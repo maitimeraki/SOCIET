@@ -1,0 +1,7 @@
+datetime
+fastapi
+uvicorn
+pydantic
+openai
+python-dotenv
+pytest
