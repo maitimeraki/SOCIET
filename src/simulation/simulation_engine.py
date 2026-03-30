@@ -1,11 +1,10 @@
 import asyncio
 from typing import List, Dict, Callable
-import json
 import uuid
 from src.simulation.world_state import SharedWorldState, MessageBus
 from src.agents.Agent import Agent
 from src.agents.config_agents import PersonalityType, Belief, AgentMemory
-from src.simulation.config_world import WorldEvent
+# from src.simulation.config_world import WorldEvent
 
 
 class SimulationSociety:
@@ -44,42 +43,93 @@ class SimulationSociety:
         print(f"👥 Society size: {len(self.agents)} agents")
         # Phase 1: Initial Perception (agents observe world)
         print("\n--- Phase 1: Perception ---")
-        initial_beliefs = {}
-        for agent in self.agents:
-            visible_world= self.world_state.get_observable_state(agent.domain_expertise)
-            beliefs = await agent.perceive(visible_world)
-            initial_beliefs[agent.agent_id] = beliefs
-            print(f"{agent.name} perceives: {len(beliefs)} beliefs")
-            
+        initial_beliefs : Dict[str, List[Belief]] = {}
+        # for agent in self.agents:
+        #     visible_world= self.world_state.get_observable_state(agent.domain_expertise)
+        #     beliefs = await agent.perceive(visible_world)
+        #     initial_beliefs[agent.agent_id] = beliefs
+        #     print(f"{agent.name} perceives: {len(beliefs)} beliefs")
+        visible_states = [
+            self.world_state.get_observable_state(agent.domain_expertise) for agent in self.agents
+        ]
+        perception_tasks = [agent.perceive(visible) for agent, visible in zip(self.agents, visible_states)]
+        # Run perceptions in parallel and handle exceptions gracefully
+        perception_results = await asyncio.gather(*perception_tasks, return_exceptions=True)
+
+        for agent, beliefs in zip(self.agents, perception_results):
+            if isinstance(beliefs, Exception):
+                print(f"{agent.name} perception failed: {beliefs}")
+                initial_beliefs[agent.agent_id] = []
+            else:
+                initial_beliefs[agent.agent_id] = beliefs
+                print(f"{agent.name} perceives: {len(beliefs)} beliefs")
+
         # Phase 2: Debate Rounds
         print("\n--- Phase 2: Debate Rounds ---")
-        round_opinions = []
+        round_opinions: List[Dict[str, Dict]] = []
+        # for round_num in range(self.max_rounds):
+        #     print(f"\n  Round {round_num + 1}/{self.max_rounds}")
+        #     round_opinion_map: Dict[str, Dict] = {}
+        #     for agent in self.agents:
+        #         # Get messages from other agents
+        #         messages = await self.message_bus.get_messages(agent.agent_id, timeout=0.5)
+        #         other_opinions = [m['content'] for m in messages if m['type']=='opinion']
+        #         # Each agent forms an opinion based on beliefs and received messages
+        #         opinion = await agent.deliberate(topic, other_opinions)
+        #         round_opinion_map[agent.agent_id] = opinion
+        #         # Broadcast opinion to others
+        #         await self.message_bus.broadcast(agent.agent_id, opinion, msg_type="opinion")
+                
+        #         # Handle potential coalitions based on opinions and trust
+        #         if round_num > 0:
+        #             await self._handle_coalitions(agent, other_opinions)
+                
+        #     round_opinions.append(round_opinion_map)
+            
+        #     # Check for consensus (simplified: if 80% agree on the same stance)
+        #     consensus_score = self._calculate_consensus(round_opinion_map)
+        #     print(f"  Consensus score: {consensus_score:.2f}")
+            
+            
+        #     if consensus_score >= self.consensus_threshold:
+        #         print(f"    ✓ Early convergence achieved")
+        #         break
+        
         for round_num in range(self.max_rounds):
             print(f"\n  Round {round_num + 1}/{self.max_rounds}")
-            round_opinion_map = {}
-            for agent in self.agents:
-                # Get messages from other agents
-                messages = await self.message_bus.get_messages(agent.agent_id, timeout=0.5)
-                other_opinions = [m['content'] for m in messages if m['type']=='opinion']
-                # Each agent forms an opinion based on beliefs and received messages
-                opinion = await agent.deliberate(topic, other_opinions)
+
+            message_tasks = [
+                self.message_bus.get_messages(agent.agent_id, timeout=0.2) for agent in self.agents
+            ]
+            message_batches = await asyncio.gather(*message_tasks)
+
+            debate_tasks = []
+            for agent, messages in zip(self.agents, message_batches):
+                other_opinions = [m["content"] for m in messages if m.get("type") == "opinion"]
+                debate_tasks.append(agent.deliberate(topic, other_opinions))
+
+            opinions = await asyncio.gather(*debate_tasks, return_exceptions=True)
+
+            round_opinion_map: Dict[str, Dict] = {}
+            for agent, opinion in zip(self.agents, opinions):
+                if isinstance(opinion, Exception):
+                    print(f"{agent.name} deliberation failed: {opinion}")
+                    continue
                 round_opinion_map[agent.agent_id] = opinion
-                # Broadcast opinion to others
-                await self.message_bus.broadcast(agent.agent_id, opinion, msg_type="opinion")
-                
-                # Handle potential coalitions based on opinions and trust
-                if round_num > 0:
-                    await self._handle_coalitions(agent, other_opinions)
-                
+
+            broadcast_tasks = [
+                self.message_bus.broadcast(agent_id, opinion, msg_type="opinion")
+                for agent_id, opinion in round_opinion_map.items()
+            ]
+            if broadcast_tasks:
+                await asyncio.gather(*broadcast_tasks)
+
             round_opinions.append(round_opinion_map)
-            
-            # Check for consensus (simplified: if 80% agree on the same stance)
+
             consensus_score = self._calculate_consensus(round_opinion_map)
             print(f"  Consensus score: {consensus_score:.2f}")
-            
-            
             if consensus_score >= self.consensus_threshold:
-                print(f"    ✓ Early convergence achieved")
+                print("  Early convergence achieved")
                 break
         # Phase 3: Synthesis
         print("\n--- Phase 3: Synthesis ---")
@@ -174,7 +224,7 @@ class SimulationSociety:
             key = op['stance'] + str(sorted(op.get('key_arguments', [])))
             if key not in groups:
                 groups[key] = []
-            groups[key].append((agent_id, op))
+            groups[key].append(op)
             
         return [{
             'weight': sum(o['confidence'] for o in group),
@@ -195,7 +245,7 @@ class SimulationSociety:
                 themes[arg] = themes.get(arg, 0) + op['confidence']
         # Sort themes by weight
         sorted_themes = sorted(themes.items(), key=lambda x: x[1], reverse=True)[:3]
-        return f"Society converges on: {', '.join([arg for arg, _ in sorted_themes])}"
+        return f"Society converges on: {', '.join([arg[0] for arg in sorted_themes])}"
     
     def _weight_by_relevance(self, clusters:List[Dict], topic:str)->List[Dict]:
         """Weight opinion clusters by relevance of agent expertise to topic"""
@@ -203,7 +253,8 @@ class SimulationSociety:
         # Here: simple keyword matching
         for cluster in clusters:
             relevance_score = 0
-            for agent_id, op in cluster['opinions']:
+            for op in cluster['opinions']:
+                agent_id = op['agent_id']
                 agent = next((a for a in self.agents if a.agent_id == agent_id), None)
                 if agent:
                     expertise_match = any(domain in topic for domain in agent.domain_expertise)
