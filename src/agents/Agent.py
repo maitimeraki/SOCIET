@@ -1,7 +1,16 @@
 import json
 import uuid
+from dataclasses import asdict, is_dataclass
 from typing import List, Callable, Optional, Dict
-from .config_agents import PersonalityType, Belief, AgentMemory
+from src.agents.config_agents import PersonalityType, Belief, AgentMemory
+
+
+def _json_default(o):
+    if is_dataclass(o):
+        return asdict(o)
+    if hasattr(o, "__dict__"):
+        return o.__dict__
+    return str(o)
 
 
 class Agent:
@@ -30,12 +39,14 @@ class Agent:
         self.mood = "neutral"  # excited, worried, curious, stubborn
         
         
-    def perceive(self, world_state:Dict)->List[Belief]:
+    async def perceive(self, world_state:Dict)->List[Belief]:
         """
         Agent observes world state and forms beliefs
         Not just raw data - interpretation through personality lens
         """
         bias = self._get_perception_bias()
+        world_state_json = json.dumps(world_state, indent=2, default=_json_default)
+
         prompt = f"""
         You are {self.name}, a specialist in {', '.join(self.domain_expertise)}.
         Your personality traits: {[p.value for p in self.personality]}.
@@ -46,12 +57,12 @@ class Agent:
         Observe this world state and form 2-3 beliefs about what it means.
         For each belief, provide confidence (0.0-1.0) and reasoning.
         
-        World State: {json.dumps(world_state, indent=2)}
+        World State: {world_state_json}
         
         Format: JSON list of {{statement, confidence, reasoning}}
         """
         
-        response = self.llm_backend(prompt)
+        response = await self.llm_backend(system_prompt="You are a helpful assistant.", user_prompt=prompt)
         new_beliefs = self._parse_beliefs(response)
         
         # Store new beliefs in long-term memory
@@ -62,7 +73,7 @@ class Agent:
         return new_beliefs
         
         
-    def deliberate(self, topic:str, other_opinions:List[Dict])->Dict:
+    async def deliberate(self, topic:str, other_opinions:List[Dict])->Dict:
         """
         Form an opinion on a topic, considering what others think
         This is where the "society" aspect emerges
@@ -75,6 +86,7 @@ class Agent:
             
         # Personality affects how we process others' views
         receptiveness = self._calculate_receptiveness(other_opinions, trust_map)
+        world_state_json = json.dumps(other_opinions, indent=2, default=_json_default)
         
         prompt = f"""
         You are {self.name}. Topic: {topic}
@@ -82,7 +94,7 @@ class Agent:
         Your core beliefs: {[b.statement for b in self.memory.long_term.values()]}
         Your personality: {[p.value for p in self.personality]}
         
-        Other agents' opinions: {json.dumps(other_opinions)}
+        Other agents' opinions: {world_state_json}
         Your trust in each: {trust_map}
         Your receptiveness today: {receptiveness}
         
@@ -102,7 +114,7 @@ class Agent:
         }}
         """
         
-        response = self.llm_backend(prompt)
+        response = await self.llm_backend(system_prompt="You are a helpful assistant.", user_prompt=prompt)
         opinion = json.loads(response)
         # Update mood based on content (emotional contagion)
         self._update_mood(opinion)

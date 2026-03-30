@@ -13,7 +13,7 @@ class SimulationSociety:
     Manages the lifecycle: Setup → Debate Rounds → Consensus → Output
     """
     
-    def __init__(self,world_state:SharedWorldState, message_bus: MessageBus,max_rounds:int =10, consensus_threshold:float=0.7):
+    def __init__(self,world_state:SharedWorldState, message_bus: MessageBus,max_rounds:int =3, consensus_threshold:float=0.7):
         self.world_state = world_state
         self.message_bus = message_bus
         self.agents: List[Agent] = []
@@ -47,7 +47,7 @@ class SimulationSociety:
         initial_beliefs = {}
         for agent in self.agents:
             visible_world= self.world_state.get_observable_state(agent.domain_expertise)
-            beliefs = agent.perceive(visible_world)
+            beliefs = await agent.perceive(visible_world)
             initial_beliefs[agent.agent_id] = beliefs
             print(f"{agent.name} perceives: {len(beliefs)} beliefs")
             
@@ -62,7 +62,7 @@ class SimulationSociety:
                 messages = await self.message_bus.get_messages(agent.agent_id, timeout=0.5)
                 other_opinions = [m['content'] for m in messages if m['type']=='opinion']
                 # Each agent forms an opinion based on beliefs and received messages
-                opinion = agent.deliberate(topic, other_opinions)
+                opinion = await agent.deliberate(topic, other_opinions)
                 round_opinion_map[agent.agent_id] = opinion
                 # Broadcast opinion to others
                 await self.message_bus.broadcast(agent.agent_id, opinion, msg_type="opinion")
@@ -108,7 +108,7 @@ class SimulationSociety:
         """
         if len(opinions) < 0:
             return 0.0
-        stances = [o['stances'] for o in opinions.values()]
+        stances = [o['stance'] for o in opinions.values()]
         confidences = [o['confidence'] for o in opinions.values()]
         # Simple consensus metric: % agreement on stance weighted by confidence
         stances_counts = {}
