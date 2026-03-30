@@ -1,5 +1,6 @@
 from typing import Dict, List
 import asyncio
+from dataclasses import asdict, is_dataclass
 from src.simulation.config_world import WorldEvent
 
 
@@ -33,19 +34,31 @@ class SharedWorldState:
         Agents see different slices of reality based on expertise
         (Information asymmetry - forces communication)
         """
-        visible = {
-            "time": self.current_time,
-            "events": [e for e in self.events 
-                      if any(d in agent_expertise for d in e.affected_domains)],
-            "indicators": {}
-        }
-        
-        # Domain-specific visibility
+        visible_events = []
+        for e in self.events:
+            if any(d in agent_expertise for d in e.affected_domains):
+                if is_dataclass(e):
+                    visible_events.append(asdict(e))
+                elif isinstance(e, dict):
+                    visible_events.append(e)
+                else:
+                    visible_events.append(
+                        {
+                            "event_type": getattr(e, "event_type", "unknown"),
+                            "description": getattr(e, "description", ""),
+                            "severity": getattr(e, "severity", 0.0),
+                            "affected_domains": getattr(e, "affected_domains", []),
+                            "timestamp": getattr(e, "timestamp", ""),
+                        }
+                    )
+
+        visible = {"time": self.current_time, "events": visible_events, "indicators": {}}
+
         if "finance" in agent_expertise:
             visible["indicators"]["economic"] = self.economic_indicators
-        if "tech" in agent_expertise:
+        if "tech" in agent_expertise or "technology" in agent_expertise:
             visible["indicators"]["technology"] = self.technological_landscape
-            
+
         return visible
     
     
