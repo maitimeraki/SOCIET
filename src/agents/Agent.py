@@ -1,5 +1,5 @@
 import json
-import uuid
+import re
 from dataclasses import asdict, is_dataclass
 from typing import List, Callable, Optional, Dict
 from src.agents.config_agents import PersonalityType, Belief, AgentMemory
@@ -12,6 +12,12 @@ def _json_default(o):
         return o.__dict__
     return str(o)
 
+
+def _strip_json_fences(text: str) -> str:
+    t = (text or "").strip()
+    if t.startswith("```"):
+        t = t.replace("```json", "").replace("```", "").strip()
+    return t
 
 class Agent:
     """
@@ -51,15 +57,16 @@ class Agent:
         You are {self.name}, a specialist in {', '.join(self.domain_expertise)}.
         Your personality traits: {[p.value for p in self.personality]}.
         Current mood: {self.mood}.
-        
         Perception bias: {bias}
-        
-        Observe this world state and form 2-3 beliefs about what it means.
-        For each belief, provide confidence (0.0-1.0) and reasoning.
-        
-        World State: {world_state_json}
-        
-        Format: JSON list of {{statement, confidence, reasoning}}
+
+        Observe this world state and form 2-3 beliefs.
+        Return ONLY JSON list:
+        [
+        {{"statement":"...", "confidence":0.0, "reasoning":"..."}}
+        ]
+
+        World State:
+        {world_state_json}
         """
         
         response = await self.llm_backend(system_prompt="You are a helpful assistant.", user_prompt=prompt)
@@ -115,30 +122,32 @@ class Agent:
         """
         
         response = await self.llm_backend(system_prompt="You are a helpful assistant.", user_prompt=prompt)
-        opinion = json.loads(response)
-        # Update mood based on content (emotional contagion)
+        cleaned = _strip_json_fences(response)
+        opinion = json.loads(cleaned)
         self._update_mood(opinion)
-        
+
         return {
             **opinion,
             "agent_id": self.agent_id,
             "agent_name": self.name,
-            "expertise": self.domain_expertise
+            "expertise": self.domain_expertise,
         }
             
             
     def _parse_beliefs(self, llm_response:str)->List[Belief]:
         """Convert LLM output into structured beliefs"""
         try:
-            belief_dicts = json.loads(llm_response)
+            cleaned = _strip_json_fences(llm_response)
+            belief_dicts = json.loads(cleaned)
             beliefs = []
             for b in belief_dicts:
-                belief = Belief(
-                    statement=b['statement'],
-                    confidence=b['confidence'],
-                    evidence=[b.get('reasoning', '')]
+                beliefs.append(
+                    Belief(
+                        statement=b["statement"],
+                        confidence=b["confidence"],
+                        evidence=[b.get("reasoning", "")],
+                    )
                 )
-                beliefs.append(belief)
             return beliefs
         except Exception as e:
             print(f"Error parsing beliefs: {e}")
