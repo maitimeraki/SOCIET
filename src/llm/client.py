@@ -19,7 +19,7 @@ class LLMClient:
         self._ollama = None
         self._ollama_models_cache = None
         
-    def _get_openai(self):
+    async def _get_openai(self):
         if not self._openai and LLMConfig.openai_api_key:
             self._openai = ChatOpenAI(
                 model=LLMConfig.default_model,
@@ -29,7 +29,7 @@ class LLMClient:
             )
         return self._openai
     
-    def _get_huggingface(self):
+    async def _get_huggingface(self):
         if not self._huggingface and LLMConfig.huggingface_api_key:
             os.environ["HUGGINGFACEHUB_API_TOKEN"] = LLMConfig.huggingface_api_key
             self._huggingface = HuggingFaceHub(
@@ -106,7 +106,7 @@ class LLMClient:
                     elif fallback_provider == "huggingface" and LLMConfig.huggingface_api_key:
                         return await self._generate_huggingface(system_prompt, user_prompt)
                     elif fallback_provider == "ollama":
-                        return await self._generate_ollama(system_prompt, user_prompt, model_name, temperature)
+                        return await self._generate_ollama(system_prompt, user_prompt, model, temperature)
                 except Exception as fallback_e:
                     print(f"Fallback to {fallback_provider} also failed: {fallback_e}")
                     continue
@@ -115,7 +115,7 @@ class LLMClient:
     
     async def _generate_openai(self, system: str, user: str, temperature: float = None) -> str:
         """Generate using OpenAI"""
-        llm = self._get_openai()
+        llm = await self._get_openai()
         if not llm:
             raise ValueError("OpenAI not configured. Please set OPENAI_API_KEY")
         
@@ -138,7 +138,7 @@ class LLMClient:
     
     async def _generate_huggingface(self, system: str, user: str) -> str:
         """Generate using HuggingFace Hub"""
-        llm = self._get_huggingface()
+        llm = await self._get_huggingface()
         if not llm:
             raise ValueError("HuggingFace not configured. Please set HUGGINGFACEHUB_API_TOKEN")
         
@@ -178,7 +178,7 @@ class LLMClient:
         system_prompt: str,
         user_prompt: str,
         provider: Optional[str] = None,
-        model_name: Optional[str] = None
+        model: Optional[str] = None
     ) -> AsyncGenerator[str, None]:
         """
         Stream tokens for real-time viewing
@@ -195,7 +195,7 @@ class LLMClient:
             async for chunk in self._stream_openai(system_prompt, user_prompt):
                 yield chunk
         elif provider == "ollama":
-            async for chunk in self._stream_ollama(system_prompt, user_prompt, model_name):
+            async for chunk in self._stream_ollama(system_prompt, user_prompt, model):
                 yield chunk
         elif provider == "huggingface":
             # HuggingFace Hub doesn't support streaming well, fallback to regular generate
@@ -207,7 +207,7 @@ class LLMClient:
         
     async def _stream_openai(self, system: str, user: str) -> AsyncGenerator[str, None]:
         """Stream from OpenAI"""
-        llm = self._get_openai()
+        llm = await self._get_openai()
         if not llm:
             result = await self.generate(system, user, provider="openai")
             yield result
@@ -229,13 +229,13 @@ class LLMClient:
                 yield chunk.content
                 
                 
-    async def _stream_ollama(self, system: str, user: str, model_name: str = None) -> AsyncGenerator[str, None]:
+    async def _stream_ollama(self, system: str, user: str, model: str = None) -> AsyncGenerator[str, None]:
         """Stream from Ollama"""
-        model = model_name or getattr(LLMConfig, 'ollama_model', "llama2")
-        llm = self._get_ollama(model)
+        model = model or getattr(LLMConfig, 'ollama_model', "qwen3.5:4b")
+        llm = await self._get_ollama(model)
         
         if not llm:
-            result = await self.generate(system, user, provider="ollama", model_name=model)
+            result = await self.generate(system, user, provider="ollama", model=model)
             yield result
             return
         
