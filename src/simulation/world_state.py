@@ -1,6 +1,6 @@
 from typing import Dict, List
 import asyncio
-from .config_world import WorldEvent
+from src.simulation.config_world import WorldEvent
 
 
 class SharedWorldState:

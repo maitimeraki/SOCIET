@@ -2,10 +2,10 @@ import asyncio
 from typing import List, Dict, Callable
 import json
 import uuid
-from .world_state import SharedWorldState, MessageBus
-from ..agents.Agent import Agent
-from ..agents.config_agents import PersonalityType, Belief, AgentMemory
-from ..simulation.config_world import WorldEvent
+from src.simulation.world_state import SharedWorldState, MessageBus
+from src.agents.Agent import Agent
+from src.agents.config_agents import PersonalityType, Belief, AgentMemory
+from src.simulation.config_world import WorldEvent
 
 
 class SimulationSociety:
