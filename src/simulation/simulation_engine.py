@@ -67,33 +67,6 @@ class SimulationSociety:
         # Phase 2: Debate Rounds
         print("\n--- Phase 2: Debate Rounds ---")
         round_opinions: List[Dict[str, Dict]] = []
-        # for round_num in range(self.max_rounds):
-        #     print(f"\n  Round {round_num + 1}/{self.max_rounds}")
-        #     round_opinion_map: Dict[str, Dict] = {}
-        #     for agent in self.agents:
-        #         # Get messages from other agents
-        #         messages = await self.message_bus.get_messages(agent.agent_id, timeout=0.5)
-        #         other_opinions = [m['content'] for m in messages if m['type']=='opinion']
-        #         # Each agent forms an opinion based on beliefs and received messages
-        #         opinion = await agent.deliberate(topic, other_opinions)
-        #         round_opinion_map[agent.agent_id] = opinion
-        #         # Broadcast opinion to others
-        #         await self.message_bus.broadcast(agent.agent_id, opinion, msg_type="opinion")
-                
-        #         # Handle potential coalitions based on opinions and trust
-        #         if round_num > 0:
-        #             await self._handle_coalitions(agent, other_opinions)
-                
-        #     round_opinions.append(round_opinion_map)
-            
-        #     # Check for consensus (simplified: if 80% agree on the same stance)
-        #     consensus_score = self._calculate_consensus(round_opinion_map)
-        #     print(f"  Consensus score: {consensus_score:.2f}")
-            
-            
-        #     if consensus_score >= self.consensus_threshold:
-        #         print(f"    ✓ Early convergence achieved")
-        #         break
         
         for round_num in range(self.max_rounds):
             print(f"\n  Round {round_num + 1}/{self.max_rounds}")
