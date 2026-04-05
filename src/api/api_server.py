@@ -4,10 +4,19 @@ import json
 from datetime import datetime
 from fastapi import FastAPI, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
-from typing import List, Dict, Optional, AsyncGenerator
+from typing import List, Dict, Optional, AsyncGenerator, Any
 from contextlib import asynccontextmanager
-from src.api.config_api import UserQuery, SimulationResponse
+from src.api.config_api import (
+    UserQuery,
+    SimulationAccepted,
+    SimulationResponse,
+    SimulationRunStatus,
+)
+from src.graph.config_graph import GraphConfig
+from src.graph.models_graph import GraphInputDocument
+from src.graph.ontology import OntologyDiscoveryStage
+from src.graph.graph_build import GraphExtractionStage
+from src.graph.normalization import GraphNormalizationStage
 from src.simulation.simulation_engine import SimulationSociety
 from src.simulation.world_state import SharedWorldState, MessageBus
 from src.simulation.config_world import WorldEvent
@@ -55,63 +64,77 @@ app.add_middleware(
 )
 
 
+AVAILABLE_DOMAINS = [
+    "finance",
+    "risk_management",
+    "business_development",
+    "market_analysis",
+    "anthropology",
+    "international_business",
+    "cultural_studies",
+    "international_law",
+    "gdpr",
+    "trade_regulation",
+    "emerging_tech",
+    "ai",
+    "innovation",
+    "logic",
+    "philosophy",
+    "systems_thinking",
+]
+
+SIMULATION_RUNS: Dict[str, SimulationRunStatus] = {}
+_RUNS_LOCK = asyncio.Lock()
 
 
-@app.post("/simulate", response_model=SimulationResponse)
-async def create_simulation(query: UserQuery, background_tasks: BackgroundTasks):
-    """
-    Main endpoint: User input -> Society opinion
-    """
-    client = global_llm_client  # Use the global client instance
-    sim_id = str(uuid.uuid4())
+def _strip_json_fences(text: str) -> str:
+    cleaned = (text or "").strip()
+    if cleaned.startswith("```"):
+        cleaned = cleaned.replace("```json", "").replace("```", "").strip()
+    return cleaned
+
+
+async def _run_simulation_pipeline(query: UserQuery) -> SimulationResponse:
+    """Shared simulation logic used by sync and async endpoints."""
     llm_cfg = get_llm_config()
 
-    # 1. Parse query into world parameters using configured provider/model
     world_params = await parse_scenario(
         scenario=query.scenario,
         context=query.context or {},
         provider=llm_cfg.default_llm_provider,
-        model=llm_cfg.default_model
+        model=llm_cfg.default_model,
     )
 
-    # 2. Spawn society
+    requested_domains = query.selected_domains or query.required_perspectives or []
     society_config = design_society(
         topic=query.scenario,
-        required_perspectives=query.required_perspectives,
-        depth=query.simulation_depth
+        required_perspectives=requested_domains,
+        depth=query.simulation_depth,
     )
 
-    # Optional: merge inferred domains from parser
     inferred_domains = world_params.get("domains", [])
     if inferred_domains:
         society_config["domains"] = sorted(set(society_config["domains"] + inferred_domains))
 
-    # 3. Initialize simulation world
     world = SharedWorldState()
     bus = MessageBus()
     society = SimulationSociety(world, bus)
 
-    world.inject_event(WorldEvent(
-        event_type="user_query",
-        description=query.scenario,
-        severity=0,
-        affected_domains=society_config["domains"],
-        timestamp=str(datetime.now())
-    ))
+    world.inject_event(
+        WorldEvent(
+            event_type="user_query",
+            description=query.scenario,
+            severity=0,
+            affected_domains=society_config["domains"],
+            timestamp=str(datetime.now()),
+        )
+    )
     world.economic_indicators["user_context"] = query.context or {}
 
-    # 4. Recruit and run with backend built from llm config
-    # llm_backend = get_llm_backend(
-    #     provider=llm_cfg.default_llm_provider,
-    #     model_name=llm_cfg.default_model,
-    #     temperature=0.7
-    # )
-    # llm_backend = await client.generate(user_prompt="How was the days going on??", system_prompt="You are the helpful asistant",provider=llm_cfg.default_llm_provider, model=llm_cfg.default_model, temperature=0.7)
-    
-    society.recruit_agents(society_config["agents"], client.generate)
+    # Use the async generate method directly as backend for Agent async methods.
+    society.recruit_agents(society_config["agents"], global_llm_client.generate)
     result = await society.run_simulation(query.scenario)
 
-    # 5. Format response
     return SimulationResponse(
         society_opinion=result["society_opinion"],
         dissenting_views=result["dissent"]["alternative_views"],
@@ -120,19 +143,118 @@ async def create_simulation(query: UserQuery, background_tasks: BackgroundTasks)
             "debate_rounds": result["meta"]["rounds_to_convergence"],
             "debate_intensity": result["meta"]["debate_intensity"],
             "provider": llm_cfg.default_llm_provider,
-            "model": llm_cfg.default_model
+            "model": llm_cfg.default_model,
+            "agent_count": len(society.agents),
         },
         agent_profiles=[
             {
                 "name": a.name,
                 "expertise": a.domain_expertise,
                 "personality": [p.value for p in a.personality],
-                "final_stance": "unknown"
+                "final_stance": "unknown",
             }
             for a in society.agents
         ],
-        raw_debate_log=result.get("debate_log") if query.simulation_depth == "deep" else None
+        raw_debate_log=result.get("debate_log") if query.simulation_depth == "deep" else None,
     )
+
+
+async def _execute_async_run(run_id: str, query: UserQuery) -> None:
+    """Background execution for async simulation requests."""
+    async with _RUNS_LOCK:
+        SIMULATION_RUNS[run_id].status = "running"
+        SIMULATION_RUNS[run_id].stage = "simulation_running"
+        SIMULATION_RUNS[run_id].progress = 0.2
+
+    try:
+        result = await _run_simulation_pipeline(query)
+        async with _RUNS_LOCK:
+            SIMULATION_RUNS[run_id].status = "completed"
+            SIMULATION_RUNS[run_id].stage = "completed"
+            SIMULATION_RUNS[run_id].progress = 1.0
+            SIMULATION_RUNS[run_id].result = result
+    except Exception as exc:
+        async with _RUNS_LOCK:
+            SIMULATION_RUNS[run_id].status = "failed"
+            SIMULATION_RUNS[run_id].stage = "failed"
+            SIMULATION_RUNS[run_id].error = str(exc)
+
+
+@app.post('/simulate/ontology', response_model=Dict[str, List[str]])
+async def discover_ontology(documents: List[GraphInputDocument]):
+    """Endpoint to discover ontology from documents."""
+    discovery_stage = OntologyDiscoveryStage()  
+    ontology = await discovery_stage.run(documents=documents)
+    return {
+        "entity_types": ontology.entity_types,
+        "relation_types": ontology.relation_types,
+    }
+    
+    
+    
+@app.post('/simulate/build_graph', response_model=Dict[str, Any])
+async def build_graph(dataset_id: str, documents: List[GraphInputDocument]):
+    """Endpoint to build graph from documents using discovered ontology."""
+    discovery_stage = OntologyDiscoveryStage()
+    ontology = await discovery_stage.run(documents=documents)
+
+    extraction_stage = GraphExtractionStage(GraphConfig())
+    chunk_count = await extraction_stage.run(dataset_id=dataset_id, documents=documents, ontology=ontology)
+
+    normalization_stage = GraphNormalizationStage(GraphConfig())
+    await normalization_stage.run(dataset_id=dataset_id)
+
+    return {
+        "dataset_id": dataset_id,
+        "docs": len(documents),
+        "chunks": chunk_count,
+        "discovered_entity_types": ontology.entity_types,
+        "discovered_relation_types": ontology.relation_types,
+    }
+
+@app.post("/simulate", response_model=SimulationResponse)
+async def create_simulation(query: UserQuery, background_tasks: BackgroundTasks):
+    """
+    Main endpoint: User input -> Society opinion
+    """
+    return await _run_simulation_pipeline(query)
+
+
+@app.post("/simulate/async", response_model=SimulationAccepted)
+async def create_simulation_async(query: UserQuery):
+    """Queue a simulation and return immediately with run id."""
+    run_id = str(uuid.uuid4())
+    run_status = SimulationRunStatus(
+        run_id=run_id,
+        status="queued",
+        progress=0.0,
+        stage="queued",
+    )
+    async with _RUNS_LOCK:
+        SIMULATION_RUNS[run_id] = run_status
+
+    asyncio.create_task(_execute_async_run(run_id, query))
+    return SimulationAccepted(
+        run_id=run_id,
+        status="queued",
+        message="Simulation accepted and queued.",
+    )
+
+
+@app.get("/simulate/{run_id}", response_model=SimulationRunStatus)
+async def get_simulation_run(run_id: str):
+    """Poll status for asynchronous simulation runs."""
+    async with _RUNS_LOCK:
+        run = SIMULATION_RUNS.get(run_id)
+        if not run:
+            return SimulationRunStatus(
+                run_id=run_id,
+                status="failed",
+                progress=0.0,
+                stage="not_found",
+                error="Run id not found",
+            )
+        return run
     
 async def parse_scenario(
     scenario: str,
@@ -161,7 +283,7 @@ Context: {world_state_json}
     )
 
     try:
-        parsed = json.loads(raw)
+        parsed = json.loads(_strip_json_fences(raw))
         return {
             "domains": parsed.get("domains", []),
             "time_horizon": parsed.get("time_horizon", "unknown"),
@@ -236,49 +358,6 @@ def design_society(topic: str, required_perspectives: Optional[List[str]], depth
         "agents": base_agents,
         "domains": sorted(set(d for a in base_agents for d in a["domain_expertise"]))
     }
-
-    
-# def get_llm_backend(
-#     provider: Optional[str] = None,
-#     model_name: Optional[str] = None,
-#     temperature: float = 0.7
-# ):
-#     """
-#     Sync adapter because Agent.perceive/deliberate call llm_backend(prompt) synchronously.
-#     """
-#     cfg = get_llm_config()
-#     selected_provider = provider or cfg.default_llm_provider
-#     selected_model = model_name or cfg.default_model
-
-#     def call_llm(prompt: str) -> str:
-#         if selected_provider == "openai":
-#             llm = global_llm_client._get_openai()
-#             if not llm:
-#                 raise ValueError("OpenAI not configured")
-#             llm.temperature = temperature
-#             messages = [
-#                 SystemMessage(content="You are a simulation agent. Return strict JSON only."),
-#                 HumanMessage(content=prompt),
-#             ]
-#             return llm.invoke(messages).content
-
-#         if selected_provider == "huggingface":
-#             llm = global_llm_client._get_huggingface()
-#             if not llm:
-#                 raise ValueError("HuggingFace not configured")
-#             full_prompt = f"<s>[INST] Return strict JSON only.\\n\\n{prompt} [/INST]"
-#             return llm.invoke(full_prompt).strip()
-
-#         llm = global_llm_client._get_ollama(selected_model)
-#         if not llm:
-#             raise ValueError(f"Ollama unavailable for model: {selected_model}")
-#         llm.temperature = temperature
-#         full_prompt = f"<<SYS>>\\nYou are a simulation agent. Return strict JSON only.\\n<</SYS>>\\n\\n{prompt}"
-#         return llm.invoke(full_prompt).strip()
-
-#     return call_llm
-
-
 
 
 
