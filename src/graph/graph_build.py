@@ -1,3 +1,4 @@
+import asyncio
 from typing import List
 from llama_index.core import Document, PropertyGraphIndex, Settings
 from llama_index.llms.openai import OpenAI
@@ -28,7 +29,7 @@ class GraphExtractionStage:
             database=config.neo4j_database,
         )
 
-    def run(
+    async def run(
         self,
         dataset_id: str,
         documents: List[GraphInputDocument],
@@ -53,12 +54,21 @@ class GraphExtractionStage:
                     md["title"] = d.title
                 llama_docs.append(Document(text=d.text, metadata=md))
 
-            index = PropertyGraphIndex.from_documents(
-                llama_docs,
-                property_graph_store=self.graph_store,
-                kg_extractors=[extractor],
-                show_progress=True,
-            )
+            if hasattr(PropertyGraphIndex, "abuild_from_documents"):
+                index = await PropertyGraphIndex.abuild_from_documents(
+                    llama_docs,
+                    property_graph_store=self.graph_store,
+                    kg_extractors=[extractor],
+                    show_progress=True,
+                )
+            else:
+                index = await asyncio.to_thread(
+                    PropertyGraphIndex.from_documents,
+                    llama_docs,
+                    property_graph_store=self.graph_store,
+                    kg_extractors=[extractor],
+                    show_progress=True,
+                )
 
             return len(index.docstore.docs)
         except Exception as e:
