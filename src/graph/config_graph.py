@@ -9,6 +9,14 @@ class GraphConfig:
     extraction_model: str = os.getenv("GRAPH_EXTRACTION_MODEL", "gpt-4.1-mini")
     temperature: float = float(os.getenv("GRAPH_TEMPERATURE", "0.0"))
     discovery_sample_size: int = int(os.getenv("GRAPH_DISCOVERY_SAMPLE_SIZE", "12"))
+    discovery_timeout_seconds: int = int(os.getenv("GRAPH_DISCOVERY_TIMEOUT_SECONDS", "90"))
+    discovery_retry_attempts: int = int(os.getenv("GRAPH_DISCOVERY_RETRY_ATTEMPTS", "3"))
+    discovery_retry_backoff_seconds: float = float(
+        os.getenv("GRAPH_DISCOVERY_RETRY_BACKOFF_SECONDS", "1.0")
+    )
+    ontology_chunk_size_chars: int = int(os.getenv("GRAPH_ONTOLOGY_CHUNK_SIZE_CHARS", "3500"))
+    ontology_chunk_overlap_chars: int = int(os.getenv("GRAPH_ONTOLOGY_CHUNK_OVERLAP_CHARS", "300"))
+    ontology_max_concurrency: int = int(os.getenv("GRAPH_ONTOLOGY_MAX_CONCURRENCY", "4"))
 
     neo4j_uri: str = os.getenv("NEO4J_URI", "bolt://localhost:7687")
     neo4j_username: str = os.getenv("NEO4J_USERNAME", "neo4j")
