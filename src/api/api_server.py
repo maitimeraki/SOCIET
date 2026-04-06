@@ -1,16 +1,20 @@
 import asyncio
 import uuid
 import json
+from pathlib import Path
 from datetime import datetime
-from fastapi import FastAPI, BackgroundTasks
+from fastapi import FastAPI, BackgroundTasks, status
 from fastapi.middleware.cors import CORSMiddleware
-from typing import List, Dict, Optional, AsyncGenerator, Any
+from typing import List, Dict, Optional, AsyncGenerator, Any, Set
 from contextlib import asynccontextmanager
 from src.api.config_api import (
     UserQuery,
     SimulationAccepted,
     SimulationResponse,
     SimulationRunStatus,
+    OntologyAccepted,
+    OntologyRunStatus,
+    OntologyResult,
 )
 from src.graph.config_graph import GraphConfig
 from src.graph.models_graph import GraphInputDocument
@@ -84,7 +88,12 @@ AVAILABLE_DOMAINS = [
 ]
 
 SIMULATION_RUNS: Dict[str, SimulationRunStatus] = {}
-_RUNS_LOCK = asyncio.Lock()
+_RUNS_LOCK = asyncio.Lock() # Lock to protect access to SIMULATION_RUNS in async context
+
+ONTOLOGY_RUNS: Dict[str, OntologyRunStatus] = {}
+_ONTOLOGY_RUNS_LOCK = asyncio.Lock()
+_ONTOLOGY_RUNTIME_DIR = Path("src/api/runtime/ontology_jobs")
+_ONTOLOGY_RUNTIME_DIR.mkdir(parents=True, exist_ok=True)
 
 
 def _strip_json_fences(text: str) -> str:
@@ -179,16 +188,218 @@ async def _execute_async_run(run_id: str, query: UserQuery) -> None:
             SIMULATION_RUNS[run_id].stage = "failed"
             SIMULATION_RUNS[run_id].error = str(exc)
 
+async def _persist_ontology_run(job_id: str, run: OntologyRunStatus) -> None:
+    """ Persist ontology run status to disk for durability and external monitoring. This allows clients to retrieve the latest status even if the server restarts, and provides a simple audit trail of ontology discovery jobs."""
+    
+    payload = run.model_dump()  # Used to serialize a model instance into a standard Python dictionary. 
+    path = _ONTOLOGY_RUNTIME_DIR / f"{job_id}.json"
+    await asyncio.to_thread(path.write_text, json.dumps(payload, ensure_ascii=False, indent=2), "utf-8")
 
-@app.post('/simulate/ontology', response_model=Dict[str, List[str]])
-async def discover_ontology(documents: List[GraphInputDocument]):
-    """Endpoint to discover ontology from documents."""
-    discovery_stage = OntologyDiscoveryStage()  
-    ontology = await discovery_stage.run(documents=documents)
+def _chunk_text(text: str, chunk_size: int, overlap: int) -> List[str]:
+    cleaned = (text or "").strip()
+    if not cleaned:
+        return []
+    step = max(1, chunk_size - overlap)
+    chunks: List[str] = []
+    for start in range(0, len(cleaned), step):
+        chunk = cleaned[start:start + chunk_size].strip()
+        if chunk:
+            chunks.append(chunk)
+    return chunks
+
+def _merge_labels(items: List[str], fallback: str) -> List[str]:
+    seen: Set[str] = set()
+    merged: List[str] = []
+    for item in items:
+        label = (item or "").strip().upper().replace(" ", "_")
+        if label and label not in seen:
+            seen.add(label)
+            merged.append(label)
+    if merged is None or len(merged) == 0:
+        merged = [fallback]
+    return merged
+
+async def _discover_chunk_with_retry(
+    discovery_stage: OntologyDiscoveryStage,
+    chunk_doc: GraphInputDocument,
+    timeout_seconds: int,
+    retry_attempts: int,
+    retry_backoff_seconds: float,
+) -> Dict[str, List[str]]:
+    last_error = "unknown_error"
+    for attempt in range(retry_attempts):
+        try:
+            ontology = await asyncio.wait_for(
+                discovery_stage.run(documents=[chunk_doc], sample_size=1),
+                timeout=timeout_seconds,
+            )
+            # This returns ONLY the names, not full entity objects, to simplify merging and reduce noise from partial properties in early stages. The full ontology with properties is stored in the normalization stage for reference.
+            view = ontology.to_public_view() # Return type -> LocalOntologyView with entity_types: List[str], relation_types: List[str]
+            return {
+                "entity_types": view.entity_types,
+                "relation_types": view.relation_types,
+            }
+        except Exception as exc:
+            last_error = str(exc)
+            if attempt < retry_attempts - 1:
+                await asyncio.sleep(retry_backoff_seconds * (2 ** attempt))
     return {
-        "entity_types": ontology.entity_types,
-        "relation_types": ontology.relation_types,
+        "entity_types": [],
+        "relation_types": [],
     }
+
+async def _execute_ontology_job(job_id: str, dataset_id: str, documents: List[GraphInputDocument]) -> None:
+    cfg = GraphConfig()
+    discovery_stage = OntologyDiscoveryStage(
+        model=cfg.discovery_model,
+        temperature=cfg.temperature,
+    )
+
+    chunks: List[GraphInputDocument] = []
+    for doc in documents:
+        doc_chunks = _chunk_text(
+            text=doc.text,
+            chunk_size=cfg.ontology_chunk_size_chars,
+            overlap=cfg.ontology_chunk_overlap_chars,
+        )
+        for idx, chunk in enumerate(doc_chunks):
+            chunks.append(
+                GraphInputDocument(
+                    document_id=f"{doc.document_id}_chunk_{idx}",
+                    title=doc.title,
+                    text=chunk,
+                    metadata={"source_document_id": doc.document_id, **(doc.metadata or {})},
+                )
+            )
+
+    total_chunks = len(chunks)
+    async with _ONTOLOGY_RUNS_LOCK:
+        ONTOLOGY_RUNS[job_id].status = "running"
+        ONTOLOGY_RUNS[job_id].stage = "chunk_discovery_running"
+        ONTOLOGY_RUNS[job_id].progress = 0.05
+        ONTOLOGY_RUNS[job_id].result = OntologyResult(
+            dataset_id=dataset_id,
+            chunks_total=total_chunks,
+            chunks_completed=0,
+        )
+        await _persist_ontology_run(job_id, ONTOLOGY_RUNS[job_id])
+    # Use a semaphore to limit concurrency of chunk processing to avoid overwhelming the LLM and to manage resource usage effectively. The concurrency level can be configured via environment variables, allowing for flexibility based on the deployment environment and expected workload.
+    semaphore = asyncio.Semaphore(max(1, cfg.ontology_max_concurrency))
+    entity_accumulator: List[str] = []
+    relation_accumulator: List[str] = []
+    completed_chunks = 0
+
+    async def _worker(chunk_doc: GraphInputDocument) -> None:
+        nonlocal completed_chunks
+        async with semaphore:
+            partial = await _discover_chunk_with_retry(
+                discovery_stage=discovery_stage,
+                chunk_doc=chunk_doc,
+                timeout_seconds=cfg.discovery_timeout_seconds,
+                retry_attempts=max(1, cfg.discovery_retry_attempts),
+                retry_backoff_seconds=max(0.1, cfg.discovery_retry_backoff_seconds),
+            )
+            entity_accumulator.extend(partial["entity_types"])
+            relation_accumulator.extend(partial["relation_types"])
+
+            async with _ONTOLOGY_RUNS_LOCK:
+                completed_chunks += 1
+                run = ONTOLOGY_RUNS[job_id]
+                run.stage = "chunk_discovery_running"
+                run.progress = min(0.9, completed_chunks / max(1, total_chunks))
+                run.result = OntologyResult(
+                    dataset_id=dataset_id,
+                    entity_types=_merge_labels(entity_accumulator, "ENTITY"),
+                    relation_types=_merge_labels(relation_accumulator, "RELATED_TO"),
+                    chunks_total=total_chunks,
+                    chunks_completed=completed_chunks,
+                )
+                await _persist_ontology_run(job_id, run)
+
+    try:
+        if total_chunks == 0:
+            async with _ONTOLOGY_RUNS_LOCK:
+                ONTOLOGY_RUNS[job_id].status = "completed"
+                ONTOLOGY_RUNS[job_id].stage = "completed"
+                ONTOLOGY_RUNS[job_id].progress = 1.0
+                ONTOLOGY_RUNS[job_id].result = OntologyResult(
+                    dataset_id=dataset_id,
+                    entity_types=["ENTITY"],
+                    relation_types=["RELATED_TO"],
+                    chunks_total=0,
+                    chunks_completed=0,
+                )
+                await _persist_ontology_run(job_id, ONTOLOGY_RUNS[job_id])
+            return
+
+        await asyncio.gather(*[_worker(chunk) for chunk in chunks])
+
+        async with _ONTOLOGY_RUNS_LOCK:
+            ONTOLOGY_RUNS[job_id].status = "completed"
+            ONTOLOGY_RUNS[job_id].stage = "completed"
+            ONTOLOGY_RUNS[job_id].progress = 1.0
+            ONTOLOGY_RUNS[job_id].result = OntologyResult(
+                dataset_id=dataset_id,
+                entity_types=_merge_labels(entity_accumulator, "ENTITY"),
+                relation_types=_merge_labels(relation_accumulator, "RELATED_TO"),
+                chunks_total=total_chunks,
+                chunks_completed=completed_chunks,
+            )
+            await _persist_ontology_run(job_id, ONTOLOGY_RUNS[job_id])
+    except Exception as exc:
+        async with _ONTOLOGY_RUNS_LOCK:
+            ONTOLOGY_RUNS[job_id].status = "failed"
+            ONTOLOGY_RUNS[job_id].stage = "failed"
+            ONTOLOGY_RUNS[job_id].error = str(exc)
+            await _persist_ontology_run(job_id, ONTOLOGY_RUNS[job_id])
+
+
+@app.post("/simulate/ontology", response_model=OntologyAccepted, status_code=status.HTTP_202_ACCEPTED)
+async def discover_ontology_async(dataset_id: str, documents: List[GraphInputDocument]):
+    """Queue ontology discovery for large documents and return immediately."""
+    job_id = str(uuid.uuid4())
+    run_status = OntologyRunStatus(
+        job_id=job_id,
+        status="queued",
+        progress=0.0,
+        stage="queued",
+        result=OntologyResult(
+            dataset_id=dataset_id,
+            chunks_total=0,
+            chunks_completed=0,
+        ),
+    )
+
+    async with _ONTOLOGY_RUNS_LOCK:
+        ONTOLOGY_RUNS[job_id] = run_status
+        await _persist_ontology_run(job_id, run_status)
+
+    asyncio.create_task(_execute_ontology_job(job_id, dataset_id, documents))
+    return OntologyAccepted(
+        job_id=job_id,
+        status="queued",
+        message="Ontology job accepted and queued.",
+    )
+
+@app.get("/simulate/ontology/{job_id}", response_model=OntologyRunStatus)
+async def get_ontology_run(job_id: str):
+    async with _ONTOLOGY_RUNS_LOCK:
+        run = ONTOLOGY_RUNS.get(job_id)
+        if run:
+            return run
+
+    path = _ONTOLOGY_RUNTIME_DIR / f"{job_id}.json"
+    if path.exists():
+        payload = await asyncio.to_thread(path.read_text, "utf-8")
+        return OntologyRunStatus.model_validate(json.loads(payload))
+
+    return OntologyRunStatus(
+        job_id=job_id,
+        status="failed",
+        progress=0.0,
+        stage="not_found",
+        error="Ontology job id not found",
+    )
     
     
     
