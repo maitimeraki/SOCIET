@@ -14,8 +14,8 @@ class GraphConfig:
     discovery_retry_backoff_seconds: float = float(
         os.getenv("GRAPH_DISCOVERY_RETRY_BACKOFF_SECONDS", "1.0")
     )
-    ontology_chunk_size_chars: int = int(os.getenv("GRAPH_ONTOLOGY_CHUNK_SIZE_CHARS", "3500"))
-    ontology_chunk_overlap_chars: int = int(os.getenv("GRAPH_ONTOLOGY_CHUNK_OVERLAP_CHARS", "300"))
+    ontology_chunk_size_chars: int = int(os.getenv("GRAPH_ONTOLOGY_CHUNK_SIZE_CHARS", "500"))
+    ontology_chunk_overlap_chars: int = int(os.getenv("GRAPH_ONTOLOGY_CHUNK_OVERLAP_CHARS", "100"))
     ontology_max_concurrency: int = int(os.getenv("GRAPH_ONTOLOGY_MAX_CONCURRENCY", "4"))
 
     neo4j_uri: str = os.getenv("NEO4J_URI", "bolt://localhost:7687")
