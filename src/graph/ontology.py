@@ -1,3 +1,4 @@
+import sys
 import json
 import logging
 from datetime import datetime
@@ -9,8 +10,19 @@ from src.graph.models_graph import (
     OntologyMetadata,
 )
 
+# Configure basic logging
+logging.basicConfig(
+    level=logging.INFO,  # DEBUG, INFO, WARNING, ERROR, CRITICAL
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.StreamHandler(sys.stdout)  # Output to terminal
+    ]
+)
 logging.basicConfig(level=logging.ERROR, format="%(asctime)s - %(levelname)s - %(message)s")
-logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
+
+# Create logger instance
+logger = logging.getLogger(__name__)
+
 
 def _strip_json_fences(text: str) -> str:
     t = (text or "").strip()
@@ -20,28 +32,27 @@ def _strip_json_fences(text: str) -> str:
 
 
 def _normalize_ontology_shape(parsed: Dict[str, Any]) -> Dict[str, Any]:
-    entity_types = parsed.get("entity_types", [])
-    relation_types = parsed.get("relation_types", [])
-    logging.info(f"Normalizing ontology shape. Initial entity_types: {entity_types}, relation_types: {relation_types}")
+    entity_types = parsed.get("entity_types", []) # return type -> List[Dict[str, Any]]
+    relation_types = parsed.get("relation_types", []) # return type -> List[Dict[str, Any]]
+    logger.info(f"Normalizing ontology shape. Initial entity_types: {entity_types}, relation_types: {relation_types}")
 
-    # Backward-compatible input: entity_types as list[str]
-    if entity_types and isinstance(entity_types[0], str):
-        entity_types = [{"type_name": e} for e in entity_types if str(e).strip()]
+    # Backward-compatible input: entity_types as List[Dict[str, str]] or List[str]
+    if entity_types and isinstance(entity_types[0], dict):
+        entity_types = [e for e in entity_types if str(e.get("type_name", "")).strip()] # return type -> List[Dict[str, str]]
 
     # Backward-compatible input: relation_types as list[str]
-    if relation_types and isinstance(relation_types[0], str):
-        relation_types = [{"type_name": r} for r in relation_types if str(r).strip()]
+    if relation_types and isinstance(relation_types[0], dict):
+        relation_types = [r for r in relation_types if str(r.get("type_name", "")).strip()]
 
-    metadata = parsed.get("metadata", {})
-    if "ontology_id" not in metadata:
-        metadata["ontology_id"] = f"onto_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}"
-    metadata.setdefault("created_at", datetime.utcnow().isoformat())
+    # metadata = parsed.get("metadata", {})
+    # if "ontology_id" not in metadata:
+    #     metadata["ontology_id"] = f"onto_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}"
+    # metadata.setdefault("created_at", datetime.utcnow().isoformat())
 
     return {
-        "metadata": metadata, # return type -> Dict[str, Any]
-        "entity_types": entity_types, # return type -> List[Dict[str, str]]
-        "relation_types": relation_types, # return type -> List[Dict[str, str]]
-        "global_constraints": parsed.get("global_constraints", {}),
+        # "metadata": metadata, # return type -> Dict[str, Any]
+        "entity_types": entity_types, # return type -> List[Dict[str, Any]]
+        "relation_types": relation_types, # return type -> List[Dict[str, Any]]
     }
 
 
@@ -69,7 +80,7 @@ class OntologyDiscoveryStage:
                 {
                     "document_id": d.document_id,
                     "title": d.title,
-                    "preview": d.text[:1800],
+                    "preview": d.text[:],
                 }
                 for d in sample
             ]
@@ -83,12 +94,12 @@ class OntologyDiscoveryStage:
                 {{
                 "entity_types": [
                     {{
-                    "type_name": "string",
-                    "description": "string",
-                    "aliases": [],
+                    "type_name": "ENTITY_TYPE",
+                    "description": "Short definition",
                     "properties": [
                         {{
-                        "name": "string",
+                        "name": "gives the property a name",
+                        "description": "describes what this property represents",
                         }}
                     ],
                     }}
@@ -96,31 +107,36 @@ class OntologyDiscoveryStage:
                 "relation_types": [
                     {{
                     "type_name": "UPPER_SNAKE_CASE",
+                    "description": "describes what this relation represents",
                     "source_entity_types": [],
                     "target_entity_types": [],
-                    "properties": [],
+                    "properties": [
+                        {{
+                        "name": "gives the property a name",
+                        "description": "describes what this property represents",
+                        }}],
                     }}
-                ]
+                ],
                 }}
 
                 Rules:
-                - Return JSON only.
-                - Keep ontology compact and high-signal.
-                - Relation type_name must be UPPER_SNAKE_CASE.
+                1. Use UPPER_SNAKE_CASE for names.
+                2. Only extract properties explicitly mentioned or strongly implied.
+                3. Return Json only
 
                 Sample:
                 {json.dumps(sample_payload, ensure_ascii=False)}
                 """
 
-            raw = await self.llm.acomplete(prompt)
-            text = _strip_json_fences(str(raw))
+            raw = await self.llm.acomplete(prompt) # return type -> str
+            text = _strip_json_fences(str(raw)) # return type -> str
 
             try:
-                parsed = json.loads(text)
-                logging.info(f"Ontology discovery successful. Parsed JSON keys: {parsed}")
+                parsed = json.loads(text) # return type -> Dict[str, Any]
+                logger.info(f"Ontology discovery successful. Parsed JSON keys: {parsed}")
             except Exception:
                 parsed = {}
-                logging.error(f"Failed to parse ontology discovery result: {text}")
+                logger.error(f"Failed to parse ontology discovery result: {text}")
 
             # Apply normalization to handle different input shapes and ensure consistent ontology structure for downstream stages. This allows the discovery stage to be more flexible in the output it accepts while still providing a reliable schema for extraction.
 
