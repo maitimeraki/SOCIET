@@ -4,6 +4,7 @@ import logging
 from datetime import datetime
 from typing import List, Dict, Any
 from llama_index.llms.openai_like import OpenAILike
+from src.utils.hydrate_ontology import hydrate_ontology
 from src.graph.models_graph import (
     GraphInputDocument,
     LocalOntology,
@@ -30,31 +31,54 @@ def _strip_json_fences(text: str) -> str:
         t = t.replace("```json", "").replace("```", "").strip()
     return t
 
+def _structured_properties(llm_data: Dict[str, Any]) -> Dict[str, Any]:
+    # This transforms the flat strings back into your strict Pydantic objects
+    for ent in llm_data.get("entity_types", []):
+        parsed_props = []
+        for prop_str in ent.get("properties", []):
+            if ":" in prop_str:
+                name, desc = prop_str.split(":", 1)
+                parsed_props.append({
+                    "name": name.strip(),
+                    "description": desc.strip()
+                })
+        ent["properties"] = parsed_props # Now matches your class schema
+        
+    for rel in llm_data.get("relation_types", []):
+        parsed_props = []
+        for prop_str in rel.get("properties", []):
+            if ":" in prop_str:
+                name, desc = prop_str.split(":", 1)
+                parsed_props.append({
+                    "name": name.strip(),
+                    "description": desc.strip()
+                })
+        rel["properties"] = parsed_props # Now matches your class schema
+    
+    return llm_data
 
-def _normalize_ontology_shape(parsed: Dict[str, Any]) -> Dict[str, Any]:
-    entity_types = parsed.get("entity_types", []) # return type -> List[Dict[str, Any]]
-    relation_types = parsed.get("relation_types", []) # return type -> List[Dict[str, Any]]
-    logger.info(f"Normalizing ontology shape. Initial entity_types: {entity_types}, relation_types: {relation_types}")
+# def _normalize_ontology_shape(parsed: Dict[str, Any]) -> Dict[str, Any]:
+#     entity_types = parsed.get("entity_types", []) # return type -> List[Dict[str, Any]]
+#     relation_types = parsed.get("relation_types", []) # return type -> List[Dict[str, Any]]
+#     logger.info(f"Normalizing ontology shape. Initial entity_types: {entity_types}, relation_types: {relation_types}")
 
-    # Backward-compatible input: entity_types as List[Dict[str, str]] or List[str]
-    if entity_types and isinstance(entity_types[0], dict):
-        entity_types = [e for e in entity_types if str(e.get("type_name", "")).strip()] # return type -> List[Dict[str, str]]
+#     # Backward-compatible input: entity_types as List[Dict[str, str]] or List[str]
+#     if entity_types and isinstance(entity_types[0], dict):
+#         entity_types = [e for e in entity_types if str(e.get("type_name", "")).strip()] # return type -> List[Dict[str, str]]
 
-    # Backward-compatible input: relation_types as list[str]
-    if relation_types and isinstance(relation_types[0], dict):
-        relation_types = [r for r in relation_types if str(r.get("type_name", "")).strip()]
+#     # Backward-compatible input: relation_types as list[str]
+#     if relation_types and isinstance(relation_types[0], dict):
+#         relation_types = [r for r in relation_types if str(r.get("type_name", "")).strip()]
 
-    # metadata = parsed.get("metadata", {})
-    # if "ontology_id" not in metadata:
-    #     metadata["ontology_id"] = f"onto_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}"
-    # metadata.setdefault("created_at", datetime.utcnow().isoformat())
+#     # metadata = parsed.get("metadata", {})
+#     # if "ontology_id" not in metadata:
+#     #     metadata["ontology_id"] = f"onto_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}"
+#     # metadata.setdefault("created_at", datetime.utcnow().isoformat())
 
-    return {
-        # "metadata": metadata, # return type -> Dict[str, Any]
-        "entity_types": entity_types, # return type -> List[Dict[str, Any]]
-        "relation_types": relation_types, # return type -> List[Dict[str, Any]]
-    }
-
+#     return {
+#         "entity_types": entity_types, # return type -> List[Dict[str, Any]]
+#         "relation_types": relation_types, # return type -> List[Dict[str, Any]]
+#     }
 
 class OntologyDiscoveryStage:
     """Discovers a local ontology schema from a sample of input documents using LLMs. The discovered ontology defines the entity types, relation types, and their properties that will be used for structured extraction in the next stage. This stage is crucial for enabling domain-agnostic graph construction without requiring manual schema definition upfront."""
@@ -96,12 +120,7 @@ class OntologyDiscoveryStage:
                     {{
                     "type_name": "ENTITY_TYPE",
                     "description": "Short definition",
-                    "properties": [
-                        {{
-                        "name": "gives the property a name",
-                        "description": "describes what this property represents",
-                        }}
-                    ],
+                    "properties": ["name: brief description"]
                     }}
                 ],
                 "relation_types": [
@@ -110,18 +129,14 @@ class OntologyDiscoveryStage:
                     "description": "describes what this relation represents",
                     "source_entity_types": [],
                     "target_entity_types": [],
-                    "properties": [
-                        {{
-                        "name": "gives the property a name",
-                        "description": "describes what this property represents",
-                        }}],
+                    "properties": ["name: brief description"]
                     }}
                 ],
                 }}
 
                 Rules:
                 1. Use UPPER_SNAKE_CASE for names.
-                2. Only extract properties explicitly mentioned or strongly implied.
+                2. Properties MUST be a list of strings formatted as "name: description".
                 3. Return Json only
 
                 Sample:
@@ -137,22 +152,17 @@ class OntologyDiscoveryStage:
             except Exception:
                 parsed = {}
                 logger.error(f"Failed to parse ontology discovery result: {text}")
+                
+            structured_json = _structured_properties(parsed) # return type -> Dict[str, Any]
+            logger.info(f"Structured properties extracted: {structured_json}")
 
             # Apply normalization to handle different input shapes and ensure consistent ontology structure for downstream stages. This allows the discovery stage to be more flexible in the output it accepts while still providing a reliable schema for extraction.
 
-            normalized = _normalize_ontology_shape(parsed) # return type -> Dict[str, Any]
-            # Returns a REAL Python object, not a dict like access keys by dot notation, type-safe and modify the objects
-            ontology = LocalOntology.model_validate(normalized) # return type -> LocalOntology
+            # normalized = _normalize_ontology_shape(parsed) # return type -> Dict[str, Any]
+            hydrate_onto = hydrate_ontology(structured_json) # return type -> Dict[str, Any]
+            # Returns a REAL Python object, not a dict like access keys by dot notation, type-safe and modify the objects.
+            ontology = LocalOntology.model_validate(hydrate_onto) # return type -> LocalOntology
             logging.info(f"Normalized ontology: {ontology}")
-
-            # Minimal fallback if model returns empty
-            # if not ontology.entity_types:
-            #     ontology.entity_types = [{"type_name": "ENTITY"}]  # pydantic coercion
-            #     ontology = LocalOntology.model_validate(ontology.model_dump())
-
-            # if not ontology.relation_types:
-            #     ontology.relation_types = [{"type_name": "RELATED_TO"}]
-            #     ontology = LocalOntology.model_validate(ontology.model_dump())
 
             return ontology
 
