@@ -1,6 +1,8 @@
 import asyncio
 import uuid
 import json
+import sys
+import logging
 from pathlib import Path
 from datetime import datetime
 from fastapi import FastAPI, BackgroundTasks, status
@@ -27,6 +29,20 @@ from src.simulation.config_world import WorldEvent
 from src.llm.client import LLMClient, global_llm_client
 from src.llm.config_llm import get_llm_config
 
+
+
+# Configure basic logging
+logging.basicConfig(
+    level=logging.INFO,  # DEBUG, INFO, WARNING, ERROR, CRITICAL
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.StreamHandler(sys.stdout)  # Output to terminal
+    ]
+)
+logging.basicConfig(level=logging.ERROR, format="%(asctime)s - %(levelname)s - %(message)s")
+
+# Create logger instance
+logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI)-> AsyncGenerator[None, None]:
@@ -234,10 +250,10 @@ async def _discover_chunk_with_retry(
                 timeout=timeout_seconds,
             )
             # This returns ONLY the names, not full entity objects, to simplify merging and reduce noise from partial properties in early stages. The full ontology with properties is stored in the normalization stage for reference.
-            view = ontology.to_public_view() # Return type -> LocalOntologyView with entity_types: List[str], relation_types: List[str]
+            view = ontology.to_public_view() # Return type -> PublicOntologyView with entity_types: List[str], relation_types: List[str]
             return {
-                "entity_types": view.entity_types,
-                "relation_types": view.relation_types,
+                "entity_types": view.entity_types, # return type -> List[str]
+                "relation_types": view.relation_types, # return type -> List[str]
             }
         except Exception as exc:
             last_error = str(exc)
@@ -271,6 +287,7 @@ async def _execute_ontology_job(job_id: str, dataset_id: str, documents: List[Gr
                     metadata={"source_document_id": doc.document_id, **(doc.metadata or {})},
                 )
             )
+    logger.info(f"Document {dataset_id} split into {len(chunks)} chunks for ontology discovery.")
 
     total_chunks = len(chunks)
     async with _ONTOLOGY_RUNS_LOCK:
@@ -292,6 +309,7 @@ async def _execute_ontology_job(job_id: str, dataset_id: str, documents: List[Gr
     async def _worker(chunk_doc: GraphInputDocument) -> None:
         nonlocal completed_chunks
         async with semaphore:
+            logger.info(f"Calling ontology discovery for chunk {chunk_doc.document_id} of dataset {dataset_id}.")
             partial = await _discover_chunk_with_retry(
                 discovery_stage=discovery_stage,
                 chunk_doc=chunk_doc,
@@ -299,8 +317,9 @@ async def _execute_ontology_job(job_id: str, dataset_id: str, documents: List[Gr
                 retry_attempts=max(1, cfg.discovery_retry_attempts),
                 retry_backoff_seconds=max(0.1, cfg.discovery_retry_backoff_seconds),
             )
-            entity_accumulator.extend(partial["entity_types"])
-            relation_accumulator.extend(partial["relation_types"])
+            logger.info(f"Completed ontology discovery for chunk {chunk_doc.document_id} of dataset {dataset_id}. Found {len(partial['entity_types'])} entity types and {len(partial['relation_types'])} relation types.")
+            entity_accumulator.extend(partial["entity_types"]) # return type -> List[str]
+            relation_accumulator.extend(partial["relation_types"]) # return type -> List[str]
 
             async with _ONTOLOGY_RUNS_LOCK:
                 completed_chunks += 1
@@ -309,8 +328,8 @@ async def _execute_ontology_job(job_id: str, dataset_id: str, documents: List[Gr
                 run.progress = min(0.9, completed_chunks / max(1, total_chunks))
                 run.result = OntologyResult(
                     dataset_id=dataset_id,
-                    entity_types=_merge_labels(entity_accumulator, "ENTITY"),
-                    relation_types=_merge_labels(relation_accumulator, "RELATED_TO"),
+                    entity_types=_merge_labels(entity_accumulator, "ENTITY"), # return type -> List[str]
+                    relation_types=_merge_labels(relation_accumulator, "RELATED_TO"), # return type -> List[str]
                     chunks_total=total_chunks,
                     chunks_completed=completed_chunks,
                 )
@@ -318,6 +337,7 @@ async def _execute_ontology_job(job_id: str, dataset_id: str, documents: List[Gr
 
     try:
         if total_chunks == 0:
+            logger.info(f"Document {dataset_id} has no chunks to process.")
             async with _ONTOLOGY_RUNS_LOCK:
                 ONTOLOGY_RUNS[job_id].status = "completed"
                 ONTOLOGY_RUNS[job_id].stage = "completed"
@@ -331,6 +351,7 @@ async def _execute_ontology_job(job_id: str, dataset_id: str, documents: List[Gr
                 )
                 await _persist_ontology_run(job_id, ONTOLOGY_RUNS[job_id])
             return
+        logger.info(f"Starting ontology discovery for dataset {dataset_id} with {total_chunks} chunks, job id {job_id}.")
 
         await asyncio.gather(*[_worker(chunk) for chunk in chunks])
 
@@ -340,13 +361,14 @@ async def _execute_ontology_job(job_id: str, dataset_id: str, documents: List[Gr
             ONTOLOGY_RUNS[job_id].progress = 1.0
             ONTOLOGY_RUNS[job_id].result = OntologyResult(
                 dataset_id=dataset_id,
-                entity_types=_merge_labels(entity_accumulator, "ENTITY"),
-                relation_types=_merge_labels(relation_accumulator, "RELATED_TO"),
+                entity_types=_merge_labels(entity_accumulator, "ENTITY"), # return type -> List[str]
+                relation_types=_merge_labels(relation_accumulator, "RELATED_TO"), # return type -> List[str]
                 chunks_total=total_chunks,
                 chunks_completed=completed_chunks,
             )
             await _persist_ontology_run(job_id, ONTOLOGY_RUNS[job_id])
     except Exception as exc:
+        logger.error(f"Error occurred while processing ontology job {job_id}: {exc}")
         async with _ONTOLOGY_RUNS_LOCK:
             ONTOLOGY_RUNS[job_id].status = "failed"
             ONTOLOGY_RUNS[job_id].stage = "failed"
@@ -373,6 +395,8 @@ async def discover_ontology_async(dataset_id: str, documents: List[GraphInputDoc
     async with _ONTOLOGY_RUNS_LOCK:
         ONTOLOGY_RUNS[job_id] = run_status
         await _persist_ontology_run(job_id, run_status)
+        
+    logger.info(f"Queued ontology discovery job {job_id} for dataset {dataset_id} with {len(documents)} documents.")
 
     asyncio.create_task(_execute_ontology_job(job_id, dataset_id, documents))
     return OntologyAccepted(
@@ -419,7 +443,7 @@ async def build_graph(dataset_id: str, documents: List[GraphInputDocument]):
         "dataset_id": dataset_id,
         "docs": len(documents),
         "chunks": chunk_count,
-        "discovered_entity_types": ontology.entity_types,
+        "discovered_entity_types": ontology.entity_types, # return type -> List[EntityTypeDefinition]
         "discovered_relation_types": ontology.relation_types,
     }
 
