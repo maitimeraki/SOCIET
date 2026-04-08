@@ -140,6 +140,6 @@ class LocalOntology(BaseModel):
 
     def to_public_view(self) -> PublicOntologyView:
         return PublicOntologyView(
-            entity_types=self.entity_labels,
-            relation_types=self.relation_labels,
+            entity_types=[ent.type_name for ent in self.entity_types],
+            relation_types=[rel.type_name for rel in self.relation_types]
         )
