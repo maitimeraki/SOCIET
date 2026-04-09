@@ -4,6 +4,7 @@ import json
 import sys
 import logging
 from pathlib import Path
+from src.logging.setup_logging import setup_logging 
 from datetime import datetime
 from fastapi import FastAPI, BackgroundTasks, status
 from fastapi.middleware.cors import CORSMiddleware
@@ -30,7 +31,6 @@ from src.llm.client import LLMClient, global_llm_client
 from src.llm.config_llm import get_llm_config
 
 
-
 # Configure basic logging
 logging.basicConfig(
     level=logging.INFO,  # DEBUG, INFO, WARNING, ERROR, CRITICAL
@@ -41,8 +41,9 @@ logging.basicConfig(
 )
 logging.basicConfig(level=logging.ERROR, format="%(asctime)s - %(levelname)s - %(message)s")
 
-# Create logger instance
-logger = logging.getLogger(__name__)
+# # Create logger instance
+# logger = logging.getLogger(__name__)
+logger = setup_logging()  # Ensure logging is configured with handler clearing to prevent duplication
 
 @asynccontextmanager
 async def lifespan(app: FastAPI)-> AsyncGenerator[None, None]:
@@ -105,13 +106,15 @@ AVAILABLE_DOMAINS = [
 
 SIMULATION_RUNS: Dict[str, SimulationRunStatus] = {}
 _RUNS_LOCK = asyncio.Lock() # Lock to protect access to SIMULATION_RUNS in async context
-
 ONTOLOGY_RUNS: Dict[str, OntologyRunStatus] = {}
 _ONTOLOGY_RUNS_LOCK = asyncio.Lock()
 _ONTOLOGY_RUNTIME_DIR = Path("src/api/runtime/ontology_jobs")
 _ONTOLOGY_RUNTIME_DIR.mkdir(parents=True, exist_ok=True)
-
-
+# Runtime state for building the graph
+BUILD_GRAPH_RUNS: Dict[str, Dict[str, Any]] = {}
+_BUILD_GRAPH_RUNS_LOCK = asyncio.Lock()
+_BUILD_GRAPH_RUNTIME_DIR = Path("src/api/runtime/build_graph_jobs")
+_BUILD_GRAPH_RUNTIME_DIR.mkdir(parents=True, exist_ok=True)
 def _strip_json_fences(text: str) -> str:
     cleaned = (text or "").strip()
     if cleaned.startswith("```"):
@@ -397,7 +400,7 @@ async def discover_ontology_async(dataset_id: str, documents: List[GraphInputDoc
         await _persist_ontology_run(job_id, run_status)
         
     logger.info(f"Queued ontology discovery job {job_id} for dataset {dataset_id} with {len(documents)} documents.")
-
+    # It just create a non-blocking task to execute the ontology discovery in the background.
     asyncio.create_task(_execute_ontology_job(job_id, dataset_id, documents))
     return OntologyAccepted(
         job_id=job_id,
@@ -424,7 +427,6 @@ async def get_ontology_run(job_id: str):
         stage="not_found",
         error="Ontology job id not found",
     )
-    
     
     
 @app.post('/simulate/build_graph', response_model=Dict[str, Any])
@@ -533,7 +535,6 @@ Context: {world_state_json}
             "success_criteria": []
         }
     
-    
 
 def design_society(topic: str, required_perspectives: Optional[List[str]], depth: str) -> Dict:
     base_agents = [
@@ -593,8 +594,6 @@ def design_society(topic: str, required_perspectives: Optional[List[str]], depth
         "agents": base_agents,
         "domains": sorted(set(d for a in base_agents for d in a["domain_expertise"]))
     }
-
-
 
 
 if __name__=="__main__":
