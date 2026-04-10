@@ -1,4 +1,4 @@
-from typing import Any, Dict, List, Optional, Literal
+from typing import Any, Dict, List, Optional, Literal, Tuple
 from pydantic import BaseModel, Field
 
 
@@ -133,10 +133,33 @@ class LocalOntology(BaseModel):
     # property decorator -> It allows you to treat a class method like a regular data attribute 
     @property
     def entity_labels(self) -> List[str]:
-        return [e.type_name for e in self.entity_types if e.type_name]
+        return [ent.type_name for ent in self.entity_types if ent.type_name.strip()]
     @property
     def relation_labels(self) -> List[str]:
-        return [r.type_name for r in self.relation_types if r.type_name]
+        return [rel.type_name for rel in self.relation_types if rel.type_name.strip()]
+    
+    @property
+    def entity_props(self)->List[Tuple[str,str]]:
+        entity_props = []
+        for ent in self.entity_types:
+            for p in ent.properties:
+                # Format: (ENTITY_property, Description)
+                # Example: ("MICROSERVICE_version", "Software version of the Microservice")
+                namespaced_name = f"{ent.type_name}_{p.name}"
+                entity_props.append((namespaced_name, p.description))
+                
+        return entity_props
+    @property
+    def relation_props(self)->List[Tuple[str,str]]:
+        relation_props = []
+        for rel in self.relation_types:
+            for p in rel.properties:
+                # Format: (ENTITY_property, Description)
+                # Example: ("MICROSERVICE_version", "Software version of the Microservice")
+                namespaced_name = f"{rel.type_name}_{p.name}"
+                relation_props.append((namespaced_name, p.description))
+                
+        return relation_props
 
     def to_public_view(self) -> PublicOntologyView:
         return PublicOntologyView(
