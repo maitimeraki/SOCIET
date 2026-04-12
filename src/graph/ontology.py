@@ -4,6 +4,7 @@ import logging
 from datetime import datetime
 from typing import List, Dict, Any
 from llama_index.llms.openai_like import OpenAILike
+from src.logging.setup_logging import setup_logging
 from src.utils.hydrate_ontology import hydrate_ontology
 from src.graph.models_graph import (
     GraphInputDocument,
@@ -22,8 +23,8 @@ logging.basicConfig(
 logging.basicConfig(level=logging.ERROR, format="%(asctime)s - %(levelname)s - %(message)s")
 
 # Create logger instance
-logger = logging.getLogger(__name__)
-
+# logger = logging.getLogger(__name__)
+logger = setup_logging()  # Ensure logging is configured with handler clearing to prevent duplication
 
 def _strip_json_fences(text: str) -> str:
     t = (text or "").strip()
@@ -57,29 +58,6 @@ def _structured_properties(llm_data: Dict[str, Any]) -> Dict[str, Any]:
     
     return llm_data
 
-# def _normalize_ontology_shape(parsed: Dict[str, Any]) -> Dict[str, Any]:
-#     entity_types = parsed.get("entity_types", []) # return type -> List[Dict[str, Any]]
-#     relation_types = parsed.get("relation_types", []) # return type -> List[Dict[str, Any]]
-#     logger.info(f"Normalizing ontology shape. Initial entity_types: {entity_types}, relation_types: {relation_types}")
-
-#     # Backward-compatible input: entity_types as List[Dict[str, str]] or List[str]
-#     if entity_types and isinstance(entity_types[0], dict):
-#         entity_types = [e for e in entity_types if str(e.get("type_name", "")).strip()] # return type -> List[Dict[str, str]]
-
-#     # Backward-compatible input: relation_types as list[str]
-#     if relation_types and isinstance(relation_types[0], dict):
-#         relation_types = [r for r in relation_types if str(r.get("type_name", "")).strip()]
-
-#     # metadata = parsed.get("metadata", {})
-#     # if "ontology_id" not in metadata:
-#     #     metadata["ontology_id"] = f"onto_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}"
-#     # metadata.setdefault("created_at", datetime.utcnow().isoformat())
-
-#     return {
-#         "entity_types": entity_types, # return type -> List[Dict[str, Any]]
-#         "relation_types": relation_types, # return type -> List[Dict[str, Any]]
-#     }
-
 class OntologyDiscoveryStage:
     """Discovers a local ontology schema from a sample of input documents using LLMs. The discovered ontology defines the entity types, relation types, and their properties that will be used for structured extraction in the next stage. This stage is crucial for enabling domain-agnostic graph construction without requiring manual schema definition upfront."""
     def __init__(self, model: str = "qwen3.5-16k:4b", temperature: float = 0.0):
@@ -89,8 +67,11 @@ class OntologyDiscoveryStage:
             api_key="ollama",
             is_chat_model=True,
             timeout=300,
-            strict=True,
-            max_retries=3,
+            strict=True, # Reliable Structured Output
+            temperature=temperature, # Deterministic output for ontology discovery
+            additional_kwargs={
+                "seed": 42, # Fixed seed for reproducibility
+            }
         )
 
     async def run(
@@ -118,7 +99,7 @@ class OntologyDiscoveryStage:
                 {{
                 "entity_types": [
                     {{
-                    "type_name": "ENTITY_TYPE",
+                    "type_name": "EntityTypeName",
                     "description": "Short definition",
                     "properties": ["name: brief description"]
                     }}
@@ -135,7 +116,7 @@ class OntologyDiscoveryStage:
                 }}
 
                 Rules:
-                1. Use UPPER_SNAKE_CASE for names.
+                1. Use UPPER_SNAKE_CASE for names of properties of relations.
                 2. Properties MUST be a list of strings formatted as "name: description".
                 3. Return Json only
 
