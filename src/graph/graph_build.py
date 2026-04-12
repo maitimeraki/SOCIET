@@ -1,12 +1,14 @@
 import asyncio
 import logging
 import sys
-from typing import List, Literal
+from typing import List
+from typing_extensions import Literal
+from enum import Enum
 from llama_index.core import Document, PropertyGraphIndex, Settings
 from llama_index.llms.openai_like import OpenAILike
 from llama_index.embeddings.ollama import OllamaEmbedding
 from llama_index.graph_stores.neo4j import Neo4jPropertyGraphStore
-from llama_index.core.indices.property_graph import SchemaLLMPathExtractor
+from llama_index.core.indices.property_graph import SchemaLLMPathExtractor, DynamicLLMPathExtractor
 from src.logging.setup_logging import setup_logging
 from src.graph.config_graph import GraphConfig
 from src.graph.models_graph import GraphInputDocument, LocalOntology
@@ -67,17 +69,19 @@ class GraphExtractionStage:
             relation_schemas = ontology.relation_labels
             possible_ent_props = ontology.entity_props
             possible_rel_props = ontology.relation_props
-            
+            validation_schema = ontology.validation_schema
+
             # Used to extract structured knowledge from unstructured text based on a predefined, strict schema. We use this extractor when building Knowledge Graphs (KGs) that require high accuracy, consistency, and alignment with a domain-specific ontology.This extractor restricts the LLM from creating arbitrary or hallucinated relationship types
             logger.info(f"Initializing SchemaLLMPathExtractor for dataset {dataset_id} with {(entity_schemas)} entity schemas and {(relation_schemas)} relation schemas.")
-            extractor = SchemaLLMPathExtractor(
+            extractor = DynamicLLMPathExtractor(
                 llm=self.llm,
-                possible_entities=entity_schemas,
-                possible_relations=relation_schemas,
-                possible_entity_props=possible_ent_props,
-                possible_relation_props=possible_rel_props,
-                
-                strict=True, # Strict ensures it doesn't hallucinate non-schema properties
+                allowed_entity_types=entity_schemas,    # Accepts your dynamic tuple!
+                allowed_relation_types=relation_schemas, # Accepts your dynamic tuple!
+                #Enables the LLM to generate specific properties for relationships and entities on the fly.
+                allowed_entity_props=possible_ent_props,
+                allowed_relation_props= possible_rel_props,
+                # max_triplets_per_chunk=15,
+                num_workers=self.config.ontology_max_concurrency, # --	Number of parallel worker threads.
             )
 
             # Keep full ontology schema on each chunk metadata for downstream processing
