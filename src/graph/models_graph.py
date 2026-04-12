@@ -138,6 +138,7 @@ class LocalOntology(BaseModel):
     def relation_labels(self) -> List[str]:
         return [rel.type_name for rel in self.relation_types if rel.type_name.strip()]
     
+    # -- Entity properties with name and description for each entity type, formatted as (ENTITY_property, Description) e.g. ("MICROSERVICE_version", "Software version of the Microservice") --
     @property
     def entity_props(self)->List[Tuple[str,str]]:
         entity_props = []
@@ -149,18 +150,31 @@ class LocalOntology(BaseModel):
                 entity_props.append((namespaced_name, p.description))
                 
         return entity_props
+    
+    # -- Relation properties with name and description for each relation type, formatted as (RELATION_property, Description) e.g. ("DEPENDS_ON_since", "Date since the dependency exists") --
     @property
     def relation_props(self)->List[Tuple[str,str]]:
         relation_props = []
         for rel in self.relation_types:
             for p in rel.properties:
-                # Format: (ENTITY_property, Description)
-                # Example: ("MICROSERVICE_version", "Software version of the Microservice")
+                # Format: (RELATION_property, Description)
+                # Example: ("DEPENDS_ON_since", "Date since the dependency exists")
                 namespaced_name = f"{rel.type_name}_{p.name}"
                 relation_props.append((namespaced_name, p.description))
                 
         return relation_props
-
+    # A dictionary mapping entity types to valid relation types (e.g., {"Person": ["Works_At"]}).
+    # format: { "Source": ["Allowed_Rel1", "Allowed_Rel2"] }
+    @property
+    def validation_schema(self)->Dict[str, Any]:
+        val_schema = {
+            ent.type_name: [
+                rel.type_name for rel in self.relation_types 
+                if ent.type_name in rel.source_entity_types
+            ] for ent in self.entity_types
+        }
+        return val_schema
+        
     def to_public_view(self) -> PublicOntologyView:
         return PublicOntologyView(
             entity_types=[ent.type_name for ent in self.entity_types],
