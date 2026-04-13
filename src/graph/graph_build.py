@@ -4,6 +4,7 @@ import sys
 from typing import List
 from typing_extensions import Literal
 from enum import Enum
+from llama_index.core.node_parser import SentenceSplitter
 from llama_index.core import Document, PropertyGraphIndex, Settings
 from llama_index.llms.openai_like import OpenAILike
 from llama_index.embeddings.ollama import OllamaEmbedding
@@ -37,7 +38,8 @@ class GraphExtractionStage:
             model=config.extraction_model,
             api_base="http://localhost:11434/v1",
             api_key="ollama",
-            timeout=120,
+            temperature=0.0,  # Deterministic output
+            timeout=300,  # Set a longer timeout to accommodate complex graph extraction processes
             max_retries=3,
         )
         # Specialized embedding model for generating vector representations of text, which can be used for semantic search, clustering, or as part of the extraction process to improve accuracy. This allows the system to capture nuanced meanings and relationships in the text that may not be explicitly defined in the ontology.
@@ -53,6 +55,8 @@ class GraphExtractionStage:
             url=config.neo4j_uri,
             database=config.neo4j_database,
         )
+        # Sentence splitter for chunking documents into manageable pieces for the LLM to process, which can help improve extraction accuracy by providing more focused context. The chunk size and overlap can be tuned based on the expected length of entities and relationships in the text.
+        self.splitter = SentenceSplitter(chunk_size=2048, chunk_overlap=400)
 
     async def run(
         self,
@@ -61,6 +65,8 @@ class GraphExtractionStage:
         ontology: LocalOntology,
     ) -> int:
         Settings.llm = self.llm
+        # Increase chunk size to provide "breathing room" for the 1416 metadata length
+        Settings.node_parser = self.splitter 
         try:
             # 1. Transform basic labels into a Property-Aware Schema
             # We map each entity label to its discovered properties dynamically
@@ -111,10 +117,11 @@ class GraphExtractionStage:
                 logger.warning(f"PropertyGraphIndex.abuild_from_documents not found. Falling back to synchronous from_documents method for dataset {dataset_id}. This may block the event loop.")
                 index = await asyncio.to_thread(
                     PropertyGraphIndex.from_documents,
-                    llama_docs,
+                    llama_docs, # Provide the full list of documents to the synchronous method
                     embed_model=self.embed_model,
                     property_graph_store=self.graph_store,
                     kg_extractors=[extractor],
+                    transformation = [self.splitter], # Ensure the same splitter is used for both node parsing and transformation to maintain consistency in how text is chunked and processed, which can improve the accuracy of entity and relationship extraction.
                     show_progress=True,
                 )
 
