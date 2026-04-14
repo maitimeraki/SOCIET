@@ -77,9 +77,13 @@ class GraphExtractionStage:
         documents: List[GraphInputDocument],
         ontology: LocalOntology,
     ) -> int:
+        import os
+        os.environ["LLAMA_INDEX_DISABLE_ASYNC_EMBEDDINGS"] = "1"
         from llama_index.core import Document, PropertyGraphIndex, Settings
         llm, embed_model, graph_store, splitter = self._build_components()
         Settings.llm = llm
+        # ✅ FIX: Disable async embeddings to prevent nested loop creation
+        Settings.embed_model = embed_model
         Settings.node_parser = splitter
 
         logger.info(f"Transforming ontology schema for dataset {dataset_id} into property-aware format.")
@@ -122,12 +126,14 @@ class GraphExtractionStage:
             # Since PropertyGraphIndex.from_documents can be synchronous and blocking
             # we execute it securely in a thread utilizing the CURRENT event loop's context
             def _build_index():
+                # ✅ Use synchronous index building instead
                 return PropertyGraphIndex.from_documents(
                     llama_docs,
                     embed_model=embed_model,
                     property_graph_store=graph_store,
                     kg_extractors=[extractor],
                     transformations=[splitter],
+                    use_async=False,  # ← FORCE SYNC MODE if available
                     show_progress=True,
                 )
 
