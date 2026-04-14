@@ -9,8 +9,8 @@ def hydrate_ontology(tiny_json: Dict[str, Any]) -> Dict[str, Any]:
     production_ontology = { # return type -> Dict[str, Any]
         "metadata": {
             "ontology_id": str(uuid.uuid4()),
-            "version": "1.0.0",
-            "confidence": 0.95 # Base confidence
+            # "version": "1.0.0",
+            # "confidence": 0.95 # Base confidence
         },
         "entity_types": [],
         "relation_types": []
@@ -25,10 +25,10 @@ def hydrate_ontology(tiny_json: Dict[str, Any]) -> Dict[str, Any]:
                 {
                     "name": p["name"],
                     "description": p["description"],
-                    "value_type": "string", # Default for 4B models
+                    # "value_type": "string", # Default for 4B models
                     "is_indexed": True,     # System decision
                     "is_searchable": True,
-                    "constraints": {}       # System default
+                    # "constraints": {}       # System default
                 } for p in ent["properties"]
             ],
             "identity": {
@@ -50,20 +50,20 @@ def hydrate_ontology(tiny_json: Dict[str, Any]) -> Dict[str, Any]:
                {
                     "name": prop["name"],
                     "description": prop["description"],
-                    "value_type": "string", # Default for 4B models
+                    # "value_type": "string", # Default for 4B models
                     "is_indexed": True,     # System decision
                     "is_searchable": True,
-                    "constraints": {}       # System default
+                    # "constraints": {}       # System default
                 } for prop in rel["properties"]
             ],
             "semantics": { "directed": True, "confidence_weighted": True }
         }
         production_ontology["relation_types"].append(full_rel)
         
-    production_ontology["global_constraints"] = {
-        "max_entities": 1000,
-        "max_relations": 5000,
-        "enforce_required_relations": True
-    }
+    # production_ontology["global_constraints"] = {
+    #     "max_entities": 1000,
+    #     "max_relations": 5000,
+    #     "enforce_required_relations": True
+    # }
 
     return production_ontology
