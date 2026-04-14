@@ -1,6 +1,12 @@
 from neo4j import AsyncGraphDatabase
 from .config_graph import GraphConfig
-
+from src.logging.setup_logging import setup_logging
+import logging
+logging.basicConfig(
+    level=logging.INFO, 
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+)
+logger = setup_logging()
 
 class GraphNormalizationStage:
     def __init__(self, config: GraphConfig):
@@ -38,11 +44,11 @@ class GraphNormalizationStage:
                         """,
                         dataset_id=dataset_id,
                     )
-                except Exception:
-                    pass
+                except Exception as apoc_exc:
+                    logger.warning(f"APOC merge failed for dataset {dataset_id}: {apoc_exc}")
 
             await driver.close()
-            
+            logger.info(f"Graph normalization completed for dataset {dataset_id}")
             
         except Exception as e:
-            print(f"Error during graph normalization: {e}")
+            logger.error(f"Error during graph normalization: {e}")
