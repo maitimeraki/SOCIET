@@ -34,65 +34,84 @@ class GraphExtractionStage:
     This stage is responsible for taking raw text documents, applying the defined ontology schema to extract structured information."""
     def __init__(self, config: GraphConfig):
         self.config = config
-        self.llm = OpenAILike(
-            model=config.extraction_model,
+        
+    def _build_components(self):
+        llm = OpenAILike(
+            model=self.config.extraction_model,
             api_base="http://localhost:11434/v1",
             api_key="ollama",
-            temperature=0.0,  # Deterministic output
-            timeout=300,  # Set a longer timeout to accommodate complex graph extraction processes
+            temperature=0.0,
+            timeout=900,
             max_retries=3,
         )
-        # Specialized embedding model for generating vector representations of text, which can be used for semantic search, clustering, or as part of the extraction process to improve accuracy. This allows the system to capture nuanced meanings and relationships in the text that may not be explicitly defined in the ontology.
-        self.embed_model = OllamaEmbedding(
+        embed_model = OllamaEmbedding(
             model_name="nomic-embed-text:v1.5",
             base_url="http://localhost:11434",
             ollama_additional_kwargs={"mirostat": 0},
         )
-        # Neo4j graph store for persisting extracted entities and relationships. This allows for efficient querying and analysis of the constructed knowledge graph, as well as integration with other tools that support the Neo4j format.
-        self.graph_store = Neo4jPropertyGraphStore(
-            username=config.neo4j_username,
-            password=config.neo4j_password,
-            url=config.neo4j_uri,
-            database=config.neo4j_database,
+        graph_store = Neo4jPropertyGraphStore(
+            username=self.config.neo4j_username,
+            password=self.config.neo4j_password,
+            url=self.config.neo4j_uri,
+            database=self.config.neo4j_database,
         )
-        # Sentence splitter for chunking documents into manageable pieces for the LLM to process, which can help improve extraction accuracy by providing more focused context. The chunk size and overlap can be tuned based on the expected length of entities and relationships in the text.
-        self.splitter = SentenceSplitter(chunk_size=2048, chunk_overlap=400)
-
+        splitter = SentenceSplitter(chunk_size=2048, chunk_overlap=400)
+        return llm, embed_model, graph_store, splitter
     async def run(
         self,
         dataset_id: str,
         documents: List[GraphInputDocument],
         ontology: LocalOntology,
     ) -> int:
-        Settings.llm = self.llm
-        # Increase chunk size to provide "breathing room" for the 1416 metadata length
-        Settings.node_parser = self.splitter 
         try:
-            # 1. Transform basic labels into a Property-Aware Schema
-            # We map each entity label to its discovered properties dynamically
-            logger.info(f"Transforming ontology schema for dataset {dataset_id} into property-aware format.")
+            return await asyncio.to_thread(
+                self._run_blocking,
+                dataset_id,
+                documents,
+                ontology,
+            )
+        except Exception as e:
+            logger.error(f"Error during graph extraction: {e}")
+            return 0
+
+    def _run_blocking(
+        self,
+        dataset_id: str,
+        documents: List[GraphInputDocument],
+        ontology: LocalOntology,
+    ) -> int:
+        return asyncio.run(self._run_async(dataset_id, documents, ontology))
+
+    async def _run_async(
+        self,
+        dataset_id: str,
+        documents: List[GraphInputDocument],
+        ontology: LocalOntology,
+    ) -> int:
+        llm, embed_model, graph_store, splitter = self._build_components()
+        Settings.llm = llm
+        Settings.node_parser = splitter
+
+        logger.info(f"Transforming ontology schema for dataset {dataset_id} into property-aware format.")
+        try:
             entity_schemas = ontology.entity_labels
             relation_schemas = ontology.relation_labels
             possible_ent_props = ontology.entity_props
             possible_rel_props = ontology.relation_props
-            validation_schema = ontology.validation_schema
 
-            # Used to extract structured knowledge from unstructured text based on a predefined, strict schema. We use this extractor when building Knowledge Graphs (KGs) that require high accuracy, consistency, and alignment with a domain-specific ontology.This extractor restricts the LLM from creating arbitrary or hallucinated relationship types
-            logger.info(f"Initializing SchemaLLMPathExtractor for dataset {dataset_id} with {(entity_schemas)} entity schemas and {(relation_schemas)} relation schemas.")
-            extractor = DynamicLLMPathExtractor(
-                llm=self.llm,
-                allowed_entity_types=entity_schemas,    # Accepts your dynamic tuple!
-                allowed_relation_types=relation_schemas, # Accepts your dynamic tuple!
-                #Enables the LLM to generate specific properties for relationships and entities on the fly.
-                allowed_entity_props=possible_ent_props,
-                allowed_relation_props= possible_rel_props,
-                # max_triplets_per_chunk=15,
-                num_workers=self.config.ontology_max_concurrency, # --	Number of parallel worker threads.
+            logger.info(
+                f"Initializing SchemaLLMPathExtractor for dataset {dataset_id} with "
+                f"{entity_schemas} entity schemas and {relation_schemas} relation schemas."
             )
 
-            # Keep full ontology schema on each chunk metadata for downstream processing
-            ontology_payload = ontology.model_dump()
-            logger.info(f"Prepared ontology payload for dataset {dataset_id}: {ontology_payload}")
+            extractor = DynamicLLMPathExtractor(
+                llm=llm,
+                allowed_entity_types=entity_schemas,
+                allowed_relation_types=relation_schemas,
+                allowed_entity_props=possible_ent_props,
+                allowed_relation_props=possible_rel_props,
+                num_workers=self.config.ontology_max_concurrency,
+            )
 
             llama_docs = []
             for d in documents:
@@ -100,32 +119,25 @@ class GraphExtractionStage:
                 md["dataset_id"] = dataset_id
                 md["document_id"] = d.document_id
                 md["ontology_id"] = ontology.metadata.ontology_id
-                md["ontology_schema"] = ontology_payload
-                if d.title:
-                    md["title"] = d.title
-                llama_docs.append(Document(text=d.text, metadata=md))
-            # Sophisticated indexing structure that constructs a knowledge graph from unstructured data (documents), where nodes and relationships can have properties (metadata). Unlike earlier "triple-based" knowledge graphs, this allows for much richer, semantic modeling.
+                md["title"] = d.title or "Untitled Specification Document"
+
+                new_doc = Document(text=d.text, metadata=md)
+                new_doc.excluded_llm_metadata_keys = ["dataset_id", "ontology_id"]
+                new_doc.excluded_embed_metadata_keys = ["dataset_id", "ontology_id", "document_id"]
+                llama_docs.append(new_doc)
+
             logger.info(f"Building property graph for dataset {dataset_id}")
-            if hasattr(PropertyGraphIndex, "abuild_from_documents"):
-                index = await PropertyGraphIndex.abuild_from_documents(
-                    llama_docs,
-                    property_graph_store=self.graph_store,
-                    kg_extractors=[extractor],
-                    show_progress=True,
-                )
-            else:
-                logger.warning(f"PropertyGraphIndex.abuild_from_documents not found. Falling back to synchronous from_documents method for dataset {dataset_id}. This may block the event loop.")
-                index = await asyncio.to_thread(
-                    PropertyGraphIndex.from_documents,
-                    llama_docs, # Provide the full list of documents to the synchronous method
-                    embed_model=self.embed_model,
-                    property_graph_store=self.graph_store,
-                    kg_extractors=[extractor],
-                    transformation = [self.splitter], # Ensure the same splitter is used for both node parsing and transformation to maintain consistency in how text is chunked and processed, which can improve the accuracy of entity and relationship extraction.
-                    show_progress=True,
-                )
+            index = await asyncio.to_thread(
+                PropertyGraphIndex.from_documents,
+                llama_docs,
+                embed_model=embed_model,
+                property_graph_store=graph_store,
+                kg_extractors=[extractor],
+                transformations=[splitter],
+                show_progress=True,
+            )
 
             return len(index.docstore.docs)
         except Exception as e:
-            logger.error(f"Error during graph extraction: {e}")
+            logger.error(f"Error during graph extraction for dataset {dataset_id}: {e}")
             return 0
