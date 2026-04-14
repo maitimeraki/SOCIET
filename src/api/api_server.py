@@ -267,12 +267,19 @@ async def _process_chunk(
             raise RuntimeError("extraction_stage is required for build_graph mode")
         
         logger.info(f"Start building the graph of {chunk_doc.document_id}")
-        docs_built = await extraction_stage.run(
-            dataset_id=dataset_id,
-            documents=[chunk_doc],
-            ontology=ontology,
-        )
-        logger.info(f"Complete building graph of {chunk_doc.document_id}")
+        try:
+            docs_built = await extraction_stage.run(
+                dataset_id=dataset_id,
+                documents=[chunk_doc],
+                ontology=ontology
+            )
+            logger.info(f"Complete building graph of {chunk_doc.document_id}")
+        except asyncio.TimeoutError:
+            logger.error(f"Graph extraction timeout for {chunk_doc.document_id}")
+            raise
+        except Exception as exc:
+            logger.error(f"Graph extraction failed for {chunk_doc.document_id}: {exc}")
+            raise  # Re-raise to properly signal failure
 
     view = ontology.to_public_view()
     return {
@@ -333,6 +340,8 @@ async def _execute_unified_job(
 
     async def _worker(chunk_doc: GraphInputDocument) -> ChunkProgress:
         async with semaphore:
+             # ✅ FIX 6: Add small delay between chunks
+            await asyncio.sleep(0.1)
             return await _process_chunk(
                 mode=mode,
                 dataset_id=dataset_id,
