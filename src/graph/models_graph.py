@@ -128,16 +128,16 @@ class LocalOntology(BaseModel):
     metadata: OntologyMetadata
     entity_types: List[EntityTypeDefinition] = Field(default_factory=list)
     relation_types: List[RelationTypeDefinition] = Field(default_factory=list)
-    global_constraints: Dict[str, Any] = Field(default_factory=dict)
+    # global_constraints: Dict[str, Any] = Field(default_factory=dict)
 
     # property decorator -> It allows you to treat a class method like a regular data attribute 
     @property
     def entity_labels(self) -> List[str]:
-        return [ent.type_name for ent in self.entity_types if ent.type_name.strip()]
+        return [ent.type_name for ent in self.entity_types if ent.type_name and ent.type_name.strip()]
     @property
     def relation_labels(self) -> List[str]:
-        return [rel.type_name for rel in self.relation_types if rel.type_name.strip()]
-    
+        return [rel.type_name for rel in self.relation_types if rel.type_name and rel.type_name.strip()]
+
     # -- Entity properties with name and description for each entity type, formatted as (ENTITY_property, Description) e.g. ("MICROSERVICE_version", "Software version of the Microservice") --
     @property
     def entity_props(self)->List[Tuple[str,str]]:

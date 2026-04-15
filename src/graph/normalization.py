@@ -1,5 +1,5 @@
 from neo4j import AsyncGraphDatabase
-from .config_graph import GraphConfig
+from src.graph.config_graph import GraphConfig
 from src.logging.setup_logging import setup_logging
 import logging
 logging.basicConfig(
