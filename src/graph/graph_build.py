@@ -3,6 +3,10 @@ import logging
 import sys
 from typing import List
 from src.logging.setup_logging import setup_logging
+from llama_index.core.node_parser import SentenceSplitter
+from llama_index.llms.openai_like import OpenAILike
+from llama_index.embeddings.ollama import OllamaEmbedding
+from llama_index.graph_stores.neo4j import Neo4jPropertyGraphStore
 from src.graph.config_graph import GraphConfig
 from src.graph.models_graph import GraphInputDocument, LocalOntology
 
@@ -26,38 +30,27 @@ class GraphExtractionStage:
     This stage is responsible for taking raw text documents, applying the defined ontology schema to extract structured information."""
     def __init__(self, config: GraphConfig):
         self.config = config
-        
-    def _build_components(self):
-        from llama_index.core.node_parser import SentenceSplitter
-        from llama_index.llms.openai_like import OpenAILike
-        from llama_index.embeddings.ollama import OllamaEmbedding
-        from llama_index.graph_stores.neo4j import Neo4jPropertyGraphStore
-        try:
-            llm = OpenAILike(
+        self.llm = OpenAILike(
                 model=self.config.extraction_model,
                 api_base="http://localhost:11434/v1",
                 api_key="ollama",
-                temperature=0.0,
+                temperature=0.7,
                 timeout=900,
                 max_retries=3,
             )
-            embed_model = OllamaEmbedding(
-                model_name="nomic-embed-text:v1.5",
-                base_url="http://localhost:11434",
-                ollama_additional_kwargs={"mirostat": 0},
-            )
-            graph_store = Neo4jPropertyGraphStore(
-                username=self.config.neo4j_username,
-                password=self.config.neo4j_password,
-                url=self.config.neo4j_uri,
-                database=self.config.neo4j_database,
-            )
-            splitter = SentenceSplitter(chunk_size=2048, chunk_overlap=400)
-            
-        except ConnectionError as e:
-            logger.error(f"HTTP error occurred while building components: {e}")
-            raise
-        return llm, embed_model, graph_store, splitter
+        self.embed_model = OllamaEmbedding(
+            model_name="nomic-embed-text:v1.5",
+            base_url="http://localhost:11434",
+            ollama_additional_kwargs={"mirostat": 0},
+        )
+        self.graph_store = Neo4jPropertyGraphStore(
+            username=self.config.neo4j_username,
+            password=self.config.neo4j_password,
+            url=self.config.neo4j_uri,
+            database=self.config.neo4j_database,
+        )
+        self.splitter = SentenceSplitter(chunk_size=2048, chunk_overlap=400)
+        
     async def run(
         self,
         dataset_id: str,
@@ -80,11 +73,11 @@ class GraphExtractionStage:
         import os
         os.environ["LLAMA_INDEX_DISABLE_ASYNC_EMBEDDINGS"] = "1"
         from llama_index.core import Document, PropertyGraphIndex, Settings
-        llm, embed_model, graph_store, splitter = self._build_components()
-        Settings.llm = llm
+
+        Settings.llm = self.llm
         # ✅ FIX: Disable async embeddings to prevent nested loop creation
-        Settings.embed_model = embed_model
-        Settings.node_parser = splitter
+        Settings.embed_model = self.embed_model
+        Settings.node_parser = self.splitter
 
         logger.info(f"Transforming ontology schema for dataset {dataset_id} into property-aware format.")
         try:
@@ -100,7 +93,7 @@ class GraphExtractionStage:
 
             from llama_index.core.indices.property_graph import SchemaLLMPathExtractor, DynamicLLMPathExtractor
             extractor = DynamicLLMPathExtractor(
-                llm=llm,
+                llm=self.llm,
                 allowed_entity_types=entity_schemas,
                 allowed_relation_types=relation_schemas,
                 allowed_entity_props=possible_ent_props,
@@ -129,10 +122,10 @@ class GraphExtractionStage:
                 # ✅ Use synchronous index building instead
                 return PropertyGraphIndex.from_documents(
                     llama_docs,
-                    embed_model=embed_model,
-                    property_graph_store=graph_store,
+                    embed_model=self.embed_model,
+                    property_graph_store=self.graph_store,
                     kg_extractors=[extractor],
-                    transformations=[splitter],
+                    transformations=[self.splitter],
                     use_async=False,  # ← FORCE SYNC MODE if available
                     show_progress=True,
                 )
@@ -142,4 +135,4 @@ class GraphExtractionStage:
             
         except Exception as e:
             logger.error(f"Error during graph extraction for dataset {dataset_id}: {e}")
-            raise 
+            raise
