@@ -60,13 +60,13 @@ def _structured_properties(llm_data: Dict[str, Any]) -> Dict[str, Any]:
 
 class OntologyDiscoveryStage:
     """Discovers a local ontology schema from a sample of input documents using LLMs. The discovered ontology defines the entity types, relation types, and their properties that will be used for structured extraction in the next stage. This stage is crucial for enabling domain-agnostic graph construction without requiring manual schema definition upfront."""
-    def __init__(self, model: str = "qwen3.5-16k:4b", temperature: float = 0.0):
+    def __init__(self, model: str = "qwen3.5-16k:4b", temperature: float = 0.7):
         self.llm = OpenAILike(
             model=model,
             api_base="http://localhost:11434/v1",
             api_key="ollama",
             is_chat_model=True,
-            timeout=300,
+            timeout=480,
             strict=True, # Reliable Structured Output
             temperature=temperature, # Deterministic output for ontology discovery
             additional_kwargs={
