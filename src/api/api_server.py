@@ -33,7 +33,6 @@ from src.simulation.config_world import WorldEvent
 from src.llm.client import global_llm_client
 from src.llm.config_llm import get_llm_config
 
-
 # Configure basic logging
 logging.basicConfig(
     level=logging.INFO,  # DEBUG, INFO, WARNING, ERROR, CRITICAL
@@ -184,7 +183,6 @@ async def _run_simulation_pipeline(query: UserQuery) -> SimulationResponse:
         raw_debate_log=result.get("debate_log") if query.simulation_depth == "deep" else None,
     )
 
-
 async def _persist_run(job_id: str, run: Dict[str, Any]) -> None:
     path = _RUNS_RUNTIME_DIR / f"{job_id}.json"
     await asyncio.to_thread(path.write_text, json.dumps(run, ensure_ascii=False, indent=2), "utf-8")
@@ -219,6 +217,7 @@ def _chunk_documents(
                 )
             )
     return chunks
+
 def _merge_labels(items: List[str], fallback: str) -> List[str]:
     seen: Set[str] = set()
     merged: List[str] = []
@@ -251,6 +250,9 @@ async def _process_chunk(
                 timeout=timeout_seconds,
             )
             break
+        except asyncio.TimeoutError:
+            logger.warning(f"Ontology discovery timeout for {chunk_doc.document_id} on attempt {attempt + 1}")
+            last_exc = RuntimeError(f"Ontology discovery timed out after {timeout_seconds} seconds")
         except Exception as exc:
             last_exc = exc
             if attempt < retry_attempts - 1:
@@ -355,6 +357,7 @@ async def _execute_unified_job(
 
     try:
         tasks = [asyncio.create_task(_worker(chunk)) for chunk in chunks]
+        logger.info(f"Started {len(tasks)} tasks for job {job_id} in mode {mode}")
         for fut in asyncio.as_completed(tasks):
             partial = await fut
             completed += 1
@@ -411,7 +414,6 @@ async def discover_ontology_async(dataset_id: str, documents: List[GraphInputDoc
     asyncio.create_task(_execute_unified_job(job_id, "ontology", dataset_id, documents))
     return {"job_id": job_id, "status": "queued", "message": "Ontology job accepted."}
 
-
 @app.post("/simulate/build_graph", status_code=status.HTTP_202_ACCEPTED)
 async def build_graph_async(dataset_id: str, documents: List[GraphInputDocument]):
     job_id = str(uuid.uuid4())
@@ -453,41 +455,42 @@ async def create_simulation(query: UserQuery, background_tasks: BackgroundTasks)
     return await _run_simulation_pipeline(query)
 
 
-# @app.post("/simulate/async", response_model=SimulationAccepted)
-# async def create_simulation_async(query: UserQuery):
-#     """Queue a simulation and return immediately with run id."""
-#     run_id = str(uuid.uuid4())
-#     run_status = SimulationRunStatus(
-#         run_id=run_id,
-#         status="queued",
-#         progress=0.0,
-#         stage="queued",
-#     )
-#     async with _RUNS_LOCK:
-#         SIMULATION_RUNS[run_id] = run_status
+@app.post('/simulate/normalize_graph', status_code=status.HTTP_202_ACCEPTED)
+async def normalize_graph(dataset_id: str, background_tasks: BackgroundTasks):
+    job_id = str(uuid.uuid4())
+    run = {
+        "job_id": job_id,
+        "mode": "normalize_graph",
+        "status": "queued",
+        "progress": 0.0,
+        "stage": "queued",
+        "error": None,
+        "result": None,
+    }
+    async with _RUNS_LOCK:
+        RUNS[job_id] = run
+        await _persist_run(job_id, run)
 
-#     asyncio.create_task(_execute_async_run(run_id, query))
-#     return SimulationAccepted(
-#         run_id=run_id,
-#         status="queued",
-#         message="Simulation accepted and queued.",
-#     )
+    async def _normalize():
+        try:
+            cfg = GraphConfig()
+            normalization_stage = GraphNormalizationStage(cfg)
+            await normalization_stage.run(dataset_id=dataset_id)
 
+            async with _RUNS_LOCK:
+                RUNS[job_id]["status"] = "completed"
+                RUNS[job_id]["stage"] = "completed"
+                RUNS[job_id]["progress"] = 1.0
+                await _persist_run(job_id, RUNS[job_id])
+        except Exception as exc:
+            async with _RUNS_LOCK:
+                RUNS[job_id]["status"] = "failed"
+                RUNS[job_id]["stage"] = "failed"
+                RUNS[job_id]["error"] = str(exc)
+                await _persist_run(job_id, RUNS[job_id])
 
-# @app.get("/simulate/{run_id}", response_model=SimulationRunStatus)
-# async def get_simulation_run(run_id: str):
-#     """Poll status for asynchronous simulation runs."""
-#     async with _RUNS_LOCK:
-#         run = SIMULATION_RUNS.get(run_id)
-#         if not run:
-#             return SimulationRunStatus(
-#                 run_id=run_id,
-#                 status="failed",
-#                 progress=0.0,
-#                 stage="not_found",
-#                 error="Run id not found",
-#             )
-#         return run
+    asyncio.create_task(_normalize())
+    return {"job_id": job_id, "status": "queued", "message": "Graph normalization job accepted."}
     
 async def parse_scenario(
     scenario: str,
