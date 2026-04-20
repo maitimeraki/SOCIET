@@ -1,0 +1,22 @@
+# Secrets and Environment
+.env
+.env.*
+*.pem
+*.key
+secrets.json
+
+# Dependencies and Build
+node_modules/
+venv/
+.venv/
+__pycache__/
+dist/
+build/
+
+# Logs and Temporary files
+*.log
+tmp/
+.tmp/
+
+# Git internals
+.git/
