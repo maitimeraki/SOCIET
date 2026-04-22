@@ -1,7 +1,8 @@
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 import uuid
-from neo4j import AsyncGraphDatabase
+import itertools
+from neo4j import AsyncGraphDatabase, Query
 from src.graph.config_graph import GraphConfig
 from src.logging.setup_logging import setup_logging
 import logging
@@ -25,8 +26,9 @@ class GraphNormalizationStage:
     - performs destructive merges only when safe and audited
     """
 
-    def __init__(self, config: GraphConfig):
+    def __init__(self, config: GraphConfig, batch_size: int = 10):
         self.config = config
+        self.batch_size = batch_size
         self.driver = AsyncGraphDatabase.driver(
             config.neo4j_uri,
             auth=(config.neo4j_username, config.neo4j_password),
@@ -40,7 +42,7 @@ class GraphNormalizationStage:
     def canonicalize_name(name: str) -> str:
         return name.strip().lower() if name else ""
 
-    async def _run(self, query: str, parameters: dict = None):
+    async def _run(self, query: Query, parameters: dict):
         async with self.driver.session(database=self.config.neo4j_database) as session:
             return await session.run(query, parameters or {})
 
@@ -50,17 +52,17 @@ class GraphNormalizationStage:
         Finds groups of nodes that share the same canonical surface form.
         Returns groups with length > 1.
         """
-        q = """
+        q = Query("""
         MATCH (n)
         WHERE n.dataset_id = $dataset_id AND n.name IS NOT NULL
         WITH toLower(trim(n.name)) AS key, collect({
-            id: id(n),
+            id: elementId(n),
             labels: labels(n),
             props: properties(n)
         }) AS nodes
         WHERE size(nodes) > 1
         RETURN key, nodes
-        """
+        """)
         result = await self._run(q, {"dataset_id": dataset_id})
         groups = []
         async for record in result:
@@ -88,7 +90,7 @@ class GraphNormalizationStage:
             type_score = 1.0 if set(a.labels) & set(b.labels) else 0.0
             provenance_score = 1.0 if a.properties.get("source") and a.properties.get("source") == b.properties.get("source") else 0.0
             # neighbor overlap: fetch neighboring labels
-            neighbor_score = await self._neighbor_label_jaccard(a.node_id, b.node_id)
+            neighbor_score = await self._neighbor_label_jaccard(str(a.node_id), str(b.node_id))
             # embedding similarity placeholder (0..1) - user must implement actual embed service
             embed_score = await self._embedding_similarity(a.properties.get("name", ""), b.properties.get("name", ""))
             # weighted sum
@@ -111,20 +113,21 @@ class GraphNormalizationStage:
         """
         Calculates Jaccard similarity of neighboring node labels.
         """
-        q = """
-        MATCH (a) WHERE id(a) = $id_a
-        MATCH (b) WHERE id(b) = $id_b
+        q = Query("""
+        MATCH (a) WHERE elementId(a) = $id_a
+        MATCH (b) WHERE elementId(b) = $id_b
         // Use pattern matching to find all neighbors
         MATCH (a)-[]-(na)
         MATCH (b)-[]-(nb)
         WITH collect(DISTINCT labels(na)) AS la, collect(DISTINCT labels(nb)) AS lb
         RETURN apoc.coll.toSet(la) AS la_set, apoc.coll.toSet(lb) AS lb_set
-        """
+        """)
         try:
             res = await self._run(q, {"id_a": id_a, "id_b": id_b})
             rec = await res.single()
-            la_set = rec["la_set"] or []
-            lb_set = rec["lb_set"] or []
+            if res is not None and rec:
+                la_set = rec["la_set"] or []
+                lb_set = rec["lb_set"] or []
             
             # FIX: APOC returns lists of lists/sets, we need to flatten and convert to set
             la_set = set(item for sublist in la_set for item in sublist)
@@ -162,27 +165,27 @@ class GraphNormalizationStage:
         Create a canonical node and connect originals to it via :ALIAS_OF (non-destructive).
         """
         canonical_id = str(uuid.uuid4())
-        create_q = f"""
+        create_q = Query("""
         UNWIND $originals AS o
         MERGE (canon:{canonical_label} {{ canonical_id: $canonical_id, dataset_id: $dataset_id }})
         ON CREATE SET canon += $canon_props
         WITH canon, o
-        MATCH (orig) WHERE id(orig) = o.id
+        MATCH (orig) WHERE elementId(orig) = o.id
         MERGE (orig)-[r:ALIAS_OF]->(canon)
         ON CREATE SET r.created_at = timestamp(), r.audit_note = $audit_note
-        RETURN id(canon) as canon_id
-        """
+        RETURN elementId(canon) as canon_id
+        """)
         originals_param = [{"id": c.node_id} for c in originals]
         await self._run(create_q, {"originals": originals_param, "canonical_id": canonical_id, "dataset_id": canonical_props.get("dataset_id"), "canon_props": canonical_props, "audit_note": audit_note})
 
     async def soft_link_same_as(self, a_id: int, b_id: int, confidence: float, reason: Optional[str] = None):
-        q = """
-        MATCH (a) WHERE id(a) = $a_id
-        MATCH (b) WHERE id(b) = $b_id
+        q = Query("""
+        MATCH (a) WHERE elementId(a) = $a_id
+        MATCH (b) WHERE elementId(b) = $b_id
         MERGE (a)-[r:SAME_AS]->(b)
         ON CREATE SET r.confidence = $confidence, r.reason = $reason, r.created_at = timestamp()
         RETURN r
-        """
+        """)
         await self._run(q, {"a_id": a_id, "b_id": b_id, "confidence": confidence, "reason": reason})
 
     # ---------- Destructive merge (audited, reversible) ----------
@@ -236,11 +239,11 @@ class GraphNormalizationStage:
                     try:
                         await tx.run(
                             """
-                            MATCH (n) WHERE id(n) IN $node_ids
+                            MATCH (n) WHERE elementId(n) IN $node_ids
                             WITH collect(n) AS nodes
                             CALL apoc.refactor.mergeNodes(nodes, {properties: "combine", mergeRels: true}) YIELD node AS merged
                             SET merged.merged_from = $merged_from, merged.merge_audit = $audit_id
-                            RETURN id(merged) AS merged_id
+                            RETURN elementId(merged) AS merged_id
                             """,
                             {"node_ids": node_ids, "merged_from": [n.node_id for n in group], "audit_id": audit_id}
                         )
@@ -265,7 +268,7 @@ class GraphNormalizationStage:
 
     # ---------- Human-review queue ----------
     async def enqueue_for_review(self, group: List[MergeCandidate], signals: Dict[str, Any], reason: Optional[str] = None) -> str:
-        q = """
+        q = Query("""
         CREATE (q:MergeReview {
             review_id: $review_id,
             created_at: timestamp(),
@@ -274,8 +277,41 @@ class GraphNormalizationStage:
             reason: $reason
         })
         RETURN q.review_id AS id
-        """
+        """)
         review_id = str(uuid.uuid4())
         group_payload = [{"id": n.node_id, "labels": n.labels, "props": n.properties} for n in group]
         res = await self._run(q, {"review_id": review_id, "group": group_payload, "signals": signals, "reason": reason})
         return review_id
+    
+    
+    async def run(self, dataset_id: str):
+        """
+        Orchestrate detection and merging in batches. Destructive merges are deferred and only executed
+        when confidence and type checks pass.
+        """
+        groups = await self.find_surface_duplicates(dataset_id)
+        # process in batches to control DB load
+        for i in range(0, len(groups), self.batch_size):
+            batch = groups[i:i + self.batch_size]
+            for group in batch:
+                signals = await self.compute_signals(group)
+                agg = signals.get("aggregate_confidence", 0.0)
+                # prefer canonicalization to destructive merge where possible
+                if agg >= 0.95:
+                    # pick a survivor heuristically: prefer node with most properties
+                    survivor = max(group, key=lambda g: len(g.properties or {}))
+                    to_merge = [g for g in group if g.node_id != survivor.node_id]
+                    try:
+                        await self.destructive_merge(survivor, to_merge, merge_author="auto")
+                    except Exception:
+                        # fallback to canonicalization if destructive merge fails
+                        await self.create_alias_relationships("CanonicalEntity", {"dataset_id": dataset_id, "created_by": "auto"}, group, audit_note="fallback-to-canonical")
+                elif agg >= 0.75:
+                    await self.create_alias_relationships("CanonicalEntity", {"dataset_id": dataset_id, "created_by": "auto"}, group, audit_note="auto-canonical")
+                elif agg >= 0.6:
+                    # soft-link high-confidence pairs
+                    for a, b in itertools.combinations(group, 2):
+                        await self.soft_link_same_as(a.node_id, b.node_id, confidence=0.6, reason="auto-soft-link")
+                else:
+                    await self.enqueue_for_review(group, signals, reason="low-confidence")
+        await self.close()
