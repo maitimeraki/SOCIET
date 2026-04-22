@@ -8,7 +8,7 @@ from llama_index.llms.openai_like import OpenAILike
 from llama_index.embeddings.ollama import OllamaEmbedding
 from llama_index.graph_stores.neo4j import Neo4jPropertyGraphStore
 from src.graph.config_graph import GraphConfig
-from src.graph.models_graph import GraphInputDocument, LocalOntology
+from src.graph.models_graph import ProcessedChunk, LocalOntology
 
 
 # Configure basic logging
@@ -54,7 +54,7 @@ class GraphExtractionStage:
     async def run(
         self,
         dataset_id: str,
-        documents: List[GraphInputDocument],
+        documents: List[ProcessedChunk],
         ontology: LocalOntology,
     ) -> int:
         try:
@@ -67,7 +67,7 @@ class GraphExtractionStage:
     async def _run_async(
         self,
         dataset_id: str,
-        documents: List[GraphInputDocument],
+        documents: List[ProcessedChunk],
         ontology: LocalOntology,
     ) -> int:
         import os
@@ -91,8 +91,19 @@ class GraphExtractionStage:
                 f"{entity_schemas} entity schemas and {relation_schemas} relation schemas."
             )
 
-            from llama_index.core.indices.property_graph import SchemaLLMPathExtractor, DynamicLLMPathExtractor
-            extractor = DynamicLLMPathExtractor(
+            from llama_index.core.indices.property_graph import (
+                SimpleLLMPathExtractor,
+                DynamicLLMPathExtractor,
+                ImplicitPathExtractor,
+            )
+            # Simple extractor - basic triple extraction without schema constraints(Simple extractor captures additional relationships the dynamic one might miss)
+            simple_extractor = SimpleLLMPathExtractor(
+                llm=self.llm,
+                max_paths_per_chunk=10,
+                num_workers=self.config.ontology_max_concurrency,
+            )
+            # Dynamic extractor - schema-guided but flexible(Dynamic extractor captures labeled entities/relations following your schema)
+            dynamic_extractor = DynamicLLMPathExtractor(
                 llm=self.llm,
                 allowed_entity_types=entity_schemas,
                 allowed_relation_types=relation_schemas,
@@ -100,18 +111,29 @@ class GraphExtractionStage:
                 allowed_relation_props=possible_rel_props,
                 num_workers=self.config.ontology_max_concurrency,
             )
+            # Implicit extractor - from node relationships(Implicit extractor adds structural relationships between nodes that LLMs don't generate)
+            implicit_extractor = ImplicitPathExtractor()
+
 
             llama_docs = []
             for d in documents:
                 md = dict(d.metadata)
                 md["dataset_id"] = dataset_id
-                md["document_id"] = d.document_id
+                md["document_id"] = d.chunk_id
+                md["chunk_index"] = d.chunk_index
+                md["content_hash"] = d.content_hash
+                md["summary_context"] = d.summary_context
+                md["domain_tags"] = d.domain_tags
+                md["expertise_level"] = d.expertise_level
+                md["breadcrumb"] = d.breadcrumb
+                md["header_level"] = d.header_level
                 md["ontology_id"] = ontology.metadata.ontology_id
-                md["title"] = d.title or "Untitled Specification Document"
-
-                new_doc = Document(text=d.text, metadata=md)
-                new_doc.excluded_llm_metadata_keys = ["dataset_id", "ontology_id"]
-                new_doc.excluded_embed_metadata_keys = ["dataset_id", "ontology_id", "document_id"]
+                md["title"] = md.get("title") or "Untitled Document"  
+                new_doc = Document(text=d.content, metadata=md)
+                
+                
+                new_doc.excluded_llm_metadata_keys = ["dataset_id", "ontology_id", "document_id", "content_hash", "chunk_index"]  # Exclude sensitive or non-informative metadata from LLM input
+                new_doc.excluded_embed_metadata_keys = ["dataset_id", "ontology_id", "document_id", "content_hash", "chunk_index"]  # Exclude from embedding metadata as well to prevent noise in vector representations
                 llama_docs.append(new_doc)
 
             logger.info(f"Building property graph for dataset {dataset_id}")
@@ -124,7 +146,7 @@ class GraphExtractionStage:
                     llama_docs,
                     embed_model=self.embed_model,
                     property_graph_store=self.graph_store,
-                    kg_extractors=[extractor],
+                    kg_extractors=[simple_extractor, dynamic_extractor, implicit_extractor],
                     transformations=[self.splitter],
                     use_async=False,  # ← FORCE SYNC MODE if available
                     show_progress=True,
