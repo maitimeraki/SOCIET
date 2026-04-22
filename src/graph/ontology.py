@@ -7,7 +7,7 @@ from llama_index.llms.openai_like import OpenAILike
 from src.logging.setup_logging import setup_logging
 from src.utils.hydrate_ontology import hydrate_ontology
 from src.graph.models_graph import (
-    GraphInputDocument,
+    ProcessedChunk,
     LocalOntology,
     OntologyMetadata,
 )
@@ -60,7 +60,7 @@ def _structured_properties(llm_data: Dict[str, Any]) -> Dict[str, Any]:
 
 class OntologyDiscoveryStage:
     """Discovers a local ontology schema from a sample of input documents using LLMs. The discovered ontology defines the entity types, relation types, and their properties that will be used for structured extraction in the next stage. This stage is crucial for enabling domain-agnostic graph construction without requiring manual schema definition upfront."""
-    def __init__(self, model: str = "qwen3.5-16k:4b", temperature: float = 0.7):
+    def __init__(self, model: str = "gemma4-e4b-64k:latest", temperature: float = 0.7):
         self.llm = OpenAILike(
             model=model,
             api_base="http://localhost:11434/v1",
@@ -76,16 +76,16 @@ class OntologyDiscoveryStage:
 
     async def run(
         self,
-        documents: List[GraphInputDocument],
+        documents: List[ProcessedChunk],
         sample_size: int = 4,
     ) -> LocalOntology:
         try:
             sample = documents[: max(1, min(sample_size, len(documents)))]
             sample_payload = [
                 {
-                    "document_id": d.document_id,
-                    "title": d.title,
-                    "preview": d.text[:],
+                    "document_id": d.parent_doc_id,
+                    "title": d.metadata.get("title", "Untitled Document"),
+                    "preview": d.content[:],
                 }
                 for d in sample
             ]
@@ -152,9 +152,7 @@ class OntologyDiscoveryStage:
             return LocalOntology(
                 metadata=OntologyMetadata(
                     ontology_id=f"onto_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}",
-                    created_at=datetime.utcnow().isoformat(),
-                    confidence=0.0,
-                    notes=f"discovery_error: {e}",
+                    created_at=datetime.utcnow().isoformat()
                 ),
                 entity_types=[],
                 relation_types=[],
