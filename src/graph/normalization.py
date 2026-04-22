@@ -215,7 +215,8 @@ class GraphNormalizationStage:
         pre_snapshot = [{"id": n.node_id, "labels": n.labels, "props": n.properties} for n in group]
         try:
             async with self.driver.session(database=self.config.neo4j_database) as session:
-                async with session.begin_transaction() as tx:
+                #  begin_transaction() returns a coroutine, not a context manager -> update to Await the transaction first
+                async with await session.begin_transaction() as tx:
                     await tx.run(
                         """
                         CREATE (m:MergeAudit {
