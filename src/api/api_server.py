@@ -20,18 +20,23 @@ from src.api.config_api import (
     OntologyResult,
     JobMode,
     ChunkProgress,
-    UnifiedJobResult
+    UnifiedJobResult,
+    GraphDebateQuery,
+    GraphDebateResponse,
 )
 from src.graph.config_graph import GraphConfig
-from src.graph.models_graph import GraphInputDocument
+from src.graph.models_graph import GlobalInputDocument, ProcessedChunk
 from src.graph.ontology import OntologyDiscoveryStage
 from src.graph.graph_build import GraphExtractionStage
 from src.graph.normalization import GraphNormalizationStage
 from src.simulation.simulation_engine import SimulationSociety
+from src.simulation.graph_debate_engine import GraphDebateSimulation
 from src.simulation.world_state import SharedWorldState, MessageBus
 from src.simulation.config_world import WorldEvent
 from src.llm.client import global_llm_client
 from src.llm.config_llm import get_llm_config
+from llama_index.llms.ollama import Ollama
+from src.utils.chunkProcessor import ChunkProcessor
 
 # Configure basic logging
 logging.basicConfig(
@@ -199,24 +204,37 @@ def _chunk_text(text: str, chunk_size: int, overlap: int) -> List[str]:
             chunks.append(chunk)
     return chunks
 
-def _chunk_documents(
-    documents: List[GraphInputDocument],
+async def _chunk_documents(
+    documents: List[GlobalInputDocument],
     chunk_size: int,
     overlap: int,
-) -> List[GraphInputDocument]:
-    chunks: List[GraphInputDocument] = []
-    for doc in documents:
-        doc_chunks = _chunk_text(doc.text, chunk_size, overlap)
-        for idx, chunk in enumerate(doc_chunks):
-            chunks.append(
-                GraphInputDocument(
-                    document_id=f"{doc.document_id}_chunk_{idx}",
-                    title=doc.title,
-                    text=chunk,
-                    metadata={"source_document_id": doc.document_id, **(doc.metadata or {})},
+) -> List[ProcessedChunk]:
+    import asyncio
+    
+    llm_cfg = get_llm_config()
+    enrichment_model = llm_cfg.default_model or "llama3:8b"
+    processor = ChunkProcessor(
+        Ollama(model=enrichment_model, request_timeout=300.0)
+    )
+    
+    async def _process_all():
+        chunks: List[ProcessedChunk] = []
+        for doc in documents:
+            # Split document into text chunks
+            doc_chunks = _chunk_text(doc.text or "", chunk_size, overlap)
+            
+            # Process each chunk
+            for idx, chunk_text in enumerate(doc_chunks):
+                processed_chunk = await processor.process_document(
+                    chunk=chunk_text,
+                    chunk_index=idx,
+                    parent_doc_id=doc.document_id,
+                    metadata=doc.metadata or {}
                 )
-            )
-    return chunks
+                chunks.append(processed_chunk)
+        
+        return chunks
+    return await _process_all()
 
 def _merge_labels(items: List[str], fallback: str) -> List[str]:
     seen: Set[str] = set()
@@ -233,7 +251,7 @@ def _merge_labels(items: List[str], fallback: str) -> List[str]:
 async def _process_chunk(
     mode: JobMode,
     dataset_id: str,
-    chunk_doc: GraphInputDocument,
+    chunk_doc: ProcessedChunk,
     discovery_stage: OntologyDiscoveryStage,
     extraction_stage: Optional[GraphExtractionStage],
     timeout_seconds: int,
@@ -242,7 +260,7 @@ async def _process_chunk(
 ) -> ChunkProgress:
     last_exc: Optional[Exception] = None
     ontology = None
-    logger.info(f"Start of chunk progress for {chunk_doc.document_id} ")
+    logger.info(f"Start of chunk progress for {chunk_doc.chunk_id} ")
     for attempt in range(max(1, retry_attempts)):
         try:
             ontology = await asyncio.wait_for(
@@ -251,36 +269,36 @@ async def _process_chunk(
             )
             break
         except asyncio.TimeoutError:
-            logger.warning(f"Ontology discovery timeout for {chunk_doc.document_id} on attempt {attempt + 1}")
+            logger.warning(f"Ontology discovery timeout for {chunk_doc.chunk_id} on attempt {attempt + 1}")
             last_exc = RuntimeError(f"Ontology discovery timed out after {timeout_seconds} seconds")
         except Exception as exc:
             last_exc = exc
             if attempt < retry_attempts - 1:
                 await asyncio.sleep(retry_backoff_seconds * (2 ** attempt))
                 
-            logger.warning(f"Ontology discovery attempt {attempt + 1} failed for {chunk_doc.document_id}: {exc}. Retrying...")
+            logger.warning(f"Ontology discovery attempt {attempt + 1} failed for {chunk_doc.chunk_id}: {exc}. Retrying...")
 
     if ontology is None:
-        raise RuntimeError(f"ontology discovery failed for {chunk_doc.document_id}: {last_exc}")
+        raise RuntimeError(f"ontology discovery failed for {chunk_doc.chunk_id}: {last_exc}")
 
     docs_built = 0
     if mode == "build_graph":
         if extraction_stage is None:
             raise RuntimeError("extraction_stage is required for build_graph mode")
         
-        logger.info(f"Start building the graph of {chunk_doc.document_id}")
+        logger.info(f"Start building the graph of {chunk_doc.chunk_id}")
         try:
             docs_built = await extraction_stage.run(
                 dataset_id=dataset_id,
                 documents=[chunk_doc],
                 ontology=ontology
             )
-            logger.info(f"Complete building graph of {chunk_doc.document_id}")
+            logger.info(f"Complete building graph of {chunk_doc.chunk_id}")
         except asyncio.TimeoutError:
-            logger.error(f"Graph extraction timeout for {chunk_doc.document_id}")
+            logger.error(f"Graph extraction timeout for {chunk_doc.chunk_id}")
             raise
         except Exception as exc:
-            logger.error(f"Graph extraction failed for {chunk_doc.document_id}: {exc}")
+            logger.error(f"Graph extraction failed for {chunk_doc.chunk_id}: {exc}")
             raise  # Re-raise to properly signal failure
 
     view = ontology.to_public_view()
@@ -294,14 +312,14 @@ async def _execute_unified_job(
     job_id: str,
     mode: JobMode,
     dataset_id: str,
-    documents: List[GraphInputDocument],
+    documents: List[GlobalInputDocument],
 ) -> None:
     cfg = GraphConfig()
     discovery_stage = OntologyDiscoveryStage(model=cfg.discovery_model, temperature=cfg.temperature)
     extraction_stage = GraphExtractionStage(cfg) if mode == "build_graph" else None
     normalization_stage = GraphNormalizationStage(cfg) if mode == "build_graph" else None
 
-    chunks = _chunk_documents(documents, cfg.ontology_chunk_size_chars, cfg.ontology_chunk_overlap_chars) # return types -> List[GraphInputDocument]
+    chunks = await _chunk_documents(documents, cfg.ontology_chunk_size_chars, cfg.ontology_chunk_overlap_chars) # return types -> List[GraphInputDocument]
     total_chunks = len(chunks)
 
     async with _RUNS_LOCK:
@@ -340,12 +358,13 @@ async def _execute_unified_job(
     docs_built = 0
     completed = 0
 
-    async def _worker(chunk_doc: GraphInputDocument) -> ChunkProgress:
+    async def _worker(chunk_doc: ProcessedChunk) -> ChunkProgress:
         async with semaphore:
              # ✅ FIX 6: Add small delay between chunks
             await asyncio.sleep(0.1)
             return await _process_chunk(
                 mode=mode,
+                # dataset_id should be passed from frontend when users put their documents, not generated here
                 dataset_id=dataset_id,
                 chunk_doc=chunk_doc,
                 discovery_stage=discovery_stage,
@@ -379,6 +398,7 @@ async def _execute_unified_job(
                 await _persist_run(job_id, RUNS[job_id])
 
         if mode == "build_graph" and normalization_stage is not None:
+            # normalization_stage is our embedded class instance
             await normalization_stage.run(dataset_id=dataset_id)
 
         async with _RUNS_LOCK:
@@ -394,9 +414,9 @@ async def _execute_unified_job(
             RUNS[job_id]["error"] = str(exc)
             await _persist_run(job_id, RUNS[job_id])
             
-               
+
 @app.post("/simulate/ontology", status_code=status.HTTP_202_ACCEPTED)
-async def discover_ontology_async(dataset_id: str, documents: List[GraphInputDocument]):
+async def discover_ontology_async(dataset_id: str, documents: List[GlobalInputDocument]):
     job_id = str(uuid.uuid4())
     run = {
         "job_id": job_id,
@@ -415,7 +435,7 @@ async def discover_ontology_async(dataset_id: str, documents: List[GraphInputDoc
     return {"job_id": job_id, "status": "queued", "message": "Ontology job accepted."}
 
 @app.post("/simulate/build_graph", status_code=status.HTTP_202_ACCEPTED)
-async def build_graph_async(dataset_id: str, documents: List[GraphInputDocument]):
+async def build_graph_async(dataset_id: str, documents: List[GlobalInputDocument]):
     job_id = str(uuid.uuid4())
     run = {
         "job_id": job_id,
@@ -453,6 +473,22 @@ async def create_simulation(query: UserQuery, background_tasks: BackgroundTasks)
     Main endpoint: User input -> Society opinion
     """
     return await _run_simulation_pipeline(query)
+
+
+@app.post("/simulate/graph_debate", response_model=GraphDebateResponse)
+async def create_graph_debate(request: GraphDebateQuery):
+    simulation = GraphDebateSimulation.from_config(archetype_label=request.archetype_label)
+    try:
+        result = await simulation.run(
+            topic=request.topic,
+            rounds=request.rounds,
+            max_agents=request.max_agents,
+            dataset_id=request.dataset_id,
+            agent_names=request.agent_names or None,
+        )
+        return GraphDebateResponse(**result)
+    finally:
+        await simulation.close()
 
 
 @app.post('/simulate/normalize_graph', status_code=status.HTTP_202_ACCEPTED)
