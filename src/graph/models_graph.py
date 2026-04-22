@@ -1,14 +1,77 @@
-from typing import Any, Dict, List, Optional, Literal, Tuple
-from pydantic import BaseModel, Field
+from typing import Any, Dict, List, Optional, Literal, Tuple, Union
+from pydantic import BaseModel, Field 
+from datetime import datetime
+from pydantic import  HttpUrl
+from pydantic import model_validator
+import uuid
+import enum
+
+def id_generate() -> str:
+    return str(uuid.uuid4())
+
+class SourceType(str, enum.Enum):
+    TEXT = "text"
+    FILE = "file"
+    URL = "url"
+    DATABASE = "database"
 
 
-class GraphInputDocument(BaseModel):
-    document_id: str
-    text: str
+# -------------- Global Input Document Schema --------------
+# This is the raw input document that gets ingested into the system, before any processing or
+class GlobalInputDocument(BaseModel):
+    # Identity
+    project_id: str = Field(default_factory=lambda: str(uuid.uuid4()), description="Simulations are usually project-specific")
+    document_id: str = Field(default_factory=lambda: str(uuid.uuid4()), description="Unique identifier for the document, used for traceability and deduplication")
+    
+    # Ingestion Metadata
+    source_type: SourceType = Field(..., description="Nature of the input source")
+    source_path: Optional[Union[HttpUrl, str]] = None  # URL or File Path
+    mime_type: Optional[str] = None  # e.g., 'application/pdf', 'text/csv'
+    
+    # The Payload
+    # 'text' remains for raw strings, but 'raw_blob' can store bytes for files
+    text: Optional[str] = None 
+    raw_content: Optional[bytes] = None 
+    
+    # Contextual Metadata
     title: Optional[str] = None
     metadata: Dict[str, Any] = Field(default_factory=dict)
+    
+    # Versioning/Audit (Important for Future Prediction)
+    timestamp: datetime = Field(default_factory=datetime.utcnow)
+    
+    @model_validator(mode="before")
+    def check_payload(cls, values):
+        if not values.get('text') and not values.get('raw_content'):
+            raise ValueError("Must provide either text or raw_content")
+        return values
 
-
+# -------- - Processed Chunk Schema ----------
+# Each chunk is a node in the graph, with explicit properties for content, context, position
+class ProcessedChunk(BaseModel):
+    # --- 1. IDENTITY & TRACEABILITY (Top-Level for Fast Neo4j Indexing) ---
+    chunk_id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    parent_doc_id: str  # Move back to top-level!
+    chunk_index: int    # Move back to top-level!
+    content_hash: str   # To avoid re-processing identical chunks
+    
+    # --- 2. CONTENT LAYERS ---
+    content: str        
+    summary_context: str # Local anchor
+    # global_summary: str  # Global anchor (Document-level context)
+    
+    # --- 3. STRUCTURAL HIERARCHY ---
+    breadcrumb: str     
+    header_level: int = 0
+    
+    # --- 4. AGENTIC PERSONA METADATA ---
+    domain_tags: List[str] 
+    expertise_level: str   # e.g., "Strategic", "Technical"
+    
+    # --- 5. DYNAMIC EXTRA METADATA ---
+    # Only put "un-searchable" or "extra" info here
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+    
 # Entity properties are explicit and typed, with constraints and indexing flags.
 # Relation properties are first-class, not just edge labels.
 # Identity and merge behavior are encoded in ontology, enabling stable normalization.
@@ -110,13 +173,11 @@ class RelationTypeDefinition(BaseModel):
 # ---------- Ontology Container ----------
 #  Allows ontology evolution, A/B testing, and rollback capabilities. Use metadata to track versioning and lineage of discovered schemas.
 class OntologyMetadata(BaseModel):
-    ontology_id: str
+    ontology_id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     version: str = "1.0.0"
     domain_hint: Optional[str] = None
     created_at: Optional[str] = None
     source_dataset_id: Optional[str] = None
-    confidence: float = 0.7
-    notes: str = ""
 
 
 class PublicOntologyView(BaseModel):
