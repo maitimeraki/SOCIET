@@ -1,7 +1,9 @@
 import re
 from typing import List, Dict, Any, cast, LiteralString
 from neo4j import AsyncGraphDatabase
+from src.logging.setup_logging import setup_logging
 
+logger = setup_logging()
 
 _SAFE_RELATION_RE = re.compile(r"^[A-Z][A-Z0-9_]{1,63}$")
 
@@ -37,6 +39,97 @@ class PersonaRepository:
             rows = await res.data()
         return [r["name"] for r in rows if r.get("name")]
 
+    async def search_agents_by_query(self, archetype_label: str | None, query_tokens: List[str], limit: int = 100) -> List[Dict[str, Any]]:
+        """Search nodes of the given archetype by matching any string property against any of the provided tokens.
+
+        Returns rows with at least the `name` property when available and the matched properties.
+        """
+        label_clause = self._label_clause(archetype_label)
+        # Simpler Cypher: return nodes and perform token matching in Python to avoid type coercion errors
+        query = f"""
+        MATCH (n{label_clause})
+        RETURN n LIMIT $limit
+        """
+        async with self._driver.session(database=self._db) as session:
+            res = await session.run(cast(LiteralString, query), limit=limit)
+            rows = await res.data()
+        logger.info(f"Search returned {len(rows)} rows from the database for archetype '{archetype_label}' with tokens {query_tokens}")
+
+        tokens = [t.lower() for t in query_tokens]
+        out: List[Dict[str, Any]] = []
+        for r in rows:
+            node = r.get("n")
+            if not node:
+                continue
+            props = dict(node._properties) if hasattr(node, '_properties') else (node if isinstance(node, dict) else dict(node))
+
+            # check any string property or list-of-strings contains any token
+            matched = False
+            for v in props.values():
+                if isinstance(v, str):
+                    lv = v.lower()
+                    if any(tok in lv for tok in tokens):
+                        matched = True
+                        break
+                # lists: only consider list of strings
+                if isinstance(v, list) and v:
+                    if all(isinstance(x, str) for x in v):
+                        joined = " ".join(v).lower()
+                        if any(tok in joined for tok in tokens):
+                            matched = True
+                            break
+                # skip other types (numbers, float arrays like embeddings)
+
+            if matched:
+                out.append(props)
+        
+        logger.info(f"After token filtering, {len(out)} rows matched the query tokens {query_tokens} for archetype '{archetype_label}'")
+        # If no matches found using the general scan, try a targeted Cypher search
+        if not out:
+            try:
+                # Only search well-known textual fields to avoid coercion of non-string properties
+                targeted_query = f"""
+                MATCH (n{label_clause})
+                WHERE ANY(t IN $tokens WHERE
+                  toLower(coalesce(n.name, '')) CONTAINS t OR
+                  toLower(coalesce(n.title, '')) CONTAINS t OR
+                  toLower(coalesce(n.summary, '')) CONTAINS t OR
+                  toLower(coalesce(n.description, '')) CONTAINS t OR
+                  toLower(coalesce(n.domain_tags, '')) CONTAINS t
+                )
+                RETURN n LIMIT $limit
+                """
+                async with self._driver.session(database=self._db) as session:
+                    res = await session.run(cast(LiteralString, targeted_query), tokens=tokens, limit=limit)
+                    trows = await res.data()
+
+                for r in trows:
+                    node = r.get("n")
+                    if not node:
+                        continue
+                    props = dict(node._properties) if hasattr(node, '_properties') else (node if isinstance(node, dict) else dict(node))
+                    out.append(props)
+            except Exception:
+                # Avoid raising; we'll return whatever we have (possibly empty)
+                logger.exception("Targeted Cypher fallback failed")
+
+        return out
+
+    async def fetch_agent_node(self, archetype_label: str | None, name: str) -> Dict[str, Any] | None:
+        """Return all properties for a node with the given name and optional archetype label."""
+        label_clause = self._label_clause(archetype_label)
+        query = f"""
+        MATCH (n{label_clause} {{name: $name}})
+        RETURN n LIMIT 1
+        """
+        async with self._driver.session(database=self._db) as session:
+            res = await session.run(cast(LiteralString, query), name=name)
+            row = await res.single()
+        if not row:
+            return None
+        node = row.get("n")
+        return dict(node._properties) if node else None
+
     async def fetch_identity(self, archetype_label: str | None, name: str) -> Dict[str, Any] | None:
         label_clause = self._label_clause(archetype_label)
         query = f"""
@@ -56,6 +149,7 @@ class PersonaRepository:
         return dict(row) if row else None
 
     async def fetch_recent_memories(self, archetype_label: str | None, name: str, memory_limit: int = 30) -> List[Dict[str, Any]]:
+        """Retrieve recent relationships/memories from agent that Maintains conversation context and agent memory across rounds"""
         label_clause = self._label_clause(archetype_label)
         query = f"""
             MATCH (n{label_clause} {{name: $name}})
@@ -113,6 +207,7 @@ class PersonaRepository:
         round_no: int,
         dataset_id: str,
     ) -> None:
+        """Write an edge representing a reaction from source_name to target_name with the given relation_type and summary."""
         if source_name == target_name:
             return
 
