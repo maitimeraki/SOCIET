@@ -91,25 +91,9 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-
-AVAILABLE_DOMAINS = [
-    "finance",
-    "risk_management",
-    "business_development",
-    "market_analysis",
-    "anthropology",
-    "international_business",
-    "cultural_studies",
-    "international_law",
-    "gdpr",
-    "trade_regulation",
-    "emerging_tech",
-    "ai",
-    "innovation",
-    "logic",
-    "philosophy",
-    "systems_thinking",
-]
+# Persona API (hatch personas from user query)
+from src.api.persona_api import router as persona_router
+app.include_router(persona_router)
 
 
 RUNS: Dict[str, Dict[str, Any]] = {}

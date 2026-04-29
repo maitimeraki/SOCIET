@@ -28,6 +28,25 @@ class SimulationResponse(BaseModel):
     raw_debate_log: Optional[List[Dict]] = None
 
 
+class GraphDebateQuery(BaseModel):
+    topic: str
+    rounds: int = 3
+    max_agents: int = 8
+    dataset_id: str = "simulation_runtime"
+    archetype_label: Optional[str] = None
+    agent_names: List[str] = Field(default_factory=list)
+
+
+class GraphDebateResponse(BaseModel):
+    topic: str
+    dataset_id: str
+    agent_count: int
+    agents: List[str]
+    rounds: List[Dict]
+    transcript: List[str]
+    warnings: List[str]
+
+
 class SimulationAccepted(BaseModel):
     run_id: str
     status: Literal["queued", "running", "completed", "failed"]
@@ -64,3 +83,24 @@ class OntologyRunStatus(BaseModel):
     stage: str = "queued"
     error: Optional[str] = None
     result: Optional[OntologyResult] = None
+    
+    
+    
+    
+# ------- --------
+from typing import Literal, TypedDict
+
+JobMode = Literal["ontology", "build_graph"]
+
+class ChunkProgress(TypedDict):
+    entity_types: List[str]
+    relation_types: List[str]
+    docs_built: int
+
+class UnifiedJobResult(TypedDict):
+    dataset_id: str
+    chunks_total: int
+    chunks_completed: int
+    docs_built: int
+    entity_types: List[str]
+    relation_types: List[str]
