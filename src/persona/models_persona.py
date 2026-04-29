@@ -88,18 +88,3 @@ class AgentProfile(BaseModel):
     confidence_breakdown: ConfidenceBreakdown
     provenance: List[ProvenanceLink]
 
-        
-    # def to_prompt_dict(self) -> Dict:
-    #     return {
-    #         "org_name": self.identity.name,
-    #         "archetype": self.identity.archetype,
-    #         "communication_style": self.identity.communication_style,
-    #         "core_values": ", ".join(self.identity.core_values) if self.identity.core_values else "Not specified",
-    #         "culture": self.identity.culture or "Not specified",
-    #         "mission": self.identity.mission or "Not specified",
-    #         "recent_history": [
-    #             f"{m.relation_type} {m.target_name}" if not m.summary else f"{m.relation_type} {m.target_name} ({m.summary})"
-    #             for m in self.memories
-    #         ],
-    #         "bias_instructions": [b.instruction for b in self.biases],
-    #     }
