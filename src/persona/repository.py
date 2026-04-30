@@ -37,18 +37,6 @@ class PersonaRepository:
     async def close(self) -> None:
         await self._driver.close()
 
-    # @staticmethod
-    # def _label_clause(archetype_label: str | None) -> str:
-    #     """Return a safe Cypher label clause like ":Label" or empty string for invalid/None."""
-    #     if not archetype_label:
-    #         return ""
-    #     # sanitize label to avoid injection and invalid labels
-    #     cleaned = re.sub(r"[^A-Za-z0-9_]", "", archetype_label)
-    #     if _SAFE_LABEL_RE.match(cleaned):
-    #         return f":{cleaned}"
-    #     logger.warning("Rejected invalid archetype_label: %s", archetype_label)
-    #     return ""
-
     @staticmethod
     def _node_props(node: Any) -> Dict[str, Any]:
         """Safely read node properties from various neo4j driver node representations."""
@@ -212,7 +200,7 @@ class PersonaRepository:
         agent names, batch-fetches nodes, computes metrics from sector results,
         and constructs profiles in parallel with a bounded concurrency.
         """
-        sector_results = await self.find_agent_sectors(llm_output, dataset_id)
+        sector_results = await self.find_agent_sectors(llm_output, dataset_id) # return type: List[Dict[str, Any]] with keys: domain_tag, total_relevance, evidence_nodes, density
 
         # Collect unique agent names from the top sectors (preserve order)
         evidence_names: List[str] = []
@@ -226,7 +214,7 @@ class PersonaRepository:
             return []
 
         # Batch-fetch agent nodes to minimize DB round-trips
-        nodes_map = await self.fetch_nodes_by_names(agent_names)
+        nodes_map = await self.fetch_nodes_by_names(agent_names) # return type : Dict[str, Dict[str, Any]] mapping agent name to node properties
 
         # Compute raw relevance per agent across the provided sector_results so we can normalize
         raw_relevance: Dict[str, float] = {name: 0.0 for name in agent_names}
@@ -234,7 +222,7 @@ class PersonaRepository:
             score = float(res.get("total_relevance") or 0.0)
             for ev in (res.get("evidence_nodes") or []):
                 if ev in raw_relevance:
-                    raw_relevance[ev] += score
+                    raw_relevance[ev] += score # THere is the problem that the same agent can appear in multiple sectors with different relevance scores, we need to sum them up to get a total relevance score per agent
 
         max_relevance = max(raw_relevance.values()) if raw_relevance else 0.0
 
@@ -243,8 +231,8 @@ class PersonaRepository:
 
         async def _build_task(agent_name: str) -> AgentProfile:
             async with semaphore:
-                node = nodes_map.get(agent_name) or await self.fetch_agent_node(agent_name) or {"name": agent_name}
-                metrics = self._calculate_agent_metrics(agent_name, node, sector_results or [], max_relevance=max_relevance)
+                node = nodes_map.get(agent_name) or await self.fetch_agent_node(agent_name) or {"name": agent_name} # return Type: Dict[str, Any] where we fetch the node properties for the agent name, if not found we create a minimal dict with just the name to avoid None issues
+                metrics = await self._calculate_agent_metrics(agent_name, node, sector_results or [], max_relevance=max_relevance)
                 return await self._build_single_agent_profile_from_node(
                     agent_name=agent_name,
                     node=node,
@@ -258,88 +246,6 @@ class PersonaRepository:
         tasks = [asyncio.create_task(_build_task(n)) for n in agent_names]
         profiles = await asyncio.gather(*tasks)
         return profiles
-    # async def _build_single_agent_profile(
-    # self,
-    # agent_name: str,
-    # user_query: str,
-    # dataset_id: str,
-    # sector_results: List[Dict[str, Any]],
-    # llm_output: Dict[str, List[str]]
-    # ) -> AgentProfile:
-    #     """Build AgentProfile from graph node data"""
-        
-    #     # 1. Fetch raw node from repository
-    #     node = await self.fetch_agent_node(
-    #         name=agent_name
-    #     )
-        
-    #     if not node:
-    #         raise ValueError(f"Agent {agent_name} not found in graph")
-        
-    #     # 2. Calculate relevance from sector results
-    #     agent_metrics = self._calculate_agent_metrics(
-    #         agent_name, 
-    #         node, 
-    #         sector_results
-    #     )
-        
-    #     # 3. Build PersonaIdentity (simplified)
-    #     identity = PersonaIdentity(
-    #         name=node.get("name", agent_name),
-    #         archetype=node.get("archetype", node.get("type_name", "Strategic Analyst")),
-    #         communication_style=node.get("communication_style", node.get("tone", "strategic and factual"))
-    #     )
-        
-    #     # 4. Determine discovery type
-    #     discovery_type = DiscoveryType.INTENT_DRIVEN if user_query else DiscoveryType.GRAPH_DISCOVERY
-        
-    #     # 5. Determine expertise level
-    #     expertise_str = node.get("expertise_level", node.get("expertise", "Strategic"))
-    #     try:
-    #         expertise_level = ExpertiseLevel(expertise_str)
-    #     except ValueError:
-    #         expertise_level = ExpertiseLevel.STRATEGIC
-        
-    #     # 6. Extract domain tags
-    #     domain_tags = node.get("domain_tags", node.get("tags", []))
-    #     if isinstance(domain_tags, str):
-    #         domain_tags = [t.strip() for t in domain_tags.split(",")]
-        
-    #     # 7. Build description and perspective
-    #     description = node.get("description", node.get("summary", f"{agent_name} - Domain expert"))
-        
-    #     # Enhanced perspective using matched sectors
-    #     matched_sectors = agent_metrics.get("matched_sectors", [])
-    #     if matched_sectors:
-    #         perspective = f"I specialize in {', '.join(matched_sectors[:3])}. {node.get('detailed_perspective', node.get('perspective', description))}"
-    #     else:
-    #         perspective = node.get("detailed_perspective", node.get("perspective", description))
-        
-    #     # 8. Calculate confidence and breakdown
-    #     confidence = agent_metrics.get("confidence", 0.7)
-    #     confidence_breakdown = ConfidenceBreakdown(
-    #         source_breadth=node.get("source_count", node.get("provenance_count", 1)),
-    #         node_density=agent_metrics.get("density", 1),
-    #         relationship_connectivity=agent_metrics.get("connectivity", 0.5)
-    #     )
-        
-    #     # 9. Extract provenance
-    #     provenance = self._extract_provenance_from_node(node)
-        
-    #     # 10. Create final AgentProfile
-    #     profile = AgentProfile(
-    #         discovery_type=discovery_type,
-    #         expertise_level=expertise_level,
-    #         identity=identity,
-    #         domain_tags=domain_tags,
-    #         description=description,
-    #         detailed_perspective=perspective,
-    #         confidence=confidence,
-    #         confidence_breakdown=confidence_breakdown,
-    #         provenance=provenance
-    #     )
-        
-    #     return profile
 
     async def _build_single_agent_profile_from_node(
         self,
@@ -393,7 +299,7 @@ class PersonaRepository:
         )
 
         # Provenance
-        provenance = self._extract_provenance_from_node(node)
+        provenance = await self.get_provenance(agent_name,limit=5) # return type: List[ProvenanceLink] where we fetch the provenance links for the agent, if not found we will attempt to synthesize them from the sector results
         # If node doesn't include provenance, attempt to synthesize from sector evidence
         if not provenance:
             # find evidence entries mentioning this agent
@@ -430,7 +336,7 @@ class PersonaRepository:
 
         return profile
     
-    def _calculate_agent_metrics(
+    async def _calculate_agent_metrics(
         self,
         agent_name: str,
         node: Dict[str, Any],
@@ -454,7 +360,7 @@ class PersonaRepository:
                     total_relevance += float(result.get("total_relevance") or 0.0)
                 except Exception:
                     total_relevance += 0.0
-                matched_sectors.append(result.get("domain_tag"))
+                matched_sectors.append(result.get("domain_tag",[]))
                 density_sum += int(result.get("density") or 1)
 
         # Normalize confidence using max_relevance when available
@@ -473,15 +379,55 @@ class PersonaRepository:
             elif num_matches == 1:
                 confidence = 0.6
 
-        # Node density (connections in graph or heuristic)
+        # Node density & connectivity: prefer stored analytics; otherwise query the graph at runtime
+        node_density = None
+        connectivity = None
+
         try:
-            node_density = int(node.get("connection_count") or node.get("degree") or (density_sum // max(1, num_matches)))
+            if node.get("connection_count") is not None:
+                node_density = int(node.get("connection_count", node.get("degree", 1)))
+            elif node.get("degree") is not None:
+                node_density = int(node.get("degree", 1))
+        except Exception:
+            node_density = None
+
+        try:
+            if node.get("centrality_score") is not None:
+                connectivity = float(node.get("centrality_score", 0.5))
+        except Exception:
+            connectivity = None
+
+        # If either metric is missing, derive neighbor info from recent memories
+        if node_density is None or connectivity is None:
+            try:
+                # fetch_recent_memories returns rows with 'target_name' entries representing connected nodes
+                mem_rows = await self.fetch_recent_memories(agent_name, memory_limit=200)
+                targets = {r.get("target_name") for r in (mem_rows or []) if r.get("target_name")}
+                neighbor_count = len(targets)
+                total_relations = len(mem_rows or [])
+
+                if node_density is None:
+                    node_density = neighbor_count
+
+                if connectivity is None:
+                    # heuristic: fraction of unique neighbors to total relations, scaled to [0,1]
+                    if total_relations > 0:
+                        connectivity = min(1.0, neighbor_count / float(total_relations))
+                    else:
+                        connectivity = 0.0
+            except Exception:
+                if node_density is None:
+                    node_density = int(density_sum or 1)
+                if connectivity is None:
+                    connectivity = 0.5
+
+        # final safety defaults
+        try:
+            node_density = int(node_density or (density_sum or 1))
         except Exception:
             node_density = int(density_sum or 1)
-
-        # Relationship connectivity (simplified)
         try:
-            connectivity = float(node.get("centrality_score") or 0.5)
+            connectivity = float(connectivity or 0.5)
         except Exception:
             connectivity = 0.5
 
@@ -494,47 +440,37 @@ class PersonaRepository:
         }
         
         
-    def _extract_provenance_from_node(self, node: Dict[str, Any]) -> List[ProvenanceLink]:
-        """Extract provenance links from node properties"""
-        provenance_list: List[ProvenanceLink] = []
-        raw_prov = node.get("provenance", [])
+    async def get_provenance(self, agent_name: str, limit: int = 5) -> List[ProvenanceLink]:
+        """Single, efficient provenance fetch."""
         from uuid import UUID
-
-        if raw_prov and isinstance(raw_prov, list):
-            for idx, prov in enumerate(raw_prov[:10]):
-                try:
-                    doc_id = str(prov.get("doc_id") or prov.get("id") or "unknown")
-                    title = str(prov.get("title") or prov.get("doc_title") or "Unknown Source")
-                    breadcrumb = str(prov.get("breadcrumb") or prov.get("path") or "")
-                    chunk_raw = prov.get("chunk_id")
-                    if chunk_raw and isinstance(chunk_raw, str):
-                        try:
-                            chunk_id = UUID(chunk_raw)
-                        except Exception:
-                            # fallback to deterministic UUID5 using doc_id + index
-                            chunk_id = _uuid.uuid5(_uuid.NAMESPACE_URL, f"{doc_id}:{idx}")
-                    else:
-                        chunk_id = _uuid.uuid5(_uuid.NAMESPACE_URL, f"{doc_id}:{idx}")
-
-                    provenance_list.append(ProvenanceLink(doc_id=doc_id, title=title, breadcrumb=breadcrumb, chunk_id=chunk_id))
-                except Exception:
-                    continue
-
-        # Fallback: create from source fields (deterministic chunk id)
-        if not provenance_list and node.get("source_doc_id"):
-            doc = str(node.get("source_doc_id"))
-            try:
-                chunk0 = _uuid.uuid5(_uuid.NAMESPACE_URL, doc)
-            except Exception:
-                chunk0 = uuid4()
-            provenance_list.append(ProvenanceLink(
-                doc_id=doc,
-                title=str(node.get("source_title", "Graph Source")),
-                breadcrumb=str(node.get("source_path", "")),
-                chunk_id=chunk0,
-            ))
-
-        return provenance_list
+        
+        # Optimized query: fixed path, indexed lookup
+        cypher = """
+        MATCH (a:Persona {name: $name})
+        MATCH (a)-[:MENTIONS]->(chunk:Chunk)
+        WHERE chunk.doc_id IS NOT NULL
+        RETURN DISTINCT
+            chunk.doc_id AS doc_id,
+            chunk.title AS title,
+            chunk.breadcrumb AS breadcrumb,
+            chunk.chunk_id AS chunk_id
+        LIMIT $limit
+        """
+        
+        async with self._driver.session(database=self._db) as session:
+            result = await session.run(cypher, name=agent_name, limit=limit)
+            rows = await result.data()
+        
+        return [
+            ProvenanceLink(
+                doc_id=row["doc_id"],
+                title=row["title"] or "Unknown Source",
+                breadcrumb=row["breadcrumb"] or "",
+                chunk_id=UUID(row["chunk_id"]) if row.get("chunk_id") else uuid4()
+            )
+            for row in rows
+            if row.get("doc_id")
+        ]
     
     # Full pipeline execution
     async def create_agent_profiles_from_query(
