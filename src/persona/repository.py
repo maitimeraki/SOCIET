@@ -1,5 +1,5 @@
 import re
-from typing import List, Dict, Any, cast, LiteralString, Callable
+from typing import List, Dict, Any, cast, LiteralString, Callable, Tuple, Optional
 from uuid import uuid4
 import uuid as _uuid
 import asyncio
@@ -314,6 +314,23 @@ class PersonaRepository:
                 chunk_id = _uuid.uuid5(_uuid.NAMESPACE_URL, doc_id)
                 provenance.append(ProvenanceLink(doc_id=doc_id, title=str(d.get('domain_tag') or 'sector'), breadcrumb='', chunk_id=chunk_id))
 
+        # Generate per-agent description/perspective from graph evidence (LLM if available, deterministic fallback)
+        try:
+            gen_desc, gen_perspective = await self._generate_description_and_perspective(
+                agent_name=agent_name,
+                node=node,
+                sector_results=sector_results or [],
+                provenance=provenance or [],
+                user_query=user_query,
+            )
+            if gen_desc:
+                description = gen_desc
+            if gen_perspective:
+                perspective = gen_perspective
+        except Exception:
+            # if generation fails, keep existing description/perspective
+            pass
+
         # last_updated
         last_updated_raw = node.get("last_updated") or node.get("updated_at")
         try:
@@ -438,6 +455,97 @@ class PersonaRepository:
             "relevance_score": total_relevance,
             "matched_sectors": matched_sectors,
         }
+
+    async def _generate_description_and_perspective(
+        self,
+        agent_name: str,
+        node: Dict[str, Any],
+        sector_results: List[Dict[str, Any]],
+        provenance: List[ProvenanceLink],
+        user_query: Optional[str] = None,
+    ) -> Tuple[str, str]:
+        """Produce a short `description` and a first-person `detailed_perspective`.
+
+        Attempts to use an injected async `llm_client` if available; otherwise falls
+        back to a deterministic template-based synthesizer using node text,
+        matched sectors, and provenance titles.
+        """
+        # collect matched sectors
+        matched = [r.get("domain_tag") for r in (sector_results or []) if agent_name in (r.get("evidence_nodes") or [])]
+
+        # gather evidence snippets (prefer summary_context)
+        evidence: List[str] = []
+        summary = node.get("summary_context") or node.get("summary") or ""
+        if summary:
+            evidence.append(summary.strip()[:800])
+        # provenance titles as lightweight evidence
+        for p in (provenance or [])[:3]:
+            try:
+                evidence.append(f"{p.title} (source={p.doc_id})")
+            except Exception:
+                continue
+
+        # build a compact prompt/text block
+        matched_text = ", ".join([m for m in matched if m]) or ", ".join(node.get("domain_tags") or [])
+
+        # try to use injected LLM client if present
+        llm = getattr(self, "llm_client", None)
+        llm_func = None
+        if llm:
+            for name in ("chat", "generate", "complete", "invoke"):
+                if hasattr(llm, name):
+                    llm_func = getattr(llm, name)
+                    break
+
+        prompt = (
+            f"Agent: {agent_name}\n"
+            f"Expertise: {node.get('expertise_level') or node.get('expertise') or ''}\n"
+            f"Matched Sectors: {matched_text}\n"
+            f"Evidence:\n- " + "\n- ".join(evidence[:3]) + "\n"
+            f"User query: {user_query or ''}\n\n"
+            "Produce two lines:\nDESCRIPTION: a single concise UI-friendly sentence (10-25 words).\n"
+            "PERSPECTIVE: a 6-9 sentence first-person worldview referencing matched sectors and evidence tags."
+        )
+
+        text_out = None
+        try:
+            if llm_func and inspect.iscoroutinefunction(llm_func):
+                resp = await llm_func(prompt)
+                text_out = resp if isinstance(resp, str) else getattr(resp, "text", str(resp))
+            elif llm_func:
+                loop = asyncio.get_event_loop()
+                resp = await loop.run_in_executor(None, llm_func, prompt)
+                text_out = resp if isinstance(resp, str) else getattr(resp, "text", str(resp))
+        except Exception:
+            text_out = None
+
+        if text_out:
+            # parse DESCRIPTION: and PERSPECTIVE:
+            desc = ""
+            pers = ""
+            try:
+                parts = text_out.split("DESCRIPTION:")
+                if len(parts) > 1:
+                    rest = parts[1]
+                    dparts = rest.split("PERSPECTIVE:")
+                    desc = dparts[0].strip()
+                    pers = dparts[1].strip() if len(dparts) > 1 else ""
+                else:
+                    # fallback: first sentence -> desc, rest -> perspective
+                    sents = text_out.strip().split(". ")
+                    desc = sents[0].strip() + ("." if not sents[0].endswith(".") else "")
+                    pers = " ".join(sents[1:]).strip()
+            except Exception:
+                desc = (summary.split(".")[0] if summary else agent_name)[:200]
+                pers = (f"I am {agent_name}. I focus on {matched_text}. " + (summary or ""))[:1000]
+
+            if desc:
+                return desc, pers or desc
+
+        # deterministic fallback
+        desc_fb = f"{agent_name}: { (summary.split('.')[:1][0] if summary else ('Expert in ' + (matched_text or 'multiple domains'))) }"
+        pers_fb = f"I am {agent_name}. I specialize in {matched_text or 'multiple domains'}. { (summary.split('.')[:2] and ' '.join(summary.split('.')[:2])) or '' }"
+        return desc_fb[:1000], pers_fb[:4000]
         
         
     async def get_provenance(self, agent_name: str, limit: int = 5) -> List[ProvenanceLink]:
