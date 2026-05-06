@@ -74,38 +74,6 @@ class PersonaRepository:
         node = row.get("n")
         return self._node_props(node) if node else None
 
-    # async def list_agent_names(self, archetype_label: Optional[str] = None, limit: int = 100) -> List[str]:
-    #     """Return a list of agent names. If `archetype_label` is provided, filter by node property or label."""
-    #     if archetype_label:
-    #         query = """
-    #         MATCH (n)
-    #         WHERE coalesce(n.archetype, '') = $label OR $label IN labels(n)
-    #         RETURN DISTINCT n.name AS name
-    #         ORDER BY coalesce(n.last_updated, datetime().epochMillis) DESC
-    #         LIMIT $limit
-    #         """
-    #         params = {"label": archetype_label, "limit": limit}
-    #     else:
-    #         query = """
-    #         MATCH (n:Persona)
-    #         RETURN DISTINCT n.name AS name
-    #         ORDER BY coalesce(n.last_updated, datetime().epochMillis) DESC
-    #         LIMIT $limit
-    #         """
-    #         params = {"limit": limit}
-
-    #     async with self._driver.session(database=self._db) as session:
-    #         res = await session.run(cast(LiteralString, query), **params)
-    #         rows = await res.data()
-
-    #     names: List[str] = []
-    #     for r in rows:
-    #         n = r.get("name")
-    #         if n:
-    #             names.append(n)
-    #     return names
-
-
     async def fetch_recent_memories(self, name: str, memory_limit: int = 30) -> List[Dict[str, Any]]:
         """Retrieve recent relationships/memories from agent that Maintains conversation context and agent memory across rounds"""
         query = f"""
@@ -144,8 +112,10 @@ class PersonaRepository:
                 rel = (tr.get("relation_type") or "RELATED_TO").upper()
                 summ = (tr.get("summary") or "").strip()
                 tr["relation_summary"] = f"{rel}: {summ}" if summ else rel
-                enriched.append(tr)
-            return enriched
+                enriched.append(tr)  
+                
+                
+            return enriched # return -> dist={ relation_type, target_name, summary, timestamp, target_props, relation_summary }
         except Exception:
             return rows
 
@@ -256,6 +226,8 @@ class PersonaRepository:
         and constructs profiles in parallel with a bounded concurrency.
         """
         sector_results = await self.find_agent_sectors(llm_output, dataset_id) # return type: List[Dict[str, Any]] with keys: domain_tag, total_relevance, evidence_nodes, density
+        
+        """Here sector_results should be cashed such that we can further use these agent name and their data."""
 
         # Collect unique agent names from the top sectors (preserve order)
         evidence_names: List[str] = []
@@ -338,12 +310,12 @@ class PersonaRepository:
             domain_tags = [t.strip() for t in domain_tags.split(",") if t.strip()]
 
         # Description and perspective
-        description = node.get("description") or node.get("summary") or f"{agent_name} - Domain expert"
+        description = agent_metrics.get("context_text") or node.get("summary") or f"{agent_name} - Domain expert"
         matched_sectors = agent_metrics.get("matched_sectors", [])
         if matched_sectors:
-            perspective = f"I specialize in {', '.join(matched_sectors[:3])}. {node.get('detailed_perspective', node.get('perspective', description))}"
+            perspective = f"I specialize in {', '.join(matched_sectors[:3])}. {agent_metrics.get('neighbor_context', node.get('perspective', description))+agent_metrics.get('context_text', '')}"
         else:
-            perspective = node.get("detailed_perspective") or node.get("perspective") or description
+            perspective = node.get("context_text") or node.get("perspective") or description
 
         # Confidence & breakdown
         confidence = float(agent_metrics.get("confidence", 0.7))
@@ -370,21 +342,21 @@ class PersonaRepository:
                 provenance.append(ProvenanceLink(doc_id=doc_id, title=str(d.get('domain_tag') or 'sector'), breadcrumb='', chunk_id=chunk_id))
 
         # Generate per-agent description/perspective from graph evidence (LLM if available, deterministic fallback)
-        try:
-            gen_desc, gen_perspective = await self._generate_description_and_perspective(
-                agent_name=agent_name,
-                node=node,
-                sector_results=sector_results or [],
-                provenance=provenance or [],
-                user_query=user_query,
-            )
-            if gen_desc:
-                description = gen_desc
-            if gen_perspective:
-                perspective = gen_perspective
-        except Exception:
-            # if generation fails, keep existing description/perspective
-            pass
+        # try:
+        #     gen_desc, gen_perspective = await self._generate_description_and_perspective(
+        #         agent_name=agent_name,
+        #         node=node,
+        #         sector_results=sector_results or [],
+        #         provenance=provenance or [],
+        #         user_query=user_query,
+        #     )
+        #     if gen_desc:
+        #         description = gen_desc
+        #     if gen_perspective:
+        #         perspective = gen_perspective
+        # except Exception:
+        #     # if generation fails, keep existing description/perspective
+        #     pass
 
         # last_updated
         last_updated_raw = node.get("last_updated") or node.get("updated_at")
@@ -535,13 +507,14 @@ class PersonaRepository:
                 if not tprops:
                     tprops = neighbor_props_map.get(t, {})
 
-                t_summary = (tprops.get("summary_context") or tprops.get("summary") or "").strip()
+                t_summary = (tprops.get("context") or tprops.get("canonical_description") or "").strip()
                 tags = tprops.get("domain_tags") or tprops.get("tags") or []
                 tags_text = ", ".join(tags) if isinstance(tags, (list, tuple)) else str(tags)
                 rels = rels_by_target.get(t, [])[:3]
                 rel_text = "; ".join([r for r in rels if r])
                 snippet = f"{t} (tags: {tags_text})" + (f": {t_summary[:180]}" if t_summary else "") + (f" — relations: {rel_text}" if rel_text else "")
-                neighbor_context.append(snippet)
+                
+                neighbor_context.append(snippet) # one element are -> "NeighborName (tags: tag1, tag2): short summary... — relations: REL1; REL2"
         except Exception:
             neighbor_context = []
 
