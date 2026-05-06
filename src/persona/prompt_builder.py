@@ -1,25 +1,25 @@
+from typing import Optional, Tuple, List, Any
 from .models_persona import AgentProfile
 
 
 class PersonaPromptBuilder:
     @staticmethod
-    def build_system_prompt(profile: AgentProfile, recent_memories: list[dict] | None = None) -> str:
+    def build_system_prompt(profile: AgentProfile, recent_memories: list[Any] | None = None) -> str:
         """Construct a system prompt for the agent based on its profile to contribute in simulation debate."""
         # Build a lightweight payload from AgentProfile for the system prompt
         identity = getattr(profile, "identity", None)
         name = identity.name if identity and getattr(identity, "name", None) else "Agent"
         archetype = identity.archetype if identity and getattr(identity, "archetype", None) else "Entity"
         communication_style = identity.communication_style if identity and getattr(identity, "communication_style", None) else "strategic and factual"
-        core_values = getattr(identity, "core_values", []) or []
-        culture = getattr(identity, "culture", "") or ""
-        mission = getattr(identity, "mission", "") or ""
 
-        recent_history = recent_memories or []
+
+        neighbors, context_text = recent_memories or []
         bias_instructions = []
+        if neighbors:
+            bias_instructions.append(f"You have recently been associated with: {neighbors}.")
+            
+        bias_text = " ".join(bias_instructions) if bias_instructions else "No recent context available."
 
-        # convert recent memories rows to short summaries for the prompt
-        history_text = "; ".join([str(m.get("summary") or m.get("breadcrumb") or m.get("title") or "memory") for m in recent_history[:20]]) if recent_history else "No recent history available."
-        bias_text = " ".join(bias_instructions) if bias_instructions else "No relationship-specific bias."
 
         return f"""
             You are an autonomous agent representing {name}.
@@ -27,12 +27,10 @@ class PersonaPromptBuilder:
             Your Identity:
             - Archetype: {archetype}
             - Communication style: {communication_style}
-            - Core values: {core_values}
-            - Culture: {culture}
-            - Mission: {mission}
+
 
             Your Context:
-            - Based on your graph history, you have recently: {history_text}
+            - Based on your graph history, you have recently: {context_text}
 
             Relationship Bias Instructions:
             - {bias_text}
@@ -45,9 +43,9 @@ class PersonaPromptBuilder:
             """.strip()
 
     @staticmethod
-    def build_user_prompt(topic: str, debate_history: list[str], round_no: int) -> str:
+    def build_user_prompt(topic: str, debate_history: list[dict], round_no: int) -> str:
         """Construct a user prompt that provides the current debate context to the agent."""
-        history = "\n".join(debate_history[-12:]) if debate_history else "No prior statements."
+        history = "\n".join([stmt.get("text", "") for stmt in debate_history[-12:]]) if debate_history else "No prior statements."
         return f"""
                 Debate topic:
                 {topic}
