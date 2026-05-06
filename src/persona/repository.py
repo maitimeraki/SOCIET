@@ -59,7 +59,7 @@ class PersonaRepository:
             return {}
 
 
-    async def fetch_agent_node(self, name: str) -> Dict[str, Any] | None:
+    async def fetch_agent_node_props(self, name: str) -> Dict[str, Any] | None:
         """Return all properties for a node with the given name and optional archetype label."""
         # label_clause = self._label_clause(archetype_label)
         query = f"""
@@ -73,6 +73,37 @@ class PersonaRepository:
             return None
         node = row.get("n")
         return self._node_props(node) if node else None
+
+    # async def list_agent_names(self, archetype_label: Optional[str] = None, limit: int = 100) -> List[str]:
+    #     """Return a list of agent names. If `archetype_label` is provided, filter by node property or label."""
+    #     if archetype_label:
+    #         query = """
+    #         MATCH (n)
+    #         WHERE coalesce(n.archetype, '') = $label OR $label IN labels(n)
+    #         RETURN DISTINCT n.name AS name
+    #         ORDER BY coalesce(n.last_updated, datetime().epochMillis) DESC
+    #         LIMIT $limit
+    #         """
+    #         params = {"label": archetype_label, "limit": limit}
+    #     else:
+    #         query = """
+    #         MATCH (n:Persona)
+    #         RETURN DISTINCT n.name AS name
+    #         ORDER BY coalesce(n.last_updated, datetime().epochMillis) DESC
+    #         LIMIT $limit
+    #         """
+    #         params = {"limit": limit}
+
+    #     async with self._driver.session(database=self._db) as session:
+    #         res = await session.run(cast(LiteralString, query), **params)
+    #         rows = await res.data()
+
+    #     names: List[str] = []
+    #     for r in rows:
+    #         n = r.get("name")
+    #         if n:
+    #             names.append(n)
+    #     return names
 
 
     async def fetch_recent_memories(self, name: str, memory_limit: int = 30) -> List[Dict[str, Any]]:
@@ -92,7 +123,31 @@ class PersonaRepository:
         async with self._driver.session(database=self._db) as session:
             res = await session.run(cast(LiteralString, query), name=name, memory_limit=memory_limit)
             rows = await res.data()
-        return rows
+        # Attach lightweight target node properties to each row to provide richer context
+        try:
+            targets = [r.get("target_name") for r in rows if r.get("target_name")]
+            # preserve order, unique
+            unique_targets = list(dict.fromkeys([t for t in targets if t]))
+            if unique_targets:
+                nodes_map = await self.fetch_nodes_by_names(unique_targets)
+            else:
+                nodes_map = {}
+            enriched: List[Dict[str, Any]] = []
+            for r in rows:
+                tr = dict(r)
+                tn = tr.get("target_name")
+                if tn and tn in nodes_map:
+                    tr["target_props"] = nodes_map.get(tn, {})
+                else:
+                    tr["target_props"] = {}
+                # create a compact relation summary for prompts
+                rel = (tr.get("relation_type") or "RELATED_TO").upper()
+                summ = (tr.get("summary") or "").strip()
+                tr["relation_summary"] = f"{rel}: {summ}" if summ else rel
+                enriched.append(tr)
+            return enriched
+        except Exception:
+            return rows
 
 
     async def find_agent_sectors(self, llm_output: Dict[str, List[str]], dataset_id: str) -> List[Dict[str, Any]]:
@@ -107,7 +162,7 @@ class PersonaRepository:
         # 2. Generate Embedding for the Vector Stream (sync or async provider supported)
         query_vector = await self._get_embedding(context_query)
 
-        async with self._driver.session(database=self._db) as session:
+        async with  self._driver.session(database=self._db) as session:
             cypher = """
             CALL db.index.vector.queryNodes('entity_embeddings', 100, $vector)
             YIELD node, score AS vector_score
@@ -119,14 +174,14 @@ class PersonaRepository:
               AND any(phrase IN $context_phrases WHERE n.summary_context CONTAINS phrase)
             WITH node, vector_score, (CASE WHEN exists(n.summary_context) THEN 1.0 ELSE 0.0 END) AS context_score
 
-            UNWIND coalesce(node.domain_tags, []) AS tag
-            RETURN 
-                tag AS domain_tag, 
-                sum(vector_score + context_score) AS total_relevance,
-                collect(coalesce(node.name, ''))[..5] AS evidence_nodes,
-                count(node) AS density
-            ORDER BY total_relevance DESC
-            LIMIT 10
+                await session.run(
+                    cast(LiteralString, query),
+                    agent_name=source_name,
+                    target_name=target_name,
+                    summary=summary,
+                    round_no=round_no,
+                    dataset_id=dataset_id,
+                )
             """
 
             res = await session.run(cypher, vector=query_vector, context_phrases=llm_output.get('latent_sectors', []), dataset_id=dataset_id)
@@ -231,8 +286,8 @@ class PersonaRepository:
 
         async def _build_task(agent_name: str) -> AgentProfile:
             async with semaphore:
-                node = nodes_map.get(agent_name) or await self.fetch_agent_node(agent_name) or {"name": agent_name} # return Type: Dict[str, Any] where we fetch the node properties for the agent name, if not found we create a minimal dict with just the name to avoid None issues
-                metrics = await self._calculate_agent_metrics(agent_name, node, sector_results or [], max_relevance=max_relevance)
+                node = nodes_map.get(agent_name) or await self.fetch_agent_node_props(agent_name) or {"name": agent_name} # return Type: Dict[str, Any] where we fetch the node properties for the agent name, if not found we create a minimal dict with just the name to avoid None issues
+                metrics = await self._calculate_agent_metrics_and_context_for_llm(agent_name, node, sector_results or [], max_relevance=max_relevance)
                 return await self._build_single_agent_profile_from_node(
                     agent_name=agent_name,
                     node=node,
@@ -252,10 +307,10 @@ class PersonaRepository:
         agent_name: str,
         node: Dict[str, Any],
         user_query: str,
-        dataset_id: str,
+        dataset_id: Optional[str],
         agent_metrics: Dict[str, Any],
         sector_results: List[Dict[str, Any]],
-        llm_output: Dict[str, List[str]],
+        llm_output: Optional[Dict[str, List[str]]],
     ) -> AgentProfile:
         """Build an AgentProfile from an already-fetched node (avoids extra DB calls)."""
         # Identity
@@ -353,7 +408,7 @@ class PersonaRepository:
 
         return profile
     
-    async def _calculate_agent_metrics(
+    async def _calculate_agent_metrics_and_context_for_llm(
         self,
         agent_name: str,
         node: Dict[str, Any],
@@ -415,28 +470,27 @@ class PersonaRepository:
             connectivity = None
 
         # If either metric is missing, derive neighbor info from recent memories
-        if node_density is None or connectivity is None:
-            try:
-                # fetch_recent_memories returns rows with 'target_name' entries representing connected nodes
-                mem_rows = await self.fetch_recent_memories(agent_name, memory_limit=200)
-                targets = {r.get("target_name") for r in (mem_rows or []) if r.get("target_name")}
-                neighbor_count = len(targets)
-                total_relations = len(mem_rows or [])
+        mem_rows: List[Dict[str, Any]] = []
+        try:
+            mem_rows = await self.fetch_recent_memories(agent_name, memory_limit=200)
+            targets = {r.get("target_name") for r in (mem_rows or []) if r.get("target_name")}
+            neighbor_count = len(targets)
+            total_relations = len(mem_rows or [])
 
-                if node_density is None:
-                    node_density = neighbor_count
+            if node_density is None:
+                node_density = neighbor_count
 
-                if connectivity is None:
-                    # heuristic: fraction of unique neighbors to total relations, scaled to [0,1]
-                    if total_relations > 0:
-                        connectivity = min(1.0, neighbor_count / float(total_relations))
-                    else:
-                        connectivity = 0.0
-            except Exception:
-                if node_density is None:
-                    node_density = int(density_sum or 1)
-                if connectivity is None:
-                    connectivity = 0.5
+            if connectivity is None:
+                # heuristic: fraction of unique neighbors to total relations, scaled to [0,1]
+                if total_relations > 0:
+                    connectivity = min(1.0, neighbor_count / float(total_relations))
+                else:
+                    connectivity = 0.0
+        except Exception:
+            if node_density is None:
+                node_density = int(density_sum or 1)
+            if connectivity is None:
+                connectivity = 0.5
 
         # final safety defaults
         try:
@@ -448,12 +502,67 @@ class PersonaRepository:
         except Exception:
             connectivity = 0.5
 
+        # Build neighbor context summaries for prompts
+        neighbor_context: List[str] = []
+        try:
+            # mem_rows may include 'target_props' from fetch_recent_memories
+            # Group relation summaries by target
+            rels_by_target: Dict[str, List[str]] = {}
+            for r in (mem_rows or [])[:200]:
+                tgt = r.get("target_name")
+                if not tgt:
+                    continue
+                rels_by_target.setdefault(tgt, []).append(r.get("relation_summary") or (r.get("relation_type") or "RELATED_TO"))
+
+            # choose top neighbors by number of relations
+            sorted_targets = sorted(rels_by_target.keys(), key=lambda t: -len(rels_by_target.get(t, [])))[:6]
+            # fetch neighbor props if mem_rows didn't include them
+            neighbor_props_map = {}
+            try:
+                names_to_fetch = [t for t in sorted_targets if not any((r.get("target_props") for r in (mem_rows or []) if r.get("target_name") == t))]
+                if names_to_fetch:
+                    neighbor_props_map = await self.fetch_nodes_by_names(names_to_fetch)
+            except Exception:
+                neighbor_props_map = {}
+
+            for t in sorted_targets:
+                # try to find target_props from mem_rows first
+                tprops = None
+                for r in (mem_rows or []):
+                    if r.get("target_name") == t and r.get("target_props"):
+                        tprops = r.get("target_props")
+                        break
+                if not tprops:
+                    tprops = neighbor_props_map.get(t, {})
+
+                t_summary = (tprops.get("summary_context") or tprops.get("summary") or "").strip()
+                tags = tprops.get("domain_tags") or tprops.get("tags") or []
+                tags_text = ", ".join(tags) if isinstance(tags, (list, tuple)) else str(tags)
+                rels = rels_by_target.get(t, [])[:3]
+                rel_text = "; ".join([r for r in rels if r])
+                snippet = f"{t} (tags: {tags_text})" + (f": {t_summary[:180]}" if t_summary else "") + (f" — relations: {rel_text}" if rel_text else "")
+                neighbor_context.append(snippet)
+        except Exception:
+            neighbor_context = []
+
+        # Compact context_text to pass into LLMs: include top matched sectors and neighbor snippets and latest relation summaries
+        try:
+            sector_hint = ", ".join([s for s in matched_sectors[:4] if s]) or ", ".join(node.get("domain_tags") or [])
+            recent_rel_summaries = [r.get("relation_summary") for r in (mem_rows or []) if r.get("relation_summary")][:6]
+            recent_text = " | ".join([s for s in recent_rel_summaries if s])
+            context_text = f"Matched sectors: {sector_hint}. Top neighbors: {'; '.join(neighbor_context[:4])}. Recent relations: {recent_text}"
+        except Exception:
+            context_text = ""
+
         return {
             "confidence": round(float(confidence), 3),
             "density": node_density,
             "connectivity": connectivity,
             "relevance_score": total_relevance,
             "matched_sectors": matched_sectors,
+            "recent_memories": mem_rows,
+            "neighbor_context": neighbor_context,
+            "context_text": context_text,
         }
 
     async def _generate_description_and_perspective(
@@ -463,6 +572,8 @@ class PersonaRepository:
         sector_results: List[Dict[str, Any]],
         provenance: List[ProvenanceLink],
         user_query: Optional[str] = None,
+        recent_memories: List[Dict[str, Any]] | None = None,
+        neighbors_map: Dict[str, Dict[str, Any]] | None = None,
     ) -> Tuple[str, str]:
         """Produce a short `description` and a first-person `detailed_perspective`.
 
@@ -471,13 +582,14 @@ class PersonaRepository:
         matched sectors, and provenance titles.
         """
         # collect matched sectors
-        matched = [r.get("domain_tag") for r in (sector_results or []) if agent_name in (r.get("evidence_nodes") or [])]
+        matched = [r.get("domain_tag") for r in (sector_results or node.get("domain_tags") or []) if agent_name in (r.get("evidence_nodes") or [agent_name] or [])]
 
         # gather evidence snippets (prefer summary_context)
         evidence: List[str] = []
-        summary = node.get("summary_context") or node.get("summary") or ""
-        if summary:
-            evidence.append(summary.strip()[:800])
+        # summary = node.get("summary_context") or node.get("summary") or ""
+        # if summary:
+        #     evidence.append(summary.strip()[:800])
+
         # provenance titles as lightweight evidence
         for p in (provenance or [])[:3]:
             try:
@@ -485,7 +597,44 @@ class PersonaRepository:
             except Exception:
                 continue
 
-        # build a compact prompt/text block
+        # If recent_memories not provided, fetch a modest window to ground perspective
+        try:
+            mem_rows = recent_memories if recent_memories is not None else await self.fetch_recent_memories(agent_name, memory_limit=50)
+        except Exception:
+            mem_rows = []
+
+        # Build neighbor context from mem_rows and optional neighbors_map
+        neighbor_context: List[str] = []
+        relation_map: Dict[str, List[str]] = {}
+        neighbor_names = []
+        for r in (mem_rows or []):
+            tgt = r.get("target_name")
+            if not tgt:
+                continue
+            neighbor_names.append(tgt)
+            rel = r.get("relation_type") or r.get("type") or "RELATED_TO"
+            summ = (r.get("summary") or "").strip()
+            relation_map.setdefault(tgt, []).append(f"{rel}: {summ}" if summ else rel)
+
+        # fetch neighbor node props if not supplied
+        try:
+            if neighbors_map is None and neighbor_names:
+                neighbors_map = await self.fetch_nodes_by_names(list(dict.fromkeys(neighbor_names)))
+        except Exception:
+            neighbors_map = neighbors_map or {}
+
+        # summarize neighbor context: include tag and short summary for top neighbors
+        for n in list(dict.fromkeys(neighbor_names))[:6]:
+            nprops = (neighbors_map or {}).get(n) or {}
+            n_summary = nprops.get("summary") or nprops.get("summary_context") or ""
+            tags = nprops.get("domain_tags") or nprops.get("tags") or []
+            tags_text = ", ".join(tags) if isinstance(tags, (list, tuple)) else str(tags)
+            rels = relation_map.get(n, [])
+            rel_text = "; ".join(rels[:2]) if rels else ""
+            snippet = f"{n} (tags: {tags_text})" + (f": {n_summary[:200]}" if n_summary else "") + (f" — relations: {rel_text}" if rel_text else "")
+            neighbor_context.append(snippet)
+
+        # build a compact prompt/text block including neighbor context
         matched_text = ", ".join([m for m in matched if m]) or ", ".join(node.get("domain_tags") or [])
 
         # try to use injected LLM client if present
@@ -497,15 +646,25 @@ class PersonaRepository:
                     llm_func = getattr(llm, name)
                     break
 
-        prompt = (
-            f"Agent: {agent_name}\n"
-            f"Expertise: {node.get('expertise_level') or node.get('expertise') or ''}\n"
-            f"Matched Sectors: {matched_text}\n"
-            f"Evidence:\n- " + "\n- ".join(evidence[:3]) + "\n"
-            f"User query: {user_query or ''}\n\n"
-            "Produce two lines:\nDESCRIPTION: a single concise UI-friendly sentence (10-25 words).\n"
-            "PERSPECTIVE: a 6-9 sentence first-person worldview referencing matched sectors and evidence tags."
-        )
+        prompt_parts = [
+            f"Agent: {agent_name}",
+            f"Expertise: {node.get('expertise_level') or node.get('expertise') or ''}",
+            f"Matched Sectors: {matched_text}",
+            "Evidence:",
+        ]
+        for ev in evidence[:3]:
+            prompt_parts.append(f"- {ev}")
+
+        if neighbor_context:
+            prompt_parts.append("Neighbor Context:")
+            for nc in neighbor_context:
+                prompt_parts.append(f"- {nc}")
+
+        prompt_parts.append(f"User query: {user_query or ''}")
+        prompt_parts.append("")
+        prompt_parts.append("Produce two outputs:\nDESCRIPTION: one concise UI-friendly sentence (10-25 words).\nPERSPECTIVE: a 5-8 sentence first-person worldview that references neighbor context, relations, and provenance.")
+
+        prompt = "\n".join(prompt_parts)
 
         text_out = None
         try:
@@ -536,15 +695,16 @@ class PersonaRepository:
                     desc = sents[0].strip() + ("." if not sents[0].endswith(".") else "")
                     pers = " ".join(sents[1:]).strip()
             except Exception:
-                desc = (summary.split(".")[0] if summary else agent_name)[:200]
-                pers = (f"I am {agent_name}. I focus on {matched_text}. " + (summary or ""))[:1000]
+                desc = (evidence[0].split(".")[0] if evidence else agent_name)[:200]
+                pers = (f"I am {agent_name}. I focus on {matched_text}. " + (evidence[0] or ""))[:1000]
 
             if desc:
                 return desc, pers or desc
 
-        # deterministic fallback
-        desc_fb = f"{agent_name}: { (summary.split('.')[:1][0] if summary else ('Expert in ' + (matched_text or 'multiple domains'))) }"
-        pers_fb = f"I am {agent_name}. I specialize in {matched_text or 'multiple domains'}. { (summary.split('.')[:2] and ' '.join(summary.split('.')[:2])) or '' }"
+        # deterministic fallback that includes neighbor hints
+        neighbor_hint = ", ".join([n for n in (list(dict.fromkeys(neighbor_names))[:3])])
+        desc_fb = f"{agent_name}: { (evidence[0].split('.')[:1][0] if evidence else ('Expert in ' + (matched_text or 'multiple domains'))) }"
+        pers_fb = f"I am {agent_name}. I specialize in {matched_text or 'multiple domains'}. I frequently interact with {neighbor_hint or 'related nodes'}. { (evidence[0].split('.')[:2] and ' '.join(evidence[0].split('.')[:2])) or '' }"
         return desc_fb[:1000], pers_fb[:4000]
         
         
@@ -584,7 +744,7 @@ class PersonaRepository:
     async def create_agent_profiles_from_query(
         self,
         user_query: str,
-        dataset_id: str = None,
+        dataset_id: str ,
         max_agents: int = 5
     ) -> List[AgentProfile]:
         """Main entry point: Query → Intent → Sectors → Profiles"""
@@ -612,55 +772,163 @@ class PersonaRepository:
         )
         
         return profiles
+    
+    
+    @staticmethod
+    def _sanitize_relation_type(relation_type: str) -> str:
+        cleaned = (relation_type or "").strip().upper().replace(" ", "_")
+        if cleaned and re.match(r"^[A-Z_][A-Z0-9_]*$", cleaned):
+            return cleaned
+        return "REACTED_TO"
+
+    async def write_reaction_edge(
+        self,
+        agent_name: str | None,
+        source_name: str,
+        target_name: str,
+        relation_type: str,
+        summary: str,
+        round_no: int,
+        dataset_id: str,
+    ) -> None:
+        """Write an edge representing a reaction from source_name to target_name with the given relation_type and summary."""
+        if source_name == target_name:
+            return
+
+        safe_relation = self._sanitize_relation_type(relation_type)
+
+        query = f"""
+        MATCH (a:Persona {{name: $agent_name}})
+        MATCH (b {{name: $target_name}})
+        MERGE (a)-[r:{safe_relation}]->(b)
+        SET
+          r.summary = $summary,
+          r.round_no = $round_no,
+          r.dataset_id = $dataset_id,
+          r.timestamp = datetime().epochMillis
+        """
+        async with self._driver.session(database=self._db) as session:
+            await session.run(
+                cast(LiteralString, query),
+                source_name=source_name,
+                target_name=target_name,
+                summary=summary,
+                round_no=round_no,
+                dataset_id=dataset_id,
+            )
 
 
-
-
-
-    # @staticmethod
-    # def _sanitize_relation_type(relation_type: str) -> str:
-    #     cleaned = (relation_type or "").strip().upper().replace(" ", "_")
-    #     if _SAFE_RELATION_RE.match(cleaned):
-    #         return cleaned
-    #     return "REACTED_TO"
-
-    # async def write_reaction_edge(
+    # async def write_profile_to_node(
     #     self,
-    #     archetype_label: str | None,
-    #     source_name: str,
-    #     target_name: str,
-    #     relation_type: str,
-    #     summary: str,
-    #     round_no: int,
-    #     dataset_id: str,
+    #     agent_name: str,
+    #     description: str | None = None,
+    #     detailed_perspective: str | None = None,
+    #     summary_provenance: Dict[str, Any] | None = None,
+    #     last_summary_at: Optional[str] = None,
     # ) -> None:
-    #     """Write an edge representing a reaction from source_name to target_name with the given relation_type and summary."""
-    #     if source_name == target_name:
-    #         return
+    #     """Persist generated profile fields back onto the graph node (best-effort).
 
-    #     safe_relation = self._sanitize_relation_type(relation_type)
-
-    #     label_clause = self._label_clause(archetype_label)
-    #     query = f"""
-    #     MATCH (a{label_clause} {{name: $source_name}})
-    #     MATCH (b {{name: $target_name}})
-    #     MERGE (a)-[r:{safe_relation}]->(b)
-    #     SET
-    #       r.summary = $summary,
-    #       r.round_no = $round_no,
-    #       r.dataset_id = $dataset_id,
-    #       r.timestamp = datetime().epochMillis
+    #     Writes `description`, `detailed_perspective`, `summary_provenance`, and
+    #     `last_summary_at` if provided. Silent on failure to avoid blocking simulation.
     #     """
-    #     async with self._driver.session(database=self._db) as session:
-    #         await session.run(
-    #             cast(LiteralString, query),
-    #             source_name=source_name,
-    #             target_name=target_name,
-    #             summary=summary,
-    #             round_no=round_no,
-    #             dataset_id=dataset_id,
+    #     try:
+    #         sets: List[str] = []
+    #         params: Dict[str, Any] = {"name": agent_name}
+    #         if description is not None:
+    #             sets.append("n.description = $description")
+    #             params["description"] = str(description)
+    #         if detailed_perspective is not None:
+    #             sets.append("n.detailed_perspective = $detailed_perspective")
+    #             params["detailed_perspective"] = str(detailed_perspective)
+    #         if summary_provenance is not None:
+    #             sets.append("n.summary_provenance = $summary_provenance")
+    #             params["summary_provenance"] = summary_provenance
+    #         if last_summary_at is not None:
+    #             sets.append("n.last_summary_at = $last_summary_at")
+    #             params["last_summary_at"] = last_summary_at
+
+    #         if not sets:
+    #             return
+
+    #         cypher = f"""
+    #         MATCH (n {{name: $name}})
+    #         SET {', '.join(sets)}
+    #         RETURN id(n) AS node_id
+    #         """
+    #         async with self._driver.session(database=self._db) as session:
+    #             await session.run(cast(LiteralString, cypher), **params)
+    #     except Exception:
+    #         logger.exception("Failed to persist profile fields for %s", agent_name)
+
+
+    # async def generate_and_persist_if_missing(
+    #     self,
+    #     agent_name: str,
+    #     node: Dict[str, Any] | None = None,
+    #     force: bool = False,
+    # ) -> Tuple[str, str]:
+    #     """Generate `description` and `detailed_perspective` only when missing (best-effort).
+
+    #     - If `node` is not provided, fetch it.
+    #     - If fields already exist and `force` is False, returns existing values.
+    #     - Otherwise calls `_generate_description_and_perspective`, persists results,
+    #       and returns them.
+    #     """
+    #     if node is None:
+    #         node = await self.fetch_agent_node_props(agent_name) or {"name": agent_name}
+
+    #     existing_desc = node.get("description") or node.get("summary")
+    #     existing_persp = node.get("detailed_perspective") or node.get("perspective")
+
+    #     if not force and existing_desc and existing_persp:
+    #         return str(existing_desc), str(existing_persp)
+
+    #     # prepare grounding: fetch recent memories and neighbor props
+    #     try:
+    #         recent_memories = await self.fetch_recent_memories(agent_name, memory_limit=80)
+    #     except Exception:
+    #         recent_memories = []
+
+    #     neighbor_names = [r.get("target_name") for r in (recent_memories or []) if r.get("target_name")]
+    #     neighbor_map = {}
+    #     try:
+    #         if neighbor_names:
+    #             neighbor_map = await self.fetch_nodes_by_names(neighbor_names)
+    #     except Exception:
+    #         neighbor_map = {}
+
+    #     try:
+    #         desc, persp = await self._generate_description_and_perspective(
+    #             agent_name=agent_name,
+    #             node=node or {},
+    #             sector_results=[],
+    #             provenance=await self.get_provenance(agent_name, limit=5),
+    #             user_query=None,
+    #             recent_memories=recent_memories,
+    #             neighbors_map=neighbor_map,
     #         )
-            
+    #     except Exception:
+    #         # fallback deterministic
+    #         desc = existing_desc or f"{agent_name} - domain expert"
+    #         persp = existing_persp or desc
+
+    #     # persist best-effort
+    #     try:
+    #         now_iso = datetime.utcnow().isoformat()
+    #         prov = {"generated_at": now_iso, "method": "on_demand_generation"}
+    #         await self.write_profile_to_node(
+    #             agent_name=agent_name,
+    #             description=desc,
+    #             detailed_perspective=persp,
+    #             summary_provenance=prov,
+    #             last_summary_at=now_iso,
+    #         )
+    #     except Exception:
+    #         logger.exception("Failed to write generated profile for %s", agent_name)
+
+    #     return desc, persp
+
+
             
             
             
