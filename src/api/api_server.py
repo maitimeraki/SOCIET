@@ -94,6 +94,9 @@ app.add_middleware(
 # Persona API (hatch personas from user query)
 from src.api.persona_api import router as persona_router
 app.include_router(persona_router)
+# Graph Debate API
+from src.api.graph_api import router as graph_router
+app.include_router(graph_router)
 
 
 RUNS: Dict[str, Dict[str, Any]] = {}
