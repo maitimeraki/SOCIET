@@ -5,8 +5,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import List, Optional, Dict, Any
-from uuid import uuid4
+from typing import List, Optional
 
 from neo4j import AsyncGraphDatabase
 from typing import cast, LiteralString
@@ -45,23 +44,6 @@ class ResponseTracker:
         """Close the Neo4j driver."""
         await self._driver.close()
 
-    @staticmethod
-    def _node_props(node: Any) -> Dict[str, Any]:
-        """Extract properties from a Neo4j node."""
-        if node is None:
-            return {}
-        try:
-            if isinstance(node, dict):
-                return dict(node)
-            if hasattr(node, "_properties"):
-                return dict(node._properties)
-            if hasattr(node, "properties"):
-                return dict(node.properties)
-            return dict(node)
-        except Exception:
-            logger.exception("Failed to extract node properties")
-            return {}
-
     async def record_response(self, agent_id: str, query: str, response: AgentTurn) -> None:
         """Store agent's response to a query.
 
@@ -72,15 +54,14 @@ class ResponseTracker:
 
         query_cypher = """
         MATCH (a:Agent {id: $agent_id})
-        CREATE (a)-[r:RESPONDED_TO]->(blank)
-        SET r = {
+        CREATE (a)-[r:RESPONDED_TO {
             query: $query,
             response: $response,
             timestamp: datetime($timestamp),
             stance: $stance,
             confidence: $confidence,
             round: $round
-        }
+        }]->()
         RETURN id(r) AS rel_id
         """
 
