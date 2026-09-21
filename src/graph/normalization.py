@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 import uuid
 import itertools
@@ -7,10 +7,32 @@ from src.graph.config_graph import GraphConfig
 from src.logging.setup_logging import setup_logging
 import logging
 logging.basicConfig(
-    level=logging.INFO, 
+    level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
 )
 logger = setup_logging()
+
+
+@dataclass
+class EntityNode:
+    """Represents an entity node to be written to Neo4j."""
+    id: Optional[str] = None
+    labels: List[str] = field(default_factory=list)
+    properties: Dict[str, Any] = field(default_factory=dict)
+
+    def __post_init__(self):
+        if self.id is None:
+            self.id = str(uuid.uuid4())
+
+
+@dataclass
+class RelationEdge:
+    """Represents a relationship edge to be written to Neo4j."""
+    source_id: str
+    target_id: str
+    relation_type: str
+    properties: Dict[str, Any] = field(default_factory=dict)
+
 
 @dataclass
 class MergeCandidate:
@@ -315,3 +337,131 @@ class GraphNormalizationStage:
                 else:
                     await self.enqueue_for_review(group, signals, reason="low-confidence")
         await self.close()
+
+    # ---------- Write operations ----------
+    async def write_entities(self, entities: List[EntityNode], graph_id: str) -> List[str]:
+        """Write entity nodes to Neo4j using MERGE for idempotency."""
+        written_ids = []
+        for entity in entities:
+            labels = ":".join(entity.labels) if entity.labels else "Entity"
+            props = dict(entity.properties)
+            props["graph_id"] = graph_id
+            props["entity_id"] = entity.id
+
+            q = Query(f"""
+                MERGE (n:{labels} {{entity_id: $entity_id}})
+                SET n += $props,
+                    n.graph_id = $graph_id,
+                    n.created_at = COALESCE(n.created_at, timestamp())
+                RETURN elementId(n) AS neo_id
+            """)
+            result = await self._run(q, {
+                "entity_id": entity.id,
+                "props": props,
+                "graph_id": graph_id
+            })
+            record = await result.single()
+            if record:
+                written_ids.append(record["neo_id"])
+        return written_ids
+
+    async def write_relations(self, relations: List[RelationEdge], graph_id: str) -> int:
+        """Write relation edges to Neo4j using MATCH + MERGE."""
+        count = 0
+        for rel in relations:
+            props = dict(rel.properties)
+            props["graph_id"] = graph_id
+
+            q = Query("""
+                MATCH (source) WHERE source.entity_id = $source_id
+                MATCH (target) WHERE target.entity_id = $target_id
+                MERGE (source)-[r:`{rel_type}`]->(target)
+                SET r += $props,
+                    r.graph_id = $graph_id,
+                    r.created_at = COALESCE(r.created_at, timestamp())
+            """.format(rel_type=rel.relation_type))
+            await self._run(q, {
+                "source_id": rel.source_id,
+                "target_id": rel.target_id,
+                "props": props,
+                "graph_id": graph_id
+            })
+            count += 1
+        return count
+
+    async def validate_entities(self, entities: List[EntityNode]) -> List[str]:
+        """Validate entities and return list of error messages."""
+        errors = []
+        for entity in entities:
+            if not entity.labels:
+                errors.append(f"Entity {entity.id}: must have at least one label")
+            if not entity.id:
+                errors.append(f"Entity: missing id")
+            # Validate property types
+            for key, value in entity.properties.items():
+                if not isinstance(key, str):
+                    errors.append(f"Entity {entity.id}: property key must be string, got {type(key)}")
+        return errors
+
+    async def validate_relations(self, relations: List[RelationEdge], valid_entity_ids: List[str]) -> List[str]:
+        """Validate relations and return list of error messages."""
+        errors = []
+        valid_ids = set(valid_entity_ids)
+        for rel in relations:
+            if not rel.source_id:
+                errors.append(f"Relation: missing source_id")
+            if not rel.target_id:
+                errors.append(f"Relation: missing target_id")
+            if not rel.relation_type:
+                errors.append(f"Relation: missing relation_type")
+            if rel.source_id not in valid_ids:
+                errors.append(f"Relation: source_id '{rel.source_id}' not in valid entity IDs")
+            if rel.target_id not in valid_ids:
+                errors.append(f"Relation: target_id '{rel.target_id}' not in valid entity IDs")
+        return errors
+
+
+async def normalize_and_write(entities: List[EntityNode], relations: List[RelationEdge]) -> str:
+    """Merge duplicates, validate, and write to Neo4j.
+
+    Args:
+        entities: List of EntityNode to write
+        relations: List of RelationEdge to write
+
+    Returns:
+        graph_id: A unique identifier for the written graph
+    """
+    config = GraphConfig()
+    stage = GraphNormalizationStage(config)
+    graph_id = str(uuid.uuid4())
+
+    try:
+        # 1. Validate input
+        entity_errors = await stage.validate_entities(entities)
+        if entity_errors:
+            raise ValueError(f"Entity validation errors: {entity_errors}")
+
+        entity_ids = [e.id for e in entities]
+        relation_errors = await stage.validate_relations(relations, entity_ids)
+        if relation_errors:
+            raise ValueError(f"Relation validation errors: {relation_errors}")
+
+        # 2. Merge duplicate entities (by id)
+        seen: Dict[str, EntityNode] = {}
+        for entity in entities:
+            if entity.id in seen:
+                # Merge properties, preferring non-empty values
+                for key, value in entity.properties.items():
+                    if key not in seen[entity.id].properties or seen[entity.id].properties[key] is None:
+                        seen[entity.id].properties[key] = value
+            else:
+                seen[entity.id] = entity
+        merged_entities = list(seen.values())
+
+        # 3. Write entities and relations to Neo4j
+        await stage.write_entities(merged_entities, graph_id)
+        await stage.write_relations(relations, graph_id)
+
+        return graph_id
+    finally:
+        await stage.close()

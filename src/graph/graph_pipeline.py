@@ -3,7 +3,7 @@ from .config_graph import GraphConfig
 from .models_graph import GraphInputDocument
 from .ontology import OntologyDiscoveryStage
 from .graph_build import GraphExtractionStage
-from .normalization import GraphNormalizationStage
+from .normalization import GraphNormalizationStage, normalize_and_write, EntityNode, RelationEdge
 
 
 class UniversalGraphPipeline:
