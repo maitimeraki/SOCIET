@@ -115,6 +115,9 @@ app.include_router(agent_router)
 # Graph Debate API
 from src.api.graph_api import router as graph_router
 app.include_router(graph_router)
+# Debate API
+from src.api.debate_api import router as debate_router
+app.include_router(debate_router)
 
 
 RUNS: Dict[str, Dict[str, Any]] = {}
