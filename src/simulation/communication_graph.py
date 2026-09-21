@@ -9,6 +9,7 @@ from typing import List, Set, Optional
 from itertools import combinations
 
 from src.simulation.agent_node import AgentNode
+from src.simulation.debate_config import DebateConfig
 
 
 @dataclass
@@ -18,13 +19,6 @@ class CommPair:
     agent_b: str  # agent ID
     shared_entities: List[str] = field(default_factory=list)
     evidence: List[str] = field(default_factory=list)
-
-
-@dataclass
-class DebateConfig:
-    """Configuration for debate rounds."""
-    comm_radius: int = 1  # Graph hop radius for round expansion
-    max_pairs_per_round: int = 50  # Cap to prevent explosion
 
 
 class CommunicationGraph:
