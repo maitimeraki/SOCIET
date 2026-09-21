@@ -58,6 +58,38 @@ def _structured_properties(llm_data: Dict[str, Any]) -> Dict[str, Any]:
     
     return llm_data
 
+async def discover_ontology(
+    chunks: List[ProcessedChunk],
+    model: str = "gemma4-e4b-64k:latest",
+    sample_size: int = 10,
+) -> LocalOntology:
+    """
+    Discover a local ontology schema from input chunks using LLM.
+
+    Args:
+        chunks: List of processed document chunks to analyze
+        model: LLM model to use for discovery (default: gemma4-e4b-64k:latest)
+        sample_size: Number of chunks to sample for discovery (default: 10)
+
+    Returns:
+        LocalOntology with discovered entity_types, relation_types, and property_definitions
+    """
+    stage = OntologyDiscoveryStage(model=model)
+    return await stage.run(documents=chunks, sample_size=sample_size)
+
+
+def discover_ontology_sync(
+    chunks: List[ProcessedChunk],
+    model: str = "gemma4-e4b-64k:latest",
+    sample_size: int = 10,
+) -> LocalOntology:
+    """
+    Synchronous wrapper for discover_ontology using asyncio.
+    """
+    import asyncio
+    return asyncio.run(discover_ontology(chunks, model, sample_size))
+
+
 class OntologyDiscoveryStage:
     """Discovers a local ontology schema from a sample of input documents using LLMs. The discovered ontology defines the entity types, relation types, and their properties that will be used for structured extraction in the next stage. This stage is crucial for enabling domain-agnostic graph construction without requiring manual schema definition upfront."""
     def __init__(self, model: str = "gemma4-e4b-64k:latest", temperature: float = 0.7):
