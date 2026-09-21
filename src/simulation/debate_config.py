@@ -9,6 +9,8 @@ class DebateConfig:
     min_entity_overlap: int = 1
     max_pairs_per_round: int = 50
     convergence_threshold: float = 0.8
+    llm_concurrency: int = 8
+    topology_score_threshold: float = 0.15
 
     def __post_init__(self):
         if not 1 <= self.max_agents <= 100:
@@ -23,3 +25,7 @@ class DebateConfig:
             raise ValueError("max_pairs_per_round must be between 1 and 200")
         if not 0.0 <= self.convergence_threshold <= 1.0:
             raise ValueError("convergence_threshold must be between 0.0 and 1.0")
+        if not 1 <= self.llm_concurrency <= 32:
+            raise ValueError("llm_concurrency must be between 1 and 32")
+        if not 0.0 <= self.topology_score_threshold <= 1.0:
+            raise ValueError("topology_score_threshold must be between 0.0 and 1.0")
