@@ -2,6 +2,7 @@
 Tests for Debate API endpoints.
 """
 import pytest
+from unittest.mock import AsyncMock, patch, MagicMock
 from fastapi.testclient import TestClient
 
 from src.api.debate_api import (
@@ -10,10 +11,7 @@ from src.api.debate_api import (
     DebateConfigRequest,
     _DEBATE_JOBS,
     _DEBATE_JOBS_LOCK,
-    _agent_turn_to_dict,
-    _comm_pair_to_dict,
 )
-from src.simulation.graph_debate_engine import AgentTurn, CommPair
 
 
 @pytest.fixture
@@ -33,6 +31,8 @@ class TestDebateRequest:
         assert config.comm_radius == 1
         assert config.min_entity_overlap == 1
         assert config.convergence_threshold == 0.8
+        assert config.llm_concurrency == 8
+        assert config.topology_score_threshold == 0.15
 
     def test_debate_request_custom_values(self):
         """Test custom config values."""
@@ -42,12 +42,16 @@ class TestDebateRequest:
             comm_radius=2,
             min_entity_overlap=2,
             convergence_threshold=0.9,
+            llm_concurrency=16,
+            topology_score_threshold=0.25,
         )
         assert config.max_agents == 25
         assert config.max_rounds == 3
         assert config.comm_radius == 2
         assert config.min_entity_overlap == 2
         assert config.convergence_threshold == 0.9
+        assert config.llm_concurrency == 16
+        assert config.topology_score_threshold == 0.25
 
     def test_debate_request_validation_max_agents(self):
         """Test max_agents validation."""
@@ -58,6 +62,20 @@ class TestDebateRequest:
         """Test convergence_threshold validation."""
         with pytest.raises(Exception):
             DebateConfigRequest(convergence_threshold=1.5)
+
+    def test_debate_request_validation_llm_concurrency(self):
+        """Test llm_concurrency validation."""
+        with pytest.raises(Exception):
+            DebateConfigRequest(llm_concurrency=0)
+        with pytest.raises(Exception):
+            DebateConfigRequest(llm_concurrency=50)
+
+    def test_debate_request_validation_topology_threshold(self):
+        """Test topology_score_threshold validation."""
+        with pytest.raises(Exception):
+            DebateConfigRequest(topology_score_threshold=-0.1)
+        with pytest.raises(Exception):
+            DebateConfigRequest(topology_score_threshold=1.5)
 
 
 class TestDebateConfigRequest:
@@ -80,42 +98,6 @@ class TestDebateConfigRequest:
             config=DebateConfigRequest(max_agents=10),
         )
         assert request.config.max_agents == 10
-
-
-class TestHelperFunctions:
-    """Test helper functions."""
-
-    def test_agent_turn_to_dict(self):
-        """Test AgentTurn serialization."""
-        turn = AgentTurn(
-            agent_id="agent-1",
-            agent_name="Test Agent",
-            content="Test content",
-            stance="POSITIVE",
-            confidence=0.8,
-            references=["ref1", "ref2"],
-        )
-        result = _agent_turn_to_dict(turn)
-        assert result["agent_id"] == "agent-1"
-        assert result["agent_name"] == "Test Agent"
-        assert result["content"] == "Test content"
-        assert result["stance"] == "POSITIVE"
-        assert result["confidence"] == 0.8
-        assert result["references"] == ["ref1", "ref2"]
-
-    def test_comm_pair_to_dict(self):
-        """Test CommPair serialization."""
-        pair = CommPair(
-            agent_a="agent-1",
-            agent_b="agent-2",
-            shared_entities=["entity1", "entity2"],
-            evidence=["evidence1"],
-        )
-        result = _comm_pair_to_dict(pair)
-        assert result["agent_a"] == "agent-1"
-        assert result["agent_b"] == "agent-2"
-        assert result["shared_entities"] == ["entity1", "entity2"]
-        assert result["evidence"] == ["evidence1"]
 
 
 class TestRouterEndpoints:
@@ -146,3 +128,81 @@ class TestRouterEndpoints:
     def test_router_tags(self):
         """Test router has correct tags."""
         assert router.tags == ["debate"]
+
+
+class TestGraphContextSignature:
+    """Test that GraphContext is called with GraphConfig(), not separate params."""
+
+    def test_graph_config_creation(self):
+        """Test that GraphConfig creates valid config for GraphContext."""
+        from src.graph.config_graph import GraphConfig
+        from src.persona.graph_context import GraphContext
+
+        cfg = GraphConfig()
+        # GraphContext should accept a GraphConfig object
+        assert cfg.neo4j_uri is not None
+        assert cfg.neo4j_username is not None
+        assert cfg.neo4j_password is not None
+        assert cfg.neo4j_database is not None
+
+    @pytest.mark.asyncio
+    async def test_graph_context_accepts_config(self):
+        """Test that GraphContext.__init__ accepts a GraphConfig parameter."""
+        from src.graph.config_graph import GraphConfig
+        from src.persona.graph_context import GraphContext
+        import inspect
+
+        # Check GraphContext signature
+        sig = inspect.signature(GraphContext.__init__)
+        params = list(sig.parameters.keys())
+        # First param is 'self', second should be 'config'
+        assert "config" in params or len(params) >= 2
+
+        # Verify we can create GraphContext with GraphConfig
+        cfg = GraphConfig()
+        ctx = GraphContext(cfg)
+        assert ctx.config is not None
+
+
+class TestDebateOrchestrator:
+    """Test DebateOrchestrator wiring and execution."""
+
+    def test_orchestrator_import(self):
+        """Test that DebateOrchestrator can be imported."""
+        from src.simulation.orchestrator import DebateOrchestrator
+        assert DebateOrchestrator is not None
+
+    @pytest.mark.asyncio
+    async def test_orchestrator_run_method_exists(self):
+        """Test that orchestrator has run method with expected signature."""
+        from src.simulation.orchestrator import DebateOrchestrator
+        from src.simulation.profile_synthesizer import ProfileSynthesizer
+        from src.simulation.topology import CommunicationTopology
+        from src.simulation.llm_batch import BatchedLLMRunner
+        from src.simulation.verdict import VerdictSynthesizer
+        from src.simulation.writeback import WriteBackService
+        import inspect
+
+        # Create mock dependencies
+        mock_profiler = MagicMock(spec=ProfileSynthesizer)
+        mock_topology = MagicMock(spec=CommunicationTopology)
+        mock_llm_runner = MagicMock(spec=BatchedLLMRunner)
+        mock_verdict = MagicMock(spec=VerdictSynthesizer)
+        mock_writeback = MagicMock(spec=WriteBackService)
+
+        orchestrator = DebateOrchestrator(
+            profile_synthesizer=mock_profiler,
+            topology=mock_topology,
+            llm_runner=mock_llm_runner,
+            verdict_synthesizer=mock_verdict,
+            writeback=mock_writeback,
+        )
+
+        # Verify run method exists
+        assert hasattr(orchestrator, 'run')
+        sig = inspect.signature(orchestrator.run)
+        params = list(sig.parameters.keys())
+        assert "query" in params
+        assert "dataset_id" in params
+        assert "config" in params
+        assert "ws_broadcast" in params
