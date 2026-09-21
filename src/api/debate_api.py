@@ -11,13 +11,13 @@ from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel, Field
 
 from src.simulation.debate_config import DebateConfig
+from src.simulation.agent_node import AgentNode, Stance
 from src.simulation.graph_debate_engine import (
     DebateEngine,
     DebateResult,
     RoundResult,
     AgentTurn,
     DebateVerdict,
-    Stance,
 )
 from src.simulation.agent_node import AgentNode
 from src.simulation.agent_spawner import AgentSpawner
@@ -282,9 +282,6 @@ class _DebateWSManager:
                 await ws.send_json(data)
             except Exception:
                 pass  # Client disconnected
-
-
-_WS_MANAGERS: Dict[str, _DebateWSManager] = {}
 
 
 def _comm_pair_to_dict(pair: CommPair) -> Dict[str, Any]:
