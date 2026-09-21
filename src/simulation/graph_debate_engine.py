@@ -7,8 +7,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
+from unittest.mock import MagicMock
 
-from src.simulation.agent_node import AgentNode
+from src.simulation.agent_node import AgentNode, Stance
 from src.simulation.agent_spawner import AgentSpawner
 from src.simulation.communication_graph import CommunicationGraph, CommPair
 from src.simulation.debate_config import DebateConfig
@@ -43,6 +44,28 @@ class DebateResult:
     final_stances: Dict[str, str]
     verdict: str
     warnings: List[str] = field(default_factory=list)
+
+
+@dataclass
+class ClusterSummary:
+    """Summary of an opinion cluster."""
+    stance: Stance
+    count: int
+    total_weight: float
+    avg_confidence: float
+    avg_conviction: float
+    agents: List[str]
+
+
+@dataclass
+class DebateVerdict:
+    """Final verdict with weighted synthesis."""
+    overall_stance: Stance
+    confidence_score: float
+    supporting_entities: List[str]
+    opposing_entities: List[str]
+    summary: str
+    cluster_details: Dict[Stance, ClusterSummary]
 
 
 class DebateEngine:
@@ -512,6 +535,216 @@ Respond with your perspective, referencing the other agent directly."""
             verdict += "The debate revealed diverse perspectives without clear consensus."
 
         return verdict
+
+    # ---- Synthesis Methods ----
+
+    def _cluster_opinions(self, results: List[AgentTurn]) -> Dict[Stance, List[AgentTurn]]:
+        """
+        Group agent responses by stance.
+
+        Args:
+            results: List of agent turns from debate.
+
+        Returns:
+            Dict mapping Stance to list of AgentTurns.
+        """
+        clusters: Dict[Stance, List[AgentTurn]] = {
+            Stance.POSITIVE: [],
+            Stance.NEGATIVE: [],
+            Stance.NEUTRAL: [],
+            Stance.AMBIVALENT: [],
+        }
+        for turn in results:
+            try:
+                stance = Stance(turn.stance) if isinstance(turn.stance, str) else turn.stance
+            except ValueError:
+                stance = Stance.NEUTRAL
+            clusters[stance].append(turn)
+        return clusters
+
+    def _weight_by_relevance(
+        self,
+        clusters: Dict[Stance, List[AgentTurn]],
+        agents: List[AgentNode],
+    ) -> Dict[Stance, float]:
+        """
+        Weight each cluster by confidence × conviction.
+
+        Higher conviction agents have more influence.
+
+        Args:
+            clusters: Opinion clusters from _cluster_opinions.
+            agents: AgentNode instances for accessing conviction.
+
+        Returns:
+            Dict mapping Stance to aggregate weight.
+        """
+        agent_map = {str(a.id): a for a in agents}
+        weights: Dict[Stance, float] = {s: 0.0 for s in Stance}
+
+        for stance, turns in clusters.items():
+            cluster_weight = 0.0
+            for turn in turns:
+                agent = agent_map.get(turn.agent_id)
+                conviction = agent.conviction if agent else 0.5
+                # weight = confidence × conviction
+                cluster_weight += turn.confidence * conviction
+            weights[stance] = cluster_weight
+
+        return weights
+
+    def _calibrate_cior(
+        self,
+        clusters: Dict[Stance, List[AgentTurn]],
+        agents: List[AgentNode],
+    ) -> Dict[Stance, float]:
+        """
+        Apply CIOR adjustment to weights.
+
+        Gut instinct (CIOR=-1) weighted less than rational (CIOR=+1).
+        Formula: weight = confidence × conviction × (1 + cior) / 2
+
+        Args:
+            clusters: Opinion clusters.
+            agents: AgentNode instances for accessing cior.
+
+        Returns:
+            Dict mapping Stance to CIOR-adjusted weights.
+        """
+        agent_map = {str(a.id): a for a in agents}
+        weights: Dict[Stance, float] = {s: 0.0 for s in Stance}
+
+        for stance, turns in clusters.items():
+            cluster_weight = 0.0
+            for turn in turns:
+                agent = agent_map.get(turn.agent_id)
+                if agent:
+                    # CIOR adjustment: (1 + cior) / 2 maps [-1, 1] to [0, 1]
+                    cior_factor = (1 + agent.cior) / 2
+                    cluster_weight += turn.confidence * agent.conviction * cior_factor
+            weights[stance] = cluster_weight
+
+        return weights
+
+    def _generate_synthesis_verdict(
+        self,
+        rounds: List[RoundResult],
+        agents: List[AgentNode],
+    ) -> DebateVerdict:
+        """
+        Generate final verdict with weighted synthesis.
+
+        Args:
+            rounds: All debate rounds.
+            agents: All participating agents.
+
+        Returns:
+            DebateVerdict with cluster analysis and verdict.
+        """
+        if not rounds:
+            return DebateVerdict(
+                overall_stance=Stance.NEUTRAL,
+                confidence_score=0.0,
+                supporting_entities=[],
+                opposing_entities=[],
+                summary="No debate occurred.",
+                cluster_details={},
+            )
+
+        # Collect all turns
+        all_turns: List[AgentTurn] = []
+        for round_result in rounds:
+            all_turns.extend(round_result.turns)
+
+        if not all_turns:
+            return DebateVerdict(
+                overall_stance=Stance.NEUTRAL,
+                confidence_score=0.0,
+                supporting_entities=[],
+                opposing_entities=[],
+                summary="No turns recorded.",
+                cluster_details={},
+            )
+
+        # Step 1: Cluster opinions
+        clusters = self._cluster_opinions(all_turns)
+
+        # Step 2: Build cluster summaries
+        cluster_details: Dict[Stance, ClusterSummary] = {}
+        for stance, turns in clusters.items():
+            if not turns:
+                continue
+            agent_map = {str(a.id): a for a in agents}
+            avg_conf = sum(t.confidence for t in turns) / len(turns)
+            avg_conv = sum(
+                agent_map.get(t.agent_id, MagicMock(conviction=0.5)).conviction
+                for t in turns
+            ) / len(turns)
+            cluster_details[stance] = ClusterSummary(
+                stance=stance,
+                count=len(turns),
+                total_weight=0.0,
+                avg_confidence=avg_conf,
+                avg_conviction=avg_conv,
+                agents=[t.agent_name for t in turns],
+            )
+
+        # Step 3: Calculate CIOR-adjusted weights
+        weights = self._calibrate_cior(clusters, agents)
+
+        # Update cluster weights
+        for stance in weights:
+            if stance in cluster_details:
+                cluster_details[stance] = ClusterSummary(
+                    stance=stance,
+                    count=cluster_details[stance].count,
+                    total_weight=weights[stance],
+                    avg_confidence=cluster_details[stance].avg_confidence,
+                    avg_conviction=cluster_details[stance].avg_conviction,
+                    agents=cluster_details[stance].agents,
+                )
+
+        # Step 4: Determine overall stance
+        overall_stance = Stance.NEUTRAL
+        max_weight = 0.0
+        for stance, weight in weights.items():
+            if weight > max_weight:
+                max_weight = weight
+                overall_stance = stance
+
+        # Calculate confidence score
+        total_weight = sum(weights.values())
+        confidence_score = max_weight / total_weight if total_weight > 0 else 0.0
+
+        # Collect supporting/opposing entities
+        supporting = []
+        opposing = []
+        for turn in all_turns:
+            try:
+                turn_stance = Stance(turn.stance) if isinstance(turn.stance, str) else turn.stance
+            except ValueError:
+                turn_stance = Stance.NEUTRAL
+            if turn_stance == overall_stance:
+                supporting.extend(turn.references)
+            else:
+                opposing.extend(turn.references)
+
+        # Generate summary
+        dominant_pct = (cluster_details[overall_stance].count / len(all_turns) * 100
+                        if overall_stance in cluster_details and all_turns else 0)
+        summary = (
+            f"The debate concluded with {dominant_pct:.0f}% of turns expressing "
+            f"{overall_stance.value} stance. Confidence score: {confidence_score:.2f}."
+        )
+
+        return DebateVerdict(
+            overall_stance=overall_stance,
+            confidence_score=confidence_score,
+            supporting_entities=list(set(supporting))[:10],
+            opposing_entities=list(set(opposing))[:10],
+            summary=summary,
+            cluster_details=cluster_details,
+        )
 
 
 # ---- CLI Test ----
