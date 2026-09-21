@@ -339,6 +339,69 @@ class GraphNormalizationStage:
         await self.close()
 
     # ---------- Write operations ----------
+    async def write_all(self, entities: List[EntityNode], relations: List[RelationEdge], graph_id: str) -> tuple[List[str], int]:
+        """Write entities and relations to Neo4j within a single transaction for consistency."""
+        written_ids = []
+        count = 0
+        async with self.driver.session(database=self.config.neo4j_database) as session:
+            async with await session.begin_transaction() as tx:
+                # Write entities
+                for entity in entities:
+                    labels = ":".join(entity.labels) if entity.labels else "Entity"
+                    props = dict(entity.properties)
+                    props["graph_id"] = graph_id
+                    props["entity_id"] = entity.id
+
+                    q = Query(f"""
+                        MERGE (n:{labels} {{entity_id: $entity_id}})
+                        SET n += $props,
+                            n.graph_id = $graph_id,
+                            n.created_at = COALESCE(n.created_at, timestamp())
+                        RETURN elementId(n) AS neo_id
+                    """)
+                    result = await tx.run(q, {
+                        "entity_id": entity.id,
+                        "props": props,
+                        "graph_id": graph_id
+                    })
+                    record = await result.single()
+                    if record:
+                        written_ids.append(record["neo_id"])
+
+                # Write relations
+                for rel in relations:
+                    props = dict(rel.properties)
+                    props["graph_id"] = graph_id
+
+                    q = Query("""
+                        MATCH (source) WHERE source.entity_id = $source_id
+                        MATCH (target) WHERE target.entity_id = $target_id
+                        CALL {
+                            WITH source, target, $rel_type AS rtype, $props AS props, $graph_id AS graph_id
+                            MATCH (source)-[r]->(target)
+                            WHERE type(r) = rtype
+                            SET r += props, r.graph_id = graph_id, r.created_at = COALESCE(r.created_at, timestamp())
+                            RETURN r
+                        }
+                        UNION
+                        MATCH (source) WHERE source.entity_id = $source_id
+                        MATCH (target) WHERE target.entity_id = $target_id
+                        CREATE (source)-[r:`$rel_type`]->(target)
+                        SET r += $props, r.graph_id = $graph_id, r.created_at = timestamp()
+                        RETURN r
+                    """)
+                    await tx.run(q, {
+                        "source_id": rel.source_id,
+                        "target_id": rel.target_id,
+                        "rel_type": rel.relation_type,
+                        "props": props,
+                        "graph_id": graph_id
+                    })
+                    count += 1
+
+                await tx.commit()
+        return written_ids, count
+
     async def write_entities(self, entities: List[EntityNode], graph_id: str) -> List[str]:
         """Write entity nodes to Neo4j using MERGE for idempotency."""
         written_ids = []
@@ -368,25 +431,39 @@ class GraphNormalizationStage:
     async def write_relations(self, relations: List[RelationEdge], graph_id: str) -> int:
         """Write relation edges to Neo4j using MATCH + MERGE."""
         count = 0
-        for rel in relations:
-            props = dict(rel.properties)
-            props["graph_id"] = graph_id
+        async with self.driver.session(database=self.config.neo4j_database) as session:
+            async with await session.begin_transaction() as tx:
+                for rel in relations:
+                    props = dict(rel.properties)
+                    props["graph_id"] = graph_id
 
-            q = Query("""
-                MATCH (source) WHERE source.entity_id = $source_id
-                MATCH (target) WHERE target.entity_id = $target_id
-                MERGE (source)-[r:`{rel_type}`]->(target)
-                SET r += $props,
-                    r.graph_id = $graph_id,
-                    r.created_at = COALESCE(r.created_at, timestamp())
-            """.format(rel_type=rel.relation_type))
-            await self._run(q, {
-                "source_id": rel.source_id,
-                "target_id": rel.target_id,
-                "props": props,
-                "graph_id": graph_id
-            })
-            count += 1
+                    # Use parameterized query - pass rel_type as parameter
+                    q = Query("""
+                        MATCH (source) WHERE source.entity_id = $source_id
+                        MATCH (target) WHERE target.entity_id = $target_id
+                        CALL {
+                            WITH source, target, $rel_type AS rtype, $props AS props, $graph_id AS graph_id
+                            MATCH (source)-[r]->(target)
+                            WHERE type(r) = rtype
+                            SET r += props, r.graph_id = graph_id, r.created_at = COALESCE(r.created_at, timestamp())
+                            RETURN r
+                        }
+                        UNION
+                        MATCH (source) WHERE source.entity_id = $source_id
+                        MATCH (target) WHERE target.entity_id = $target_id
+                        CREATE (source)-[r:`$rel_type`]->(target)
+                        SET r += $props, r.graph_id = $graph_id, r.created_at = timestamp()
+                        RETURN r
+                    """)
+                    await tx.run(q, {
+                        "source_id": rel.source_id,
+                        "target_id": rel.target_id,
+                        "rel_type": rel.relation_type,
+                        "props": props,
+                        "graph_id": graph_id
+                    })
+                    count += 1
+                await tx.commit()
         return count
 
     async def validate_entities(self, entities: List[EntityNode]) -> List[str]:
@@ -458,9 +535,8 @@ async def normalize_and_write(entities: List[EntityNode], relations: List[Relati
                 seen[entity.id] = entity
         merged_entities = list(seen.values())
 
-        # 3. Write entities and relations to Neo4j
-        await stage.write_entities(merged_entities, graph_id)
-        await stage.write_relations(relations, graph_id)
+        # 3. Write entities and relations to Neo4j (within single transaction)
+        await stage.write_all(merged_entities, relations, graph_id)
 
         return graph_id
     finally:

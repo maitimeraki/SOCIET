@@ -68,36 +68,41 @@ class TestNormalizeAndWrite:
             mock_validate.return_value = []
             with patch.object(GraphNormalizationStage, 'validate_relations', new_callable=AsyncMock) as mock_rel_validate:
                 mock_rel_validate.return_value = []
-                with patch.object(GraphNormalizationStage, 'write_entities', new_callable=AsyncMock) as mock_write:
-                    mock_write.return_value = []
-                    with patch.object(GraphNormalizationStage, 'write_relations', new_callable=AsyncMock) as mock_rel:
-                        mock_rel.return_value = 0
-                        with patch.object(GraphNormalizationStage, 'close', new_callable=AsyncMock):
-                            graph_id = await normalize_and_write(entities, relations)
+                with patch.object(GraphNormalizationStage, 'write_all', new_callable=AsyncMock) as mock_write:
+                    mock_write.return_value = ([], 0)
+                    with patch.object(GraphNormalizationStage, 'close', new_callable=AsyncMock):
+                        graph_id = await normalize_and_write(entities, relations)
 
         assert graph_id is not None
         assert len(graph_id) == 36  # UUID format
 
     @pytest.mark.asyncio
     async def test_merges_duplicate_entities(self):
-        """Verify duplicate entities are merged by id."""
+        """Verify duplicate entities are merged by id via normalize_and_write."""
         entities = [
             EntityNode(id="e1", labels=["Person"], properties={"name": "Alice", "age": 30}),
             EntityNode(id="e1", labels=["Person"], properties={"age": 31}),  # duplicate
         ]
-        merged_seen = {}
+        relations = []
 
-        # Check that duplicates are merged
-        for entity in entities:
-            if entity.id in merged_seen:
-                for key, value in entity.properties.items():
-                    if key not in merged_seen[entity.id].properties or merged_seen[entity.id].properties[key] is None:
-                        merged_seen[entity.id].properties[key] = value
-            else:
-                merged_seen[entity.id] = entity
+        with patch.object(GraphNormalizationStage, 'validate_entities', new_callable=AsyncMock) as mock_validate:
+            mock_validate.return_value = []
+            with patch.object(GraphNormalizationStage, 'validate_relations', new_callable=AsyncMock) as mock_rel_validate:
+                mock_rel_validate.return_value = []
+                with patch.object(GraphNormalizationStage, 'write_all', new_callable=AsyncMock) as mock_write:
+                    mock_write.return_value = ([], 0)
+                    with patch.object(GraphNormalizationStage, 'close', new_callable=AsyncMock):
+                        graph_id = await normalize_and_write(entities, relations)
 
-        assert len(merged_seen) == 1
-        assert merged_seen["e1"].properties["name"] == "Alice"
+        # Verify write_all was called with merged entities (should have only 1 entity)
+        mock_write.assert_called_once()
+        call_args = mock_write.call_args
+        merged_entities_arg = call_args[0][0]  # First positional arg
+        assert len(merged_entities_arg) == 1, "Duplicate entities should be merged into 1"
+        assert merged_entities_arg[0].id == "e1"
+        assert merged_entities_arg[0].properties["name"] == "Alice"
+        # Merge fills in missing values; existing values are preserved (age=30 from first entity)
+        assert merged_entities_arg[0].properties["age"] == 30
 
     @pytest.mark.asyncio
     async def test_validates_entities(self):
@@ -109,12 +114,10 @@ class TestNormalizeAndWrite:
             mock_validate.return_value = []
             with patch.object(GraphNormalizationStage, 'validate_relations', new_callable=AsyncMock) as mock_rel_validate:
                 mock_rel_validate.return_value = []
-                with patch.object(GraphNormalizationStage, 'write_entities', new_callable=AsyncMock) as mock_write:
-                    mock_write.return_value = []
-                    with patch.object(GraphNormalizationStage, 'write_relations', new_callable=AsyncMock) as mock_rel:
-                        mock_rel.return_value = 0
-                        with patch.object(GraphNormalizationStage, 'close', new_callable=AsyncMock):
-                            await normalize_and_write(entities, relations)
+                with patch.object(GraphNormalizationStage, 'write_all', new_callable=AsyncMock) as mock_write:
+                    mock_write.return_value = ([], 0)
+                    with patch.object(GraphNormalizationStage, 'close', new_callable=AsyncMock):
+                        await normalize_and_write(entities, relations)
 
         mock_validate.assert_called_once_with(entities)
 
