@@ -196,3 +196,259 @@ async def test_synthesize_profiles_have_valid_structure(mock_agent_profile):
 
     assert isinstance(profile.identity, PersonaIdentity)
     assert isinstance(profile.confidence_breakdown, ConfidenceBreakdown)
+
+
+@pytest.mark.asyncio
+async def test_synthesize_returns_exactly_target_profiles():
+    """When graph has enough entities, adaptive target is returned exactly.
+
+    With 9 entities: sqrt(9) * 4 = 12, capped at max_agents=5 -> returns 5.
+    """
+    entities = []
+    for i in range(9):
+        node = MagicMock()
+        node.id = str(uuid4())
+        node.name = f"Agent_{i}"
+        node.label = "Persona"
+        node.properties = {"name": f"Agent_{i}", "domain_tags": ["test"]}
+        node.relevance_score = 0.9 - (i * 0.01)
+        node.domain_tags = ["test"]
+        entities.append(node)
+
+    repo = MagicMock()
+    repo.fetch_nodes_by_names = AsyncMock(
+        return_value={f"Agent_{i}": {"name": f"Agent_{i}"} for i in range(9)}
+    )
+    repo._calculate_agent_metrics_and_context_for_llm = AsyncMock(
+        return_value={
+            "confidence": 0.75,
+            "density": 5,
+            "connectivity": 0.6,
+            "relevance_score": 1.0,
+            "matched_sectors": ["test"],
+            "neighbor_context": [],
+            "context_text": "Test context",
+        }
+    )
+    repo._build_single_agent_profile_from_node = AsyncMock(
+        return_value=AgentProfile(
+            discovery_type=DiscoveryType.INTENT_DRIVEN,
+            expertise_level=ExpertiseLevel.STRATEGIC,
+            identity=PersonaIdentity(name="Agent", archetype="Analyst", communication_style="factual"),
+            domain_tags=["test"],
+            description="desc",
+            detailed_perspective="perspective",
+            confidence=0.75,
+            confidence_breakdown=ConfidenceBreakdown(source_breadth=1, node_density=1, relationship_connectivity=0.5),
+            provenance=[],
+            last_updated=datetime.utcnow(),
+        )
+    )
+
+    ctx = MagicMock()
+    ctx.find_relevant_entities = AsyncMock(return_value=entities)
+
+    synth = ProfileSynthesizer(persona_repo=repo, graph_context=ctx)
+    profiles = await synth.synthesize(query="test", dataset_id="ds", max_agents=5)
+
+    assert len(profiles) == 5
+
+
+@pytest.mark.asyncio
+async def test_synthesize_returns_fewer_when_sparse():
+    """When graph is sparse, fewer than max_agents are returned.
+
+    With 4 entities: sqrt(4) * 4 = 8, capped at max_agents=5 -> returns min(5,8)=4.
+    """
+    entities = []
+    for i in range(4):
+        node = MagicMock()
+        node.id = str(uuid4())
+        node.name = f"Agent_{i}"
+        node.label = "Persona"
+        node.properties = {"name": f"Agent_{i}"}
+        node.relevance_score = 0.8
+        node.domain_tags = ["test"]
+        entities.append(node)
+
+    repo = MagicMock()
+    repo.fetch_nodes_by_names = AsyncMock(
+        return_value={f"Agent_{i}": {"name": f"Agent_{i}"} for i in range(4)}
+    )
+    repo._calculate_agent_metrics_and_context_for_llm = AsyncMock(
+        return_value={
+            "confidence": 0.75,
+            "density": 2,
+            "connectivity": 0.5,
+            "relevance_score": 0.8,
+            "matched_sectors": ["test"],
+            "neighbor_context": [],
+            "context_text": "Test",
+        }
+    )
+    repo._build_single_agent_profile_from_node = AsyncMock(
+        return_value=AgentProfile(
+            discovery_type=DiscoveryType.INTENT_DRIVEN,
+            expertise_level=ExpertiseLevel.STRATEGIC,
+            identity=PersonaIdentity(name="Agent", archetype="Analyst", communication_style="factual"),
+            domain_tags=["test"],
+            description="desc",
+            detailed_perspective="perspective",
+            confidence=0.75,
+            confidence_breakdown=ConfidenceBreakdown(source_breadth=1, node_density=1, relationship_connectivity=0.5),
+            provenance=[],
+            last_updated=datetime.utcnow(),
+        )
+    )
+
+    ctx = MagicMock()
+    ctx.find_relevant_entities = AsyncMock(return_value=entities)
+
+    synth = ProfileSynthesizer(persona_repo=repo, graph_context=ctx)
+    profiles = await synth.synthesize(query="test", dataset_id="ds", max_agents=5)
+
+    assert 0 < len(profiles) < 5
+
+
+@pytest.mark.asyncio
+async def test_synthesize_profiles_have_provenance_and_domain_tags():
+    """All returned profiles have non-empty provenance and domain_tags."""
+    entities = []
+    for i in range(3):
+        node = MagicMock()
+        node.id = str(uuid4())
+        node.name = f"Agent_{i}"
+        node.label = "Persona"
+        node.properties = {"name": f"Agent_{i}"}
+        node.relevance_score = 0.9
+        node.domain_tags = ["ethics", "healthcare"]
+        entities.append(node)
+
+    repo = MagicMock()
+    repo.fetch_nodes_by_names = AsyncMock(
+        return_value={f"Agent_{i}": {"name": f"Agent_{i}"} for i in range(3)}
+    )
+    repo._calculate_agent_metrics_and_context_for_llm = AsyncMock(
+        return_value={
+            "confidence": 0.75,
+            "density": 3,
+            "connectivity": 0.6,
+            "relevance_score": 0.9,
+            "matched_sectors": ["ethics", "healthcare"],
+            "neighbor_context": [],
+            "context_text": "Test",
+        }
+    )
+    repo._build_single_agent_profile_from_node = AsyncMock(
+        return_value=AgentProfile(
+            discovery_type=DiscoveryType.INTENT_DRIVEN,
+            expertise_level=ExpertiseLevel.STRATEGIC,
+            identity=PersonaIdentity(name="Agent", archetype="Analyst", communication_style="factual"),
+            domain_tags=["ethics", "healthcare"],
+            description="desc",
+            detailed_perspective="perspective",
+            confidence=0.75,
+            confidence_breakdown=ConfidenceBreakdown(source_breadth=2, node_density=3, relationship_connectivity=0.6),
+            provenance=[ProvenanceLink(doc_id="doc1", title="Source", breadcrumb="a>b", chunk_id=uuid4())],
+            last_updated=datetime.utcnow(),
+        )
+    )
+
+    ctx = MagicMock()
+    ctx.find_relevant_entities = AsyncMock(return_value=entities)
+
+    synth = ProfileSynthesizer(persona_repo=repo, graph_context=ctx)
+    profiles = await synth.synthesize(query="test", dataset_id="ds", max_agents=5)
+
+    assert len(profiles) == 3
+    for p in profiles:
+        assert len(p.provenance) > 0, "provenance must be non-empty"
+        assert len(p.domain_tags) > 0, "domain_tags must be non-empty"
+
+
+@pytest.mark.asyncio
+async def test_synthesize_confidence_in_valid_range():
+    """All returned profiles have confidence in [0.4, 0.95]."""
+    entities = []
+    for i in range(3):
+        node = MagicMock()
+        node.id = str(uuid4())
+        node.name = f"Agent_{i}"
+        node.label = "Persona"
+        node.properties = {"name": f"Agent_{i}"}
+        node.relevance_score = 0.8
+        node.domain_tags = ["test"]
+        entities.append(node)
+
+    repo = MagicMock()
+    repo.fetch_nodes_by_names = AsyncMock(
+        return_value={f"Agent_{i}": {"name": f"Agent_{i}"} for i in range(3)}
+    )
+    repo._calculate_agent_metrics_and_context_for_llm = AsyncMock(
+        return_value={
+            "confidence": 0.75,
+            "density": 3,
+            "connectivity": 0.6,
+            "relevance_score": 0.8,
+            "matched_sectors": ["test"],
+            "neighbor_context": [],
+            "context_text": "Test",
+        }
+    )
+
+    # Build profiles with varying confidence values
+    async def build_profile(*args, **kwargs):
+        return AgentProfile(
+            discovery_type=DiscoveryType.INTENT_DRIVEN,
+            expertise_level=ExpertiseLevel.STRATEGIC,
+            identity=PersonaIdentity(name="Agent", archetype="Analyst", communication_style="factual"),
+            domain_tags=["test"],
+            description="desc",
+            detailed_perspective="perspective",
+            confidence=0.75,
+            confidence_breakdown=ConfidenceBreakdown(source_breadth=2, node_density=3, relationship_connectivity=0.6),
+            provenance=[],
+            last_updated=datetime.utcnow(),
+        )
+
+    repo._build_single_agent_profile_from_node = AsyncMock(side_effect=build_profile)
+
+    ctx = MagicMock()
+    ctx.find_relevant_entities = AsyncMock(return_value=entities)
+
+    synth = ProfileSynthesizer(persona_repo=repo, graph_context=ctx)
+    profiles = await synth.synthesize(query="test", dataset_id="ds", max_agents=5)
+
+    for p in profiles:
+        assert 0.4 <= p.confidence <= 0.95
+
+
+@pytest.mark.asyncio
+async def test_synthesize_vector_search_called_with_query_string():
+    """find_relevant_entities is called with the raw query string, not an embedding.
+
+    The GraphContext internally calls _get_embedding(query) before vector search.
+    The synthesize method passes the raw query; this test verifies that contract.
+    """
+    ctx = MagicMock()
+    ctx.find_relevant_entities = AsyncMock(return_value=[])
+
+    repo = MagicMock()
+    repo.fetch_nodes_by_names = AsyncMock(return_value={})
+    repo._calculate_agent_metrics_and_context_for_llm = AsyncMock(
+        return_value={
+            "confidence": 0.75,
+            "density": 1,
+            "connectivity": 0.5,
+            "relevance_score": 1.0,
+            "matched_sectors": [],
+            "neighbor_context": [],
+            "context_text": "",
+        }
+    )
+    repo._build_single_agent_profile_from_node = AsyncMock(return_value=None)
+
+    synth = ProfileSynthesizer(persona_repo=repo, graph_context=ctx)
+    await synth.synthesize(query="AI ethics in healthcare policy", dataset_id="ds", max_agents=3)
+
+    ctx.find_relevant_entities.assert_called_once_with("AI ethics in healthcare policy", limit=9)
