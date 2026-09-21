@@ -121,46 +121,8 @@ class PersonaRepository:
 
 
     async def find_agent_sectors(self, llm_output: Dict[str, List[str]], dataset_id: str) -> List[Dict[str, Any]]:
-        """Hybrid context-first + vector search.
-
-        embedding_service: object exposing async `get_embedding(text) -> List[float]`.
-        Returns list of domain tag rows with relevance and evidence_nodes.
-        """
-        # 1. Prepare the Search Context
-        context_query = " ".join((llm_output.get('direct_keywords') or []) + (llm_output.get('latent_sectors') or []))
-
-        # 2. Generate Embedding for the Vector Stream (sync or async provider supported)
-        query_vector = await self._get_embedding(context_query)
-
-        async with  self._driver.session(database=self._db) as session:
-            cypher = """
-            CALL db.index.vector.queryNodes('entity_embeddings', 100, $vector)
-            YIELD node, score AS vector_score
-            WHERE coalesce(node.dataset_id, '') = $dataset_id
-
-            WITH node, vector_score
-            OPTIONAL MATCH (n) WHERE id(n) = id(node)
-            WHERE n.summary_context IS NOT NULL
-              AND any(phrase IN $context_phrases WHERE n.summary_context CONTAINS phrase)
-            WITH node, vector_score, (CASE WHEN exists(n.summary_context) THEN 1.0 ELSE 0.0 END) AS context_score
-
-                await session.run(
-                    cast(LiteralString, query),
-                    agent_name=source_name,
-                    target_name=target_name,
-                    summary=summary,
-                    round_no=round_no,
-                    dataset_id=dataset_id,
-                )
-            """
-
-            res = await session.run(cypher, vector=query_vector, context_phrases=llm_output.get('latent_sectors', []), dataset_id=dataset_id)
-            rows = await res.data()
-        # normalize rows to dicts
-        out: List[Dict[str, Any]] = []
-        for r in rows:
-            out.append({k: r.get(k) for k in r.keys()})
-        return out
+        """Deprecated: sector discovery is now handled by ProfileSynthesizer."""
+        raise NotImplementedError("use ProfileSynthesizer for sector discovery")
 
     async def _get_embedding(self, text: str, embedding_service: Any | None = None) -> List[float]:
         """Compatibility wrapper: support async and sync embedding providers.
@@ -756,7 +718,6 @@ class PersonaRepository:
 
     async def write_reaction_edge(
         self,
-        agent_name: str | None,
         source_name: str,
         target_name: str,
         relation_type: str,
