@@ -4,9 +4,11 @@ import json
 import sys
 import logging
 from pathlib import Path
-from src.logging.setup_logging import setup_logging 
+from src.logging.setup_logging import setup_logging
+from src.api.middleware import LoggingMiddleware
 from datetime import datetime
-from fastapi import FastAPI, BackgroundTasks, status
+from fastapi import FastAPI, BackgroundTasks, status, Request
+from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from typing import List, Dict, Optional, AsyncGenerator, Any, Set
 from contextlib import asynccontextmanager
@@ -86,14 +88,30 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=["http://localhost:5173", "http://localhost:3000", "http://127.0.0.1:5173"],
     allow_methods=["*"],
     allow_headers=["*"],
 )
+app.add_middleware(LoggingMiddleware)
+
+
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    """Global exception handler with correlation ID support."""
+    correlation_id = getattr(request.state, "correlation_id", "unknown")
+    logger.error(f"Unhandled exception [{correlation_id}]: {exc}", exc_info=True)
+    return JSONResponse(
+        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        content={"error": "Internal server error", "correlation_id": correlation_id},
+    )
+
 
 # Persona API (hatch personas from user query)
 from src.api.persona_api import router as persona_router
 app.include_router(persona_router)
+# Agent API
+from src.api.agent_api import router as agent_router
+app.include_router(agent_router)
 # Graph Debate API
 from src.api.graph_api import router as graph_router
 app.include_router(graph_router)
@@ -452,14 +470,72 @@ async def get_job(job_id: str):
         payload = await asyncio.to_thread(path.read_text, "utf-8")
         return json.loads(payload)
 
-    return {"job_id": job_id, "status": "failed", "stage": "not_found", "error": "job id not found"}  
-    
+    return {"job_id": job_id, "status": "failed", "stage": "not_found", "error": "job id not found"}
+
+
+@app.post("/simulate/async", status_code=status.HTTP_202_ACCEPTED)
+async def create_simulation_async(query: UserQuery):
+    """Async simulation: returns job_id for polling progress."""
+    job_id = str(uuid.uuid4())
+    run = {
+        "job_id": job_id,
+        "mode": "simulation",
+        "status": "queued",
+        "progress": 0.0,
+        "stage": "queued",
+        "error": None,
+        "result": None,
+    }
+    async with _RUNS_LOCK:
+        RUNS[job_id] = run
+        await _persist_run(job_id, run)
+
+    asyncio.create_task(_run_simulation_async(job_id, query))
+    return {"job_id": job_id, "status": "queued", "message": "Simulation job accepted."}
+
+
+async def _run_simulation_async(job_id: str, query: UserQuery) -> None:
+    """Background task to run simulation and update job status."""
+    try:
+        async with _RUNS_LOCK:
+            RUNS[job_id]["status"] = "running"
+            RUNS[job_id]["stage"] = "running"
+            RUNS[job_id]["progress"] = 0.1
+            await _persist_run(job_id, RUNS[job_id])
+
+        result = await _run_simulation_pipeline(query)
+
+        async with _RUNS_LOCK:
+            RUNS[job_id]["status"] = "completed"
+            RUNS[job_id]["stage"] = "completed"
+            RUNS[job_id]["progress"] = 1.0
+            RUNS[job_id]["result"] = result.model_dump()
+            await _persist_run(job_id, RUNS[job_id])
+    except Exception as exc:
+        async with _RUNS_LOCK:
+            RUNS[job_id]["status"] = "failed"
+            RUNS[job_id]["stage"] = "failed"
+            RUNS[job_id]["error"] = str(exc)
+            await _persist_run(job_id, RUNS[job_id])
+
+
 @app.post("/simulate", response_model=SimulationResponse)
 async def create_simulation(query: UserQuery, background_tasks: BackgroundTasks):
     """
     Main endpoint: User input -> Society opinion
     """
-    return await _run_simulation_pipeline(query)
+    max_retries = 3
+    base_delay = 1.0
+    for attempt in range(max_retries):
+        try:
+            return await _run_simulation_pipeline(query)
+        except Exception as e:
+            if attempt == max_retries - 1:
+                logger.error(f"Simulation failed after {max_retries} attempts: {e}")
+                raise
+            delay = base_delay * (2 ** attempt)
+            logger.warning(f"Simulation attempt {attempt + 1} failed: {e}. Retrying in {delay}s...")
+            await asyncio.sleep(delay)
 
 
 @app.post("/simulate/graph_debate", response_model=GraphDebateResponse)
@@ -474,6 +550,9 @@ async def create_graph_debate(request: GraphDebateQuery):
             agent_names=request.agent_names or None,
         )
         return GraphDebateResponse(**result)
+    except Exception as e:
+        logger.error(f"Graph debate failed: {e}")
+        raise
     finally:
         await simulation.close()
 
@@ -621,3 +700,13 @@ def design_society(topic: str, required_perspectives: Optional[List[str]], depth
 if __name__=="__main__":
     import uvicorn
     uvicorn.run(app, host="127.0.0.1", port=8000)
+
+
+@app.get("/health")
+async def health_check():
+    """Health check endpoint for monitoring."""
+    return {
+        "status": "healthy",
+        "version": "1.0",
+        "active_jobs": len(RUNS),
+    }
