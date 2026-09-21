@@ -109,6 +109,7 @@ class CommunicationGraph:
         self,
         agents: List[AgentNode],
         referenced_ids: List[str],
+        agents_to_add: Optional[List[AgentNode]] = None,
     ) -> List[AgentNode]:
         """
         Add agents referenced in Round 1 responses.
@@ -120,6 +121,8 @@ class CommunicationGraph:
         Args:
             agents: Current list of AgentNode instances
             referenced_ids: List of agent IDs referenced in responses
+            agents_to_add: Optional list of AgentNode instances to add.
+                           Caller should fetch these from repository based on referenced_ids.
 
         Returns:
             Expanded list of AgentNode instances (original + newly referenced)
@@ -130,12 +133,13 @@ class CommunicationGraph:
         existing_ids: Set[str] = {str(a.id) for a in agents}
         new_ids = [rid for rid in referenced_ids if rid not in existing_ids]
 
-        if not new_ids:
+        if not new_ids or not agents_to_add:
             return agents
 
-        # Return original agents unchanged - expansion handled by caller
-        # who has access to the full agent repository
-        return agents
+        # Filter agents_to_add to only include those in new_ids
+        new_agents = [a for a in agents_to_add if str(a.id) in new_ids]
+
+        return agents + new_agents
 
     def _compute_overlap(self, agent_a: AgentNode, agent_b: AgentNode) -> Set[str]:
         """Compute shared entity tags between two agents."""
