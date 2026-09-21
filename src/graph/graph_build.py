@@ -1,7 +1,8 @@
 import asyncio
 import logging
 import sys
-from typing import List
+import uuid
+from typing import List, Optional
 from src.logging.setup_logging import setup_logging
 from llama_index.core.node_parser import SentenceSplitter
 from llama_index.llms.openai_like import OpenAILike
@@ -113,7 +114,7 @@ class GraphExtractionStage:
             )
             # Implicit extractor - from node relationships(Implicit extractor adds structural relationships between nodes that LLMs don't generate)
             implicit_extractor = ImplicitPathExtractor()
-
+            
 
             llama_docs = []
             for d in documents:
@@ -158,3 +159,46 @@ class GraphExtractionStage:
         except Exception as e:
             logger.error(f"Error during graph extraction for dataset {dataset_id}: {e}")
             raise
+
+
+def extract_graph(
+    chunks: List[ProcessedChunk],
+    ontology: LocalOntology,
+    dataset_id: Optional[str] = None,
+    config: Optional[GraphConfig] = None,
+) -> int:
+    """Extract entities and relationships from chunks using ontology schema.
+
+    Args:
+        chunks: List of processed document chunks to extract from.
+        ontology: LocalOntology defining entity and relation types to extract.
+        dataset_id: Optional dataset identifier. Auto-generated if not provided.
+        config: Optional GraphConfig. Creates default if not provided.
+
+    Returns:
+        Number of documents/chunks processed.
+    """
+    if dataset_id is None:
+        dataset_id = str(uuid.uuid4())
+
+    if config is None:
+        config = GraphConfig()
+
+    stage = GraphExtractionStage(config)
+
+    # Synchronous wrapper for the async run method
+    try:
+        loop = asyncio.get_event_loop()
+        if loop.is_running():
+            # If loop is already running, create a new task
+            import concurrent.futures
+            with concurrent.futures.ThreadPoolExecutor() as executor:
+                future = executor.submit(
+                    asyncio.run, stage.run(dataset_id, chunks, ontology)
+                )
+                return future.result()
+        else:
+            return loop.run_until_complete(stage.run(dataset_id, chunks, ontology))
+    except RuntimeError:
+        # No event loop exists, create one
+        return asyncio.run(stage.run(dataset_id, chunks, ontology))
