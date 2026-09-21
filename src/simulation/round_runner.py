@@ -31,9 +31,13 @@ def _parse_response_stance(response: str, default_stance: str, default_confidenc
 def _build_system_prompt(agent: AgentProfile, opponent: AgentProfile, shared_entities: list[str]) -> str:
     domains = ", ".join(agent.domain_tags[:3])
     shared = ", ".join(shared_entities[:3]) if shared_entities else "none"
+    cb = agent.confidence_breakdown
+    provenance_summary = ", ".join([p.title for p in agent.provenance[:3]]) if agent.provenance else "none"
     return (
         f"You are {agent.identity.name}, an expert in {domains}.\n"
         f"Your perspective: {agent.detailed_perspective[:500]}\n"
+        f"Confidence breakdown: sources={cb.source_breadth}, nodes={cb.node_density}, connectivity={cb.relationship_connectivity:.2f}\n"
+        f"Provenance: {provenance_summary}\n"
         f"You share these entities with your opponent: {shared}\n"
         f"Engage genuinely with opposing viewpoints while staying true to your expertise."
     )
