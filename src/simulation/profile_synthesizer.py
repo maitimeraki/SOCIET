@@ -1,4 +1,6 @@
 """ProfileSynthesizer: Graph-backed agent profile synthesis from entity clusters."""
+import asyncio
+import inspect
 import math
 from collections import defaultdict
 from typing import Any
@@ -14,6 +16,18 @@ class ProfileSynthesizer:
     def __init__(self, persona_repo: PersonaRepository, graph_context: GraphContext):
         self._repo = persona_repo
         self._ctx = graph_context
+
+    async def _safe_provenance(self, entity_id: str) -> list:
+        """Fetch entity provenance; tolerate unconfigured/mocked contexts."""
+        try:
+            if hasattr(self._ctx, "get_provenance"):
+                result = self._ctx.get_provenance(entity_id)
+                if inspect.iscoroutine(result):
+                    result = await result
+                return list(result) if isinstance(result, (list, tuple)) else []
+        except Exception:
+            return []
+        return []
 
     async def synthesize(
         self, query: str, dataset_id: str, max_agents: int = 5
@@ -35,25 +49,60 @@ class ProfileSynthesizer:
         if not entities:
             return []
 
-        # Group entities by provenance (entities sharing same source chunks cluster together)
-        clusters: dict[str, list[EntityNode]] = defaultdict(list)
+        # Co-occurrence clustering: entities sharing source chunks cluster together.
+        # Provenance fetch bounded by search_limit = max_agents * 3.
+        prov_keys: list[tuple] = []
         for entity in entities:
-            # Use entity id as cluster key (each entity is its own cluster)
-            # Provenance-based grouping would require fetching context for each entity
-            clusters[entity.id].append(entity)
+            prov = await self._safe_provenance(entity.id)
+            doc_ids = sorted({p.doc_id for p in prov if getattr(p, "doc_id", None)})
+            if doc_ids:
+                prov_keys.append(tuple(doc_ids))
+            else:
+                # Empty provenance → unique key (preserves one-cluster-per-entity path).
+                prov_keys.append(("__solo__", entity.id))
+
+        initial: dict[tuple, list[EntityNode]] = defaultdict(list)
+        for entity, key in zip(entities, prov_keys):
+            initial[key].append(entity)
+
+        # Merge clusters sharing any doc_id.
+        # ponytail: O(n^2) pairwise union-find; n bounded by max_agents * 3 ≤ 50.
+        key_list = list(initial.keys())
+        parent = {i: i for i in range(len(key_list))}
+
+        def _find(i: int) -> int:
+            while parent[i] != i:
+                parent[i] = parent[parent[i]]
+                i = parent[i]
+            return i
+
+        for i in range(len(key_list)):
+            if "__solo__" in key_list[i]:
+                continue
+            set_i = set(key_list[i])
+            for j in range(i + 1, len(key_list)):
+                if "__solo__" in key_list[j]:
+                    continue
+                if set_i & set(key_list[j]):
+                    ri, rj = _find(i), _find(j)
+                    if ri != rj:
+                        parent[ri] = rj
+
+        clusters: dict[int, list[EntityNode]] = defaultdict(list)
+        for i, key in enumerate(key_list):
+            clusters[_find(i)].extend(initial[key])
 
         # Sort clusters by aggregate relevance score
-        cluster_scores = []
-        for cluster_id, cluster_entities in clusters.items():
-            total_relevance = sum(e.relevance_score for e in cluster_entities)
-            cluster_scores.append((cluster_id, cluster_entities, total_relevance))
-
+        cluster_scores = [
+            (cid, ents, sum(e.relevance_score for e in ents))
+            for cid, ents in clusters.items()
+        ]
         cluster_scores.sort(key=lambda x: x[2], reverse=True)
         top_clusters = cluster_scores[:target]
 
         # Build profiles for each cluster
         profiles: list[AgentProfile] = []
-        semaphore = __import__("asyncio").Semaphore(8)
+        semaphore = asyncio.Semaphore(8)
 
         async def _build_profile(
             cluster_id: str, cluster_entities: list[EntityNode]
@@ -101,7 +150,7 @@ class ProfileSynthesizer:
             _build_profile(cluster_id, cluster_entities)
             for cluster_id, cluster_entities, _ in top_clusters
         ]
-        results = await __import__("asyncio").gather(*tasks)
+        results = await asyncio.gather(*tasks)
         profiles = [p for p in results if p is not None]
 
         return profiles
