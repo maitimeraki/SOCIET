@@ -127,7 +127,7 @@ class ProfileSynthesizer:
                     e.relevance_score for e in cluster_entities
                 ) if cluster_entities else 1.0
 
-                metrics = await self._repo._calculate_agent_metrics_and_context_for_llm(
+                metrics = await self._repo.calculate_agent_metrics_and_context_for_llm(
                     agent_name=agent_name,
                     node=node,
                     sector_results=sector_results,
@@ -135,7 +135,7 @@ class ProfileSynthesizer:
                 )
 
                 # Build profile
-                return await self._repo._build_single_agent_profile_from_node(
+                return await self._repo.build_single_agent_profile_from_node(
                     agent_name=agent_name,
                     node=node,
                     user_query=query,

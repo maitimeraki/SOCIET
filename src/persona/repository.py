@@ -121,8 +121,38 @@ class PersonaRepository:
 
 
     async def find_agent_sectors(self, llm_output: Dict[str, List[str]], dataset_id: str) -> List[Dict[str, Any]]:
-        """Deprecated: sector discovery is now handled by ProfileSynthesizer."""
-        raise NotImplementedError("use ProfileSynthesizer for sector discovery")
+        """Discover agent sectors by grouping Persona nodes by domain tags.
+
+        Returns list of sector dicts with keys: domain_tag, total_relevance, evidence_nodes, density.
+        """
+        query = """
+        MATCH (n:Persona)
+        WHERE coalesce(n.dataset_id, '') = $dataset_id
+          AND size(coalesce(n.domain_tags, [])) > 0
+        UNWIND n.domain_tags AS tag
+        WITH tag, n,
+             size(n.domain_tags) AS tag_count,
+             coalesce(n.relevance_score, 0.5) AS node_relevance
+        RETURN tag AS domain_tag,
+               sum(node_relevance) AS total_relevance,
+               collect(DISTINCT n.name) AS evidence_nodes,
+               count(DISTINCT n) AS density
+        ORDER BY total_relevance DESC
+        LIMIT 20
+        """
+        async with self._driver.session(database=self._db) as session:
+            res = await session.run(query, dataset_id=dataset_id)
+            rows = await res.data()
+
+        return [
+            {
+                "domain_tag": r["domain_tag"],
+                "total_relevance": float(r["total_relevance"] or 0),
+                "evidence_nodes": r["evidence_nodes"],
+                "density": int(r["density"] or 0),
+            }
+            for r in rows
+        ]
 
     async def _get_embedding(self, text: str, embedding_service: Any | None = None) -> List[float]:
         """Compatibility wrapper: support async and sync embedding providers.
@@ -221,8 +251,8 @@ class PersonaRepository:
         async def _build_task(agent_name: str) -> AgentProfile:
             async with semaphore:
                 node = nodes_map.get(agent_name) or await self.fetch_agent_node_props(agent_name) or {"name": agent_name} # return Type: Dict[str, Any] where we fetch the node properties for the agent name, if not found we create a minimal dict with just the name to avoid None issues
-                metrics = await self._calculate_agent_metrics_and_context_for_llm(agent_name, node, sector_results or [], max_relevance=max_relevance)
-                return await self._build_single_agent_profile_from_node(
+                metrics = await self.calculate_agent_metrics_and_context_for_llm(agent_name, node, sector_results or [], max_relevance=max_relevance)
+                return await self.build_single_agent_profile_from_node(
                     agent_name=agent_name,
                     node=node,
                     user_query=user_query,
@@ -236,7 +266,7 @@ class PersonaRepository:
         profiles = await asyncio.gather(*tasks)
         return profiles
 
-    async def _build_single_agent_profile_from_node(
+    async def build_single_agent_profile_from_node(
         self,
         agent_name: str,
         node: Dict[str, Any],
@@ -342,7 +372,7 @@ class PersonaRepository:
 
         return profile
     
-    async def _calculate_agent_metrics_and_context_for_llm(
+    async def calculate_agent_metrics_and_context_for_llm(
         self,
         agent_name: str,
         node: Dict[str, Any],

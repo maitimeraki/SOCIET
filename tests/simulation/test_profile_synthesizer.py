@@ -70,7 +70,7 @@ def mock_persona_repo(mock_agent_profile):
     """Create a mock PersonaRepository."""
     repo = MagicMock()
     repo.fetch_nodes_by_names = AsyncMock(return_value={})
-    repo._calculate_agent_metrics_and_context_for_llm = AsyncMock(
+    repo.calculate_agent_metrics_and_context_for_llm = AsyncMock(
         return_value={
             "confidence": 0.75,
             "density": 5,
@@ -81,7 +81,7 @@ def mock_persona_repo(mock_agent_profile):
             "context_text": "Test context",
         }
     )
-    repo._build_single_agent_profile_from_node = AsyncMock(
+    repo.build_single_agent_profile_from_node = AsyncMock(
         return_value=mock_agent_profile
     )
     return repo
@@ -147,10 +147,10 @@ async def test_synthesize_calls_repo_methods(synthesizer, mock_persona_repo):
     assert mock_persona_repo.fetch_nodes_by_names.called
 
     # Verify metrics calculation was called
-    assert mock_persona_repo._calculate_agent_metrics_and_context_for_llm.called
+    assert mock_persona_repo.calculate_agent_metrics_and_context_for_llm.called
 
     # Verify profile building was called
-    assert mock_persona_repo._build_single_agent_profile_from_node.called
+    assert mock_persona_repo.build_single_agent_profile_from_node.called
 
 
 @pytest.mark.asyncio
@@ -219,7 +219,7 @@ async def test_synthesize_returns_exactly_target_profiles():
     repo.fetch_nodes_by_names = AsyncMock(
         return_value={f"Agent_{i}": {"name": f"Agent_{i}"} for i in range(9)}
     )
-    repo._calculate_agent_metrics_and_context_for_llm = AsyncMock(
+    repo.calculate_agent_metrics_and_context_for_llm = AsyncMock(
         return_value={
             "confidence": 0.75,
             "density": 5,
@@ -230,7 +230,7 @@ async def test_synthesize_returns_exactly_target_profiles():
             "context_text": "Test context",
         }
     )
-    repo._build_single_agent_profile_from_node = AsyncMock(
+    repo.build_single_agent_profile_from_node = AsyncMock(
         return_value=AgentProfile(
             discovery_type=DiscoveryType.INTENT_DRIVEN,
             expertise_level=ExpertiseLevel.STRATEGIC,
@@ -275,7 +275,7 @@ async def test_synthesize_returns_fewer_when_sparse():
     repo.fetch_nodes_by_names = AsyncMock(
         return_value={f"Agent_{i}": {"name": f"Agent_{i}"} for i in range(4)}
     )
-    repo._calculate_agent_metrics_and_context_for_llm = AsyncMock(
+    repo.calculate_agent_metrics_and_context_for_llm = AsyncMock(
         return_value={
             "confidence": 0.75,
             "density": 2,
@@ -286,7 +286,7 @@ async def test_synthesize_returns_fewer_when_sparse():
             "context_text": "Test",
         }
     )
-    repo._build_single_agent_profile_from_node = AsyncMock(
+    repo.build_single_agent_profile_from_node = AsyncMock(
         return_value=AgentProfile(
             discovery_type=DiscoveryType.INTENT_DRIVEN,
             expertise_level=ExpertiseLevel.STRATEGIC,
@@ -328,7 +328,7 @@ async def test_synthesize_profiles_have_provenance_and_domain_tags():
     repo.fetch_nodes_by_names = AsyncMock(
         return_value={f"Agent_{i}": {"name": f"Agent_{i}"} for i in range(3)}
     )
-    repo._calculate_agent_metrics_and_context_for_llm = AsyncMock(
+    repo.calculate_agent_metrics_and_context_for_llm = AsyncMock(
         return_value={
             "confidence": 0.75,
             "density": 3,
@@ -339,7 +339,7 @@ async def test_synthesize_profiles_have_provenance_and_domain_tags():
             "context_text": "Test",
         }
     )
-    repo._build_single_agent_profile_from_node = AsyncMock(
+    repo.build_single_agent_profile_from_node = AsyncMock(
         return_value=AgentProfile(
             discovery_type=DiscoveryType.INTENT_DRIVEN,
             expertise_level=ExpertiseLevel.STRATEGIC,
@@ -384,7 +384,7 @@ async def test_synthesize_confidence_in_valid_range():
     repo.fetch_nodes_by_names = AsyncMock(
         return_value={f"Agent_{i}": {"name": f"Agent_{i}"} for i in range(3)}
     )
-    repo._calculate_agent_metrics_and_context_for_llm = AsyncMock(
+    repo.calculate_agent_metrics_and_context_for_llm = AsyncMock(
         return_value={
             "confidence": 0.75,
             "density": 3,
@@ -411,7 +411,7 @@ async def test_synthesize_confidence_in_valid_range():
             last_updated=datetime.utcnow(),
         )
 
-    repo._build_single_agent_profile_from_node = AsyncMock(side_effect=build_profile)
+    repo.build_single_agent_profile_from_node = AsyncMock(side_effect=build_profile)
 
     ctx = MagicMock()
     ctx.find_relevant_entities = AsyncMock(return_value=entities)
@@ -435,7 +435,7 @@ async def test_synthesize_vector_search_called_with_query_string():
 
     repo = MagicMock()
     repo.fetch_nodes_by_names = AsyncMock(return_value={})
-    repo._calculate_agent_metrics_and_context_for_llm = AsyncMock(
+    repo.calculate_agent_metrics_and_context_for_llm = AsyncMock(
         return_value={
             "confidence": 0.75,
             "density": 1,
@@ -446,7 +446,7 @@ async def test_synthesize_vector_search_called_with_query_string():
             "context_text": "",
         }
     )
-    repo._build_single_agent_profile_from_node = AsyncMock(return_value=None)
+    repo.build_single_agent_profile_from_node = AsyncMock(return_value=None)
 
     synth = ProfileSynthesizer(persona_repo=repo, graph_context=ctx)
     await synth.synthesize(query="AI ethics in healthcare policy", dataset_id="ds", max_agents=3)
