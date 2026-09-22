@@ -11,3 +11,14 @@ __pycache__/
 .env/
 *.sqlite3
 .qodo
+graphify-out/
+.continue
+.graphify_detect.json
+.graphify_python
+agent_profiles.*md
+output*.md
+plan.*
+docs/
+*.txt
+runtime/
+.claude/
