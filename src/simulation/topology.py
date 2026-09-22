@@ -5,6 +5,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, List
+from src.simulation.communication_graph import CommPair
 
 if TYPE_CHECKING:
     from neo4j import AsyncGraphDatabase
@@ -12,14 +13,6 @@ if TYPE_CHECKING:
     from src.simulation.debate_config import DebateConfig
 
 
-@dataclass
-class CommPair:
-    """A communication pair between two agents."""
-    agent_a: str
-    agent_b: str
-    shared_entities: List[str] = field(default_factory=list)
-    evidence: List[str] = field(default_factory=list)
-    score: float = 0.0
 
 
 class CommunicationTopology:

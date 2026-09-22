@@ -19,6 +19,7 @@ class CommPair:
     agent_b: str  # agent ID
     shared_entities: List[str] = field(default_factory=list)
     evidence: List[str] = field(default_factory=list)
+    score: float = 0.0  # topology-derived pair quality score
 
 
 class CommunicationGraph:
