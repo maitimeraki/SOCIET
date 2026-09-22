@@ -58,7 +58,7 @@ logger = setup_logging()  # Ensure logging is configured with handler clearing t
 async def lifespan(app: FastAPI)-> AsyncGenerator[None, None]:
     """Startup and shutdown events for the API server"""
     # 1. Setup: Everything before 'yield' runs on STARTUP
-    print("Starting up API server...")
+    logger.info("Starting up API server...")
     client = global_llm_client  # Use the global client instance
     # Test LLM connectivity, warm up caches, etc.
     try:
@@ -70,10 +70,10 @@ async def lifespan(app: FastAPI)-> AsyncGenerator[None, None]:
             temperature=0.7
         )
         if test:
-            print(f"✅ LLM connected: {get_llm_config().default_llm_provider}")
+            logger.info(f"LLM connected: {get_llm_config().default_llm_provider}")
         
     except Exception as e:
-        print(f"LLM connectivity test failed: {e}")
+        logger.exception(f"LLM connectivity test failed: {e}")
         raise RuntimeError("LLM provider is not reachable. Check configuration.")
 
     yield # The app runs while it's paused here
