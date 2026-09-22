@@ -4,22 +4,12 @@ Entity overlap determines communication eligibility — no broadcast.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass, field
 from typing import List, Set, Optional
 from itertools import combinations
 
 from src.simulation.agent_node import AgentNode
 from src.simulation.debate_config import DebateConfig
-
-
-@dataclass
-class CommPair:
-    """A communication pair between two agents."""
-    agent_a: str  # agent ID
-    agent_b: str  # agent ID
-    shared_entities: List[str] = field(default_factory=list)
-    evidence: List[str] = field(default_factory=list)
-    score: float = 0.0  # topology-derived pair quality score
+from src.simulation.pair_turn import CommPair as CommPair  # noqa: F401, E402
 
 
 class CommunicationGraph:
