@@ -1,7 +1,10 @@
 """VerdictSynthesizer: cluster-weighted CIOR synthesis for debate verdicts."""
 from __future__ import annotations
 
+import asyncio
+import logging
 from typing import TYPE_CHECKING
+
 from src.simulation.pair_turn import (
     RoundResult,
     DebateVerdict,
@@ -12,6 +15,10 @@ from src.simulation.agent_node import Stance
 
 if TYPE_CHECKING:
     from src.llm.client import LLMClient
+
+logger = logging.getLogger(__name__)
+
+SUMMARY_MAX_CHARS = 600
 
 
 class VerdictSynthesizer:
@@ -123,6 +130,19 @@ class VerdictSynthesizer:
             f"{overall_stance.value} stance. Confidence score: {confidence_score:.2f}."
         )
 
+        if llm_client is not None:
+            llm_summary = _call_llm_summary_sync(
+                llm_client=llm_client,
+                overall_stance=overall_stance,
+                confidence_score=confidence_score,
+                dominant_count=dominant_count,
+                total_turns=len(all_turns),
+                supporting=supporting[:5],
+                opposing=opposing[:5],
+            )
+            if llm_summary:
+                summary = llm_summary
+
         return DebateVerdict(
             overall_stance=overall_stance,
             confidence_score=confidence_score,
@@ -176,3 +196,46 @@ class VerdictSynthesizer:
                     cluster_weight += turn.confidence * 0.5
             weights[stance] = cluster_weight
         return weights
+
+
+def _call_llm_summary_sync(
+    *,
+    llm_client: "LLMClient",
+    overall_stance: Stance,
+    confidence_score: float,
+    dominant_count: int,
+    total_turns: int,
+    supporting: list[str],
+    opposing: list[str],
+) -> str | None:
+    """Bridge the async LLMClient.generate into the sync synthesize path.
+
+    Falls back to template (returns None) on any failure. Sync callers running
+    inside an active event loop will surface a RuntimeError; the orchestrator
+    currently passes llm_client=None so it does not hit this branch.
+    """
+    system_prompt = (
+        "You are a neutral debate summarizer. Produce a concise verdict "
+        "summary from the aggregate statistics below. Keep it under 600 chars."
+    )
+    user_prompt = (
+        f"Overall stance: {overall_stance.value}\n"
+        f"Confidence score: {confidence_score:.2f}\n"
+        f"Dominant turns: {dominant_count} of {total_turns}\n"
+        f"Top supporting entities: {supporting}\n"
+        f"Top opposing entities: {opposing}"
+    )
+    try:
+        raw = asyncio.run(
+            llm_client.generate(
+                system_prompt=system_prompt,
+                user_prompt=user_prompt,
+                temperature=0.3,
+            )
+        )
+    except Exception:
+        logger.exception("LLM summary generation failed; using template")
+        return None
+    if not raw:
+        return None
+    return raw.strip()[:SUMMARY_MAX_CHARS]
