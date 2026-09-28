@@ -501,6 +501,39 @@ async def test_activation_pulls_in_candidates_after_commit():
 
 
 @pytest.mark.asyncio
+async def test_no_activation_event_when_no_candidate_resolves():
+    """Candidates found but none resolvable → roster unchanged, so nothing was activated."""
+    synth = AsyncMock(spec=ProfileSynthesizer)
+    topo = AsyncMock(spec=CommunicationTopology)
+    society_memory = AsyncMock(spec=SocietyMemory)
+    society_memory.commit_round.return_value = _ok_receipt()
+    synth.synthesize.return_value = [_make_profile(1, "Alice")]
+    synth.synthesize_from_names = AsyncMock(return_value=[])
+    topo.compute_round_pairs.side_effect = lambda *a, **kw: [
+        CommPair(agent_a="Alice", agent_b="Bob", shared_entities=[], score=0.5)
+    ]
+    topo.find_activation_candidates = AsyncMock(return_value=[
+        ActivationCandidate(agent_name="Carl", shared_entities=["carbon"], reason="mentioned entity in the debate")
+    ])
+    llm_runner = MagicMock(spec=BatchedLLMRunner)
+    llm_runner.gather = MagicMock(side_effect=lambda *a, **kw: _AsyncEmptyIter())
+    verdict_synth = MagicMock(spec=VerdictSynthesizer)
+    verdict_synth.synthesize.return_value = _make_verdict()
+
+    ws_calls = []
+
+    async def ws(msg):
+        ws_calls.append(msg)
+
+    orch = _orch(synth, topo, society_memory, verdict_synth, llm_runner)
+    result = await orch.run("q", "ds1", DebateConfig(max_agents=5, max_rounds=1), ws)
+
+    synth.synthesize_from_names.assert_awaited_once()
+    assert not any(m.get("type") == "activation" for m in ws_calls)
+    assert not any("activated" in w for w in result.warnings)
+
+
+@pytest.mark.asyncio
 async def test_activation_disabled_by_config():
     synth = AsyncMock(spec=ProfileSynthesizer)
     topo = AsyncMock(spec=CommunicationTopology)

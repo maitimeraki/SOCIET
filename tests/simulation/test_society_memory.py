@@ -85,6 +85,9 @@ async def test_commit_round_writes_opinions_and_round_keyed_edges():
     assert any("STATED" in q for q in queries)
     rx = next(q for q in queries if "REACTED_TO" in q)
     assert "round_no: r.round_no" in rx          # round-keyed MERGE — no overwrite across rounds
+    assert "query_hash: $query_hash" in rx       # ...and query-keyed — no overwrite across debates
+    rx_params = next(kw for (q, kw) in session.calls if "REACTED_TO" in q)
+    assert rx_params["query_hash"] == "qh1"
     assert any("current_stance" in q for q in queries)
     # weight math: 0.8 * 0.5 * (1 + 0) / 2 = 0.2
     _, params = session.calls[0]
@@ -130,12 +133,17 @@ async def test_read_snapshot_maps_rows_and_buzz():
             return FakeResult(rows)
 
     driver = MagicMock()
-    driver.session.return_value = TwoStageSession()
+    sess = TwoStageSession()
+    driver.session.return_value = sess
     svc = SocietyMemory(driver, "db")
     snap = await svc.read_snapshot("ds1", "qh1", through_round=2, top_k=8)
     assert snap.round == 2
     assert [e["agent"] for e in snap.entries] == ["Alice", "Bob"]  # weight-desc order preserved
     assert snap.neighbor_map == {"Alice": ["Bob"]}
+    # REACTED_TO neighbours are narrowed to this debate; OPPOSES/SUPPORTS stay static
+    nq, nparams = next((q, kw) for (q, kw) in sess.calls if "OPPOSES|SUPPORTS" in q)
+    assert "type(r) <> 'REACTED_TO' OR r.query_hash = $query_hash" in nq
+    assert nparams["query_hash"] == "qh1"
     assert snap.buzz == [{"entity": "carbon", "mentions": 2}]
     assert snap.version == "r2:2"
     assert snap.to_prompt(speaker="Alice", opponent="Bob") != ""

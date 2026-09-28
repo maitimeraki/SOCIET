@@ -25,7 +25,7 @@ LAYER 1: User Interface (React dashboard, API, CLI)
 ### Data Flow
 
 ```
-User Input → parse_scenario() → design_society() → recruit_agents()
+User Input → POST /simulate/debate → DebateOrchestrator → ProfileSynthesizer.synthesize()
     ↓
 Debate Loop (per round):
     SocietyMemory.read_snapshot() → SocietySnapshot → prompt society state (round ≥ 2)

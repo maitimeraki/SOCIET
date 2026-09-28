@@ -43,6 +43,13 @@ def test_parse_stance_negative():
     assert stance == "NEGATIVE"
 
 
+def test_parse_stance_negative_markers_beat_positive_substrings():
+    """`disagree` contains `agree`; a positive-first check reads disagreement as POSITIVE."""
+    assert _parse_response_stance("I disagree with Bob about carbon pricing.", "NEUTRAL", 0.5)[0] == "NEGATIVE"
+    assert _parse_response_stance("I do not agree with the proposal.", "NEUTRAL", 0.5)[0] == "NEGATIVE"
+    assert _parse_response_stance("I support this proposal.", "NEUTRAL", 0.5)[0] == "POSITIVE"
+
+
 def test_parse_stance_neutral():
     stance, _ = _parse_response_stance("This is a balanced view with both pros and cons", "POSITIVE", 0.5)
     assert stance == "NEUTRAL"

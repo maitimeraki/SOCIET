@@ -188,17 +188,21 @@ class DebateOrchestrator:
                                     for c in candidates
                                 },
                             )
-                            profiles.extend(new_profiles)
-                            await ws_broadcast({
-                                "type": "activation",
-                                "round": round_num,
-                                "agents": [p.identity.name for p in new_profiles],
-                                "reasons": {c.agent_name: c.reason for c in candidates},
-                            })
-                            warnings.append(
-                                f"Round {round_num}: activated {len(new_profiles)} agents: "
-                                + ", ".join(p.identity.name for p in new_profiles)
-                            )
+                            # Every candidate may be unresolvable (synthesize_from_names
+                            # returns []): then the roster did not grow, so no activation
+                            # event and no warning — nothing was activated.
+                            if new_profiles:
+                                profiles.extend(new_profiles)
+                                await ws_broadcast({
+                                    "type": "activation",
+                                    "round": round_num,
+                                    "agents": [p.identity.name for p in new_profiles],
+                                    "reasons": {c.agent_name: c.reason for c in candidates},
+                                })
+                                warnings.append(
+                                    f"Round {round_num}: activated {len(new_profiles)} agents: "
+                                    + ", ".join(p.identity.name for p in new_profiles)
+                                )
                     except Exception as exc:
                         warnings.append(f"Round {round_num}: activation failed: {exc}")
 

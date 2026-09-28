@@ -16,10 +16,14 @@ def _parse_response_stance(
     confidence = default_confidence
     response_lower = response.lower()
 
-    if any(word in response_lower for word in ["support", "agree", "favor", "endorse", "positive"]):
-        stance = "POSITIVE"
-    elif any(word in response_lower for word in ["oppose", "disagree", "reject", "against", "negative"]):
+    # Negative markers first: "disagree" contains "agree", and "do not agree" contains
+    # "agree" too, so a positive-first test reads a disagreement as POSITIVE. `not agree`
+    # catches the negated-affirmative phrasing a bare "disagree" misses.
+    if any(word in response_lower for word in
+           ["oppose", "disagree", "not agree", "reject", "against", "negative"]):
         stance = "NEGATIVE"
+    elif any(word in response_lower for word in ["support", "agree", "favor", "endorse", "positive"]):
+        stance = "POSITIVE"
     elif any(word in response_lower for word in ["neutral", "balanced", "both", "neither"]):
         stance = "NEUTRAL"
 

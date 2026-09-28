@@ -3,8 +3,8 @@
 Round-barrier protocol: every agent's statements land in the graph the moment
 its round ends; every round >= 2 reads the committed society state back before
 speaking. Idempotent: Opinion writes MERGE on (dataset_id, query_hash, round_no,
-agent_name); REACTED_TO reactions MERGE on (dataset_id, round_no) between
-dataset-scoped Personas. Re-running any round is safe.
+agent_name); REACTED_TO reactions MERGE on (dataset_id, query_hash, round_no)
+between dataset-scoped Personas. Re-running any round is safe.
 """
 from __future__ import annotations
 
@@ -49,7 +49,8 @@ _REACTION_CYPHER = """
 UNWIND $reactions AS r
 MATCH (a:Persona {name: r.speaker_name, dataset_id: $dataset_id})
 MATCH (b:Persona {name: r.target_name, dataset_id: $dataset_id})
-MERGE (a)-[x:REACTED_TO {dataset_id: $dataset_id, round_no: r.round_no}]->(b)
+MERGE (a)-[x:REACTED_TO {dataset_id: $dataset_id, query_hash: $query_hash,
+                          round_no: r.round_no}]->(b)
 SET x.summary = left(r.summary, 300), x.stance = r.stance, x.confidence = r.confidence
 """
 
@@ -126,9 +127,9 @@ class SocietyMemory:
             turns_by_agent.setdefault(turn.agent_name, []).append(turn)
 
         # Reactions are pair relations, so they come from the pair loop — but keyed
-        # by (speaker, target): REACTED_TO MERGEs on (dataset_id, round_no) between the
-        # same two Personas, so a repeated CommPair yields one edge, not two. Last turn
-        # wins, matching the Opinion stance/confidence below.
+        # by (speaker, target): REACTED_TO MERGEs on (dataset_id, query_hash, round_no)
+        # between the same two Personas, so a repeated CommPair yields one edge, not
+        # two. Last turn wins, matching the Opinion stance/confidence below.
         reactions_by_key: Dict[tuple, dict] = {}
         for pair in round_result.pairs:
             for turn in round_result.turns:
@@ -185,7 +186,8 @@ class SocietyMemory:
                 tx = await session.begin_transaction()
                 await tx.run(_OPINION_CYPHER, opinions=opinions,
                              dataset_id=dataset_id, query_hash=query_hash)
-                await tx.run(_REACTION_CYPHER, reactions=reactions, dataset_id=dataset_id)
+                await tx.run(_REACTION_CYPHER, reactions=reactions,
+                             dataset_id=dataset_id, query_hash=query_hash)
                 if mention_rows:
                     await tx.run(_MENTIONS_CYPHER, rows=mention_rows,
                                  dataset_id=dataset_id, query_hash=query_hash)
@@ -211,10 +213,14 @@ class SocietyMemory:
                o.confidence AS confidence, o.weight AS weight,
                left(o.text, 150) AS summary, o.entities AS entities
         """
+        # OPPOSES/SUPPORTS are static graph edges (not round- or query-keyed), so only
+        # the REACTED_TO arm is narrowed to this debate; otherwise a [directly
+        # connected to you] marker could come from an unrelated debate on the dataset.
         neighbor_q = """
         MATCH (p:Persona)-[r:OPPOSES|SUPPORTS|REACTED_TO]-(q:Persona)
         WHERE coalesce(p.dataset_id, '') = $dataset_id
           AND coalesce(q.dataset_id, '') = $dataset_id
+          AND (type(r) <> 'REACTED_TO' OR r.query_hash = $query_hash)
         RETURN p.name AS src, collect(DISTINCT q.name) AS neighbors
         """
         async with self._driver.session(database=self._db) as session:
@@ -222,7 +228,9 @@ class SocietyMemory:
                 opinion_q, dataset_id=dataset_id, query_hash=query_hash,
                 through_round=through_round, cap=cap,
             )).data()
-            n_rows = await (await session.run(neighbor_q, dataset_id=dataset_id)).data()
+            n_rows = await (await session.run(
+                neighbor_q, dataset_id=dataset_id, query_hash=query_hash,
+            )).data()
 
         counts: Counter = Counter()
         for r in rows:
