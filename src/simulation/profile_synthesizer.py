@@ -5,13 +5,13 @@ import math
 from collections import defaultdict
 from typing import Any
 
+from src.persona.agent import Agent
 from src.persona.graph_context import GraphContext, EntityNode
-from src.persona.models_persona import AgentProfile
 from src.persona.repository import PersonaRepository
 
 
 class ProfileSynthesizer:
-    """Synthesizes AgentProfiles from graph entity clusters using sector discovery."""
+    """Synthesizes canonical Agents from graph entity clusters."""
 
     def __init__(self, persona_repo: PersonaRepository, graph_context: GraphContext):
         self._repo = persona_repo
@@ -31,14 +31,14 @@ class ProfileSynthesizer:
 
     async def synthesize(
         self, query: str, dataset_id: str, max_agents: int = 5
-    ) -> list[AgentProfile]:
+    ) -> list[Agent]:
         """Synthesize agent profiles from relevant graph entities.
 
         1. Vector-search entities by query
         2. Group entities by shared chunk provenance (co-occurrence clustering)
         3. Sort clusters by aggregate relevance
         4. Take top clusters (adaptive count)
-        5. Build AgentProfile for each cluster representative
+        5. Build Agent for each cluster representative
         """
         # Adaptive target: sqrt(n) * 4, capped at max_agents
         search_limit = max_agents * 3
@@ -101,12 +101,12 @@ class ProfileSynthesizer:
         top_clusters = cluster_scores[:target]
 
         # Build profiles for each cluster
-        profiles: list[AgentProfile] = []
+        profiles: list[Agent] = []
         semaphore = asyncio.Semaphore(8)
 
         async def _build_profile(
             cluster_id: str, cluster_entities: list[EntityNode]
-        ) -> AgentProfile | None:
+        ) -> Agent | None:
             async with semaphore:
                 # Use the most relevant entity in the cluster as representative
                 representative = max(cluster_entities, key=lambda e: e.relevance_score)
@@ -154,6 +154,47 @@ class ProfileSynthesizer:
         profiles = [p for p in results if p is not None]
 
         return profiles
+
+    async def synthesize_from_names(
+        self,
+        names: list[str],
+        query: str,
+        dataset_id: str,
+        relevance_by_name: dict[str, float] | None = None,
+    ) -> list[Agent]:
+        """Build full Agent profiles for explicitly-named graph Personas.
+
+        Activation path: candidates surfaced by topology are converted through
+        the same repository pipeline as query-driven synthesis, minus clustering.
+        """
+        if not names:
+            return []
+        relevant = {str(k): float(v) for k, v in (relevance_by_name or {}).items()}
+        semaphore = asyncio.Semaphore(8)
+
+        async def _build(name: str) -> Agent | None:
+            async with semaphore:
+                nodes_map = await self._repo.fetch_nodes_by_names([name])
+                node = nodes_map.get(name) or {"name": name}
+                relevance = max(0.05, min(1.0, relevant.get(name, 0.33)))
+                domain_tags = node.get("domain_tags") if isinstance(node, dict) else getattr(node, "domain_tags", []) or []
+                first_tag = (domain_tags[0] if domain_tags else None) or "general"
+                sector_results = [{
+                    "domain_tag": first_tag,
+                    "total_relevance": relevance,
+                    "evidence_nodes": [name],
+                    "density": 1,
+                }]
+                metrics = await self._repo.calculate_agent_metrics_and_context_for_llm(
+                    agent_name=name, node=node, sector_results=sector_results, max_relevance=1.0,
+                )
+                return await self._repo.build_single_agent_profile_from_node(
+                    agent_name=name, node=node, user_query=query, dataset_id=dataset_id,
+                    agent_metrics=metrics, sector_results=sector_results, llm_output=None,
+                )
+
+        results = await asyncio.gather(*(_build(n) for n in names))
+        return [p for p in results if p is not None]
 
     def _build_sector_results_from_cluster(
         self, cluster_entities: list[EntityNode]

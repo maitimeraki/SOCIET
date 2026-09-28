@@ -452,3 +452,51 @@ async def test_synthesize_vector_search_called_with_query_string():
     await synth.synthesize(query="AI ethics in healthcare policy", dataset_id="ds", max_agents=3)
 
     ctx.find_relevant_entities.assert_called_once_with("AI ethics in healthcare policy", limit=9)
+
+
+"""Tests for ProfileSynthesizer.synthesize_from_names (activation path)."""
+import pytest
+from unittest.mock import AsyncMock, MagicMock
+
+from src.simulation.profile_synthesizer import ProfileSynthesizer
+
+
+@pytest.fixture
+def repo():
+    repo = AsyncMock()
+    repo.fetch_nodes_by_names = AsyncMock(return_value={
+        "Carl": {"name": "Carl", "domain_tags": ["regulation"], "confidence": 0.7},
+    })
+    repo.calculate_agent_metrics_and_context_for_llm = AsyncMock(return_value={"confidence": 0.7})
+    repo.build_single_agent_profile_from_node = AsyncMock(side_effect=lambda **kw: MagicMock(name=kw["agent_name"]))
+    return repo
+
+
+@pytest.fixture
+def synth(repo):
+    return ProfileSynthesizer(repo, MagicMock())
+
+
+@pytest.mark.asyncio
+async def test_synthesize_from_names_builds_via_repo_pipeline(repo, synth):
+    profiles = await synth.synthesize_from_names(["Carl"], "query", "ds1", {"Carl": 0.5})
+    assert len(profiles) == 1
+    repo.fetch_nodes_by_names.assert_awaited_with(["Carl"])
+    kwargs = repo.build_single_agent_profile_from_node.await_args.kwargs
+    assert kwargs["agent_name"] == "Carl" and kwargs["dataset_id"] == "ds1"
+    metrics_kw = repo.calculate_agent_metrics_and_context_for_llm.await_args.kwargs
+    assert metrics_kw["max_relevance"] == 1.0
+    assert metrics_kw["sector_results"][0]["total_relevance"] == 0.5
+
+
+@pytest.mark.asyncio
+async def test_synthesize_from_names_skips_unresolvable(repo, synth):
+    repo.build_single_agent_profile_from_node = AsyncMock(return_value=None)
+    profiles = await synth.synthesize_from_names(["Ghost"], "q", "ds")
+    assert profiles == []
+
+
+@pytest.mark.asyncio
+async def test_synthesize_from_names_empty_names(repo, synth):
+    assert await synth.synthesize_from_names([], "q", "ds") == []
+    repo.fetch_nodes_by_names.assert_not_awaited()
