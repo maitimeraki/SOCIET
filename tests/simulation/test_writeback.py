@@ -4,7 +4,7 @@ from unittest.mock import MagicMock
 
 from src.simulation.writeback import WriteBackService
 from src.simulation.pair_turn import AgentTurn, RoundResult
-from src.simulation.communication_graph import CommPair
+from src.simulation.pair_turn import CommPair
 
 
 def _make_turn(agent_id, agent_name, content='test', stance='POS', confidence=0.8):
@@ -48,7 +48,7 @@ class TestWriteBackServiceParams:
             _make_turn('a1', 'Alice', 'Alice says hi', stance='POS'),
             _make_turn('b1', 'Bob', 'Bob says hi', stance='NEG'),
         ]
-        pairs = [CommPair(agent_a='a1', agent_b='b1')]
+        pairs = [CommPair(agent_a='Alice', agent_b='Bob')]
         rounds = [_make_round(1, turns, pairs)]
 
         await svc.persist_round_turns(rounds, 'ds_001')
@@ -87,8 +87,8 @@ class TestWriteBackServiceParams:
         turns1 = [_make_turn('a1', 'Alice', 'r1'), _make_turn('b1', 'Bob', 'r1')]
         turns2 = [_make_turn('a1', 'Alice', 'r2'), _make_turn('b1', 'Bob', 'r2')]
         rounds = [
-            _make_round(1, turns1, [CommPair(agent_a='a1', agent_b='b1')]),
-            _make_round(2, turns2, [CommPair(agent_a='a1', agent_b='b1')]),
+            _make_round(1, turns1, [CommPair(agent_a='Alice', agent_b='Bob')]),
+            _make_round(2, turns2, [CommPair(agent_a='Alice', agent_b='Bob')]),
         ]
 
         await svc.persist_round_turns(rounds, 'ds_001')
@@ -109,8 +109,8 @@ class TestWriteBackServiceParams:
             _make_turn('y', 'Dana', 'dana content'),
         ]
         rounds = [
-            _make_round(1, turns, [CommPair(agent_a='x', agent_b='y')]),
-            _make_round(2, turns, [CommPair(agent_a='y', agent_b='x')]),
+            _make_round(1, turns, [CommPair(agent_a='Charlie', agent_b='Dana')]),
+            _make_round(2, turns, [CommPair(agent_a='Dana', agent_b='Charlie')]),
         ]
 
         await svc.persist_round_turns(rounds, 'ds')
@@ -132,7 +132,7 @@ class TestWriteBackServiceParams:
 
         svc = WriteBackService(mock_driver, 'db')
         turns = [_make_turn('z', 'Zara', 'z self-talks')]
-        rounds = [_make_round(1, turns, [CommPair(agent_a='z', agent_b='z')])]
+        rounds = [_make_round(1, turns, [CommPair(agent_a='Zara', agent_b='Zara')])]
 
         await svc.persist_round_turns(rounds, 'ds')
 
@@ -151,7 +151,7 @@ class TestErrorIsolation:
 
         svc = WriteBackService(mock_driver, 'db')
         turns = [_make_turn('a', 'A', 'a'), _make_turn('b', 'B', 'b')]
-        rounds = [_make_round(1, turns, [CommPair(agent_a='a', agent_b='b')])]
+        rounds = [_make_round(1, turns, [CommPair(agent_a='A', agent_b='B')])]
 
         # Must not raise
         await svc.persist_round_turns(rounds, 'ds')
@@ -176,9 +176,9 @@ class TestErrorIsolation:
         svc = WriteBackService(mock_driver, 'db')
         turns = [_make_turn('a', 'A', 'a'), _make_turn('b', 'B', 'b')]
         rounds = [
-            _make_round(1, turns, [CommPair(agent_a='a', agent_b='b')]),
-            _make_round(2, turns, [CommPair(agent_a='a', agent_b='b')]),
-            _make_round(3, turns, [CommPair(agent_a='a', agent_b='b')]),
+            _make_round(1, turns, [CommPair(agent_a='A', agent_b='B')]),
+            _make_round(2, turns, [CommPair(agent_a='A', agent_b='B')]),
+            _make_round(3, turns, [CommPair(agent_a='A', agent_b='B')]),
         ]
 
         await svc.persist_round_turns(rounds, 'ds')
@@ -193,21 +193,3 @@ class TestErrorIsolation:
         svc = WriteBackService(mock_driver, 'db')
         await svc.persist_round_turns([], 'ds')
         mock_driver.session.assert_not_called()
-
-
-class TestResolveTargetName:
-    """Unit tests for _resolve_target_name."""
-
-    def test_resolves_existing(self):
-        turns = [_make_turn('id1', 'Alice'), _make_turn('id2', 'Bob')]
-        result = WriteBackService._resolve_target_name('id2', turns)
-        assert result == 'Bob'
-
-    def test_missing_id_returns_none(self):
-        turns = [_make_turn('id1', 'Alice')]
-        result = WriteBackService._resolve_target_name('unknown', turns)
-        assert result is None
-
-    def test_empty_turns_returns_none(self):
-        result = WriteBackService._resolve_target_name('any', [])
-        assert result is None

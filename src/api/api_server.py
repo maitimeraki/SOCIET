@@ -6,8 +6,7 @@ import logging
 from pathlib import Path
 from src.logging.setup_logging import setup_logging
 from src.api.middleware import LoggingMiddleware
-from datetime import datetime
-from fastapi import FastAPI, BackgroundTasks, status, Request
+from fastapi import FastAPI, BackgroundTasks, HTTPException, status, Request
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from typing import List, Dict, Optional, AsyncGenerator, Any, Set
@@ -23,21 +22,14 @@ from src.api.config_api import (
     JobMode,
     ChunkProgress,
     UnifiedJobResult,
-    GraphDebateQuery,
-    GraphDebateResponse,
 )
 from src.graph.config_graph import GraphConfig
 from src.graph.models_graph import GlobalInputDocument, ProcessedChunk
 from src.graph.ontology import OntologyDiscoveryStage
 from src.graph.graph_build import GraphExtractionStage
 from src.graph.normalization import GraphNormalizationStage
-from src.simulation.simulation_engine import SimulationSociety
-from src.simulation.graph_debate_engine import GraphDebateSimulation
-from src.simulation.world_state import SharedWorldState, MessageBus
-from src.simulation.config_world import WorldEvent
 from src.llm.client import global_llm_client
 from src.llm.config_llm import get_llm_config
-from llama_index.llms.ollama import Ollama
 from src.utils.chunkProcessor import ChunkProcessor
 
 # Configure basic logging
@@ -56,27 +48,58 @@ logger = setup_logging()  # Ensure logging is configured with handler clearing t
 
 @asynccontextmanager
 async def lifespan(app: FastAPI)-> AsyncGenerator[None, None]:
-    """Startup and shutdown events for the API server"""
+    """Startup and shutdown events for the API server.
+
+    On startup:
+      1. Apply Neo4j schema bootstrap (constraints, indexes, vector index)
+         so writes and vector retrieval don't fail at runtime.
+      2. Probe the LLM provider.
+    """
     # 1. Setup: Everything before 'yield' runs on STARTUP
     logger.info("Starting up API server...")
-    client = global_llm_client  # Use the global client instance
-    # Test LLM connectivity, warm up caches, etc.
+
+    # 1a. Apply Neo4j schema bootstrap (idempotent).
+    try:
+        from neo4j import AsyncGraphDatabase
+        from src.graph.config_graph import GraphConfig
+        from src.graph.neo4j_bootstrap import ensure_schema
+
+        cfg = GraphConfig()
+        driver = AsyncGraphDatabase.driver(
+            cfg.neo4j_uri,
+            auth=(cfg.neo4j_username, cfg.neo4j_password),
+        )
+        try:
+            result = await ensure_schema(driver, cfg.neo4j_database)
+            logger.info(
+                "Neo4j schema bootstrap: applied=%d failed=%d",
+                len(result["applied"]),
+                len(result["failed"]),
+            )
+        finally:
+            await driver.close()
+    except Exception:
+        # Don't block startup if Neo4j is unreachable -- log and let
+        # individual requests surface the failure.
+        logger.exception("Neo4j schema bootstrap failed; continuing startup")
+
+    # 1b. LLM connectivity probe.
+    client = global_llm_client
     try:
         test = await client.generate(
-            "You are a test system.", 
+            "You are a test system.",
             "Say 'OK' if working.",
             provider=get_llm_config().default_llm_provider,
             model=get_llm_config().default_model,
-            temperature=0.7
+            temperature=0.7,
         )
         if test:
             logger.info(f"LLM connected: {get_llm_config().default_llm_provider}")
-        
     except Exception as e:
         logger.exception(f"LLM connectivity test failed: {e}")
         raise RuntimeError("LLM provider is not reachable. Check configuration.")
 
-    yield # The app runs while it's paused here
+    yield
     # 2. Shutdown: Everything after 'yield' runs on SHUTDOWN
 
 app = FastAPI(
@@ -112,9 +135,6 @@ app.include_router(persona_router)
 # Agent API
 from src.api.agent_api import router as agent_router
 app.include_router(agent_router)
-# Graph Debate API
-from src.api.graph_api import router as graph_router
-app.include_router(graph_router)
 # Debate API
 from src.api.debate_api import router as debate_router
 app.include_router(debate_router)
@@ -124,77 +144,6 @@ RUNS: Dict[str, Dict[str, Any]] = {}
 _RUNS_LOCK = asyncio.Lock()
 _RUNS_RUNTIME_DIR = Path("src/api/runtime/jobs")
 _RUNS_RUNTIME_DIR.mkdir(parents=True, exist_ok=True)
-
-def _strip_json_fences(text: str) -> str:
-    cleaned = (text or "").strip()
-    if cleaned.startswith("```"):
-        cleaned = cleaned.replace("```json", "").replace("```", "").strip()
-    return cleaned
-
-
-async def _run_simulation_pipeline(query: UserQuery) -> SimulationResponse:
-    """Shared simulation logic used by sync and async endpoints."""
-    llm_cfg = get_llm_config()
-
-    world_params = await parse_scenario(
-        scenario=query.scenario,
-        context=query.context or {},
-        provider=llm_cfg.default_llm_provider,
-        model=llm_cfg.default_model,
-    )
-
-    requested_domains = query.selected_domains or query.required_perspectives or []
-    society_config = design_society(
-        topic=query.scenario,
-        required_perspectives=requested_domains,
-        depth=query.simulation_depth,
-    )
-
-    inferred_domains = world_params.get("domains", [])
-    if inferred_domains:
-        society_config["domains"] = sorted(set(society_config["domains"] + inferred_domains))
-
-    world = SharedWorldState()
-    bus = MessageBus()
-    society = SimulationSociety(world, bus)
-
-    world.inject_event(
-        WorldEvent(
-            event_type="user_query",
-            description=query.scenario,
-            severity=0,
-            affected_domains=society_config["domains"],
-            timestamp=str(datetime.now()),
-        )
-    )
-    world.economic_indicators["user_context"] = query.context or {}
-
-    # Use the async generate method directly as backend for Agent async methods.
-    society.recruit_agents(society_config["agents"], global_llm_client.generate)
-    result = await society.run_simulation(query.scenario)
-
-    return SimulationResponse(
-        society_opinion=result["society_opinion"],
-        dissenting_views=result["dissent"]["alternative_views"],
-        confidence_metrics={
-            "overall_confidence": result["society_opinion"]["confidence"],
-            "debate_rounds": result["meta"]["rounds_to_convergence"],
-            "debate_intensity": result["meta"]["debate_intensity"],
-            "provider": llm_cfg.default_llm_provider,
-            "model": llm_cfg.default_model,
-            "agent_count": len(society.agents),
-        },
-        agent_profiles=[
-            {
-                "name": a.name,
-                "expertise": a.domain_expertise,
-                "personality": [p.value for p in a.personality],
-                "final_stance": "unknown",
-            }
-            for a in society.agents
-        ],
-        raw_debate_log=result.get("debate_log") if query.simulation_depth == "deep" else None,
-    )
 
 async def _persist_run(job_id: str, run: Dict[str, Any]) -> None:
     path = _RUNS_RUNTIME_DIR / f"{job_id}.json"
@@ -218,13 +167,9 @@ async def _chunk_documents(
     overlap: int,
 ) -> List[ProcessedChunk]:
     import asyncio
-    
-    llm_cfg = get_llm_config()
-    enrichment_model = llm_cfg.default_model or "llama3:8b"
-    processor = ChunkProcessor(
-        Ollama(model=enrichment_model, request_timeout=300.0)
-    )
-    
+
+    processor = ChunkProcessor()
+
     async def _process_all():
         chunks: List[ProcessedChunk] = []
         for doc in documents:
@@ -327,7 +272,7 @@ async def _execute_unified_job(
     extraction_stage = GraphExtractionStage(cfg) if mode == "build_graph" else None
     normalization_stage = GraphNormalizationStage(cfg) if mode == "build_graph" else None
 
-    chunks = await _chunk_documents(documents, cfg.ontology_chunk_size_chars, cfg.ontology_chunk_overlap_chars) # return types -> List[GraphInputDocument]
+    chunks = await _chunk_documents(documents, cfg.ontology_chunk_size_chars, cfg.ontology_chunk_overlap_chars) # return types -> List[GlobalInputDocument]
     total_chunks = len(chunks)
 
     async with _RUNS_LOCK:
@@ -478,86 +423,18 @@ async def get_job(job_id: str):
 
 @app.post("/simulate/async", status_code=status.HTTP_202_ACCEPTED)
 async def create_simulation_async(query: UserQuery):
-    """Async simulation: returns job_id for polling progress."""
-    job_id = str(uuid.uuid4())
-    run = {
-        "job_id": job_id,
-        "mode": "simulation",
-        "status": "queued",
-        "progress": 0.0,
-        "stage": "queued",
-        "error": None,
-        "result": None,
-    }
-    async with _RUNS_LOCK:
-        RUNS[job_id] = run
-        await _persist_run(job_id, run)
-
-    asyncio.create_task(_run_simulation_async(job_id, query))
-    return {"job_id": job_id, "status": "queued", "message": "Simulation job accepted."}
-
-
-async def _run_simulation_async(job_id: str, query: UserQuery) -> None:
-    """Background task to run simulation and update job status."""
-    try:
-        async with _RUNS_LOCK:
-            RUNS[job_id]["status"] = "running"
-            RUNS[job_id]["stage"] = "running"
-            RUNS[job_id]["progress"] = 0.1
-            await _persist_run(job_id, RUNS[job_id])
-
-        result = await _run_simulation_pipeline(query)
-
-        async with _RUNS_LOCK:
-            RUNS[job_id]["status"] = "completed"
-            RUNS[job_id]["stage"] = "completed"
-            RUNS[job_id]["progress"] = 1.0
-            RUNS[job_id]["result"] = result.model_dump()
-            await _persist_run(job_id, RUNS[job_id])
-    except Exception as exc:
-        async with _RUNS_LOCK:
-            RUNS[job_id]["status"] = "failed"
-            RUNS[job_id]["stage"] = "failed"
-            RUNS[job_id]["error"] = str(exc)
-            await _persist_run(job_id, RUNS[job_id])
+    raise HTTPException(
+        status_code=501,
+        detail="Legacy /simulate/async retired — use POST /simulate/debate (graph-backed).",
+    )
 
 
 @app.post("/simulate", response_model=SimulationResponse)
 async def create_simulation(query: UserQuery, background_tasks: BackgroundTasks):
-    """
-    Main endpoint: User input -> Society opinion
-    """
-    max_retries = 3
-    base_delay = 1.0
-    for attempt in range(max_retries):
-        try:
-            return await _run_simulation_pipeline(query)
-        except Exception as e:
-            if attempt == max_retries - 1:
-                logger.error(f"Simulation failed after {max_retries} attempts: {e}")
-                raise
-            delay = base_delay * (2 ** attempt)
-            logger.warning(f"Simulation attempt {attempt + 1} failed: {e}. Retrying in {delay}s...")
-            await asyncio.sleep(delay)
-
-
-@app.post("/simulate/graph_debate", response_model=GraphDebateResponse)
-async def create_graph_debate(request: GraphDebateQuery):
-    simulation = GraphDebateSimulation.from_config(archetype_label=request.archetype_label)
-    try:
-        result = await simulation.run(
-            topic=request.topic,
-            rounds=request.rounds,
-            max_agents=request.max_agents,
-            dataset_id=request.dataset_id,
-            agent_names=request.agent_names or None,
-        )
-        return GraphDebateResponse(**result)
-    except Exception as e:
-        logger.error(f"Graph debate failed: {e}")
-        raise
-    finally:
-        await simulation.close()
+    raise HTTPException(
+        status_code=501,
+        detail="Legacy /simulate retired — use POST /simulate/debate (graph-backed).",
+    )
 
 
 @app.post('/simulate/normalize_graph', status_code=status.HTTP_202_ACCEPTED)
@@ -596,108 +473,6 @@ async def normalize_graph(dataset_id: str, background_tasks: BackgroundTasks):
 
     asyncio.create_task(_normalize())
     return {"job_id": job_id, "status": "queued", "message": "Graph normalization job accepted."}
-    
-async def parse_scenario(
-    scenario: str,
-    context: Dict,
-    provider: Optional[str] = None,
-    model: Optional[str] = None
-) -> Dict:
-    
-    world_state_json = json.dumps(context, ensure_ascii=False)
-    prompt = f"""
-Analyze this business scenario and extract JSON with keys:
-- domains: string[]
-- time_horizon: string
-- risk_factors: string[]
-- success_criteria: string[]
-
-Scenario: {scenario}
-Context: {world_state_json}
-"""
-    raw = await global_llm_client.generate(
-        system_prompt="You extract structured simulation parameters. Return valid JSON only.",
-        user_prompt=prompt,
-        provider=provider,
-        model=model,
-        temperature=0.2
-    )
-
-    try:
-        parsed = json.loads(_strip_json_fences(raw))
-        return {
-            "domains": parsed.get("domains", []),
-            "time_horizon": parsed.get("time_horizon", "unknown"),
-            "risk_factors": parsed.get("risk_factors", []),
-            "success_criteria": parsed.get("success_criteria", []),
-        }
-    except Exception:
-        return {
-            "domains": [],
-            "time_horizon": "unknown",
-            "risk_factors": [],
-            "success_criteria": []
-        }
-    
-
-def design_society(topic: str, required_perspectives: Optional[List[str]], depth: str) -> Dict:
-    base_agents = [
-        {
-            "name": "Conservative Analyst",
-            "domain_expertise": ["finance", "risk_management"],
-            "personality": ["pessimist", "conservative", "skeptic"],
-            "initial_beliefs": [{"statement": "Market expansion is inherently risky", "confidence": 0.8, "evidence": ["historical volatility"]}]
-        },
-        {
-            "name": "Growth Strategist",
-            "domain_expertise": ["business_development", "market_analysis"],
-            "personality": ["optimist", "innovator"],
-            "initial_beliefs": [{"statement": "First-mover advantage outweighs risks", "confidence": 0.75, "evidence": ["competitive dynamics"]}]
-        },
-        {
-            "name": "Cultural Translator",
-            "domain_expertise": ["anthropology", "international_business", "cultural_studies"],
-            "personality": ["skeptic", "optimist"],
-            "initial_beliefs": [{"statement": "Local adaptation determines success", "confidence": 0.9, "evidence": ["cross-market variance"]}]
-        }
-    ]
-
-    if "europe" in topic.lower() or "eu" in topic.lower():
-        base_agents.append({
-            "name": "Regulatory Expert",
-            "domain_expertise": ["international_law", "gdpr", "trade_regulation"],
-            "personality": ["skeptic", "conservative"],
-            "initial_beliefs": [{"statement": "Compliance costs are underestimated", "confidence": 0.85, "evidence": ["regulatory overhead"]}]
-        })
-
-    if "tech" in topic.lower() or "ai" in topic.lower():
-        base_agents.append({
-            "name": "Technology Scout",
-            "domain_expertise": ["emerging_tech", "ai", "innovation"],
-            "personality": ["innovator", "optimist"],
-            "initial_beliefs": [{"statement": "Technology obsoletes old business models", "confidence": 0.8, "evidence": ["adoption curves"]}]
-        })
-
-    if depth == "deep":
-        base_agents.append({
-            "name": "Contrarian",
-            "domain_expertise": ["logic", "philosophy", "systems_thinking"],
-            "personality": ["skeptic", "pessimist"],
-            "initial_beliefs": [{"statement": "Group consensus is often wrong", "confidence": 0.9, "evidence": ["groupthink patterns"]}]
-        })
-
-    # Optional perspective filter
-    if required_perspectives:
-        rp = set(p.lower() for p in required_perspectives)
-        base_agents = [
-            a for a in base_agents
-            if any(d.lower() in rp for d in a["domain_expertise"]) or a["name"] in {"Conservative Analyst", "Growth Strategist"}
-        ]
-
-    return {
-        "agents": base_agents,
-        "domains": sorted(set(d for a in base_agents for d in a["domain_expertise"]))
-    }
 
 
 if __name__=="__main__":

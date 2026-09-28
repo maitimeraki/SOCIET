@@ -7,7 +7,7 @@ from src.persona.models_persona import AgentProfile, PersonaIdentity, Confidence
 from src.simulation.llm_batch import BatchedLLMRunner
 from src.simulation.round_runner import RoundRunner, _build_system_prompt, _build_user_prompt, _parse_response_stance
 from src.simulation.pair_turn import RoundResult
-from src.simulation.communication_graph import CommPair
+from src.simulation.pair_turn import CommPair
 
 
 def make_profile(name: str, domain_tags: list[str], perspective: str, confidence: float) -> tuple[uuid.UUID, AgentProfile]:
@@ -27,8 +27,8 @@ def make_profile(name: str, domain_tags: list[str], perspective: str, confidence
     return aid, p
 
 
-def make_pair(aid_a: uuid.UUID, aid_b: uuid.UUID, shared: list[str]) -> CommPair:
-    return CommPair(agent_a=str(aid_a), agent_b=str(aid_b), shared_entities=shared, evidence=[])
+def make_pair(name_a: str, name_b: str, shared: list[str]) -> CommPair:
+    return CommPair(agent_a=name_a, agent_b=name_b, shared_entities=shared, evidence=[])
 
 
 # ------------------------------------------------------------------
@@ -122,7 +122,7 @@ async def test_execute_round_returns_round_result():
     aid_alice, alice = make_profile("Alice", ["economics"], "Markets work.", 0.8)
     aid_bob, bob = make_profile("Bob", ["climate"], "Climate matters.", 0.7)
     profiles = [alice, bob]
-    pairs = [make_pair(aid_alice, aid_bob, ["carbon"])]
+    pairs = [make_pair("Alice", "Bob", ["carbon"])]
 
     result = await rr.execute_round(profiles, pairs, round_num=1, query="Tax carbon?", history=[])
 
@@ -141,7 +141,7 @@ async def test_execute_round_uses_profile_fields_in_prompts():
     aid_alice, alice = make_profile("Alice", ["AI safety"], "AI alignment is critical.", 0.9)
     aid_bob, bob = make_profile("Bob", ["economics"], "Economic growth first.", 0.6)
     profiles = [alice, bob]
-    pairs = [make_pair(aid_alice, aid_bob, ["regulation"])]
+    pairs = [make_pair("Alice", "Bob", ["regulation"])]
 
     await rr.execute_round(profiles, pairs, round_num=1, query="Regulate AI?", history=[])
 
@@ -159,7 +159,7 @@ async def test_execute_round_ws_broadcast_called():
     runner = BatchedLLMRunner(mock_llm)
     ws_calls = []
 
-    def track_ws(msg):
+    async def track_ws(msg):
         ws_calls.append(msg)
 
     rr = RoundRunner(runner, ws_broadcast=track_ws)
@@ -167,7 +167,7 @@ async def test_execute_round_ws_broadcast_called():
     aid_alice, alice = make_profile("Alice", ["x"], "x", 0.8)
     aid_bob, bob = make_profile("Bob", ["y"], "y", 0.7)
     profiles = [alice, bob]
-    pairs = [make_pair(aid_alice, aid_bob, [])]
+    pairs = [make_pair("Alice", "Bob", [])]
 
     await rr.execute_round(profiles, pairs, round_num=1, query="Topic?", history=[])
 
@@ -195,7 +195,7 @@ async def test_execute_round_error_continues():
     aid_alice, alice = make_profile("Alice", ["x"], "x", 0.8)
     aid_bob, bob = make_profile("Bob", ["y"], "y", 0.7)
     profiles = [alice, bob]
-    pairs = [make_pair(aid_alice, aid_bob, [])]
+    pairs = [make_pair("Alice", "Bob", [])]
 
     result = await rr.execute_round(profiles, pairs, round_num=1, query="Topic?", history=[])
 
@@ -213,7 +213,7 @@ async def test_execute_round_turn_contains_profile_data():
     aid_alice, alice = make_profile("Alice", ["x"], "x", 0.8)
     aid_bob, bob = make_profile("Bob", ["y"], "y", 0.6)
     profiles = [alice, bob]
-    pairs = [make_pair(aid_alice, aid_bob, [])]
+    pairs = [make_pair("Alice", "Bob", [])]
 
     result = await rr.execute_round(profiles, pairs, round_num=1, query="Topic?", history=[])
 
