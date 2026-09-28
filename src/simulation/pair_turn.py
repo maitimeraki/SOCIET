@@ -3,8 +3,17 @@ from dataclasses import dataclass, field
 from typing import Dict, List
 
 from src.simulation.agent_node import Stance
-from src.simulation.communication_graph import CommPair
 from src.persona.models_persona import ProvenanceLink
+
+
+@dataclass
+class CommPair:
+    """A communication pair between two agents (uses agent names)."""
+    agent_a: str  # agent name
+    agent_b: str  # agent name
+    shared_entities: List[str] = field(default_factory=list)
+    evidence: List[str] = field(default_factory=list)
+    score: float = 0.0  # topology-derived pair quality score
 
 
 @dataclass

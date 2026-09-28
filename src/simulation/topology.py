@@ -3,16 +3,14 @@ CommunicationTopology: Cypher-based pair scoring using Neo4j graph.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, List
-from src.simulation.communication_graph import CommPair
+
+from src.simulation.pair_turn import CommPair
 
 if TYPE_CHECKING:
     from neo4j import AsyncGraphDatabase
-    from src.persona.models_persona import AgentProfile
+    from src.persona.agent import Agent
     from src.simulation.debate_config import DebateConfig
-
-
 
 
 class CommunicationTopology:
@@ -24,7 +22,7 @@ class CommunicationTopology:
 
     async def compute_round_pairs(
         self,
-        profiles: List["AgentProfile"],
+        profiles: List["Agent"],
         dataset_id: str,
         round_num: int,
         config: "DebateConfig",
@@ -33,16 +31,24 @@ class CommunicationTopology:
         Compute communication pairs for a debate round using Cypher.
 
         Round 1: Direct entity overlap via single-hop paths.
-        Round 2+: Expand path length to comm_radius hops.
+        Round 2+: Expand path length to per-agent `communication_radius`
+                  (capped by `config.comm_radius`). Previously the agent's
+                  own radius was ignored; this was Gap P15.
         """
         agent_names = [p.identity.name for p in profiles]
+        # Per-agent radius takes precedence, capped by the global config ceiling.
+        per_agent_radius = max(
+            (getattr(p, "communication_radius", 1) for p in profiles),
+            default=1,
+        )
+        effective_radius = max(1, min(int(per_agent_radius), int(config.comm_radius)))
 
         async with self._driver.session(database=self._db) as session:
             if round_num == 1:
                 cypher, params = self._round1_cypher(agent_names, dataset_id, config)
             else:
                 cypher, params = self._round_n_cypher(
-                    agent_names, dataset_id, config, round_num
+                    agent_names, dataset_id, config, effective_radius
                 )
 
             result = await session.run(cypher, **params)
@@ -55,7 +61,7 @@ class CommunicationTopology:
         dataset_id: str,
         config: "DebateConfig",
     ) -> tuple[str, dict]:
-        """Generate Cypher for round 1: single-hop entity sharing."""
+        """Cypher for round 1: single-hop entity sharing (Jaccard + OPPOSES/SUPPORTS)."""
         cypher = """
         MATCH (a:Persona)-[r1]-(e)-[r2]-(b:Persona)
         WHERE a.name IN $agent_names AND b.name IN $agent_names
@@ -65,7 +71,8 @@ class CommunicationTopology:
              collect(DISTINCT e.name) AS shared_entities
         WHERE shared_count >= 1
         WITH a, b, shared_count, shared_entities,
-             size(a.domain_tags) AS tags_a, size(b.domain_tags) AS tags_b
+             size(coalesce(a.domain_tags, [])) AS tags_a,
+             size(coalesce(b.domain_tags, [])) AS tags_b
         WITH a, b, shared_count, shared_entities,
              toFloat(shared_count) / toFloat(tags_a + tags_b - shared_count) AS jaccard,
              exists((a)-[:OPPOSES]-(b)) AS has_opposes,
@@ -94,10 +101,15 @@ class CommunicationTopology:
         agent_names: List[str],
         dataset_id: str,
         config: "DebateConfig",
-        round_num: int,
+        effective_radius: int,
     ) -> tuple[str, dict]:
-        """Generate Cypher for round 2+: multi-hop paths up to comm_radius."""
-        radius = config.comm_radius
+        """Cypher for round 2+: multi-hop paths up to the agent's communication_radius.
+
+        `effective_radius` is a Python int already clamped to [1, config.comm_radius]
+        by the caller. We interpolate it via Cypher's `*1..N` syntax, which only
+        accepts integers -- the caller-side clamp is what makes this safe.
+        """
+        radius = effective_radius
 
         cypher = f"""
         MATCH (a:Persona)-[r1*1..{radius}]-(e)-[r2*1..{radius}]-(b:Persona)
@@ -108,7 +120,8 @@ class CommunicationTopology:
              collect(DISTINCT e.name) AS shared_entities
         WHERE shared_count >= 1
         WITH a, b, shared_count, shared_entities,
-             size(a.domain_tags) AS tags_a, size(b.domain_tags) AS tags_b
+             size(coalesce(a.domain_tags, [])) AS tags_a,
+             size(coalesce(b.domain_tags, [])) AS tags_b
         WITH a, b, shared_count, shared_entities,
              toFloat(shared_count) / toFloat(tags_a + tags_b - shared_count) AS jaccard,
              exists((a)-[:OPPOSES]-(b)) AS has_opposes,
@@ -144,3 +157,4 @@ class CommunicationTopology:
             )
             pairs.append(pair)
         return pairs
+
