@@ -168,6 +168,40 @@ class DebateOrchestrator:
                 except Exception as exc:
                     warnings.append(f"Round {round_num}: commit failed: {exc}")
 
+                # Activation: pull related non-participants in (they debate from next round)
+                if config.max_new_agents_per_round > 0 and len(profiles) < config.max_agents:
+                    try:
+                        candidates = await self._topology.find_activation_candidates(
+                            participants=[p.identity.name for p in profiles],
+                            dataset_id=dataset_id,
+                            query_hash=query_hash,
+                            last_round=round_num,
+                            max_new=min(config.max_new_agents_per_round, config.max_agents - len(profiles)),
+                        )
+                        if candidates:
+                            new_profiles = await self._profile_synthesizer.synthesize_from_names(
+                                names=[c.agent_name for c in candidates],
+                                query=query,
+                                dataset_id=dataset_id,
+                                relevance_by_name={
+                                    c.agent_name: min(1.0, len(c.shared_entities) / 3.0)
+                                    for c in candidates
+                                },
+                            )
+                            profiles.extend(new_profiles)
+                            await ws_broadcast({
+                                "type": "activation",
+                                "round": round_num,
+                                "agents": [p.identity.name for p in new_profiles],
+                                "reasons": {c.agent_name: c.reason for c in candidates},
+                            })
+                            warnings.append(
+                                f"Round {round_num}: activated {len(new_profiles)} agents: "
+                                + ", ".join(p.identity.name for p in new_profiles)
+                            )
+                    except Exception as exc:
+                        warnings.append(f"Round {round_num}: activation failed: {exc}")
+
                 if self._check_convergence(rounds, profiles, config=config):
                     break
 

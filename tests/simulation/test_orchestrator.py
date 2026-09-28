@@ -8,7 +8,7 @@ import asyncio
 from src.simulation.orchestrator import DebateOrchestrator, OrchestratedDebateResult
 from src.simulation.profile_synthesizer import ProfileSynthesizer
 from src.simulation.topology import CommunicationTopology
-from src.simulation.pair_turn import CommPair
+from src.simulation.pair_turn import ActivationCandidate, CommPair
 from src.simulation.llm_batch import BatchedLLMRunner
 from src.simulation.verdict import VerdictSynthesizer
 from src.simulation.society_memory import SocietyMemory
@@ -389,3 +389,67 @@ async def test_convergence_uses_config_threshold():
     r2b = RoundResult(round_num=2, turns=[t, n], pairs=[])
     assert orchestrator._check_convergence([r1, r2b], None, config=DebateConfig(convergence_threshold=0.8)) is False
     assert orchestrator._check_convergence([r1, r2b], None, config=DebateConfig(convergence_threshold=0.4)) is True
+
+
+def _orch(synth, topo, society_memory, verdict_synth=None, llm_runner=None):
+    return DebateOrchestrator(
+        profile_synthesizer=synth, topology=topo,
+        llm_runner=llm_runner or MagicMock(spec=BatchedLLMRunner),
+        verdict_synthesizer=verdict_synth or MagicMock(spec=VerdictSynthesizer),
+        society_memory=society_memory,
+    )
+
+
+@pytest.mark.asyncio
+async def test_activation_pulls_in_candidates_after_commit():
+    synth = AsyncMock(spec=ProfileSynthesizer)
+    topo = AsyncMock(spec=CommunicationTopology)
+    society_memory = AsyncMock(spec=SocietyMemory)
+    synth.synthesize.return_value = [_make_profile(1, "Alice")]
+    new_profile = _make_profile(2, "Carl")
+    synth.synthesize_from_names = AsyncMock(return_value=[new_profile])
+    topo.compute_round_pairs.side_effect = lambda *a, **kw: [
+        CommPair(agent_a="Alice", agent_b="Bob", shared_entities=[], score=0.5)
+    ]
+    topo.find_activation_candidates = AsyncMock(return_value=[
+        ActivationCandidate(agent_name="Carl", shared_entities=["carbon"], reason="mentioned entity in the debate")
+    ])
+    llm_runner = MagicMock(spec=BatchedLLMRunner)
+    llm_runner.gather = MagicMock(side_effect=lambda *a, **kw: _AsyncEmptyIter())
+    verdict_synth = MagicMock(spec=VerdictSynthesizer)
+    verdict_synth.synthesize.return_value = _make_verdict()
+
+    ws_calls = []
+
+    async def ws(msg):
+        ws_calls.append(msg)
+
+    orch = _orch(synth, topo, society_memory, verdict_synth, llm_runner)
+    result = await orch.run("q", "ds1", DebateConfig(max_agents=5, max_rounds=1), ws)
+
+    synth.synthesize_from_names.assert_awaited_once()
+    assert any(m.get("type") == "activation" for m in ws_calls)
+    assert any("activated" in w for w in result.warnings)
+
+
+@pytest.mark.asyncio
+async def test_activation_disabled_by_config():
+    synth = AsyncMock(spec=ProfileSynthesizer)
+    topo = AsyncMock(spec=CommunicationTopology)
+    society_memory = AsyncMock(spec=SocietyMemory)
+    synth.synthesize.return_value = [_make_profile(1, "Alice")]
+    synth.synthesize_from_names = AsyncMock(return_value=[])
+    topo.compute_round_pairs.side_effect = lambda *a, **kw: [
+        CommPair(agent_a="Alice", agent_b="Bob", shared_entities=[], score=0.5)
+    ]
+    topo.find_activation_candidates = AsyncMock(return_value=[
+        ActivationCandidate(agent_name="Carl")
+    ])
+    llm_runner = MagicMock(spec=BatchedLLMRunner)
+    llm_runner.gather = MagicMock(side_effect=lambda *a, **kw: _AsyncEmptyIter())
+    orch = _orch(synth, topo, society_memory)
+
+    config = DebateConfig(max_agents=5, max_rounds=1, max_new_agents_per_round=0)
+    await orch.run("q", "ds1", config, AsyncMock())
+    topo.find_activation_candidates.assert_not_awaited()
+    synth.synthesize_from_names.assert_not_awaited()
