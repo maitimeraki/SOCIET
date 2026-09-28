@@ -37,7 +37,8 @@ class CommunicationTopology:
                   path for every pair.
         """
         agent_names = [p.identity.name for p in profiles]
-        # Per-agent radius takes precedence, capped by the global config ceiling.
+        # One cohort-wide radius: the widest agent's own radius governs every
+        # pair, clamped to [1, config.comm_radius].
         per_agent_radius = max(
             (getattr(p, "communication_radius", 1) for p in profiles),
             default=1,

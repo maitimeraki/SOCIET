@@ -9,7 +9,7 @@ pipeline assumes. Run via:
 
 Production-grade invariants enforced here:
 
-  1. (Persona {name, dataset_id}) is unique — writeback's MERGE becomes
+  1. (Persona {name, dataset_id}) is unique — SocietyMemory's MERGE becomes
      a single indexed lookup, not a graph scan.
   2. (Chunk {chunk_id}) is unique — provenance lookups are O(log n).
   3. Vector indexes `persona_embeddings` (Persona.embedding) and

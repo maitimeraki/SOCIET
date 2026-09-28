@@ -1,120 +1,203 @@
 # Simulation World (AI Society Simulator)
 
-Simulation World is a multi-agent decision simulation platform.  
-It takes a user scenario, creates a society of domain-specific AI agents, runs structured debate, and returns:
+**An AI-driven multi-agent simulation platform for structured societal debate and consensus generation.**
 
-- A synthesized society opinion
-- Confidence metrics
-- Dissenting/alternative views
-- Agent profile summary
-- Optional raw debate logs (deep mode)
+---
 
-## Project Structure
+## What It Does
 
-- `src/` — Python backend and simulation engine
-  - `src/api/` — FastAPI server and API schemas
-  - `src/simulation/` — world state, message bus, simulation orchestration
-  - `src/agents/` — agent logic and behavior
-  - `src/llm/` — LLM provider client and configuration
-- `frontend/` — React + Vite dashboard UI
+Simulation World transforms a business question or scenario into a synthesized societal opinion by:
 
-## Core Architecture
+1. **Creating a Society** of domain-specific AI agents with distinct expertise, personalities, and stances
+2. **Running Structured Debate** where agents argue, counter-argue, and respond to each other
+3. **Generating Consensus** using CIOR-weighted opinion clustering (not simple voting)
+4. **Delivering Insights** with confidence metrics, dissenting views, and supporting evidence
 
-1. **User/API Layer** receives scenario and context.
-2. **Orchestration** parses scenario into simulation parameters.
-3. **Simulation World** creates a society of agents with different expertise/personality.
-4. **Debate + Consensus** runs iterative argument exchange and aggregation.
-5. **Output Engine** returns final recommendation, confidence, and dissent.
+### Example
+
+```json
+// Input: "Should I expand into Europe?"
+{
+  "scenario": "Should I expand my SaaS business into Europe in 2026?",
+  "context": { "budget_usd": 200000, "team_size": 12 }
+}
+
+// Output: Synthesized society opinion
+{
+  "society_opinion": "Cautionary expansion with phased approach recommended...",
+  "confidence_metrics": { "overall_confidence": 0.78, "debate_rounds": 3 },
+  "agent_profiles": [
+    { "name": "Conservative Analyst", "expertise": ["finance", "risk_management"] },
+    { "name": "Growth Strategist", "expertise": ["business_development"] }
+  ],
+  "dissenting_views": [...]
+}
+```
+
+---
+
+## Architecture Overview
+
+### 5-Layer System Design
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│  LAYER 5: Opinion Output Engine (Final results delivery)         │
+├─────────────────────────────────────────────────────────────────┤
+│  LAYER 4: Consensus & Synthesis (CIOR-weighted verdict)         │
+├─────────────────────────────────────────────────────────────────┤
+│  LAYER 3: Simulation World (Debate orchestration)               │
+├─────────────────────────────────────────────────────────────────┤
+│  LAYER 2: Orchestration Engine (API, job management)             │
+├─────────────────────────────────────────────────────────────────┤
+│  LAYER 1: User Interface (React dashboard, API, CLI)             │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### Data Flow
+
+```
+User Input → Parse Scenario → Design Society → Create Agents
+    ↓
+Debate Loop (per round):
+    Topology (Cypher) → RoundRunner → LLM API → Parse → Write-back to Neo4j
+    ↓
+Convergence Check (80% threshold)
+    ↓
+Verdict Synthesis → Society Opinion + Confidence + Dissenting Views
+```
+
+---
+
+## Key Components
+
+### Simulation Engine (`src/simulation/`)
+
+| File | Purpose |
+|------|---------|
+| `orchestrator.py` | **DebateOrchestrator** - 5-stage pipeline coordinator |
+| `round_runner.py` | Executes single debate rounds, builds prompts |
+| `topology.py` | **CommunicationTopology** - Cypher-based agent pair scoring |
+| `verdict.py` | **VerdictSynthesizer** - CIOR-weighted consensus |
+| `society_memory.py` | **SocietyMemory** - Commits rounds to Neo4j (Opinion/STATED/REACTED_TO) + snapshot read-back |
+| `profile_synthesizer.py` | Creates agents from graph entities |
+| `pair_turn.py` | Data classes for turns, pairs, verdicts |
+
+### Graph System (`src/graph/`)
+
+| File | Purpose |
+|------|---------|
+| `graph_pipeline.py` | **UniversalGraphPipeline** - end-to-end document→graph |
+| `ontology.py` | **OntologyDiscoveryStage** - LLM-based schema discovery |
+| `graph_build.py` | **GraphExtractionStage** - entity/relation extraction |
+| `normalization.py` | Deduplication and property normalization |
+| `neo4j_bootstrap.py` | Schema initialization |
+
+### Persona Layer (`src/persona/`)
+
+| File | Purpose |
+|------|---------|
+| `agent.py` | **Canonical Agent model** - identity, stance, conviction, cior |
+| `repository.py` | **PersonaRepository** - Neo4j operations for agents |
+| `graph_context.py` | Entity discovery from graph |
+
+### API Layer (`src/api/`)
+
+| File | Purpose |
+|------|---------|
+| `api_server.py` | FastAPI server, job management, endpoints |
+| `config_api.py` | Request/response schemas |
+| `middleware.py` | Logging middleware |
+| `runtime/jobs/` | Async job state persistence |
+
+### LLM Integration (`src/llm/`)
+
+| File | Purpose |
+|------|---------|
+| `client.py` | **LLMClient** - unified multi-provider interface |
+| `config_llm.py` | Provider configuration |
+
+---
 
 ## Tech Stack
 
 ### Backend
-- Python 3.11+
-- FastAPI
-- Uvicorn
-- Pydantic
-- OpenAI / HuggingFace / Ollama support
-- LangChain ecosystem (installed in requirements)
+- **Python 3.11+** - Core language
+- **FastAPI** - Async HTTP API
+- **Neo4j** - Knowledge graph storage
+- **LiteLLM** - Universal LLM gateway (100+ providers)
+- **Pydantic v2** - Schema validation
+- **Redis** - Caching and rate limiting
+- **Celery** - Background job processing
 
-### Frontend
-- React
-- TypeScript
-- Vite
-- Tailwind CSS
+### LLM Providers (via LiteLLM)
+- **OpenAI** (GPT-4, GPT-3.5, o1-preview)
+- **Anthropic** (Claude 3.5, Claude 3)
+- **Azure OpenAI** (Enterprise deployment)
+- **AWS Bedrock** (Claude, Llama on AWS)
+- **Ollama** (Local: Llama3, Mistral, any GGUF)
+- **Any OpenAI-compatible endpoint** (LocalAI, vLLM, custom Docker gateways)
 
-## API Overview
+### File Format Support
+- **PDF** - PyMuPDF extraction with page/table preservation
+- **DOCX** - python-docx with headings/lists
+- **Markdown** - markdown-it with structure
+- **Plain Text** - Built-in read
+- **URLs** - requests + BeautifulSoup web scraping
 
-Base URL (local): `http://127.0.0.1:8000`
+### Frontend (In Progress)
+- **React 18** + **TypeScript**
+- **Vite** - Build tool
+- **Tailwind CSS** - Styling
+- **Zustand** - State management
+- **@xyflow/react** - Graph visualization
+- **Framer Motion** - Animations
 
-Main endpoints:
+---
 
-- `GET /domains`  
-  Returns supported expert domains.
-- `POST /simulate`  
-  Runs simulation synchronously and returns final result.
-- `POST /simulate/async`  
-  Queues simulation and returns a `run_id`.
-- `GET /simulate/{run_id}`  
-  Polls async simulation status/result.
+## Quick Start
 
-### Example request (`POST /simulate`)
-
-```json
-{
-  "scenario": "Should I expand my SaaS business into Europe in 2026?",
-  "context": {
-    "budget_usd": 200000,
-    "team_size": 12,
-    "current_markets": ["India", "Singapore"]
-  },
-  "simulation_depth": "standard",
-  "selected_domains": ["finance", "international_law", "market_analysis"],
-  "mode": "sync"
-}
-```
-
-## Local Setup
-
-## 1) Clone and open project
+### 1. Environment Setup
 
 ```bash
-git clone <your-repo-url>
+# Clone and navigate
 cd SIMULATION-WORLD
-```
 
-## 2) Create Python environment and install backend dependencies
-
-```bash
+# Create Python environment
 python -m venv .venv
-.venv\Scripts\activate
+source .venv/bin/activate  # Linux/Mac
+.venv\Scripts\activate     # Windows
+
+# Install dependencies
 pip install -r requirements.txt
 ```
 
-## 3) Configure environment variables
+### 2. Configure Environment
 
-Create `.env` (or use existing env setup) and set values as needed:
-
+Create `.env` file:
 ```env
 DEFAULT_LLM_PROVIDER=ollama
 OPENAI_API_KEY=
 HUGGINGFACEHUB_API_TOKEN=
 OLLAMA_BASE_URL=http://localhost:11434
 OLLAMA_MODEL=qwen3.5-100k:9b
+
+NEO4J_URI=bolt://localhost:7687
+NEO4J_USERNAME=neo4j
+NEO4J_PASSWORD=your_password
+NEO4J_DATABASE=neo4j
 ```
 
-> At least one provider must be reachable. The API performs an LLM connectivity check at startup.
-
-## 4) Run backend API server
+### 3. Start Backend
 
 ```bash
-python src/api/api_server.py
+# Start API server
+uvicorn src.api.api_server:app --host 127.0.0.1 --port 8000 --reload
+
+# API docs at http://localhost:8000/docs
 ```
 
-Server starts on `http://127.0.0.1:8000`.
-
-## 5) Run frontend
-
-In a new terminal:
+### 4. Start Frontend (Development)
 
 ```bash
 cd frontend
@@ -122,20 +205,144 @@ npm install
 npm run dev
 ```
 
-Frontend dev server starts on Vite default port (typically `http://localhost:5173`).
+---
 
-## Development Notes
+## API Endpoints
 
-- `simulation_depth` supports: `shallow`, `standard`, `deep`
-- `deep` mode includes a richer debate trace and may add contrarian reasoning
-- Domain selection can influence which agents are recruited
-- Async mode is suitable for longer runs and UI polling
+### Main Simulation
 
-## Current Status
+| Endpoint | Method | Purpose |
+|----------|--------|---------|
+| `/simulate` | POST | Synchronous simulation |
+| `/simulate/async` | POST | Async simulation (returns job_id) |
+| `/simulate/jobs/{job_id}` | GET | Poll job status |
 
-This repository contains active backend and frontend scaffolding with working simulation flow via API.  
-Some files still include placeholder metadata (for example in `src/pyproject.toml`) and can be refined as project packaging matures.
+### Graph Operations
+
+| Endpoint | Method | Purpose |
+|----------|--------|---------|
+| `/simulate/build_graph` | POST | Document → Knowledge Graph |
+| `/simulate/ontology` | POST | Ontology discovery only |
+| `/simulate/normalize_graph` | POST | Normalize existing graph |
+
+### Graph Debate
+
+| Endpoint | Method | Purpose |
+|----------|--------|---------|
+| `/simulate/debate` | POST | Graph-backed agent debate |
+
+### Health
+
+| Endpoint | Method | Purpose |
+|----------|--------|---------|
+| `/health` | GET | Health check |
+
+---
+
+## Example API Requests
+
+### Sync Simulation
+```bash
+curl -X POST http://localhost:8000/simulate \
+  -H "Content-Type: application/json" \
+  -d '{
+    "scenario": "Should I expand my SaaS into Europe?",
+    "context": { "budget_usd": 200000, "team_size": 12 },
+    "simulation_depth": "standard"
+  }'
+```
+
+### Build Knowledge Graph
+```bash
+curl -X POST http://localhost:8000/simulate/build_graph \
+  -H "Content-Type: application/json" \
+  -d '{
+    "dataset_id": "merger_2025",
+    "documents": [{
+      "document_id": "doc_001",
+      "title": "Merger Agreement",
+      "text": "Acme Corp agrees to acquire Beta Industries for $2.5B..."
+    }]
+  }'
+```
+
+---
+
+## Testing
+
+```bash
+# Run all tests
+pytest
+
+# Run specific test file
+pytest tests/simulation/test_orchestrator.py
+
+# Run with coverage
+pytest --cov=src tests/
+```
+
+---
+
+## Project Structure
+
+```
+src/
+├── main.py                    # Entry point
+├── api/                      # FastAPI server + endpoints
+├── simulation/               # Core debate engine
+│   ├── orchestrator.py       # 5-stage pipeline coordinator
+│   ├── round_runner.py       # Round execution
+│   ├── topology.py           # Cypher pair scoring
+│   ├── verdict.py            # CIOR-weighted synthesis
+│   ├── society_memory.py     # Opinion/REACTED_TO commit + snapshot read
+│   └── profile_synthesizer.py # Agent creation
+├── persona/                  # Agent models + repository
+│   ├── agent.py             # Canonical Agent schema
+│   └── repository.py        # Neo4j operations
+├── graph/                   # Knowledge graph construction
+│   ├── graph_pipeline.py    # End-to-end pipeline
+│   ├── ontology.py          # Schema discovery
+│   └── graph_build.py       # Entity extraction
+└── llm/                     # Multi-provider LLM client
+    └── client.py            # Unified interface
+
+frontend/                     # React + TypeScript dashboard
+tests/                       # Pytest test suite
+docs/
+└── ARCHITECTURE.md          # Detailed architecture docs
+```
+
+---
+
+## Key Concepts
+
+### CIOR (Certainty-Instinct Opinion Range)
+Weighting formula for consensus:
+```
+weight = confidence × conviction × (1 + cior) / 2
+```
+- `cior = +1.0` → Maximum receptivity
+- `cior =  0.0` → Neutral
+- `cior = -1.0` → Maximum hostility
+
+### Communication Topology
+- **Round 1**: Single-hop entity overlap via Cypher
+- **Round N**: Multi-hop paths up to agent's `communication_radius`
+- **Pair Scoring**: Jaccard similarity + OPPOSES/SUPPORTS edge bonuses
+
+### Convergence
+Debate stops when dominant stance reaches 80% weighted consensus.
+
+---
+
+## Documentation
+
+- [TECHNOLOGY_STACK.md](docs/TECHNOLOGY_STACK.md) - Complete tech stack and production architecture
+- [ARCHITECTURE.md](docs/ARCHITECTURE.md) - Detailed component architecture
+- [DESIGN.md](DESIGN.md) - Frontend design specification (Neural Observatory)
+
+---
 
 ## License
 
-Add your preferred license (MIT, Apache-2.0, etc.) in this repository.
+MIT
