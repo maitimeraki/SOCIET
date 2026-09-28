@@ -10,7 +10,10 @@ import re
 
 from src.graph.neo4j_bootstrap import _statements
 
-PLACEHOLDER = re.compile(r"\$[A-Za-z_][A-Za-z0-9_]*")
+# Capture group only: compare placeholder *names* against params keys, which
+# are bare names. Including the `$` would make every legitimately
+# parameterized statement compare {'$x'} against {'x'} and fail.
+PLACEHOLDER = re.compile(r"\$([A-Za-z_][A-Za-z0-9_]*)")
 
 
 def _vectors():
