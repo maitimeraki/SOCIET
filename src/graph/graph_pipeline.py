@@ -1,6 +1,6 @@
 from typing import List, Dict, Any
 from .config_graph import GraphConfig
-from .models_graph import GraphInputDocument
+from .models_graph import GlobalInputDocument
 from .ontology import OntologyDiscoveryStage
 from .graph_build import GraphExtractionStage
 from .normalization import GraphNormalizationStage, normalize_and_write, EntityNode, RelationEdge
@@ -17,7 +17,7 @@ class UniversalGraphPipeline:
         self.extraction = GraphExtractionStage(self.config)
         self.normalization = GraphNormalizationStage(self.config)
 
-    async def run(self, dataset_id: str, documents: List[GraphInputDocument]) -> Dict[str, Any]:
+    async def run(self, dataset_id: str, documents: List[GlobalInputDocument]) -> Dict[str, Any]:
         try:
             ontology = await self.discovery.run(
                 documents=documents,
