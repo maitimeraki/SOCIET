@@ -194,6 +194,10 @@ async def test_ws_broadcast_passed_to_round_runner():
         # F41.1: the commit receipt must be broadcast, not silently degraded
         assert any(m.get("type") == "commit" for m in ws_calls)
         assert not any("commit failed" in w for w in result.warnings)
+        # ...and its payload must carry the keys the WS client reads
+        commit_msg = next(m for m in ws_calls if m.get("type") == "commit")
+        assert commit_msg["round"] == 1
+        assert set(commit_msg) >= set(_ok_receipt())
 
 
 @pytest.mark.asyncio
