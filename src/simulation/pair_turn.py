@@ -17,6 +17,14 @@ class CommPair:
 
 
 @dataclass
+class ActivationCandidate:
+    """A non-participating agent that should join the debate."""
+    agent_name: str
+    shared_entities: List[str] = field(default_factory=list)
+    reason: str = ""
+
+
+@dataclass
 class AgentTurn:
     """Single agent turn in the debate."""
     agent_id: str

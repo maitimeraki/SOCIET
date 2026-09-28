@@ -5,7 +5,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, List
 
-from src.simulation.pair_turn import CommPair
+from src.simulation.pair_turn import ActivationCandidate, CommPair
 
 if TYPE_CHECKING:
     from neo4j import AsyncGraphDatabase
@@ -103,11 +103,16 @@ class CommunicationTopology:
         config: "DebateConfig",
         effective_radius: int,
     ) -> tuple[str, dict]:
-        """Cypher for round 2+: multi-hop paths up to the agent's communication_radius.
+        """Cypher for round 2+: multi-hop paths up to a single cohort-wide radius.
 
-        `effective_radius` is a Python int already clamped to [1, config.comm_radius]
-        by the caller. We interpolate it via Cypher's `*1..N` syntax, which only
-        accepts integers -- the caller-side clamp is what makes this safe.
+        The round emits one query for every pair, so there is one radius for the
+        whole cohort: `effective_radius` is `max()` over all agents' own
+        `communication_radius` (clamped to [1, config.comm_radius]) -- one
+        wide-radius agent widens the path for every pair.
+
+        `effective_radius` is a Python int already clamped by the caller. We
+        interpolate it via Cypher's `*1..N` syntax, which only accepts integers
+        -- the caller-side clamp is what makes this safe.
         """
         radius = effective_radius
 
@@ -144,6 +149,79 @@ class CommunicationTopology:
             "max_pairs": config.max_pairs_per_round,
         }
         return cypher, params
+
+    _ACTIVATION_MENTIONS_CYPHER = """
+    MATCH (o:Opinion {dataset_id: $ds, query_hash: $qh, round_no: $last_round})-[:MENTIONS]->(e)
+    MATCH (p:Persona)
+    WHERE coalesce(p.dataset_id, '') = $ds
+      AND NOT p.name IN $participants
+      AND (e.name IN coalesce(p.entity_affinity, []) OR e.name IN coalesce(p.domain_tags, []))
+    WITH p, collect(DISTINCT e.name) AS shared
+    WHERE size(shared) > 0
+    RETURN p.name AS name, shared
+    ORDER BY size(shared) DESC
+    LIMIT $limit
+    """
+
+    _ACTIVATION_ADJACENCY_CYPHER = """
+    MATCH (p:Persona)-[r1]-(e)-[r2]-(part:Persona)
+    WHERE part.name IN $participants
+      AND coalesce(p.dataset_id, '') = $ds
+      AND coalesce(part.dataset_id, '') = $ds
+      AND p <> part
+      AND NOT p.name IN $participants
+    WITH p, count(DISTINCT e) AS shared_count, collect(DISTINCT e.name) AS shared_entities
+    WHERE shared_count >= 1
+    RETURN p.name AS name, shared_entities
+    ORDER BY shared_count DESC
+    LIMIT $limit
+    """
+
+    async def find_activation_candidates(
+        self,
+        participants: List[str],
+        dataset_id: str,
+        query_hash: str,
+        last_round: int,
+        max_new: int,
+    ) -> List["ActivationCandidate"]:
+        """Agents outside the debate that should be pulled in after a round.
+
+        Source 1: entities named in the round's committed opinions matched
+        against persona entity_affinity / domain_tags.
+        Source 2: personas sharing single-hop entity paths with participants
+        (same scoring family as round-1 pairing).
+        """
+        if max_new <= 0 or not participants:
+            return []
+
+        async with self._driver.session(database=self._db) as session:
+            rows_m = await (await session.run(
+                self._ACTIVATION_MENTIONS_CYPHER,
+                ds=dataset_id, qh=query_hash, last_round=last_round,
+                participants=participants, limit=max_new,
+            )).data()
+            rows_a = await (await session.run(
+                self._ACTIVATION_ADJACENCY_CYPHER,
+                ds=dataset_id, participants=participants, limit=max_new,
+            )).data()
+
+        merged: dict[str, ActivationCandidate] = {}
+        for r in rows_m:
+            merged[r["name"]] = ActivationCandidate(
+                agent_name=r["name"],
+                shared_entities=list(r.get("shared") or []),
+                reason="mentioned entity in the debate",
+            )
+        for r in rows_a:
+            if r["name"] not in merged:
+                merged[r["name"]] = ActivationCandidate(
+                    agent_name=r["name"],
+                    shared_entities=list(r.get("shared_entities") or []),
+                    reason="shares entities with the active debate",
+                )
+        ranked = sorted(merged.values(), key=lambda c: len(c.shared_entities), reverse=True)
+        return ranked[:max_new]
 
     def _parse_comm_pairs(self, records: list) -> List[CommPair]:
         """Parse Neo4j records into CommPair objects."""
