@@ -20,6 +20,16 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+
+def _profile_float(profile, attr: str, default: float) -> float:
+    """Read a float off a profile, falling back only when it is absent or None.
+
+    `Agent.conviction` is `ge=0.0`, so 0.0 is a legitimate value: `value or default`
+    would silently rewrite it to the default and fabricate debate weight.
+    """
+    value = getattr(profile, attr, None) if profile is not None else None
+    return default if value is None else float(value)
+
 _OPINION_CYPHER = """
 UNWIND $opinions AS op
 MERGE (o:Opinion {dataset_id: $dataset_id, query_hash: $query_hash,
@@ -112,7 +122,14 @@ class SocietyMemory:
     ) -> dict:
         """Commit one round atomically. MERGE — idempotent. Returns receipt dict."""
         turns_by_agent: Dict[str, list] = {}
-        reactions: List[dict] = []
+        for turn in round_result.turns:
+            turns_by_agent.setdefault(turn.agent_name, []).append(turn)
+
+        # Reactions are pair relations, so they come from the pair loop — but keyed
+        # by (speaker, target): REACTED_TO MERGEs on (dataset_id, round_no) between the
+        # same two Personas, so a repeated CommPair yields one edge, not two. Last turn
+        # wins, matching the Opinion stance/confidence below.
+        reactions_by_key: Dict[tuple, dict] = {}
         for pair in round_result.pairs:
             for turn in round_result.turns:
                 if turn.agent_name == pair.agent_a:
@@ -123,21 +140,21 @@ class SocietyMemory:
                     continue
                 if target_name == turn.agent_name:
                     continue
-                reactions.append({
+                reactions_by_key[(turn.agent_name, target_name)] = {
                     "speaker_name": turn.agent_name,
                     "target_name": target_name,
                     "round_no": round_result.round_num,
                     "summary": turn.content,
                     "stance": turn.stance,
                     "confidence": turn.confidence,
-                })
-                turns_by_agent.setdefault(turn.agent_name, []).append(turn)
+                }
+        reactions: List[dict] = list(reactions_by_key.values())
 
         opinions: List[dict] = []
         for agent_name, turns in turns_by_agent.items():
             profile = profile_map.get(agent_name)
-            conviction = float(getattr(profile, "conviction", 0.5) or 0.5) if profile else 0.5
-            cior = float(getattr(profile, "cior", 0.0) or 0.0) if profile else 0.0
+            conviction = _profile_float(profile, "conviction", 0.5)
+            cior = _profile_float(profile, "cior", 0.0)
             last = turns[-1]  # final position in this round is the canonical stance
             entities: list[str] = []
             for t in turns:

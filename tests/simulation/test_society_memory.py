@@ -150,3 +150,41 @@ def test_to_prompt_excludes_own_entries():
     ])
     prompt = snap.to_prompt(speaker="Alice", opponent="Bob")
     assert "other" in prompt and "own" not in prompt
+
+
+@pytest.mark.asyncio
+async def test_commit_round_multi_pair_agent_text_not_duplicated():
+    """An agent speaking in several pairs must be committed exactly once."""
+    session = FakeSession()
+    driver = MagicMock()
+    driver.session.return_value = session
+    svc = SocietyMemory(driver, "db")
+    rnd = _round(1,
+                 [_turn("Alice", "alice speaks", stance="POSITIVE"),
+                  _turn("Bob", "bob speaks", stance="NEGATIVE"),
+                  _turn("Carol", "carol speaks", stance="NEUTRAL")],
+                 [CommPair(agent_a="Alice", agent_b="Bob"),
+                  CommPair(agent_a="Alice", agent_b="Carol"),
+                  CommPair(agent_a="Alice", agent_b="Bob")])  # duplicate pair must not inflate edges
+    receipt = await svc.commit_round(rnd, "ds", "qh", {})
+    opinions = session.calls[0][1]["opinions"]
+    alice = next(o for o in opinions if o["agent_name"] == "Alice")
+    assert alice["text"] == "alice speaks"          # exactly once — not "alice speaks\n\nalice speaks"
+    assert receipt["opinions"] == 3
+    assert receipt["edges"] == 4                    # Alice->Bob, Bob->Alice, Alice->Carol, Carol->Alice
+
+
+@pytest.mark.asyncio
+async def test_commit_round_zero_conviction_keeps_zero_weight():
+    """conviction == 0.0 is a real value; CIOR weight must not fabricate 0.5 for it."""
+    session = FakeSession()
+    driver = MagicMock()
+    driver.session.return_value = session
+    svc = SocietyMemory(driver, "db")
+    rnd = _round(1, [_turn("Zero", "z content", stance="NEUTRAL", conf=0.8)],
+                 [CommPair(agent_a="Zero", agent_b="Other")])
+    await svc.commit_round(rnd, "ds", "qh",
+                           {"Zero": FakeProfile("Zero", conviction=0.0, cior=0.0)})
+    op = session.calls[0][1]["opinions"][0]
+    assert op["conviction"] == 0.0
+    assert op["weight"] == 0.0                      # not 0.8 * 0.5 * (1 + 0) / 2 == 0.2
