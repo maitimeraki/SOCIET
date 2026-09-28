@@ -272,7 +272,7 @@ async def _execute_unified_job(
     extraction_stage = GraphExtractionStage(cfg) if mode == "build_graph" else None
     normalization_stage = GraphNormalizationStage(cfg) if mode == "build_graph" else None
 
-    chunks = await _chunk_documents(documents, cfg.ontology_chunk_size_chars, cfg.ontology_chunk_overlap_chars) # return types -> List[GlobalInputDocument]
+    chunks = await _chunk_documents(documents, cfg.ontology_chunk_size_chars, cfg.ontology_chunk_overlap_chars)
     total_chunks = len(chunks)
 
     async with _RUNS_LOCK:

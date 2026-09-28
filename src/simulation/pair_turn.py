@@ -1,4 +1,4 @@
-"""PairTurn types extracted from graph_debate_engine for shared use across modules."""
+"""PairTurn types shared across simulation modules."""
 from dataclasses import dataclass, field
 from typing import Dict, List
 
