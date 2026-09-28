@@ -3,28 +3,26 @@ import uuid
 import pytest
 from unittest.mock import AsyncMock
 
-from src.persona.models_persona import AgentProfile, PersonaIdentity, ConfidenceBreakdown
+from src.persona.agent import Agent, ConfidenceBreakdown, DiscoveryType, ExpertiseLevel, PersonaIdentity
 from src.simulation.llm_batch import BatchedLLMRunner
 from src.simulation.round_runner import RoundRunner, _build_system_prompt, _build_user_prompt, _parse_response_stance
-from src.simulation.pair_turn import RoundResult
-from src.simulation.pair_turn import CommPair
+from src.simulation.pair_turn import RoundResult, CommPair
 
 
-def make_profile(name: str, domain_tags: list[str], perspective: str, confidence: float) -> tuple[uuid.UUID, AgentProfile]:
+def make_profile(name: str, domain_tags: list[str], perspective: str, confidence: float) -> tuple[uuid.UUID, Agent]:
     aid = uuid.uuid4()
-    p = AgentProfile(
+    agent = Agent(
         agent_id=aid,
         identity=PersonaIdentity(name=name, archetype="Expert", communication_style="Formal"),
-        domain_tags=domain_tags,
-        description=f"{name} description",
+        discovery_type=DiscoveryType.INTENT_DRIVEN,
+        expertise_level=ExpertiseLevel.TECHNICAL,
+        bio=f"{name} description",
         detailed_perspective=perspective,
+        domain_tags=domain_tags,
         confidence=confidence,
         confidence_breakdown=ConfidenceBreakdown(source_breadth=1, node_density=1, relationship_connectivity=0.5),
-        provenance=[],
-        discovery_type="intent_driven",
-        expertise_level="Technical",
     )
-    return aid, p
+    return aid, agent
 
 
 def make_pair(name_a: str, name_b: str, shared: list[str]) -> CommPair:
