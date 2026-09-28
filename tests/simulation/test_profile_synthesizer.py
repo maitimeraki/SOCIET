@@ -500,3 +500,35 @@ async def test_synthesize_from_names_skips_unresolvable(repo, synth):
 async def test_synthesize_from_names_empty_names(repo, synth):
     assert await synth.synthesize_from_names([], "q", "ds") == []
     repo.fetch_nodes_by_names.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_synthesize_from_names_skips_name_absent_from_nodes_map(repo, synth):
+    """A name that does not resolve in nodes_map is unresolvable: skip, never build.
+
+    The repo fixture resolves only "Carl", so "Ghost" is absent from the graph.
+    Building anyway would fabricate an Agent with default archetype/stance/cior
+    from the bare name — a hardcoded roster in disguise.
+    """
+    nodes_map = await repo.fetch_nodes_by_names(["Ghost"])
+    assert "Ghost" not in nodes_map  # premise: the name does not resolve
+
+    profiles = await synth.synthesize_from_names(["Ghost"], "q", "ds")
+
+    assert profiles == []
+    repo.build_single_agent_profile_from_node.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_synthesize_from_names_filters_none_for_resolved_name(repo, synth):
+    """A name that does resolve, whose builder still yields None, is filtered out.
+
+    This keeps the `p is not None` filter exercised now that unresolvable names
+    short-circuit before the builder.
+    """
+    repo.build_single_agent_profile_from_node = AsyncMock(return_value=None)
+
+    profiles = await synth.synthesize_from_names(["Carl"], "q", "ds")
+
+    assert profiles == []
+    repo.build_single_agent_profile_from_node.assert_awaited()

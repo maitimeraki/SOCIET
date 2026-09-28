@@ -1,6 +1,7 @@
 """ProfileSynthesizer: Graph-backed agent profile synthesis from entity clusters."""
 import asyncio
 import inspect
+import logging
 import math
 from collections import defaultdict
 from typing import Any
@@ -8,6 +9,8 @@ from typing import Any
 from src.persona.agent import Agent
 from src.persona.graph_context import GraphContext, EntityNode
 from src.persona.repository import PersonaRepository
+
+logger = logging.getLogger(__name__)
 
 
 class ProfileSynthesizer:
@@ -175,7 +178,12 @@ class ProfileSynthesizer:
         async def _build(name: str) -> Agent | None:
             async with semaphore:
                 nodes_map = await self._repo.fetch_nodes_by_names([name])
-                node = nodes_map.get(name) or {"name": name}
+                node = nodes_map.get(name)
+                if node is None:
+                    # No graph node backs this name. Skipping beats fabricating a
+                    # default-archetype/-stance/-cior Agent from the bare string.
+                    logger.warning("synthesize_from_names: %r has no graph node; skipped", name)
+                    return None
                 relevance = max(0.05, min(1.0, relevant.get(name, 0.33)))
                 domain_tags = node.get("domain_tags") if isinstance(node, dict) else getattr(node, "domain_tags", []) or []
                 first_tag = (domain_tags[0] if domain_tags else None) or "general"

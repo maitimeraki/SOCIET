@@ -301,18 +301,23 @@ from src.simulation.pair_turn import ActivationCandidate
 async def test_find_activation_candidates_merges_sources_and_caps(mock_driver):
     driver, result = mock_driver
     result.data = AsyncMock(side_effect=[
-        [{"name": "Swing", "shared": ["carbon"]}],                    # mentions source
-        [{"name": "Dormant", "shared_entities": ["ethics"]},
-         {"name": "Swing", "shared_entities": ["carbon", "ethics"]}],  # adjacency source
+        [{"name": "Swing", "shared": ["carbon"]},                       # mentions source: 1 entity
+         {"name": "Quiet", "shared": ["tariff", "trade"]}],             # mentions source: 2 entities
+        [{"name": "Dormant", "shared_entities": ["ethics", "policy", "law"]},  # adjacency source: 3 entities
+         {"name": "Swing", "shared_entities": ["carbon", "ethics"]}],   # adjacency dup — mention copy wins
     ])
     topology = CommunicationTopology(driver, "db")
     cands = await topology.find_activation_candidates(
         participants=["Alice"], dataset_id="ds1", query_hash="qh1", last_round=1, max_new=2,
     )
     names = [c.agent_name for c in cands]
+    # 3 merged candidates (> max_new), richest inserted last: the cap and the
+    # descending-count ranking are both load-bearing here.
     assert len(cands) == 2
     assert "Dormant" in names
-    assert cands[0].agent_name == "Swing"  # ranked by shared-entity count desc
+    assert names == ["Dormant", "Quiet"]
+    assert cands[0].agent_name == "Dormant"  # ranked by shared-entity count desc
+    assert "Swing" not in names              # cap drops the poorest candidate
 
 
 @pytest.mark.asyncio
@@ -322,3 +327,4 @@ async def test_find_activation_candidates_disabled_or_no_candidates(mock_driver)
     topology = CommunicationTopology(driver, "db")
     assert await topology.find_activation_candidates(["A"], "ds", "qh", 1, max_new=0) == []
     assert await topology.find_activation_candidates([], "ds", "qh", 1, max_new=2) == []
+    driver.session.assert_not_called()  # short-circuit happens before any query

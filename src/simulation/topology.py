@@ -31,9 +31,10 @@ class CommunicationTopology:
         Compute communication pairs for a debate round using Cypher.
 
         Round 1: Direct entity overlap via single-hop paths.
-        Round 2+: Expand path length to per-agent `communication_radius`
-                  (capped by `config.comm_radius`). Previously the agent's
-                  own radius was ignored; this was Gap P15.
+        Round 2+: Expand path length to one cohort-wide radius: `max()` over
+                  every agent's own `communication_radius`, clamped to
+                  [1, `config.comm_radius`]. One wide-radius agent widens the
+                  path for every pair.
         """
         agent_names = [p.identity.name for p in profiles]
         # Per-agent radius takes precedence, capped by the global config ceiling.
