@@ -1,7 +1,7 @@
 """Chunk processing utilities for document ingestion."""
 import uuid
 import hashlib
-from typing import List, Optional
+from typing import Any, List, Optional
 from io import StringIO, BytesIO
 from fastapi import UploadFile
 from llama_index.core.node_parser import SentenceSplitter
@@ -168,3 +168,33 @@ def process_documents(
             all_chunks.append(chunk)
 
     return all_chunks
+
+
+class ChunkProcessor:
+    """Chunk-level processor for the API layer (api_server._chunk_documents).
+
+    Thin adapter over _create_processed_chunk. Enrichment fields stay blank —
+    a separate enrichment stage owns them (see models_graph ProcessedChunk docstring).
+    The llama-index LLM argument is accepted and ignored (API-shape compatibility).
+    """
+
+    def __init__(self, llm: Any = None):
+        self._llm = llm
+
+    async def process_document(
+        self,
+        chunk: str,
+        chunk_index: int,
+        parent_doc_id: str,
+        metadata: dict,
+    ) -> ProcessedChunk:
+        return _create_processed_chunk(
+            content=chunk,
+            chunk_index=chunk_index,
+            parent_doc_id=parent_doc_id,
+            source_document=str(
+                (metadata or {}).get("title")
+                or (metadata or {}).get("source_document")
+                or "unknown"
+            ),
+        )
