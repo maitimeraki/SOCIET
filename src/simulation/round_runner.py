@@ -1,13 +1,15 @@
 """RoundRunner: dispatches pair prompts via BatchedLLMRunner and assembles RoundResult."""
 from dataclasses import dataclass
-from typing import Optional, Callable, AsyncIterator
+from typing import Optional, Callable
 
-from src.persona.models_persona import AgentProfile
-from src.simulation.llm_batch import BatchedLLMRunner, PairPrompt, PairResult
+from src.persona.agent import Agent
+from src.simulation.llm_batch import BatchedLLMRunner, PairPrompt
 from src.simulation.pair_turn import AgentTurn, RoundResult, CommPair
 
 
-def _parse_response_stance(response: str, default_stance: str, default_confidence: float) -> tuple[str, float]:
+def _parse_response_stance(
+    response: str, default_stance: str, default_confidence: float
+) -> tuple[str, float]:
     """Parse stance and confidence from agent response using simple heuristics."""
     stance = default_stance
     confidence = default_confidence
@@ -28,14 +30,36 @@ def _parse_response_stance(response: str, default_stance: str, default_confidenc
     return stance, confidence
 
 
-def _build_system_prompt(agent: AgentProfile, opponent: AgentProfile, shared_entities: list[str]) -> str:
+def _extract_references(content: str, candidates: list[str]) -> list[str]:
+    """Entities a turn references: known candidate names appearing in the content. Cap 5.
+
+    ponytail: name-containment heuristic; upgrade to ontology-aware entity
+    resolution if precision matters.
+    """
+    lower = content.lower()
+    refs: list[str] = []
+    for cand in candidates:
+        name = (cand or "").strip()
+        if name and name.lower() in lower and name not in refs:
+            refs.append(name)
+    return refs[:5]
+
+
+def _build_system_prompt(agent: Agent, opponent: Agent, shared_entities: list[str]) -> str:
     domains = ", ".join(agent.domain_tags[:3])
     shared = ", ".join(shared_entities[:3]) if shared_entities else "none"
     cb = agent.confidence_breakdown
-    provenance_summary = ", ".join([p.title for p in agent.provenance[:3]]) if agent.provenance else "none"
+    provenance_summary = (
+        ", ".join([p.title for p in agent.summary_provenance[:3]])
+        if agent.summary_provenance
+        else "none"
+    )
     return (
         f"You are {agent.identity.name}, an expert in {domains}.\n"
+        f"Archetype: {agent.identity.archetype}. Communication style: {agent.identity.communication_style}.\n"
         f"Your perspective: {agent.detailed_perspective[:500]}\n"
+        f"Bio: {agent.bio[:300]}\n"
+        f"Stance on this topic: {agent.stance.value} (intensity {agent.intensity:.2f}).\n"
         f"Confidence breakdown: sources={cb.source_breadth}, nodes={cb.node_density}, connectivity={cb.relationship_connectivity:.2f}\n"
         f"Provenance: {provenance_summary}\n"
         f"You share these entities with your opponent: {shared}\n"
@@ -43,7 +67,9 @@ def _build_system_prompt(agent: AgentProfile, opponent: AgentProfile, shared_ent
     )
 
 
-def _build_user_prompt(agent: AgentProfile, opponent: AgentProfile, query: str, history: list[dict]) -> str:
+def _build_user_prompt(
+    agent: Agent, opponent: Agent, query: str, history: list[dict]
+) -> str:
     history_str = ""
     if history:
         recent = history[-4:]
@@ -61,21 +87,26 @@ def _build_user_prompt(agent: AgentProfile, opponent: AgentProfile, query: str, 
 @dataclass
 class RoundRunner:
     """Executes one debate round: builds prompts, runs LLM batch, assembles RoundResult."""
+
     _llm: BatchedLLMRunner
     ws_broadcast: Optional[Callable] = None
 
     async def execute_round(
         self,
-        profiles: list[AgentProfile],
+        profiles: list[Agent],
         pairs: list[CommPair],
         round_num: int,
         query: str,
         history: list[dict],
     ) -> RoundResult:
-        prompts = []
-        profile_map = {str(p.agent_id): p for p in profiles}
-        # prompt_map keeps track of which pair+direction each prompt belongs to
+        prompts: list[PairPrompt] = []
+        profile_map = {p.identity.name: p for p in profiles}
         prompt_meta: dict[str, dict] = {}
+
+        # Use the first profile's dataset_id so pair_ids are tenant-scoped.
+        # All profiles in a debate share the same dataset_id; this guards
+        # against collisions if two datasets ever share agent names.
+        dataset_id = profiles[0].graph_snapshot.dataset_id if profiles else "default"
 
         for pair in pairs:
             agent_a = profile_map.get(pair.agent_a)
@@ -85,30 +116,20 @@ class RoundRunner:
 
             shared = [str(e) for e in (pair.shared_entities or [])]
 
-            # A speaks to B
-            meta_a = {
-                "pair": pair,
-                "speaker": agent_a,
-                "opponent": agent_b,
-            }
+            meta_a = {"pair": pair, "speaker": agent_a, "opponent": agent_b}
             prompt_a = PairPrompt(
                 system_prompt=_build_system_prompt(agent_a, agent_b, shared),
                 user_prompt=_build_user_prompt(agent_a, agent_b, query, history),
-                pair_id=f"{pair.agent_a}:{pair.agent_b}",
+                pair_id=f"{dataset_id}:{pair.agent_a}:{pair.agent_b}",
             )
             prompts.append(prompt_a)
             prompt_meta[prompt_a.pair_id] = meta_a
 
-            # B speaks to A
-            meta_b = {
-                "pair": pair,
-                "speaker": agent_b,
-                "opponent": agent_a,
-            }
+            meta_b = {"pair": pair, "speaker": agent_b, "opponent": agent_a}
             prompt_b = PairPrompt(
                 system_prompt=_build_system_prompt(agent_b, agent_a, shared),
                 user_prompt=_build_user_prompt(agent_b, agent_a, query, history),
-                pair_id=f"{pair.agent_b}:{pair.agent_a}",
+                pair_id=f"{dataset_id}:{pair.agent_b}:{pair.agent_a}",
             )
             prompts.append(prompt_b)
             prompt_meta[prompt_b.pair_id] = meta_b
@@ -118,7 +139,14 @@ class RoundRunner:
 
         async for result in self._llm.gather(prompts):
             if self.ws_broadcast:
-                self.ws_broadcast({"type": "pair_turn", "pair_id": result.pair_id, "response": result.response, "error": result.error})
+                await self.ws_broadcast(
+                    {
+                        "type": "pair_turn",
+                        "pair_id": result.pair_id,
+                        "response": result.response,
+                        "error": result.error,
+                    }
+                )
 
             meta = prompt_meta.get(result.pair_id)
             if meta is None or result.error:
@@ -135,11 +163,16 @@ class RoundRunner:
                 content=result.response,
                 stance=stance,
                 confidence=confidence,
-                references=[],
+                references=_extract_references(
+                    result.response,
+                    list(dict.fromkeys(
+                        (meta["pair"].shared_entities or [])
+                        + [meta["opponent"].identity.name]
+                    )),
+                ),
             )
             turns.append(turn)
 
-            # Track which pairs were processed
             pair = meta["pair"]
             if pair not in collected_pairs:
                 collected_pairs.append(pair)

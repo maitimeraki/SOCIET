@@ -221,3 +221,34 @@ async def test_execute_round_turn_contains_profile_data():
     # Both are boosted by "certain" word: Alice 0.8->0.9, Bob 0.6->0.7
     assert 0.9 in confidences
     assert 0.7 in confidences
+
+
+# ------------------------------------------------------------------
+# Turn references
+# ------------------------------------------------------------------
+
+from src.simulation.round_runner import _extract_references
+
+
+def test_extract_references_matches_candidates_in_content():
+    refs = _extract_references("Carbon tax hurts the EPA budget", ["EPA", "carbon tax", "unrelated"])
+    assert refs == ["EPA", "carbon tax"]
+
+
+def test_extract_references_caps_at_five():
+    refs = _extract_references(" ".join(f"n{i}" for i in range(10)), [f"n{i}" for i in range(10)])
+    assert len(refs) == 5
+
+
+@pytest.mark.asyncio
+async def test_execute_round_fills_references():
+    mock_llm = AsyncMock()
+    mock_llm.generate = AsyncMock(return_value="I disagree with Bob about carbon pricing.")
+    rr = RoundRunner(BatchedLLMRunner(mock_llm))
+    _, alice = make_profile("Alice", ["x"], "x", 0.8)
+    _, bob = make_profile("Bob", ["y"], "y", 0.7)
+    result = await rr.execute_round(
+        [alice, bob], [make_pair("Alice", "Bob", ["carbon pricing"])], round_num=1, query="Q?", history=[]
+    )
+    alice_turn = next(t for t in result.turns if t.agent_name == "Alice")
+    assert "Bob" in alice_turn.references
