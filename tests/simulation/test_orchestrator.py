@@ -464,6 +464,8 @@ async def test_activation_pulls_in_candidates_after_commit():
     synth = AsyncMock(spec=ProfileSynthesizer)
     topo = AsyncMock(spec=CommunicationTopology)
     society_memory = AsyncMock(spec=SocietyMemory)
+    # Explicit successful receipt: an unset AsyncMock return degrades to the commit-failed branch.
+    society_memory.commit_round.return_value = _ok_receipt()
     synth.synthesize.return_value = [_make_profile(1, "Alice")]
     new_profile = _make_profile(2, "Carl")
     synth.synthesize_from_names = AsyncMock(return_value=[new_profile])
@@ -489,6 +491,9 @@ async def test_activation_pulls_in_candidates_after_commit():
     synth.synthesize_from_names.assert_awaited_once()
     assert any(m.get("type") == "activation" for m in ws_calls)
     assert any("activated" in w for w in result.warnings)
+    # F41.1: this test must not silently take the degraded commit branch either
+    assert any(m.get("type") == "commit" for m in ws_calls)
+    assert not any("commit failed" in w for w in result.warnings)
 
 
 @pytest.mark.asyncio
@@ -496,6 +501,8 @@ async def test_activation_disabled_by_config():
     synth = AsyncMock(spec=ProfileSynthesizer)
     topo = AsyncMock(spec=CommunicationTopology)
     society_memory = AsyncMock(spec=SocietyMemory)
+    # Explicit successful receipt: an unset AsyncMock return degrades to the commit-failed branch.
+    society_memory.commit_round.return_value = _ok_receipt()
     synth.synthesize.return_value = [_make_profile(1, "Alice")]
     synth.synthesize_from_names = AsyncMock(return_value=[])
     topo.compute_round_pairs.side_effect = lambda *a, **kw: [
@@ -509,6 +516,10 @@ async def test_activation_disabled_by_config():
     orch = _orch(synth, topo, society_memory)
 
     config = DebateConfig(max_agents=5, max_rounds=1, max_new_agents_per_round=0)
-    await orch.run("q", "ds1", config, AsyncMock())
+    ws_broadcast = AsyncMock()
+    await orch.run("q", "ds1", config, ws_broadcast)
     topo.find_activation_candidates.assert_not_awaited()
     synth.synthesize_from_names.assert_not_awaited()
+    # F41.1: activation is off, but the commit path is still exercised — not silently degraded
+    sent = [c.args[0] for c in ws_broadcast.call_args_list if c.args]
+    assert any(m.get("type") == "commit" for m in sent)
