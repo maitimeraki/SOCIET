@@ -1,11 +1,12 @@
 import asyncio
-from src.graph.models_graph import GlobalInputDocument
+from src.graph.models_graph import GlobalInputDocument, SourceType
 from src.graph.graph_pipeline import UniversalGraphPipeline
 
 
 async def main():
     docs = [
     GlobalInputDocument(
+        source_type=SourceType.TEXT,
         document_id="tech_spec_001",
         title="System Architecture Documentation",
         text="""System Architecture Overview - Version 3.2
@@ -37,6 +38,7 @@ async def main():
             ),
             
             GlobalInputDocument(
+                source_type=SourceType.TEXT,
                 document_id="legal_002",
                 title="Corporate Merger Agreement",
                 text="""MERGER AGREEMENT - Acme Corp and Beta Industries
@@ -82,6 +84,7 @@ async def main():
             ),
             
             GlobalInputDocument(
+                source_type=SourceType.TEXT,
                 document_id="news_003",
                 title="Healthcare AI Partnership Announcement",
                 text="""HealthTech Innovators Announce Strategic Partnership
