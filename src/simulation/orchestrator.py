@@ -1,18 +1,17 @@
 """DebateOrchestrator: coordinates the full debate pipeline with all 5 dependencies."""
+import hashlib
 from dataclasses import dataclass
-from typing import Callable, Awaitable, Any
+from typing import Callable, Awaitable, Any, List, Optional
 
-from src.persona.repository import PersonaRepository
-from src.persona.graph_context import GraphContext
+from src.persona.agent import Agent, Stance
 from src.simulation.profile_synthesizer import ProfileSynthesizer
 from src.simulation.topology import CommunicationTopology
 from src.simulation.llm_batch import BatchedLLMRunner
 from src.simulation.round_runner import RoundRunner
 from src.simulation.verdict import VerdictSynthesizer
-from src.simulation.writeback import WriteBackService
+from src.simulation.society_memory import SocietyMemory
 from src.simulation.debate_config import DebateConfig
-from src.simulation.pair_turn import RoundResult, DebateVerdict
-from src.simulation.agent_node import Stance
+from src.simulation.pair_turn import RoundResult
 
 
 @dataclass
@@ -32,7 +31,7 @@ class DebateOrchestrator:
     2. CommunicationTopology - compute agent pairs via Cypher
     3. RoundRunner (with BatchedLLMRunner) - execute debate rounds
     4. VerdictSynthesizer - synthesize final verdict
-    5. WriteBackService - persist results to graph
+    5. SocietyMemory - per-round commit to graph + society snapshot read-back
     """
 
     def __init__(
@@ -41,13 +40,13 @@ class DebateOrchestrator:
         topology: CommunicationTopology,
         llm_runner: BatchedLLMRunner,
         verdict_synthesizer: VerdictSynthesizer,
-        writeback: WriteBackService,
+        society_memory: SocietyMemory,
     ):
         self._profile_synthesizer = profile_synthesizer
         self._topology = topology
         self._llm_runner = llm_runner
         self._verdict_synthesizer = verdict_synthesizer
-        self._writeback = writeback
+        self._society_memory = society_memory
 
     async def run(
         self,
@@ -55,12 +54,18 @@ class DebateOrchestrator:
         dataset_id: str,
         config: DebateConfig,
         ws_broadcast: Callable[[dict[str, Any]], Awaitable[None]],
+        llm_client: Optional[Any] = None,
     ) -> OrchestratedDebateResult:
         """
         Run the full debate pipeline with WebSocket streaming.
+
+        `llm_client` is optional; when supplied the verdict summary is
+        produced by the LLM via `asynthesize` (no asyncio.run, no loop
+        collision). When omitted a deterministic template summary is used.
         """
         warnings: list[str] = []
         all_turns: list = []
+        profiles: List[Agent] = []
 
         # Step 1: Synthesize profiles from graph
         profiles = await self._profile_synthesizer.synthesize(
@@ -82,32 +87,41 @@ class DebateOrchestrator:
         rounds: list[RoundResult] = []
         round_runner = RoundRunner(_llm=self._llm_runner, ws_broadcast=ws_broadcast)
         debate_history: list[dict[str, Any]] = []
+        snapshot = None  # graph-side society state, read at the start of rounds >= 2
+        query_hash = hashlib.sha256(query.encode("utf-8")).hexdigest()[:16]
 
         for round_num in range(1, config.max_rounds + 1):
             try:
-                # Compute pairs for this round
-                pairs = await self._topology.compute_round_pairs(
-                    profiles=profiles,
-                    dataset_id=dataset_id,
-                    round_num=round_num,
-                    config=config,
-                )
+                if round_num > 1:
+                    try:
+                        snapshot = await self._society_memory.read_snapshot(
+                            dataset_id=dataset_id,
+                            query_hash=query_hash,
+                            through_round=round_num - 1,
+                            top_k=config.snapshot_top_k,
+                        )
+                    except Exception as exc:
+                        warnings.append(f"Round {round_num}: society snapshot read failed: {exc}")
+                        snapshot = None
 
+                pairs = await self._topology.compute_round_pairs(
+                    profiles=profiles, dataset_id=dataset_id, round_num=round_num, config=config,
+                )
                 if not pairs:
                     warnings.append(f"Round {round_num}: No pairs computed")
                     continue
 
-                # Execute round
+                if snapshot is not None:
+                    share = self._weighted_share(rounds, profiles)
+                    if share:
+                        snapshot.consensus = {"stance": share[0], "weight_share": share[1]}
+
                 round_result = await round_runner.execute_round(
-                    profiles=profiles,
-                    pairs=pairs,
-                    round_num=round_num,
-                    query=query,
-                    history=debate_history,
+                    profiles=profiles, pairs=pairs, round_num=round_num,
+                    query=query, history=debate_history, society=snapshot,
                 )
                 rounds.append(round_result)
 
-                # Update history
                 for turn in round_result.turns:
                     debate_history.append({
                         "agent_name": turn.agent_name,
@@ -119,7 +133,6 @@ class DebateOrchestrator:
                     })
                     all_turns.append(turn)
 
-                # Stream round via WebSocket
                 await ws_broadcast({
                     "type": "round",
                     "round": round_num,
@@ -140,16 +153,32 @@ class DebateOrchestrator:
                     ],
                 })
 
-                # Check convergence
-                if self._check_convergence(rounds):
+                # Commit this round to the graph (idempotent; failure-isolated)
+                try:
+                    receipt = await self._society_memory.commit_round(
+                        round_result=round_result,
+                        dataset_id=dataset_id,
+                        query_hash=query_hash,
+                        profile_map={p.identity.name: p for p in profiles},
+                    )
+                    if receipt.get("failed"):
+                        warnings.append(f"Round {round_num}: commit failed: {receipt.get('error')}")
+                    else:
+                        await ws_broadcast({"type": "commit", **receipt})
+                except Exception as exc:
+                    warnings.append(f"Round {round_num}: commit failed: {exc}")
+
+                if self._check_convergence(rounds, profiles, config=config):
                     break
 
             except Exception as exc:
                 warnings.append(f"Round {round_num} failed: {exc}")
                 continue
 
-        # Step 3: Synthesize verdict
-        verdict = self._verdict_synthesizer.synthesize(rounds=rounds, profiles=profiles)
+        # Step 3: Synthesize verdict (async path -- no asyncio.run collision)
+        verdict = await self._verdict_synthesizer.asynthesize(
+            rounds=rounds, profiles=profiles, llm_client=llm_client
+        )
 
         # Step 4: Collect final stances
         final_stances: dict[str, str] = {}
@@ -161,37 +190,52 @@ class DebateOrchestrator:
             else:
                 final_stances[profile.identity.name] = "NEUTRAL"
 
-        # Step 5: Persist to graph
-        try:
-            await self._writeback.persist_round_turns(rounds=rounds, dataset_id=dataset_id)
-        except Exception as exc:
-            warnings.append(f"Writeback failed: {exc}")
-
         return OrchestratedDebateResult(
-            converged=self._check_convergence(rounds),
+            converged=self._check_convergence(rounds, profiles, config=config),
             verdict=verdict.summary if verdict else "Debate completed.",
             final_stances=final_stances,
             warnings=warnings,
             rounds_executed=len(rounds),
         )
 
-    def _check_convergence(self, rounds: list[RoundResult]) -> bool:
-        """Check if debate has converged based on stance uniformity."""
+    def _weighted_share(self, rounds: list[RoundResult], profiles: List[Agent]) -> Optional[tuple[str, float]]:
+        """(dominant stance, weight share) via CIOR weights. None when no turns."""
+        clusters: dict[Stance, list] = {
+            Stance.POSITIVE: [], Stance.NEGATIVE: [], Stance.NEUTRAL: [], Stance.AMBIVALENT: [],
+        }
+        for turn in (t for rnd in rounds for t in rnd.turns):
+            try:
+                stance = Stance(turn.stance) if isinstance(turn.stance, str) else turn.stance
+                clusters[stance].append(turn)
+            except ValueError:
+                clusters[Stance.NEUTRAL].append(turn)
+        total_turns = sum(len(v) for v in clusters.values())
+        if total_turns == 0:
+            return None
+        if profiles:
+            profile_map = {p.identity.name: p for p in profiles}
+            weights = self._verdict_synthesizer._calibrate_cior(clusters, profile_map)
+            total = sum(weights.values())
+        else:
+            weights = {s: len(v) for s, v in clusters.items()}
+            total = float(total_turns)
+        if total <= 0:
+            return None
+        dominant = max(weights, key=lambda s: weights[s])
+        share_val = max(weights.values()) / total
+        return (dominant.value if hasattr(dominant, "value") else str(dominant), share_val)
+
+    def _check_convergence(
+        self,
+        rounds: list[RoundResult],
+        profiles: Optional[List[Agent]] = None,
+        config: Optional[DebateConfig] = None,
+    ) -> bool:
+        """Quality-weighted convergence on the LAST TWO rounds, with configured threshold."""
         if len(rounds) < 2:
             return False
-
-        all_stances: dict[str, int] = {}
-        for rnd in rounds[-2:]:  # Check last 2 rounds
-            for turn in rnd.turns:
-                try:
-                    stance = Stance(turn.stance) if isinstance(turn.stance, str) else turn.stance
-                    all_stances[stance] = all_stances.get(stance, 0) + 1
-                except ValueError:
-                    pass
-
-        if not all_stances:
+        share = self._weighted_share(rounds[-2:], profiles)
+        if share is None:
             return False
-
-        total = sum(all_stances.values())
-        dominant = max(all_stances.values())
-        return (dominant / total) >= 0.8
+        threshold = config.convergence_threshold if config is not None else 0.8
+        return share[1] >= threshold

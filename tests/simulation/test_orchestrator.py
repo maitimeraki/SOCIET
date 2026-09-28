@@ -1,4 +1,6 @@
 """Tests for DebateOrchestrator."""
+import uuid
+
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 import asyncio
@@ -9,20 +11,36 @@ from src.simulation.topology import CommunicationTopology
 from src.simulation.pair_turn import CommPair
 from src.simulation.llm_batch import BatchedLLMRunner
 from src.simulation.verdict import VerdictSynthesizer
-from src.simulation.writeback import WriteBackService
+from src.simulation.society_memory import SocietyMemory
 from src.simulation.debate_config import DebateConfig
 from src.simulation.pair_turn import AgentTurn, RoundResult, DebateVerdict
 from src.simulation.agent_node import Stance
-from src.persona.models_persona import AgentProfile, PersonaIdentity
+from src.persona.agent import (
+    Agent,
+    ConfidenceBreakdown,
+    DiscoveryType,
+    ExpertiseLevel,
+    GraphSnapshot,
+    PersonaIdentity,
+)
 
 
-def _make_profile(agent_id: int, name: str) -> AgentProfile:
-    identity = MagicMock(spec=PersonaIdentity)
-    identity.name = name
-    profile = MagicMock(spec=AgentProfile)
-    profile.agent_id = agent_id
-    profile.identity = identity
-    return profile
+def _make_profile(agent_id: int, name: str) -> Agent:
+    """Canonical Agent stand-in — the debate loop reads it, so every field must resolve."""
+    return Agent(
+        agent_id=uuid.UUID(int=agent_id),
+        identity=PersonaIdentity(name=name, archetype="Expert", communication_style="Formal"),
+        discovery_type=DiscoveryType.INTENT_DRIVEN,
+        expertise_level=ExpertiseLevel.TECHNICAL,
+        bio=f"{name} perspective",
+        detailed_perspective=f"{name} perspective",
+        domain_tags=[f"{name}_domain"],
+        confidence=0.7,
+        confidence_breakdown=ConfidenceBreakdown(
+            source_breadth=1, node_density=1, relationship_connectivity=0.5
+        ),
+        graph_snapshot=GraphSnapshot(dataset_id="ds1"),
+    )
 
 
 def _make_verdict(summary: str = "Test verdict.") -> DebateVerdict:
@@ -59,20 +77,19 @@ class _AsyncEmptyIter:
 
 @pytest.mark.asyncio
 async def test_five_step_flow():
-    """Verify all 5 steps execute: profiles → topology → round → verdict → writeback."""
+    """Verify all 5 steps execute: profiles → topology → round → verdict → graph commit."""
     synth = AsyncMock(spec=ProfileSynthesizer)
     topo = AsyncMock(spec=CommunicationTopology)
     llm_runner = MagicMock(spec=BatchedLLMRunner)
     verdict_synth = MagicMock(spec=VerdictSynthesizer)
-    writeback = AsyncMock(spec=WriteBackService)
+    society_memory = AsyncMock(spec=SocietyMemory)
 
     profiles = [_make_profile(1, "Alice"), _make_profile(2, "Bob")]
     synth.synthesize.return_value = profiles
     topo.compute_round_pairs.return_value = [
         CommPair(agent_a="Alice", agent_b="Bob", shared_entities=[], score=0.5)
     ]
-    verdict_synth.synthesize.return_value = _make_verdict()
-    writeback.persist_round_turns.return_value = None
+    verdict_synth.asynthesize.return_value = _make_verdict()
     llm_runner.gather = MagicMock(return_value=_AsyncEmptyIter())
 
     orchestrator = DebateOrchestrator(
@@ -80,7 +97,7 @@ async def test_five_step_flow():
         topology=topo,
         llm_runner=llm_runner,
         verdict_synthesizer=verdict_synth,
-        writeback=writeback,
+        society_memory=society_memory,
     )
 
     ws_broadcast = AsyncMock()
@@ -97,10 +114,14 @@ async def test_five_step_flow():
     assert topo.compute_round_pairs.call_count == 3
 
     # Step 3: verdict synthesized once
-    verdict_synth.synthesize.assert_called_once()
+    verdict_synth.asynthesize.assert_called_once()
 
-    # Step 4: writeback called once
-    writeback.persist_round_turns.assert_awaited_once()
+    # Step 4: every round committed to the graph; snapshot read from round 2 on
+    assert society_memory.commit_round.call_count == result.rounds_executed
+    if result.rounds_executed > 1:
+        assert society_memory.read_snapshot.call_count == result.rounds_executed - 1
+    else:
+        society_memory.read_snapshot.assert_not_awaited()
 
     assert isinstance(result, OrchestratedDebateResult)
     assert result.verdict == "Test verdict."
@@ -114,7 +135,7 @@ async def test_ws_broadcast_passed_to_round_runner():
     topo = AsyncMock(spec=CommunicationTopology)
     llm_runner = MagicMock(spec=BatchedLLMRunner)
     verdict_synth = MagicMock(spec=VerdictSynthesizer)
-    writeback = AsyncMock(spec=WriteBackService)
+    society_memory = AsyncMock(spec=SocietyMemory)
 
     profiles = [_make_profile(1, "Alice"), _make_profile(2, "Bob")]
     synth.synthesize.return_value = profiles
@@ -122,7 +143,6 @@ async def test_ws_broadcast_passed_to_round_runner():
         CommPair(agent_a="Alice", agent_b="Bob", shared_entities=[], score=0.5)
     ]
     verdict_synth.synthesize.return_value = _make_verdict()
-    writeback.persist_round_turns.return_value = None
     llm_runner.gather = MagicMock(return_value=_AsyncEmptyIter())
 
     orchestrator = DebateOrchestrator(
@@ -130,7 +150,7 @@ async def test_ws_broadcast_passed_to_round_runner():
         topology=topo,
         llm_runner=llm_runner,
         verdict_synthesizer=verdict_synth,
-        writeback=writeback,
+        society_memory=society_memory,
     )
 
     ws_calls = []
@@ -164,7 +184,7 @@ async def test_no_profiles_returns_early():
     topo = AsyncMock(spec=CommunicationTopology)
     llm_runner = MagicMock(spec=BatchedLLMRunner)
     verdict_synth = MagicMock(spec=VerdictSynthesizer)
-    writeback = AsyncMock(spec=WriteBackService)
+    society_memory = AsyncMock(spec=SocietyMemory)
 
     synth.synthesize.return_value = []
 
@@ -173,7 +193,7 @@ async def test_no_profiles_returns_early():
         topology=topo,
         llm_runner=llm_runner,
         verdict_synthesizer=verdict_synth,
-        writeback=writeback,
+        society_memory=society_memory,
     )
 
     ws_broadcast = AsyncMock()
@@ -184,8 +204,9 @@ async def test_no_profiles_returns_early():
     assert result.converged is False
     assert "No agents could be synthesized" in result.verdict
     topo.compute_round_pairs.assert_not_called()
-    verdict_synth.synthesize.assert_not_called()
-    writeback.persist_round_turns.assert_not_called()
+    verdict_synth.asynthesize.assert_not_called()
+    society_memory.commit_round.assert_not_awaited()
+    society_memory.read_snapshot.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -195,7 +216,7 @@ async def test_convergence_check_breaks_loop():
     topo = AsyncMock(spec=CommunicationTopology)
     llm_runner = MagicMock(spec=BatchedLLMRunner)
     verdict_synth = MagicMock(spec=VerdictSynthesizer)
-    writeback = AsyncMock(spec=WriteBackService)
+    society_memory = AsyncMock(spec=SocietyMemory)
 
     profiles = [_make_profile(1, "Alice")]
     synth.synthesize.return_value = profiles
@@ -207,7 +228,6 @@ async def test_convergence_check_breaks_loop():
         CommPair(agent_a="Alice", agent_b="Bob", shared_entities=[], score=0.5)
     ]
     verdict_synth.synthesize.return_value = _make_verdict()
-    writeback.persist_round_turns.return_value = None
     # Fresh iterator per call so each round gets an empty async iterator
     llm_runner.gather = MagicMock(side_effect=lambda *a, **kw: _AsyncEmptyIter())
 
@@ -216,11 +236,11 @@ async def test_convergence_check_breaks_loop():
         topology=topo,
         llm_runner=llm_runner,
         verdict_synthesizer=verdict_synth,
-        writeback=writeback,
+        society_memory=society_memory,
     )
 
     # Override _check_convergence with a sync function (same signature as the real method)
-    def fake_convergence(rounds):
+    def fake_convergence(rounds, profiles=None, config=None):
         return len(rounds) >= 2
 
     orchestrator._check_convergence = fake_convergence
@@ -241,13 +261,12 @@ async def test_convergence_false_when_insufficient_rounds():
     topo = AsyncMock(spec=CommunicationTopology)
     llm_runner = MagicMock(spec=BatchedLLMRunner)
     verdict_synth = MagicMock(spec=VerdictSynthesizer)
-    writeback = AsyncMock(spec=WriteBackService)
+    society_memory = AsyncMock(spec=SocietyMemory)
 
     profiles = [_make_profile(1, "Alice")]
     synth.synthesize.return_value = profiles
     topo.compute_round_pairs.return_value = []
     verdict_synth.synthesize.return_value = _make_verdict()
-    writeback.persist_round_turns.return_value = None
     llm_runner.gather = MagicMock(return_value=_AsyncEmptyIter())
 
     orchestrator = DebateOrchestrator(
@@ -255,7 +274,7 @@ async def test_convergence_false_when_insufficient_rounds():
         topology=topo,
         llm_runner=llm_runner,
         verdict_synthesizer=verdict_synth,
-        writeback=writeback,
+        society_memory=society_memory,
     )
 
     ws_broadcast = AsyncMock()
@@ -273,7 +292,7 @@ async def test_check_convergence_domimant_stance_threshold():
     topo = AsyncMock(spec=CommunicationTopology)
     llm_runner = MagicMock(spec=BatchedLLMRunner)
     verdict_synth = MagicMock(spec=VerdictSynthesizer)
-    writeback = AsyncMock(spec=WriteBackService)
+    society_memory = AsyncMock(spec=SocietyMemory)
 
     profiles = [_make_profile(1, "Alice"), _make_profile(2, "Bob")]
     synth.synthesize.return_value = profiles
@@ -281,7 +300,6 @@ async def test_check_convergence_domimant_stance_threshold():
         CommPair(agent_a="Alice", agent_b="Bob", shared_entities=[], score=0.5)
     ]
     verdict_synth.synthesize.return_value = _make_verdict()
-    writeback.persist_round_turns.return_value = None
 
     # Build RoundResults with controlled turn stances so we can test
     # _check_convergence directly without wiring through the full LLM stack.
@@ -313,9 +331,61 @@ async def test_check_convergence_domimant_stance_threshold():
         topology=topo,
         llm_runner=llm_runner,
         verdict_synthesizer=verdict_synth,
-        writeback=writeback,
+        society_memory=society_memory,
     )
 
     # Test _check_convergence directly
     assert orchestrator._check_convergence([r1]) is False  # < 2 rounds
     assert orchestrator._check_convergence([r1, r2]) is True  # 100% dominant
+
+
+@pytest.mark.asyncio
+async def test_commit_failure_degrades_to_warning():
+    synth = AsyncMock(spec=ProfileSynthesizer)
+    topo = AsyncMock(spec=CommunicationTopology)
+    llm_runner = MagicMock(spec=BatchedLLMRunner)
+    verdict_synth = MagicMock(spec=VerdictSynthesizer)
+    society_memory = AsyncMock(spec=SocietyMemory)
+    synth.synthesize.return_value = [_make_profile(1, "Alice")]
+    topo.compute_round_pairs.side_effect = lambda *a, **kw: [
+        CommPair(agent_a="Alice", agent_b="Bob", shared_entities=[], score=0.5)
+    ]
+    verdict_synth.synthesize.return_value = _make_verdict()
+    society_memory.commit_round.side_effect = RuntimeError("db down")
+    llm_runner.gather = MagicMock(side_effect=lambda *a, **kw: _AsyncEmptyIter())
+
+    orchestrator = DebateOrchestrator(
+        profile_synthesizer=synth, topology=topo, llm_runner=llm_runner,
+        verdict_synthesizer=verdict_synth, society_memory=society_memory,
+    )
+    result = await orchestrator.run("q", "ds1", DebateConfig(max_agents=5, max_rounds=1), AsyncMock())
+    assert any("commit failed" in w for w in result.warnings)
+
+
+@pytest.mark.asyncio
+async def test_convergence_uses_config_threshold():
+    synth, topo, llm_runner, verdict_synth = (AsyncMock(spec=ProfileSynthesizer),
+                                              AsyncMock(spec=CommunicationTopology),
+                                              MagicMock(spec=BatchedLLMRunner),
+                                              MagicMock(spec=VerdictSynthesizer))
+    synth.synthesize.return_value = [_make_profile(1, "Alice")]
+    topo.compute_round_pairs.side_effect = lambda *a, **kw: [
+        CommPair(agent_a="Alice", agent_b="Bob", shared_entities=[], score=0.5)
+    ]
+    verdict_synth.synthesize.return_value = _make_verdict()
+    llm_runner.gather = MagicMock(side_effect=lambda *a, **kw: _AsyncEmptyIter())
+    society_memory = AsyncMock(spec=SocietyMemory)
+    orchestrator = DebateOrchestrator(
+        profile_synthesizer=synth, topology=topo, llm_runner=llm_runner,
+        verdict_synthesizer=verdict_synth, society_memory=society_memory,
+    )
+    # 100% dominant on last 2 rounds → converged with low threshold...
+    t = _make_turn("1", "Alice", "POSITIVE")
+    r1 = RoundResult(round_num=1, turns=[t], pairs=[])
+    r2 = RoundResult(round_num=2, turns=[t], pairs=[])
+    assert orchestrator._check_convergence([r1, r2], None, config=DebateConfig(convergence_threshold=0.8)) is True
+    # ...and a 50%-dominant mix is rejected at 0.8 but accepted at 0.4
+    n = _make_turn("1", "Alice", "NEGATIVE")
+    r2b = RoundResult(round_num=2, turns=[t, n], pairs=[])
+    assert orchestrator._check_convergence([r1, r2b], None, config=DebateConfig(convergence_threshold=0.8)) is False
+    assert orchestrator._check_convergence([r1, r2b], None, config=DebateConfig(convergence_threshold=0.4)) is True

@@ -1,10 +1,10 @@
-"""Integration tests: round → VerdictSynthesizer → WriteBackService flow."""
+"""Integration tests: round → VerdictSynthesizer → SocietyMemory commit flow."""
 import pytest
 import asyncio
 from unittest.mock import AsyncMock, MagicMock
 
 from src.simulation.verdict import VerdictSynthesizer
-from src.simulation.writeback import WriteBackService
+from src.simulation.society_memory import SocietyMemory
 from src.simulation.pair_turn import RoundResult, AgentTurn, CommPair
 from src.simulation.agent_node import Stance
 
@@ -20,8 +20,8 @@ def _make_turn(agent_id: str, agent_name: str, content: str, stance: str, confid
     )
 
 
-def _make_pair(a_id: str, b_id: str) -> CommPair:
-    return CommPair(agent_a=a_id, agent_b=b_id)
+def _make_pair(a_name: str, b_name: str) -> CommPair:
+    return CommPair(agent_a=a_name, agent_b=b_name)
 
 
 class TestVerdictSynthesizerFromRound:
@@ -37,8 +37,8 @@ class TestVerdictSynthesizerFromRound:
             _make_turn("a5", "Eve", "AI has great potential", "POSITIVE", 0.9),
         ]
         pairs = [
-            _make_pair("a1", "a2"),
-            _make_pair("a3", "a4"),
+            _make_pair("Alice", "Bob"),
+            _make_pair("Carol", "Dave"),
         ]
         round_result = RoundResult(round_num=1, turns=turns, pairs=pairs)
 
@@ -70,54 +70,58 @@ class TestVerdictSynthesizerFromRound:
         assert verdict.cluster_details == {}
 
 
-class TestWriteBackPersistsRound:
-    """test_writeback_persists_round — mocked driver verifies session.run is called."""
+class TestSocietyMemoryCommitsRound:
+    """test_society_memory_commits_round — mocked driver verifies the round lands in the graph."""
 
-    @pytest.mark.asyncio
-    async def test_persist_round_turns_calls_session_run(self):
-        # Build mock session / driver chain
-        mock_result = AsyncMock()
-        mock_result.data = AsyncMock(return_value=[])  # consumed by async with
+    @staticmethod
+    def _mock_graph():
+        mock_tx = AsyncMock()
         mock_session = AsyncMock()
-        mock_session.run = AsyncMock(return_value=mock_result)
+        mock_session.begin_transaction = AsyncMock(return_value=mock_tx)
         mock_session.__aenter__ = AsyncMock(return_value=mock_session)
         mock_session.__aexit__ = AsyncMock(return_value=None)
 
         mock_driver = MagicMock()
         mock_driver.session = MagicMock(return_value=mock_session)
+        return mock_driver, mock_session, mock_tx
+
+    @pytest.mark.asyncio
+    async def test_commit_round_writes_opinions_and_reactions(self):
+        mock_driver, mock_session, mock_tx = self._mock_graph()
 
         turns = [
             _make_turn("a1", "Alice", "AI is great", "POSITIVE", 0.9),
             _make_turn("a2", "Bob", "AI is risky", "NEGATIVE", 0.8),
         ]
-        pairs = [_make_pair("a1", "a2")]
+        pairs = [_make_pair("Alice", "Bob")]
         round_result = RoundResult(round_num=1, turns=turns, pairs=pairs)
 
-        service = WriteBackService(mock_driver, "neo4j")
-        await service.persist_round_turns(rounds=[round_result], dataset_id="test-ds-42")
+        service = SocietyMemory(mock_driver, "neo4j")
+        receipt = await service.commit_round(
+            round_result=round_result,
+            dataset_id="test-ds-42",
+            query_hash="qh42",
+            profile_map={},
+        )
 
         # session() called with the configured database name
         mock_driver.session.assert_called_once_with(database="neo4j")
 
-        # run() called once for the single round
-        mock_session.run.assert_called_once()
+        # opinions written inside the round's transaction, scoped to the dataset
+        opinion_kwargs = mock_tx.run.call_args_list[0].kwargs
+        assert opinion_kwargs["dataset_id"] == "test-ds-42"
+        assert opinion_kwargs["query_hash"] == "qh42"
+        assert len(opinion_kwargs["opinions"]) == 2
 
-        # dataset_id passed through
-        call_kwargs = mock_session.run.call_args.kwargs
-        assert call_kwargs.get("dataset_id") == "test-ds-42"
-        assert "turns" in call_kwargs
+        # one opinion per speaker, one reaction edge per direction
+        assert receipt["failed"] is False
+        assert receipt["opinions"] == 2
+        assert receipt["edges"] == 2
+        mock_tx.commit.assert_awaited_once()
 
     @pytest.mark.asyncio
-    async def test_persist_multiple_rounds_calls_run_per_round(self):
-        mock_result = AsyncMock()
-        mock_result.data = AsyncMock(return_value=[])
-        mock_session = AsyncMock()
-        mock_session.run = AsyncMock(return_value=mock_result)
-        mock_session.__aenter__ = AsyncMock(return_value=mock_session)
-        mock_session.__aexit__ = AsyncMock(return_value=None)
-
-        mock_driver = MagicMock()
-        mock_driver.session = MagicMock(return_value=mock_session)
+    async def test_commit_multiple_rounds_writes_once_per_round(self):
+        mock_driver, mock_session, mock_tx = self._mock_graph()
 
         round1 = RoundResult(
             round_num=1,
@@ -125,7 +129,7 @@ class TestWriteBackPersistsRound:
                 _make_turn("a1", "Alice", "AI helps", "POSITIVE", 0.9),
                 _make_turn("a2", "Bob", "AI helps too", "POSITIVE", 0.8),
             ],
-            pairs=[_make_pair("a1", "a2")],
+            pairs=[_make_pair("Alice", "Bob")],
         )
         round2 = RoundResult(
             round_num=2,
@@ -133,10 +137,20 @@ class TestWriteBackPersistsRound:
                 _make_turn("a1", "Alice", "AI still helps", "POSITIVE", 0.85),
                 _make_turn("a2", "Bob", "AI now seems harmful", "NEGATIVE", 0.7),
             ],
-            pairs=[_make_pair("a1", "a2")],
+            pairs=[_make_pair("Alice", "Bob")],
         )
 
-        service = WriteBackService(mock_driver, "neo4j")
-        await service.persist_round_turns(rounds=[round1, round2], dataset_id="multi-round")
+        service = SocietyMemory(mock_driver, "neo4j")
+        receipt1 = await service.commit_round(
+            round_result=round1, dataset_id="multi-round",
+            query_hash="qh", profile_map={},
+        )
+        receipt2 = await service.commit_round(
+            round_result=round2, dataset_id="multi-round",
+            query_hash="qh", profile_map={},
+        )
 
-        assert mock_session.run.call_count == 2
+        # one session (and one committed transaction) per round
+        assert mock_driver.session.call_count == 2
+        assert mock_tx.commit.await_count == 2
+        assert (receipt1["round"], receipt2["round"]) == (1, 2)

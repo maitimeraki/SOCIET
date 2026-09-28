@@ -105,7 +105,7 @@ async def _run_debate_async(
             from src.simulation.topology import CommunicationTopology
             from src.simulation.llm_batch import BatchedLLMRunner
             from src.simulation.verdict import VerdictSynthesizer
-            from src.simulation.writeback import WriteBackService
+            from src.simulation.society_memory import SocietyMemory
             from src.llm.client import LLMClient
 
             llm = LLMClient()
@@ -121,7 +121,7 @@ async def _run_debate_async(
                 topology=CommunicationTopology(ctx._driver, ctx._db),
                 llm_runner=llm_runner,
                 verdict_synthesizer=VerdictSynthesizer(),
-                writeback=WriteBackService(ctx._driver, ctx._db),
+                society_memory=SocietyMemory(ctx._driver, ctx._db),
             )
 
             # Run debate with orchestrator

@@ -180,7 +180,7 @@ class TestDebateOrchestrator:
         from src.simulation.topology import CommunicationTopology
         from src.simulation.llm_batch import BatchedLLMRunner
         from src.simulation.verdict import VerdictSynthesizer
-        from src.simulation.writeback import WriteBackService
+        from src.simulation.society_memory import SocietyMemory
         import inspect
 
         # Create mock dependencies
@@ -188,14 +188,14 @@ class TestDebateOrchestrator:
         mock_topology = MagicMock(spec=CommunicationTopology)
         mock_llm_runner = MagicMock(spec=BatchedLLMRunner)
         mock_verdict = MagicMock(spec=VerdictSynthesizer)
-        mock_writeback = MagicMock(spec=WriteBackService)
+        mock_society_memory = MagicMock(spec=SocietyMemory)
 
         orchestrator = DebateOrchestrator(
             profile_synthesizer=mock_profiler,
             topology=mock_topology,
             llm_runner=mock_llm_runner,
             verdict_synthesizer=mock_verdict,
-            writeback=mock_writeback,
+            society_memory=mock_society_memory,
         )
 
         # Verify run method exists
