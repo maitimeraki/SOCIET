@@ -5,6 +5,7 @@ from typing import Optional, Callable
 from src.persona.agent import Agent
 from src.simulation.llm_batch import BatchedLLMRunner, PairPrompt
 from src.simulation.pair_turn import AgentTurn, RoundResult, CommPair
+from src.simulation.society_memory import SocietySnapshot
 
 
 def _parse_response_stance(
@@ -68,17 +69,37 @@ def _build_system_prompt(agent: Agent, opponent: Agent, shared_entities: list[st
 
 
 def _build_user_prompt(
-    agent: Agent, opponent: Agent, query: str, history: list[dict]
+    agent: Agent,
+    opponent: Agent,
+    query: str,
+    history: list[dict],
+    society: Optional[SocietySnapshot] = None,
 ) -> str:
     history_str = ""
     if history:
         recent = history[-4:]
         lines = [f"- {h['agent_name']}: {h['content'][:150]}" for h in recent]
         history_str = "\n".join(lines)
+
+    opp_last = next(
+        (h for h in reversed(history) if h.get("agent_name") == opponent.identity.name),
+        None,
+    )
+    their_stance = opp_last["stance"] if opp_last else getattr(opponent, "stance", None)
+    if hasattr(their_stance, "value"):
+        their_stance = their_stance.value
+
+    society_str = ""
+    if society is not None:
+        block = society.to_prompt(speaker=agent.identity.name, opponent=opponent.identity.name)
+        if block:
+            society_str = f"{block}\n\n"
+
     return (
         f"DEBATE TOPIC: {query}\n\n"
         f"You are responding to: {opponent.identity.name}\n"
-        f"Their stance: (review conversation history below)\n\n"
+        f"Their stance: {their_stance or 'NEUTRAL'} (latest on record)\n\n"
+        f"{society_str}"
         f"CONVERSATION HISTORY:\n{history_str or '(No previous turns)'}\n\n"
         f"Respond to {opponent.identity.name}'s perspective, engaging with specific arguments."
     )
@@ -98,6 +119,7 @@ class RoundRunner:
         round_num: int,
         query: str,
         history: list[dict],
+        society: Optional[SocietySnapshot] = None,
     ) -> RoundResult:
         prompts: list[PairPrompt] = []
         profile_map = {p.identity.name: p for p in profiles}
@@ -119,7 +141,7 @@ class RoundRunner:
             meta_a = {"pair": pair, "speaker": agent_a, "opponent": agent_b}
             prompt_a = PairPrompt(
                 system_prompt=_build_system_prompt(agent_a, agent_b, shared),
-                user_prompt=_build_user_prompt(agent_a, agent_b, query, history),
+                user_prompt=_build_user_prompt(agent_a, agent_b, query, history, society=society),
                 pair_id=f"{dataset_id}:{pair.agent_a}:{pair.agent_b}",
             )
             prompts.append(prompt_a)
@@ -128,7 +150,7 @@ class RoundRunner:
             meta_b = {"pair": pair, "speaker": agent_b, "opponent": agent_a}
             prompt_b = PairPrompt(
                 system_prompt=_build_system_prompt(agent_b, agent_a, shared),
-                user_prompt=_build_user_prompt(agent_b, agent_a, query, history),
+                user_prompt=_build_user_prompt(agent_b, agent_a, query, history, society=society),
                 pair_id=f"{dataset_id}:{pair.agent_b}:{pair.agent_a}",
             )
             prompts.append(prompt_b)

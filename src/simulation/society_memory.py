@@ -2,8 +2,9 @@
 
 Round-barrier protocol: every agent's statements land in the graph the moment
 its round ends; every round >= 2 reads the committed society state back before
-speaking. Idempotent: all writes MERGE on (dataset_id, query_hash, round_no,
-agent_name) so re-running any round is safe.
+speaking. Idempotent: Opinion writes MERGE on (dataset_id, query_hash, round_no,
+agent_name); REACTED_TO reactions MERGE on (dataset_id, round_no) between
+dataset-scoped Personas. Re-running any round is safe.
 """
 from __future__ import annotations
 

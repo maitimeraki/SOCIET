@@ -252,3 +252,45 @@ async def test_execute_round_fills_references():
     )
     alice_turn = next(t for t in result.turns if t.agent_name == "Alice")
     assert "Bob" in alice_turn.references
+
+
+# ------------------------------------------------------------------
+# Society state injection
+# ------------------------------------------------------------------
+
+from src.simulation.society_memory import SocietySnapshot
+
+
+def test_user_prompt_renders_society_block_without_own_lines():
+    _, alice = make_profile("Alice", ["x"], "x", 0.8)
+    _, bob = make_profile("Bob", ["y"], "y", 0.7)
+    snap = SocietySnapshot(round=1, entries=[
+        {"agent": "Alice", "round": 1, "stance": "POSITIVE", "confidence": 0.9, "weight": 0.5, "summary": "own take"},
+        {"agent": "Carol", "round": 1, "stance": "NEGATIVE", "confidence": 0.8, "weight": 0.4, "summary": "carol take"},
+    ])
+    prompt = _build_user_prompt(alice, bob, "Tax carbon?", [], society=snap)
+    assert "SOCIETY STATE" in prompt and "carol take" in prompt and "own take" not in prompt
+
+
+def test_user_prompt_shows_opponent_latest_stance_from_history():
+    _, alice = make_profile("Alice", ["x"], "x", 0.8)
+    _, bob = make_profile("Bob", ["y"], "y", 0.7)
+    history = [{"agent_name": "Bob", "content": "b", "stance": "NEGATIVE"}]
+    prompt = _build_user_prompt(alice, bob, "Q?", history)
+    assert "Their stance: NEGATIVE" in prompt
+
+
+@pytest.mark.asyncio
+async def test_execute_round_passes_society_into_prompts():
+    mock_llm = AsyncMock()
+    mock_llm.generate = AsyncMock(return_value="ok")
+    rr = RoundRunner(BatchedLLMRunner(mock_llm))
+    _, alice = make_profile("Alice", ["x"], "x", 0.8)
+    _, bob = make_profile("Bob", ["y"], "y", 0.7)
+    snap = SocietySnapshot(round=1, entries=[
+        {"agent": "Carol", "round": 1, "stance": "POSITIVE", "confidence": 0.9, "weight": 0.5, "summary": "carol"},
+    ])
+    await rr.execute_round([alice, bob], [make_pair("Alice", "Bob", [])],
+                           round_num=2, query="Q?", history=[], society=snap)
+    for c in mock_llm.generate.call_args_list:
+        assert "SOCIETY STATE" in c.kwargs["user_prompt"]
