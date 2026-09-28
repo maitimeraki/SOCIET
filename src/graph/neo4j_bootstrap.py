@@ -17,14 +17,17 @@ Production-grade invariants enforced here:
      vector retrieval never hits "no such index".
   4. Lookup indexes for chunk.doc_id, agent.updated_at — hot read paths
      become O(log n) instead of full scans.
+  5. Composite index on Opinion (dataset_id, query_hash, round_no) — snapshot
+     reads and activation queries become O(log n). (Single-property uniqueness
+     constraints require Enterprise Neo4j; idempotency is enforced by MERGE
+     semantics, so Community edition is fine.)
 
-`show_progress=False` is intentional; CREATE (IF NOT EXISTS) on a populated
-DB returns instantly and we want this silent in production logs.
+Every statement is idempotent (IF NOT EXISTS), so re-running the bootstrap on
+a populated DB is a no-op and safe in production logs.
 """
 from __future__ import annotations
 
 import logging
-from typing import Optional
 
 from neo4j import AsyncGraphDatabase
 
@@ -44,7 +47,8 @@ EMBEDDING_SIMILARITY = "cosine"
 def _statements() -> list[tuple[str, dict]]:
     """All schema statements, in dependency order.
 
-    Tuple shape: (cypher_template, params_for_substitution).
+    Tuple shape: (cypher, params) where params is passed as Cypher query
+    parameters. Statements carrying only literals use an empty dict.
     """
     return [
         # ---- Uniqueness constraints ----
@@ -84,29 +88,36 @@ def _statements() -> list[tuple[str, dict]]:
             "FOR (a:Agent) ON (a.updated_at)",
             {},
         ),
+        (
+            "CREATE INDEX opinion_round IF NOT EXISTS "
+            "FOR (n:Opinion) ON (n.dataset_id, n.query_hash, n.round_no)",
+            {},
+        ),
         # ---- Vector index (entity embeddings; llama-index store writes __Entity__) ----
+        # Config values are literals, not parameters: Neo4j rejects parameters
+        # inside OPTIONS { indexConfig: ... } (neo4j/neo4j#12956).
         (
             "CREATE VECTOR INDEX entity_embeddings IF NOT EXISTS "
             "FOR (n:__Entity__) ON (n.embedding) "
             "OPTIONS { "
-            "  indexConfig: { "
-            "    `vector.dimensions`: $dimensions, "
-            "    `vector.similarity_function`: $similarity "
+            f"  indexConfig: {{ "
+            f"    `vector.dimensions`: {EMBEDDING_DIMENSIONS}, "
+            f"    `vector.similarity_function`: '{EMBEDDING_SIMILARITY}' "
             "  } "
             "}",
-            {"dimensions": EMBEDDING_DIMENSIONS, "similarity": EMBEDDING_SIMILARITY},
+            {},
         ),
         # ---- Vector index (Persona.embedding) ----
         (
             "CREATE VECTOR INDEX persona_embeddings IF NOT EXISTS "
             "FOR (n:Persona) ON (n.embedding) "
             "OPTIONS { "
-            "  indexConfig: { "
-            "    `vector.dimensions`: $dimensions, "
-            "    `vector.similarity_function`: $similarity "
+            f"  indexConfig: {{ "
+            f"    `vector.dimensions`: {EMBEDDING_DIMENSIONS}, "
+            f"    `vector.similarity_function`: '{EMBEDDING_SIMILARITY}' "
             "  } "
             "}",
-            {"dimensions": EMBEDDING_DIMENSIONS, "similarity": EMBEDDING_SIMILARITY},
+            {},
         ),
     ]
 
@@ -134,7 +145,8 @@ async def ensure_schema(
         for cypher, params in _statements():
             label = _statement_label(cypher)
             try:
-                await session.run(cypher, **params)
+                result = await session.run(cypher, **params)
+                await result.consume()
                 applied.append(label)
                 logger.debug("Schema applied: %s", label)
             except Exception as exc:  # pragma: no cover — defensive
@@ -161,6 +173,7 @@ def _statement_label(cypher: str) -> str:
         "INDEX persona_dataset",
         "INDEX agent_archetype",
         "INDEX agent_updated",
+        "INDEX opinion_round",
         "VECTOR INDEX persona_embeddings",
         "VECTOR INDEX entity_embeddings",
     ):
