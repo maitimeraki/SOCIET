@@ -175,6 +175,21 @@ async def test_commit_round_multi_pair_agent_text_not_duplicated():
 
 
 @pytest.mark.asyncio
+async def test_commit_round_self_pair_writes_no_reaction():
+    """A self-pair (agent_a == agent_b) is not a reaction: REACTED_TO needs two distinct Personas."""
+    session = FakeSession()
+    driver = MagicMock()
+    driver.session.return_value = session
+    svc = SocietyMemory(driver, "db")
+    rnd = _round(1, [_turn("X", "x content")], [CommPair(agent_a="X", agent_b="X")])
+    receipt = await svc.commit_round(rnd, "ds", "qh", {})
+    assert receipt["opinions"] == 1
+    assert receipt["edges"] == 0
+    _, params = next((q, kw) for (q, kw) in session.calls if "REACTED_TO" in q)
+    assert params["reactions"] == []
+
+
+@pytest.mark.asyncio
 async def test_commit_round_zero_conviction_keeps_zero_weight():
     """conviction == 0.0 is a real value; CIOR weight must not fabricate 0.5 for it."""
     session = FakeSession()

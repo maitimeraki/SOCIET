@@ -43,6 +43,12 @@ def _make_profile(agent_id: int, name: str) -> Agent:
     )
 
 
+def _ok_receipt() -> dict:
+    """The receipt shape `SocietyMemory.commit_round` returns on success."""
+    return {"round": 1, "dataset_id": "ds1", "query_hash": "qhash",
+            "opinions": 2, "edges": 1, "failed": False}
+
+
 def _make_verdict(summary: str = "Test verdict.") -> DebateVerdict:
     return DebateVerdict(
         overall_stance=Stance.POSITIVE,
@@ -91,6 +97,8 @@ async def test_five_step_flow():
     ]
     verdict_synth.asynthesize.return_value = _make_verdict()
     llm_runner.gather = MagicMock(return_value=_AsyncEmptyIter())
+    # Explicit successful receipt: an unset AsyncMock return degrades to the commit-failed branch.
+    society_memory.commit_round.return_value = _ok_receipt()
 
     orchestrator = DebateOrchestrator(
         profile_synthesizer=synth,
@@ -127,6 +135,11 @@ async def test_five_step_flow():
     assert result.verdict == "Test verdict."
     assert result.rounds_executed == 3
 
+    # F41.1: the commit receipt must be broadcast, not silently degraded
+    sent = [c.args[0] for c in ws_broadcast.call_args_list if c.args]
+    assert any(m.get("type") == "commit" for m in sent)
+    assert not any("commit failed" in w for w in result.warnings)
+
 
 @pytest.mark.asyncio
 async def test_ws_broadcast_passed_to_round_runner():
@@ -144,6 +157,8 @@ async def test_ws_broadcast_passed_to_round_runner():
     ]
     verdict_synth.synthesize.return_value = _make_verdict()
     llm_runner.gather = MagicMock(return_value=_AsyncEmptyIter())
+    # Explicit successful receipt: an unset AsyncMock return degrades to the commit-failed branch.
+    society_memory.commit_round.return_value = _ok_receipt()
 
     orchestrator = DebateOrchestrator(
         profile_synthesizer=synth,
@@ -168,13 +183,17 @@ async def test_ws_broadcast_passed_to_round_runner():
         ))
         patched_rr_class.return_value = patched_rr_instance
 
-        await orchestrator.run("test query", "ds1", config, fake_ws)
+        result = await orchestrator.run("test query", "ds1", config, fake_ws)
 
         # Verify RoundRunner was constructed with the ws_broadcast
         patched_rr_class.assert_called_once()
         call_kwargs = patched_rr_class.call_args.kwargs
         assert "ws_broadcast" in call_kwargs
         assert call_kwargs["ws_broadcast"] is fake_ws
+
+        # F41.1: the commit receipt must be broadcast, not silently degraded
+        assert any(m.get("type") == "commit" for m in ws_calls)
+        assert not any("commit failed" in w for w in result.warnings)
 
 
 @pytest.mark.asyncio
@@ -230,6 +249,8 @@ async def test_convergence_check_breaks_loop():
     verdict_synth.synthesize.return_value = _make_verdict()
     # Fresh iterator per call so each round gets an empty async iterator
     llm_runner.gather = MagicMock(side_effect=lambda *a, **kw: _AsyncEmptyIter())
+    # Explicit successful receipt: an unset AsyncMock return degrades to the commit-failed branch.
+    society_memory.commit_round.return_value = _ok_receipt()
 
     orchestrator = DebateOrchestrator(
         profile_synthesizer=synth,
@@ -248,10 +269,15 @@ async def test_convergence_check_breaks_loop():
     ws_broadcast = AsyncMock()
     config = DebateConfig(max_agents=5, max_rounds=5)
 
-    await orchestrator.run("test query", "ds1", config, ws_broadcast)
+    result = await orchestrator.run("test query", "ds1", config, ws_broadcast)
 
     # Should stop at 2 rounds instead of max_rounds=5
     assert topo.compute_round_pairs.call_count == 2
+
+    # F41.1: the commit receipt must be broadcast, not silently degraded
+    sent = [c.args[0] for c in ws_broadcast.call_args_list if c.args]
+    assert any(m.get("type") == "commit" for m in sent)
+    assert not any("commit failed" in w for w in result.warnings)
 
 
 @pytest.mark.asyncio
@@ -360,6 +386,39 @@ async def test_commit_failure_degrades_to_warning():
     )
     result = await orchestrator.run("q", "ds1", DebateConfig(max_agents=5, max_rounds=1), AsyncMock())
     assert any("commit failed" in w for w in result.warnings)
+
+
+@pytest.mark.asyncio
+async def test_commit_failure_first_round_does_not_abort_loop():
+    """A commit failure on round 1 degrades to a warning; round 2 still runs and commits."""
+    synth = AsyncMock(spec=ProfileSynthesizer)
+    topo = AsyncMock(spec=CommunicationTopology)
+    llm_runner = MagicMock(spec=BatchedLLMRunner)
+    verdict_synth = MagicMock(spec=VerdictSynthesizer)
+    society_memory = AsyncMock(spec=SocietyMemory)
+    synth.synthesize.return_value = [_make_profile(1, "Alice")]
+    topo.compute_round_pairs.side_effect = lambda *a, **kw: [
+        CommPair(agent_a="Alice", agent_b="Bob", shared_entities=[], score=0.5)
+    ]
+    verdict_synth.synthesize.return_value = _make_verdict()
+    llm_runner.gather = MagicMock(side_effect=lambda *a, **kw: _AsyncEmptyIter())
+    # Round 1 blows up, round 2 commits fine — the loop must survive the first.
+    society_memory.commit_round.side_effect = [RuntimeError("db down"), _ok_receipt()]
+
+    orchestrator = DebateOrchestrator(
+        profile_synthesizer=synth, topology=topo, llm_runner=llm_runner,
+        verdict_synthesizer=verdict_synth, society_memory=society_memory,
+    )
+    config = DebateConfig(max_agents=5, max_rounds=2)
+    ws_broadcast = AsyncMock()
+    result = await orchestrator.run("q", "ds1", config, ws_broadcast)
+
+    assert result.rounds_executed == config.max_rounds
+    assert any("Round 1: commit failed" in w for w in result.warnings)
+    assert not any("Round 2: commit failed" in w for w in result.warnings)
+    # Round 2's successful commit was broadcast — proof the loop reached it.
+    sent = [c.args[0] for c in ws_broadcast.call_args_list if c.args]
+    assert any(m.get("type") == "commit" for m in sent)
 
 
 @pytest.mark.asyncio
