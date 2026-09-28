@@ -26,7 +26,7 @@ class LLMClient:
     @staticmethod
     def _model_str(provider: str, model: Optional[str]) -> str:
         if provider == "ollama":
-            return f"ollama/{model or getattr(LLMConfig, 'ollama_model', 'qwen3.5:4b')}"
+            return f"ollama/{model or getattr(LLMConfig, 'ollama_model', 'qwen3.5-16k:4b')}"
         if provider == "huggingface":
             return f"huggingface/{model or getattr(LLMConfig, 'huggingface_model', 'Qwen/Qwen3.5-9B')}"
         if provider == "openai":
@@ -37,8 +37,10 @@ class LLMClient:
     def _call_kwargs(provider: str) -> dict:
         kwargs: dict = {}
         if provider == "ollama":
+            # litellm's ollama/ provider speaks Ollama's native API and appends
+            # /api/chat itself, so it needs the bare base — a /v1 suffix 404s.
             base = getattr(LLMConfig, "ollama_base_url", "http://localhost:11434")
-            kwargs["api_base"] = f"{base.rstrip('/')}/v1"
+            kwargs["api_base"] = base.rstrip("/")
             kwargs["api_key"] = "ollama"
         elif provider == "openai" and LLMConfig.openai_api_key:
             kwargs["api_key"] = LLMConfig.openai_api_key
@@ -65,8 +67,11 @@ class LLMClient:
         errors: list[str] = []
         for p in chain:
             try:
+                # The caller's model id is only meaningful for the provider they
+                # named; a fallback leg must use its own configured model.
+                leg_model = model if p == provider else None
                 response = await litellm.acompletion(
-                    model=self._model_str(p, model),
+                    model=self._model_str(p, leg_model),
                     messages=[
                         {"role": "system", "content": system_prompt},
                         {"role": "user", "content": user_prompt},
