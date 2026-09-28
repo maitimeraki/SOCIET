@@ -6,6 +6,7 @@ openai
 python-dotenv
 pytest
 langchain==0.1.0
+langchain-ollama==1.1.0
 langchain-openai==0.0.2
 langchain-community==0.0.10
 redis==5.0.1
@@ -16,3 +17,4 @@ llama-index-embeddings-ollama
 llama-index-llms-openai
 llama-index-llms-openai-like
 neo4j
+litellm>=1.40.0
