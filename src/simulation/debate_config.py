@@ -11,6 +11,8 @@ class DebateConfig:
     convergence_threshold: float = 0.8
     llm_concurrency: int = 8
     topology_score_threshold: float = 0.15
+    max_new_agents_per_round: int = 2
+    snapshot_top_k: int = 8
 
     def __post_init__(self):
         if not 1 <= self.max_agents <= 100:
@@ -29,3 +31,7 @@ class DebateConfig:
             raise ValueError("llm_concurrency must be between 1 and 32")
         if not 0.0 <= self.topology_score_threshold <= 1.0:
             raise ValueError("topology_score_threshold must be between 0.0 and 1.0")
+        if not 0 <= self.max_new_agents_per_round <= 10:
+            raise ValueError("max_new_agents_per_round must be between 0 and 10")
+        if not 5 <= self.snapshot_top_k <= 20:
+            raise ValueError("snapshot_top_k must be between 5 and 20")
