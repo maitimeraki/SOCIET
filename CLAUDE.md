@@ -53,6 +53,8 @@ SimulationResponse (society_opinion, confidence_metrics, dissenting_views)
 | `society_memory.py` | SocietyMemory | Per-round commit (Opinion/STATED/REACTED_TO) + snapshot read-back |
 | `profile_synthesizer.py` | ProfileSynthesizer | Graph → Agent creation |
 | `pair_turn.py` | CommPair, AgentTurn, RoundResult | Data classes |
+| `llm_batch.py` | BatchedLLMRunner | Parallel LLM calls per round |
+| `debate_config.py` | DebateConfig | Validated debate settings |
 
 ### Graph System (`src/graph/`)
 | File | Class | Purpose |
@@ -61,97 +63,111 @@ SimulationResponse (society_opinion, confidence_metrics, dissenting_views)
 | `ontology.py` | OntologyDiscoveryStage | LLM-based schema discovery |
 | `graph_build.py` | GraphExtractionStage | Entity/relation extraction |
 | `normalization.py` | GraphNormalizationStage | Deduplication, property normalization |
+| `neo4j_bootstrap.py` | — | Neo4j constraints/indexes (CLI: `src/cli/bootstrap_neo4j.py`) |
+| `models_graph.py` | — | Graph data models (ProcessedChunk, LocalOntology, GlobalInputDocument) |
+| `config_graph.py` | GraphConfig | Neo4j connection + graph settings |
 
 ### Persona Layer (`src/persona/`)
 | File | Class | Purpose |
 |------|-------|---------|
 | `agent.py` | Agent | Canonical agent model (identity, stance, conviction, cior) |
 | `repository.py` | PersonaRepository | Neo4j operations, agent metrics |
+| `graph_context.py` | GraphContext | Vector + keyword retrieval over the graph |
+| `models_persona.py` | — | Persona-side data models |
 
 ### API Layer (`src/api/`)
 | File | Purpose |
 |------|---------|
-| `api_server.py` | FastAPI server, job management, endpoints |
+| `api_server.py` | FastAPI app (real entry point), job management, `/simulate` endpoints |
 | `config_api.py` | Request/response Pydantic schemas |
+| `debate_api.py` | Debate router (`/simulate/debate` + job status + WS stream) |
+| `persona_api.py` | Persona router (`/api/personas/hatch`) |
+| `middleware.py` | Request/response logging with correlation IDs |
+
+> **Removed 2026-09-30 (decision D1):** the legacy `/api/agents` stack — `src/api/agent_api.py`, `src/persona/agent_repository.py`, `src/persona/response_tracker.py` and the `agent_node.py` model — was deleted. Superseded by the debate path: agents are created only from graph retrieval (`ProfileSynthesizer`), never from a second hardcoded agent store.
 
 ### LLM Integration (`src/llm/`)
 | File | Class | Purpose |
 |------|-------|---------|
 | `client.py` | LLMClient | LiteLLM wrapper - 100+ providers unified interface |
-
-### File Extractors (`src/infrastructure/extractors/`)
-| File | Class | Purpose |
-|------|-------|---------|
-| `base.py` | BaseExtractor | Abstract extractor interface |
-| `pdf_extractor.py` | PDFExtractor | PyMuPDF implementation |
-| `docx_extractor.py` | DOCXExtractor | python-docx implementation |
-| `md_extractor.py` | MarkdownExtractor | markdown-it implementation |
-| `url_extractor.py` | URLExtractor | requests + BeautifulSoup |
+| `config_llm.py` | — | LLM configuration |
 
 ## Directory Structure
 
 ```
 src/
-├── main.py
-├── config.py
+├── main.py                      # Graph pipeline demo entry
 │
-├── api/
-│   ├── server.py              # FastAPI app
-│   └── routes/
-│       ├── simulation.py      # /simulate endpoints
-│       ├── documents.py       # /documents endpoints
-│       └── health.py         # /health, /metrics
+├── api/                         # FastAPI layer
+│   ├── api_server.py            # FastAPI app (real entry point), job management
+│   ├── config_api.py            # Request/response Pydantic schemas
+│   ├── debate_api.py            # Debate router + WebSocket stream
+│   ├── persona_api.py           # Persona router (/api/personas/hatch)
+│   └── middleware.py            # Logging middleware (correlation IDs)
 │
-├── domain/                    # Pure domain models (no dependencies)
-│   ├── agent/
-│   │   └── agent_profile.py  # AgentProfile schema
-│   ├── debate/
-│   │   └── debate_session.py # DebateSession
-│   ├── graph/
-│   │   ├── node.py          # GraphNode (standard schema)
-│   │   └── relationship.py   # GraphRelationship
-│   └── verdict/
-│       └── verdict_output.py  # VerdictOutput
+├── simulation/                  # Debate engine
+│   ├── orchestrator.py          # DebateOrchestrator (coordinator)
+│   ├── round_runner.py          # Single round execution
+│   ├── topology.py              # CommunicationTopology (Cypher pair scoring)
+│   ├── profile_synthesizer.py   # ProfileSynthesizer (graph → Agent)
+│   ├── verdict.py               # VerdictSynthesizer (CIOR-weighted consensus)
+│   ├── society_memory.py        # SocietyMemory (round commit + snapshot read-back)
+│   ├── pair_turn.py             # CommPair, AgentTurn, RoundResult
+│   ├── llm_batch.py             # BatchedLLMRunner (parallel LLM calls)
+│   └── debate_config.py         # DebateConfig dataclass
 │
-├── application/              # Use cases
-│   ├── simulation/
-│   │   └── run_simulation.py
-│   ├── graph/
-│   │   └── build_graph.py   # Document → Graph
-│   └── society/
-│       └── create_society.py # Agent society creation
+├── persona/                     # Persona layer
+│   ├── agent.py                 # Canonical Agent model (Pydantic)
+│   ├── repository.py            # PersonaRepository (Neo4j operations)
+│   ├── graph_context.py         # GraphContext (entity retrieval)
+│   └── models_persona.py        # Persona data models
 │
-├── infrastructure/           # External dependencies
-│   ├── llm/
-│   │   ├── litellm_client.py # LiteLLM implementation
-│   │   └── gateways.py       # Gateway configuration
-│   ├── extractors/
-│   │   ├── base.py          # BaseExtractor interface
-│   │   ├── pdf_extractor.py  # PyMuPDF
-│   │   ├── docx_extractor.py # python-docx
-│   │   ├── md_extractor.py  # markdown-it
-│   │   └── url_extractor.py  # requests + BeautifulSoup
-│   ├── chunking/
-│   │   ├── semantic_chunker.py # Semantic chunking
-│   │   └── chunking_pipeline.py # Parallel chunking
-│   ├── graph/
-│   │   └── neo4j_repository.py # Neo4j operations
-│   └── cache/
-│       └── redis_client.py   # Redis caching
+├── graph/                       # Knowledge graph construction
+│   ├── graph_pipeline.py        # UniversalGraphPipeline (end-to-end)
+│   ├── ontology.py              # OntologyDiscoveryStage
+│   ├── graph_build.py           # GraphExtractionStage
+│   ├── normalization.py         # GraphNormalizationStage
+│   ├── neo4j_bootstrap.py       # Constraints / indexes / vector index
+│   ├── models_graph.py          # Graph data models
+│   └── config_graph.py          # Graph configuration
 │
-└── tests/
+├── llm/                         # LLM integration
+│   ├── client.py                # LLMClient (LiteLLM, multi-provider)
+│   └── config_llm.py            # LLM configuration
+│
+├── logging/
+│   └── setup_logging.py         # Structured logging setup
+│
+├── cli/
+│   └── bootstrap_neo4j.py       # Neo4j schema bootstrap CLI
+│
+└── utils/
+    ├── chunkProcessor.py        # Document chunk processing
+    ├── queryIntend.py           # Query intent extraction
+    └── hydrate_ontology.py      # Ontology hydration helpers
 
-frontend/                      # React + TypeScript
+tests/                           # Single test tree, mirrors src/ subsystems
+frontend/                        # React + TypeScript
 docs/
-└── TECHNOLOGY_STACK.md       # Production tech stack
+└── TECHNOLOGY_STACK.md          # Production tech stack
 ```
 
 ## Development Commands
 
 ### Setup & Dependencies
 ```bash
-pip install -r requirements.txt       # Root dependencies
-uvicorn src.api.api_server:app --reload # Start API server
+# Canonical interpreter: .venv/Scripts/python.exe (Python 3.11.9).
+# `python` / `pytest` on PATH resolve to the venv.
+
+python -m ensurepip --upgrade         # only if .venv has no pip
+
+# KNOWN ISSUE: `pip install -r requirements.txt` does not resolve —
+# langchain==0.1.0 vs langchain-ollama==1.1.0 conflict on langchain-core.
+# The runtime dependency that makes the suite pass today:
+pip install "litellm>=1.40.0"
+
+uvicorn src.api.api_server:app --reload  # Start API server
+python -m src.cli.bootstrap_neo4j        # Initialize Neo4j schema
 ```
 
 ### Run API
@@ -162,9 +178,9 @@ uvicorn src.api.api_server:app --host 127.0.0.1 --port 8000
 
 ### Testing
 ```bash
-pytest                           # Run all tests
+pytest                           # Run all tests (single tests/ tree)
 pytest tests/simulation/         # Simulation tests only
-pytest src/persona/              # Persona layer tests
+pytest tests/persona/            # Persona layer tests
 ```
 
 ### Graph Pipeline Demo
