@@ -4,14 +4,19 @@ from uuid import uuid4
 import uuid as _uuid
 import asyncio
 import inspect
+import hashlib
 from datetime import datetime
-from src.persona.models_persona import (
-    AgentProfile,
-    PersonaIdentity,
+from src.persona.agent import (
+    Agent,
+    Agent as AgentProfile,  # back-compat alias — old name in same module
+    ConfidenceBreakdown,
     DiscoveryType,
     ExpertiseLevel,
-    ConfidenceBreakdown,
+    GraphSnapshot,
+    PersonaIdentity,
     ProvenanceLink,
+    Stance,
+    agent_profile_to_agent,
 )
 from neo4j import AsyncGraphDatabase
 from llama_index.embeddings.ollama import OllamaEmbedding
@@ -210,8 +215,8 @@ class PersonaRepository:
         dataset_id: str,
         user_query: str,
         max_agents: int = 5,
-    ) -> List[AgentProfile]:
-        """Build AgentProfiles from `find_agent_sectors` output.
+    ) -> List[Agent]:
+        """Build canonical Agents from `find_agent_sectors` output.
 
         This implementation is optimized for production: it collects top evidence
         agent names, batch-fetches nodes, computes metrics from sector results,
@@ -248,7 +253,7 @@ class PersonaRepository:
         # Build profiles concurrently with bounded parallelism
         semaphore = asyncio.Semaphore(8)
 
-        async def _build_task(agent_name: str) -> AgentProfile:
+        async def _build_task(agent_name: str) -> Agent:
             async with semaphore:
                 node = nodes_map.get(agent_name) or await self.fetch_agent_node_props(agent_name) or {"name": agent_name} # return Type: Dict[str, Any] where we fetch the node properties for the agent name, if not found we create a minimal dict with just the name to avoid None issues
                 metrics = await self.calculate_agent_metrics_and_context_for_llm(agent_name, node, sector_results or [], max_relevance=max_relevance)
@@ -275,8 +280,15 @@ class PersonaRepository:
         agent_metrics: Dict[str, Any],
         sector_results: List[Dict[str, Any]],
         llm_output: Optional[Dict[str, List[str]]],
-    ) -> AgentProfile:
-        """Build an AgentProfile from an already-fetched node (avoids extra DB calls)."""
+    ) -> Agent:
+        """Build the canonical Agent from an already-fetched node (avoids extra DB calls).
+
+        Populates every behavioral field (stance, conviction, cior, intensity,
+        belief, opinion, communication_radius, instinct_tags, entity_affinity,
+        expertise_areas) so downstream consumers — verdict CIOR weighting,
+        round-runner prompt construction, topology pair scoring — never
+        silently fall back to a default.
+        """
         # Identity
         identity = PersonaIdentity(
             name=node.get("name", agent_name),
@@ -318,37 +330,30 @@ class PersonaRepository:
         )
 
         # Provenance
-        provenance = await self.get_provenance(agent_name,limit=5) # return type: List[ProvenanceLink] where we fetch the provenance links for the agent, if not found we will attempt to synthesize them from the sector results
+        provenance = await self.get_provenance(agent_name,limit=5)
         # If node doesn't include provenance, attempt to synthesize from sector evidence
         if not provenance:
-            # find evidence entries mentioning this agent
             docs = []
             for res in sector_results:
                 if agent_name in (res.get("evidence_nodes") or []):
                     docs.append(res)
-            # synthesize minimal provenance links from found docs
             for d in docs[:3]:
-                # use domain tag + dataset as fallback doc id
                 doc_id = f"sector:{d.get('domain_tag')}@{dataset_id}"
                 chunk_id = _uuid.uuid5(_uuid.NAMESPACE_URL, doc_id)
                 provenance.append(ProvenanceLink(doc_id=doc_id, title=str(d.get('domain_tag') or 'sector'), breadcrumb='', chunk_id=chunk_id))
 
-        # Generate per-agent description/perspective from graph evidence (LLM if available, deterministic fallback)
-        # try:
-        #     gen_desc, gen_perspective = await self._generate_description_and_perspective(
-        #         agent_name=agent_name,
-        #         node=node,
-        #         sector_results=sector_results or [],
-        #         provenance=provenance or [],
-        #         user_query=user_query,
-        #     )
-        #     if gen_desc:
-        #         description = gen_desc
-        #     if gen_perspective:
-        #         perspective = gen_perspective
-        # except Exception:
-        #     # if generation fails, keep existing description/perspective
-        #     pass
+        # Behavioral core — every field read by verdict / round / topology
+        stance = self._safe_stance(node.get("stance"))
+        intensity = self._safe_float(node.get("intensity"), 0.5, 0.0, 1.0)
+        conviction = self._safe_float(node.get("conviction"), 0.5, 0.0, 1.0)
+        cior = self._safe_float(node.get("cior"), 0.0, -1.0, 1.0)
+        belief = str(node.get("belief") or node.get("world_model") or "")
+        opinion = str(node.get("opinion") or node.get("current_take") or perspective[:500])
+        communication_radius = self._safe_int(node.get("communication_radius"), 1, 1, 5)
+
+        instinct_tags = self._safe_list(node.get("instinct_tags"))
+        entity_affinity = self._safe_list(node.get("entity_affinity")) or list(domain_tags)
+        expertise_areas = self._safe_list(node.get("expertise_areas")) or list(domain_tags)
 
         # last_updated
         last_updated_raw = node.get("last_updated") or node.get("updated_at")
@@ -357,20 +362,86 @@ class PersonaRepository:
         except Exception:
             last_updated = datetime.utcnow()
 
-        profile = AgentProfile(
-            discovery_type=discovery_type,
-            expertise_level=expertise_level,
-            identity=identity,
-            domain_tags=domain_tags,
-            description=str(description)[:1000],
-            detailed_perspective=str(perspective)[:4000],
-            confidence=confidence,
-            confidence_breakdown=confidence_breakdown,
-            provenance=provenance,
-            last_updated=last_updated,
+        # Graph snapshot — used for staleness checks and auditability.
+        # version_hash = sha256 of (dataset_id + sorted provenance doc_ids).
+        snapshot_input = (
+            str(dataset_id or "unknown")
+            + "|"
+            + ",".join(sorted({p.doc_id for p in provenance}))
+        )
+        version_hash = hashlib.sha256(snapshot_input.encode("utf-8")).hexdigest()
+        graph_snapshot = GraphSnapshot(
+            dataset_id=str(dataset_id or "unknown"),
+            ontology_id=node.get("ontology_id"),
+            chunk_count=int(node.get("chunk_count") or len(provenance)),
+            version_hash=version_hash,
         )
 
-        return profile
+        return Agent(
+            identity=identity,
+            discovery_type=discovery_type,
+            expertise_level=expertise_level,
+            last_updated=last_updated,
+            bio=str(description)[:1000],                # bio = description
+            detailed_perspective=str(perspective)[:4000],
+            role_description=str(node.get("role_description") or description)[:300],
+            stance=stance,
+            intensity=intensity,
+            confidence=confidence,
+            conviction=conviction,
+            belief=belief,
+            opinion=opinion,
+            cior=cior,
+            instinct_tags=instinct_tags,
+            domain_tags=domain_tags,
+            entity_affinity=entity_affinity,
+            expertise_areas=expertise_areas,
+            communication_radius=communication_radius,
+            summary_provenance=provenance,
+            confidence_breakdown=confidence_breakdown,
+            graph_snapshot=graph_snapshot,
+        )
+
+    @staticmethod
+    def _safe_stance(v: Any) -> Stance:
+        if isinstance(v, Stance):
+            return v
+        if isinstance(v, str):
+            try:
+                return Stance(v.upper())
+            except ValueError:
+                return Stance.NEUTRAL
+        return Stance.NEUTRAL
+
+    @staticmethod
+    def _safe_float(v: Any, default: float, lo: float, hi: float) -> float:
+        try:
+            f = float(v)
+            return max(lo, min(hi, f))
+        except (TypeError, ValueError):
+            return default
+
+    @staticmethod
+    def _safe_int(v: Any, default: int, lo: int, hi: int) -> int:
+        try:
+            i = int(v)
+            return max(lo, min(hi, i))
+        except (TypeError, ValueError):
+            return default
+
+    @staticmethod
+    def _safe_list(v: Any) -> List[str]:
+        if v is None:
+            return []
+        if isinstance(v, (list, tuple)):
+            return [str(t).strip() for t in v if str(t).strip()]
+        if isinstance(v, str):
+            return [t.strip() for t in v.split(",") if t.strip()]
+        return []
+
+    # Backwards-compatible alias for any caller still expecting the old name.
+    async def _legacy_build_agent_profile(self, *args, **kwargs) -> AgentProfile:
+        return await self.build_single_agent_profile_from_node(*args, **kwargs)
     
     async def calculate_agent_metrics_and_context_for_llm(
         self,
@@ -711,8 +782,8 @@ class PersonaRepository:
         user_query: str,
         dataset_id: str ,
         max_agents: int = 5
-    ) -> List[AgentProfile]:
-        """Main entry point: Query → Intent → Sectors → Profiles"""
+    ) -> List[Agent]:
+        """Main entry point: Query → Intent → Sectors → Agents"""
         from src.utils.queryIntend import QueryIntend
         intent_extractor = QueryIntend(model="gemma4:e4b")
         

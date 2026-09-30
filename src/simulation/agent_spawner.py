@@ -1,17 +1,27 @@
 """
-Agent Spawner: Converts graph entities to agent personas with derived BCO/CIOR fields.
+Agent Spawner: Converts graph entities to canonical Agent personas.
 
-This module bridges the graph layer (entities) and the simulation layer (agents),
-deriving all BCO (Belief-Conviction-Opinion) and CIOR metrics from entity data.
+All BCO (Belief-Conviction-Opinion) and CIOR metrics are derived from
+entity data. Output is the canonical `Agent` model -- the legacy
+`AgentNode` shim is left in place for callers that still expect it.
 """
 from __future__ import annotations
 
 from typing import List, Optional, Any
-from src.simulation.agent_node import AgentNode, Stance
+
+from src.persona.agent import (
+    Agent,
+    ConfidenceBreakdown,
+    DiscoveryType,
+    ExpertiseLevel,
+    GraphSnapshot,
+    PersonaIdentity,
+    ProvenanceLink,
+    Stance,
+)
 from src.persona.graph_context import GraphContext, EntityNode
 
 
-# Stance derivation mapping: entity label -> default stance
 _ENTITY_STANCE_MAP = {
     "competitor": Stance.NEGATIVE,
     "partner": Stance.POSITIVE,
@@ -20,70 +30,36 @@ _ENTITY_STANCE_MAP = {
     "supplier": Stance.NEUTRAL,
 }
 
-# Default stance when entity type is not in map
 _DEFAULT_STANCE = Stance.NEUTRAL
 
-# Entity types associated with risk-averse behavior (negative CIOR)
 _RISK_AVERSE_TYPES = {"regulator", "compliance", "auditor", "risk_management"}
-# Entity types associated with growth-oriented behavior (positive CIOR)
 _GROWTH_ORIENTED_TYPES = {"startup", "investor", "partner", "customer", "vendor"}
 
 
 class AgentSpawner:
-    """
-    Spawns AgentNode instances from graph entities.
-
-    All persona fields (BCO, CIOR, stance, etc.) are derived from entity properties
-    and graph metrics — no hardcoded agents.
-    """
+    """Spawns canonical `Agent` instances from graph entities."""
 
     def __init__(self, graph_context: Optional[GraphContext] = None):
-        """
-        Initialize the spawner with an optional GraphContext.
-
-        Args:
-            graph_context: GraphContext instance for entity lookups.
-                          If None, spawn_agents_from_query will fail.
-        """
         self._graph = graph_context
 
     @property
     def graph(self) -> GraphContext:
-        """Get the graph context, raising if not configured."""
         if self._graph is None:
-            raise RuntimeError("AgentSpawner requires a GraphContext. Initialize with graph_context parameter.")
+            raise RuntimeError(
+                "AgentSpawner requires a GraphContext. Initialize with graph_context parameter."
+            )
         return self._graph
 
     async def spawn_agents_from_query(
         self,
         query: str,
         max_agents: int = 8,
-    ) -> List[AgentNode]:
-        """
-        Find relevant graph entities and spawn agents from them.
-
-        Args:
-            query: User query to find relevant entities.
-            max_agents: Maximum number of agents to spawn.
-
-        Returns:
-            List of AgentNode instances with derived BCO/CIOR fields.
-        """
+    ) -> List[Agent]:
         entities = await self.graph.find_relevant_entities(query, limit=max_agents)
         agents = [self._spawn_agent(entity) for entity in entities]
-        # Respect max_agents cap
         return agents[:max_agents]
 
-    def _spawn_agent(self, entity: EntityNode) -> AgentNode:
-        """
-        Convert a single entity into an AgentNode with all derived fields.
-
-        Args:
-            entity: The graph entity to convert.
-
-        Returns:
-            A fully populated AgentNode.
-        """
+    def _spawn_agent(self, entity: EntityNode) -> Agent:
         stance = self._derive_stance(entity)
         intensity = self._derive_intensity(entity)
         confidence = self._derive_confidence(entity)
@@ -91,26 +67,41 @@ class AgentSpawner:
         cior = self._derive_cior(entity)
         instinct_tags = self._derive_instinct_tags(entity)
         domain_tags = self._derive_domain_tags(entity)
-
-        # entity_affinity based on label
         entity_affinity = self._derive_entity_affinity(entity)
+        role_description = entity.summary or f"{entity.name} - {entity.label}"
 
-        return AgentNode(
-            name=entity.name,
-            archetype=entity.label,
+        # BCO/CIOR-derived fields are surfaced as Agent fields directly.
+        # Provenance + confidence breakdown are populated lazily on first debate.
+        return Agent(
+            identity=PersonaIdentity(
+                name=entity.name,
+                archetype=entity.label,
+                communication_style="data-driven",
+            ),
+            discovery_type=DiscoveryType.GRAPH_DISCOVERY,
+            expertise_level=ExpertiseLevel.STRATEGIC,
+            bio=f"{entity.name} - {entity.label}",
+            detailed_perspective=belief,
+            role_description=role_description,
             stance=stance,
             intensity=intensity,
             confidence=confidence,
-            belief=belief,
             conviction=self._derive_conviction(entity, confidence),
-            opinion="",  # Filled per-query during simulation
+            belief=belief,
+            opinion="",
             cior=cior,
             instinct_tags=instinct_tags,
             domain_tags=domain_tags,
             entity_affinity=entity_affinity,
-            role_description=entity.summary or f"{entity.name} - {entity.label}",
             expertise_areas=domain_tags[:3],
-            display_order=0,
+            communication_radius=1,
+            summary_provenance=[],
+            confidence_breakdown=ConfidenceBreakdown(
+                source_breadth=0,
+                node_density=int(entity.properties.get("connection_count", 0)) or 1,
+                relationship_connectivity=float(entity.properties.get("centrality_score", 0.5)) or 0.5,
+            ),
+            graph_snapshot=GraphSnapshot(dataset_id="unknown"),
         )
 
     def _derive_stance(self, entity: EntityNode) -> Stance:
@@ -118,11 +109,11 @@ class AgentSpawner:
         Derive agent stance from entity type/label.
 
         Rules:
-        - Competitor → NEGATIVE
-        - Partner → POSITIVE
-        - Regulator → NEUTRAL
-        - Customer → POSITIVE
-        - Supplier → NEUTRAL
+        - Competitor NEGATIVE
+        - Partner POSITIVE
+        - Regulator NEUTRAL
+        - Customer POSITIVE
+        - Supplier NEUTRAL
 
         Args:
             entity: The graph entity.
@@ -138,7 +129,7 @@ class AgentSpawner:
         Derive response intensity from entity properties and relevance.
 
         Range: 0.0 to 1.0
-        Based on relevance_score (higher → more intense).
+        Based on relevance_score (higher = more intense).
 
         Args:
             entity: The graph entity.
@@ -211,7 +202,7 @@ class AgentSpawner:
             entity: The graph entity.
 
         Returns:
-            A belief string representing the agent's worldview.
+            A belief string representing the agent worldview.
         """
         # Priority: explicit belief prop > summary > archetype-based
         belief = entity.properties.get("belief", "")
