@@ -14,7 +14,7 @@ from src.simulation.verdict import VerdictSynthesizer
 from src.simulation.society_memory import SocietyMemory
 from src.simulation.debate_config import DebateConfig
 from src.simulation.pair_turn import AgentTurn, RoundResult, DebateVerdict
-from src.simulation.agent_node import Stance
+from src.persona.agent import Stance
 from src.persona.agent import (
     Agent,
     ConfidenceBreakdown,

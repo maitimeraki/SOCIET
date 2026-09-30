@@ -2,7 +2,7 @@
 from dataclasses import dataclass, field
 from typing import Dict, List
 
-from src.simulation.agent_node import Stance
+from src.persona.agent import Stance
 from src.persona.models_persona import ProvenanceLink
 
 

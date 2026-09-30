@@ -132,9 +132,6 @@ async def global_exception_handler(request: Request, exc: Exception):
 # Persona API (hatch personas from user query)
 from src.api.persona_api import router as persona_router
 app.include_router(persona_router)
-# Agent API
-from src.api.agent_api import router as agent_router
-app.include_router(agent_router)
 # Debate API
 from src.api.debate_api import router as debate_router
 app.include_router(debate_router)

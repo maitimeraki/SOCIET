@@ -2,9 +2,9 @@
 Canonical Agent schema.
 
 Single source of truth for agent identity, bio, behavior, and provenance.
-Replaces the fragmented AgentProfile (persona/models_persona.py) and
-AgentNode (simulation/agent_node.py) pair — verdict, round runner, topology,
-orchestrator, and society memory all consume this model.
+Replaces the fragmented AgentProfile (persona/models_persona.py) model —
+verdict, round runner, topology, orchestrator, and society memory all consume
+this model.
 
 Field layout follows the user's "production-grade bio file" requirement:
   - Identity: name, archetype, communication_style
@@ -207,9 +207,8 @@ class Agent(BaseModel):
 # ---------------------------------------------------------------------------
 # Backwards-compatible aliases
 # ---------------------------------------------------------------------------
-# Older imports (`from src.persona.models_persona import AgentProfile`,
-# `from src.simulation.agent_node import AgentNode`) keep working for one
-# release. New code MUST import Agent from this module.
+# Older imports (`from src.persona.models_persona import AgentProfile`)
+# keep working for one release. New code MUST import Agent from this module.
 # ---------------------------------------------------------------------------
 
 from src.persona.models_persona import (  # noqa: E402  (intentional late import)

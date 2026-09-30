@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock, MagicMock
 from src.simulation.verdict import VerdictSynthesizer
 from src.simulation.society_memory import SocietyMemory
 from src.simulation.pair_turn import RoundResult, AgentTurn, CommPair
-from src.simulation.agent_node import Stance
+from src.persona.agent import Stance
 
 
 def _make_turn(agent_id: str, agent_name: str, content: str, stance: str, confidence: float) -> AgentTurn:

@@ -4,7 +4,7 @@ from unittest.mock import MagicMock
 
 from src.simulation.verdict import VerdictSynthesizer
 from src.simulation.pair_turn import RoundResult, AgentTurn
-from src.simulation.agent_node import Stance
+from src.persona.agent import Stance
 
 
 class MockProfile:

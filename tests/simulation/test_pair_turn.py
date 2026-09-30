@@ -27,7 +27,7 @@ class TestPairTurnImports:
         assert result.query == "test"
 
     def test_cluster_summary_from_pair_turn(self):
-        from src.simulation.agent_node import Stance
+        from src.persona.agent import Stance
         summary = ClusterSummary(stance=Stance.POSITIVE, count=5, total_weight=1.0, avg_confidence=0.7, avg_conviction=0.5, agents=[])
         assert summary.stance == Stance.POSITIVE
 
@@ -36,7 +36,7 @@ class TestDebateVerdictNewFields:
     """DebateVerdict has the new fields: provenance_by_claim, rounds_executed."""
 
     def test_provenance_by_claim_default_empty(self):
-        from src.simulation.agent_node import Stance
+        from src.persona.agent import Stance
         verdict = DebateVerdict(
             overall_stance=Stance.NEUTRAL,
             confidence_score=0.5,
@@ -49,7 +49,7 @@ class TestDebateVerdictNewFields:
         assert isinstance(verdict.provenance_by_claim, dict)
 
     def test_rounds_executed_default_zero(self):
-        from src.simulation.agent_node import Stance
+        from src.persona.agent import Stance
         verdict = DebateVerdict(
             overall_stance=Stance.NEUTRAL,
             confidence_score=0.5,
@@ -62,7 +62,7 @@ class TestDebateVerdictNewFields:
         assert isinstance(verdict.rounds_executed, int)
 
     def test_provenance_by_claim_can_be_set(self):
-        from src.simulation.agent_node import Stance
+        from src.persona.agent import Stance
         from src.persona.models_persona import ProvenanceLink
         from uuid import uuid4
 
