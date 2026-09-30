@@ -190,3 +190,20 @@ def test_new_loop_fields_validated():
         DebateConfig(max_new_agents_per_round=11)
     with pytest.raises(ValueError):
         DebateConfig(snapshot_top_k=4)
+
+
+def test_s4_blend_fields_defaults():
+    cfg = DebateConfig()
+    assert cfg.w1 == 0.6
+    assert cfg.w2 == 0.4
+    assert cfg.w1 + cfg.w2 == pytest.approx(1.0)
+    assert cfg.selection_score_threshold == 0.6
+
+
+def test_s4_blend_fields_validated():
+    with pytest.raises(ValueError, match="w1 must be between 0.0 and 1.0"):
+        DebateConfig(w1=1.1)
+    with pytest.raises(ValueError, match="w2 must be between 0.0 and 1.0"):
+        DebateConfig(w2=-0.1)
+    with pytest.raises(ValueError, match="selection_score_threshold must be between 0.0 and 1.0"):
+        DebateConfig(selection_score_threshold=1.1)

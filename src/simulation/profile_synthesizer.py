@@ -9,6 +9,13 @@ from typing import Any
 from src.persona.agent import Agent
 from src.persona.graph_context import GraphContext, EntityNode
 from src.persona.repository import PersonaRepository
+from src.simulation.debate_config import DebateConfig
+from src.simulation.relevance_matrix import (
+    NoAgentsDerivableError,
+    SelectionCandidate,
+    rank_candidates,
+)
+from src.utils.queryIntend import QueryIntent
 
 logger = logging.getLogger(__name__)
 
@@ -33,15 +40,26 @@ class ProfileSynthesizer:
         return []
 
     async def synthesize(
-        self, query: str, dataset_id: str, max_agents: int = 5
+        self,
+        query: str,
+        dataset_id: str,
+        max_agents: int = 5,
+        intent: QueryIntent | None = None,
+        config: DebateConfig | None = None,
     ) -> list[Agent]:
         """Synthesize agent profiles from relevant graph entities.
 
         1. Vector-search entities by query
         2. Group entities by shared chunk provenance (co-occurrence clustering)
-        3. Sort clusters by aggregate relevance
+        3. Rank clusters by the S4 score (intent-semantic + density blend); with
+           no intent this is exactly the previous density-only ordering
         4. Take top clusters (adaptive count)
         5. Build Agent for each cluster representative
+
+        `intent` is the read-only S3 intent (None for older callers); `config`
+        carries the S4 blend weights. Raises `NoAgentsDerivableError` when the
+        graph yields no candidate at all — an empty roster is a failed job, not
+        a debate with nobody in it.
         """
         # Adaptive target: sqrt(n) * 4, capped at max_agents
         search_limit = max_agents * 3
@@ -50,7 +68,10 @@ class ProfileSynthesizer:
         target = min(max_agents, int(math.sqrt(relevant_entity_count) * 4))
 
         if not entities:
-            return []
+            raise NoAgentsDerivableError(
+                f"no agents derivable from graph: no candidate entities for query {query!r} "
+                f"in dataset {dataset_id!r}"
+            )
 
         # Co-occurrence clustering: entities sharing source chunks cluster together.
         # Provenance fetch bounded by search_limit = max_agents * 3.
@@ -95,13 +116,21 @@ class ProfileSynthesizer:
         for i, key in enumerate(key_list):
             clusters[_find(i)].extend(initial[key])
 
-        # Sort clusters by aggregate relevance score
-        cluster_scores = [
-            (cid, ents, sum(e.relevance_score for e in ents))
-            for cid, ents in clusters.items()
+        # S4: rank clusters by the intent-semantic + density blend. No intent →
+        # no terms → density-only ordering, which reproduces the previous
+        # `sort(key=sum(relevance_score), reverse=True)` exactly (the density
+        # component is a monotonic scaling of that sum and the sort is stable).
+        candidates = [
+            SelectionCandidate(
+                name=max(ents, key=lambda e: e.relevance_score).name,
+                text=self._candidate_text(ents),
+                evidence=ents,
+            )
+            for ents in clusters.values()
         ]
-        cluster_scores.sort(key=lambda x: x[2], reverse=True)
-        top_clusters = cluster_scores[:target]
+        rows = rank_candidates(candidates, intent, config or DebateConfig())
+        entities_by_name = {candidate.name: ents for candidate, ents in zip(candidates, clusters.values())}
+        top_clusters = [(row.name, entities_by_name[row.name]) for row in rows[:target]]
 
         # Build profiles for each cluster
         profiles: list[Agent] = []
@@ -150,8 +179,8 @@ class ProfileSynthesizer:
 
         # Process clusters in parallel
         tasks = [
-            _build_profile(cluster_id, cluster_entities)
-            for cluster_id, cluster_entities, _ in top_clusters
+            _build_profile(row_name, cluster_entities)
+            for row_name, cluster_entities in top_clusters
         ]
         results = await asyncio.gather(*tasks)
         profiles = [p for p in results if p is not None]
@@ -203,6 +232,16 @@ class ProfileSynthesizer:
 
         results = await asyncio.gather(*(_build(n) for n in names))
         return [p for p in results if p is not None]
+
+    @staticmethod
+    def _candidate_text(cluster_entities: list[EntityNode]) -> str:
+        """The S4 semantic text of a cluster: its entities' names, domain tags and summaries."""
+        parts: list[str] = []
+        for entity in cluster_entities:
+            parts.append(str(getattr(entity, "name", "") or ""))
+            parts.extend(str(tag) for tag in (getattr(entity, "domain_tags", None) or []))
+            parts.append(str(getattr(entity, "summary", "") or ""))
+        return " ".join(part for part in parts if part)
 
     def _build_sector_results_from_cluster(
         self, cluster_entities: list[EntityNode]

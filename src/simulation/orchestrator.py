@@ -68,17 +68,20 @@ class DebateOrchestrator:
 
         `intent` is the S3 query intent extracted by the caller (the debate
         job path); it is read-only here and is threaded into the round
-        prompts and exposed on the result for later stages.
+        prompts and into S4 selection, and exposed on the result for later
+        stages.
         """
         warnings: list[str] = []
         all_turns: list = []
         profiles: List[Agent] = []
 
-        # Step 1: Synthesize profiles from graph
+        # Step 1: Synthesize profiles from graph (S4 selection consumes the intent)
         profiles = await self._profile_synthesizer.synthesize(
             query=query,
             dataset_id=dataset_id,
             max_agents=config.max_agents,
+            intent=intent,
+            config=config,
         )
 
         if not profiles:

@@ -1,5 +1,6 @@
 import re
-from typing import List, Dict, Any, cast, LiteralString, Callable, Tuple, Optional
+from dataclasses import asdict
+from typing import TYPE_CHECKING, List, Dict, Any, cast, LiteralString, Callable, Tuple, Optional
 from uuid import uuid4
 import uuid as _uuid
 import asyncio
@@ -21,6 +22,11 @@ from src.persona.agent import (
 from neo4j import AsyncGraphDatabase
 from llama_index.embeddings.ollama import OllamaEmbedding
 from src.logging.setup_logging import setup_logging
+from src.simulation.debate_config import DebateConfig
+from src.simulation.relevance_matrix import SelectionCandidate, rank_candidates
+
+if TYPE_CHECKING:
+    from src.utils.queryIntend import QueryIntent
 
 logger = setup_logging()
 
@@ -125,10 +131,22 @@ class PersonaRepository:
             return rows
 
 
-    async def find_agent_sectors(self, llm_output: Dict[str, List[str]], dataset_id: str) -> List[Dict[str, Any]]:
+    async def find_agent_sectors(
+        self,
+        llm_output: Dict[str, List[str]],
+        dataset_id: str,
+        intent: Optional["QueryIntent"] = None,
+        config: Optional[DebateConfig] = None,
+    ) -> List[Dict[str, Any]]:
         """Discover agent sectors by grouping Persona nodes by domain tags.
 
-        Returns list of sector dicts with keys: domain_tag, total_relevance, evidence_nodes, density.
+        S4: sectors are ranked by the intent-semantic + density blend and each
+        row carries its decomposition under `selection`. `intent` is the S3
+        intent; without it the keyword/entity frame is read from `llm_output`,
+        and with neither the ordering is the previous density-only one.
+
+        Returns list of sector dicts with keys: domain_tag, total_relevance,
+        evidence_nodes, density, selection.
         """
         query = """
         MATCH (n:Persona)
@@ -149,7 +167,7 @@ class PersonaRepository:
             res = await session.run(query, dataset_id=dataset_id)
             rows = await res.data()
 
-        return [
+        sectors = [
             {
                 "domain_tag": r["domain_tag"],
                 "total_relevance": float(r["total_relevance"] or 0),
@@ -158,6 +176,28 @@ class PersonaRepository:
             }
             for r in rows
         ]
+
+        candidates = [
+            SelectionCandidate(
+                name=str(sector["domain_tag"]),
+                text=" ".join(
+                    [str(sector["domain_tag"])]
+                    + [str(node) for node in (sector["evidence_nodes"] or [])]
+                ),
+                evidence=[sector],
+            )
+            for sector in sectors
+        ]
+        ranked = rank_candidates(
+            candidates,
+            intent if intent is not None else llm_output,
+            config or DebateConfig(),
+        )
+
+        sectors_by_tag = {candidate.name: sector for candidate, sector in zip(candidates, sectors)}
+        for row in ranked:
+            sectors_by_tag[row.name]["selection"] = asdict(row)
+        return [sectors_by_tag[row.name] for row in ranked]
 
     async def _get_embedding(self, text: str, embedding_service: Any | None = None) -> List[float]:
         """Compatibility wrapper: support async and sync embedding providers.
@@ -215,14 +255,17 @@ class PersonaRepository:
         dataset_id: str,
         user_query: str,
         max_agents: int = 5,
+        intent: Optional["QueryIntent"] = None,
     ) -> List[Agent]:
         """Build canonical Agents from `find_agent_sectors` output.
 
         This implementation is optimized for production: it collects top evidence
         agent names, batch-fetches nodes, computes metrics from sector results,
         and constructs profiles in parallel with a bounded concurrency.
+
+        `intent` is the S3 intent, forwarded so sector ranking consumes it.
         """
-        sector_results = await self.find_agent_sectors(llm_output, dataset_id) # return type: List[Dict[str, Any]] with keys: domain_tag, total_relevance, evidence_nodes, density
+        sector_results = await self.find_agent_sectors(llm_output, dataset_id, intent=intent) # return type: List[Dict[str, Any]] with keys: domain_tag, total_relevance, evidence_nodes, density, selection
         
         """Here sector_results should be cashed such that we can further use these agent name and their data."""
 
@@ -799,12 +842,13 @@ class PersonaRepository:
             "search_perspectives": intent.search_perspectives
         }
         
-        # 4. Build complete agent profiles
+        # 4. Build complete agent profiles (sector ranking consumes the intent)
         profiles = await self.build_agent_profiles_from_sectors(
             llm_output=llm_output,
             dataset_id=dataset_id,
             user_query=user_query,
-            max_agents=max_agents
+            max_agents=max_agents,
+            intent=intent,
         )
         
         return profiles

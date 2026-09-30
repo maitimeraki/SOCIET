@@ -15,6 +15,8 @@ from src.persona.models_persona import (
     ProvenanceLink,
 )
 from src.simulation.profile_synthesizer import ProfileSynthesizer
+from src.simulation.relevance_matrix import NoAgentsDerivableError
+from src.utils.queryIntend import QueryIntent
 
 
 @pytest.fixture
@@ -169,16 +171,15 @@ async def test_synthesize_adaptive_count(synthesizer, mock_graph_context):
 
 @pytest.mark.asyncio
 async def test_synthesize_empty_entities(synthesizer):
-    """Verify synthesize handles empty entity list gracefully."""
+    """An empty graph is a failed selection, not an empty roster (S4 invariant)."""
     synthesizer._ctx.find_relevant_entities = AsyncMock(return_value=[])
 
-    profiles = await synthesizer.synthesize(
-        query="test",
-        dataset_id="test_dataset",
-        max_agents=5,
-    )
-
-    assert profiles == []
+    with pytest.raises(NoAgentsDerivableError, match="no agents derivable from graph"):
+        await synthesizer.synthesize(
+            query="test",
+            dataset_id="test_dataset",
+            max_agents=5,
+        )
 
 
 @pytest.mark.asyncio
@@ -429,9 +430,16 @@ async def test_synthesize_vector_search_called_with_query_string():
 
     The GraphContext internally calls _get_embedding(query) before vector search.
     The synthesize method passes the raw query; this test verifies that contract.
+    The graph returns one entity — an empty graph is now a hard selection failure.
     """
+    entity = MagicMock()
+    entity.id = "e1"
+    entity.name = "Agent_0"
+    entity.relevance_score = 0.9
+    entity.domain_tags = ["test"]
+    entity.summary = "test entity"
     ctx = MagicMock()
-    ctx.find_relevant_entities = AsyncMock(return_value=[])
+    ctx.find_relevant_entities = AsyncMock(return_value=[entity])
 
     repo = MagicMock()
     repo.fetch_nodes_by_names = AsyncMock(return_value={})
@@ -455,9 +463,12 @@ async def test_synthesize_vector_search_called_with_query_string():
 
 
 """Tests for ProfileSynthesizer.synthesize_from_names (activation path)."""
+import logging
+
 import pytest
 from unittest.mock import AsyncMock, MagicMock
 
+from src.simulation.debate_config import DebateConfig
 from src.simulation.profile_synthesizer import ProfileSynthesizer
 
 
@@ -532,3 +543,95 @@ async def test_synthesize_from_names_filters_none_for_resolved_name(repo, synth)
 
     assert profiles == []
     repo.build_single_agent_profile_from_node.assert_awaited()
+
+
+"""S4: the debate path's selection consumes the S3 intent."""
+
+
+def _cluster_entity(name: str, score: float, tags: list, summary: str) -> MagicMock:
+    node = MagicMock()
+    node.id = name  # unique per entity → each entity is its own provenance-solo cluster
+    node.name = name
+    node.label = "Persona"
+    node.properties = {"name": name}
+    node.relevance_score = score
+    node.domain_tags = tags
+    node.summary = summary
+    return node
+
+
+def _selection_synth(entities):
+    """A synthesizer over `entities` whose repo names each built profile after its agent."""
+    async def build_profile(**kwargs):
+        return MagicMock(identity=PersonaIdentity(
+            name=kwargs["agent_name"], archetype="Analyst", communication_style="factual",
+        ))
+
+    repo = MagicMock()
+    repo.fetch_nodes_by_names = AsyncMock(return_value={})
+    repo.calculate_agent_metrics_and_context_for_llm = AsyncMock(return_value={})
+    repo.build_single_agent_profile_from_node = AsyncMock(side_effect=build_profile)
+
+    ctx = MagicMock()
+    ctx.find_relevant_entities = AsyncMock(return_value=entities)
+    return ProfileSynthesizer(persona_repo=repo, graph_context=ctx)
+
+
+# The denser cluster is the off-topic one, so density-only order and
+# intent-driven order disagree — that is what makes the selection observable.
+_SELECTION_ENTITIES = [
+    _cluster_entity("Carbon Analyst", 0.9, ["economics"], "carbon tax economics policy"),
+    _cluster_entity("Grid Engineer", 0.5, ["energy"], "energy grid engineering"),
+]
+
+
+@pytest.mark.asyncio
+async def test_synthesize_selection_follows_the_intent():
+    """Two intents select two different agents from the same graph (P2-T1)."""
+    carbon = QueryIntent(
+        direct_keywords=["carbon", "tax"], latent_sectors=[], search_perspectives=[],
+    )
+    energy = QueryIntent(
+        direct_keywords=["energy", "grid"], latent_sectors=[], search_perspectives=[],
+    )
+
+    carbon_names = [
+        p.identity.name
+        for p in await _selection_synth(_SELECTION_ENTITIES).synthesize(
+            query="q", dataset_id="ds", max_agents=1, intent=carbon,
+        )
+    ]
+    energy_names = [
+        p.identity.name
+        for p in await _selection_synth(_SELECTION_ENTITIES).synthesize(
+            query="q", dataset_id="ds", max_agents=1, intent=energy,
+        )
+    ]
+
+    assert carbon_names == ["Carbon Analyst"]
+    assert energy_names == ["Grid Engineer"]
+
+
+@pytest.mark.asyncio
+async def test_synthesize_without_intent_keeps_the_density_only_order():
+    """Backward compatibility: no intent → the pre-S4 density ordering."""
+    profiles = await _selection_synth(_SELECTION_ENTITIES).synthesize(
+        query="q", dataset_id="ds", max_agents=2,
+    )
+
+    assert [p.identity.name for p in profiles] == ["Carbon Analyst", "Grid Engineer"]
+
+
+@pytest.mark.asyncio
+async def test_synthesize_falls_back_to_density_order_and_warns(caplog):
+    """An intent that clears no candidate restores the density ordering and warns."""
+    intent = QueryIntent(direct_keywords=["energy"], latent_sectors=[], search_perspectives=[])
+    config = DebateConfig(selection_score_threshold=0.99)
+
+    with caplog.at_level(logging.WARNING, logger="src.simulation.relevance_matrix"):
+        profiles = await _selection_synth(_SELECTION_ENTITIES).synthesize(
+            query="q", dataset_id="ds", max_agents=2, intent=intent, config=config,
+        )
+
+    assert [p.identity.name for p in profiles] == ["Carbon Analyst", "Grid Engineer"]
+    assert "falling back to density-only ordering" in caplog.text

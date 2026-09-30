@@ -114,9 +114,10 @@ async def test_five_step_flow():
 
     result = await orchestrator.run("test query", "ds1", config, ws_broadcast)
 
-    # Step 1: profile_synthesizer called
+    # Step 1: profile_synthesizer called — with the S3 intent and the run's
+    # config, so S4 selection can blend against it
     synth.synthesize.assert_awaited_once_with(
-        query="test query", dataset_id="ds1", max_agents=5
+        query="test query", dataset_id="ds1", max_agents=5, intent=None, config=config
     )
 
     # Step 2: topology called per round (max_rounds=3)
