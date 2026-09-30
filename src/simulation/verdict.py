@@ -94,7 +94,8 @@ class VerdictSynthesizer:
         clusters = self._cluster_opinions(all_turns)
         profile_map = {p.identity.name: p for p in profiles}
 
-        weights = self._calibrate_cior(clusters, profile_map)
+        warned_missing: set[str] = set()
+        weights = self._calibrate_cior(clusters, profile_map, warned=warned_missing)
 
         cluster_details: dict[Stance, ClusterSummary] = {}
         for stance, turns in clusters.items():
@@ -106,6 +107,8 @@ class VerdictSynthesizer:
             convictions: List[float] = []
             for turn in turns:
                 profile = profile_map.get(turn.agent_name)
+                if profile is None:
+                    self._warn_missing_profile(turn.agent_name, warned_missing)
                 convictions.append(profile.conviction if profile else 0.5)
             avg_conv = sum(convictions) / len(convictions) if convictions else 0.5
 
@@ -179,12 +182,26 @@ class VerdictSynthesizer:
             clusters[stance].append(turn)
         return clusters
 
+    @staticmethod
+    def _warn_missing_profile(agent_name: str, warned: set[str]) -> None:
+        """One warning per agent per synthesis: the speaker is absent from profile_map."""
+        if agent_name in warned:
+            return
+        warned.add(agent_name)
+        logger.warning(
+            "VerdictSynthesizer: agent '%s' absent from profile_map; "
+            "falling back to conviction=0.5, cior=0.0 (reduced weight)",
+            agent_name,
+        )
+
     def _calibrate_cior(
         self,
         clusters: dict[Stance, list[AgentTurn]],
         profile_map: dict[str, Agent],
+        warned: set[str] | None = None,
     ) -> dict[Stance, float]:
         """weight = confidence * conviction * (1 + cior) / 2."""
+        warned = set() if warned is None else warned
         weights: dict[Stance, float] = {s: 0.0 for s in Stance}
         for stance, turns in clusters.items():
             cluster_weight = 0.0
@@ -194,6 +211,7 @@ class VerdictSynthesizer:
                     cior_factor = (1.0 + profile.cior) / 2.0
                     cluster_weight += turn.confidence * profile.conviction * cior_factor
                 else:
+                    self._warn_missing_profile(turn.agent_name, warned)
                     cluster_weight += turn.confidence * 0.5
             weights[stance] = cluster_weight
         return weights

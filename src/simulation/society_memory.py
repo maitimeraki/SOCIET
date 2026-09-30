@@ -154,6 +154,12 @@ class SocietyMemory:
         opinions: List[dict] = []
         for agent_name, turns in turns_by_agent.items():
             profile = profile_map.get(agent_name)
+            if profile is None:
+                logger.warning(
+                    "SocietyMemory: agent '%s' absent from profile_map; opinion weight "
+                    "falls back to conviction=0.5, cior=0.0 (reduced weight)",
+                    agent_name,
+                )
             conviction = _profile_float(profile, "conviction", 0.5)
             cior = _profile_float(profile, "cior", 0.0)
             last = turns[-1]  # final position in this round is the canonical stance

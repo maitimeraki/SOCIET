@@ -1,4 +1,5 @@
 """Tests for SocietyMemory (per-round commit + snapshot read)."""
+import logging
 import uuid
 import pytest
 from unittest.mock import MagicMock
@@ -211,3 +212,22 @@ async def test_commit_round_zero_conviction_keeps_zero_weight():
     op = session.calls[0][1]["opinions"][0]
     assert op["conviction"] == 0.0
     assert op["weight"] == 0.0                      # not 0.8 * 0.5 * (1 + 0) / 2 == 0.2
+
+
+@pytest.mark.asyncio
+async def test_commit_round_missing_profile_warns(caplog):
+    """A speaker absent from profile_map gets the fallback weight — observably (P0-T4)."""
+    session = FakeSession()
+    driver = MagicMock()
+    driver.session.return_value = session
+    svc = SocietyMemory(driver, "db")
+    rnd = _round(1, [_turn("Ghost", "g content", conf=0.8)],
+                 [CommPair(agent_a="Ghost", agent_b="Other")])
+    with caplog.at_level(logging.WARNING, logger="src.simulation.society_memory"):
+        await svc.commit_round(rnd, "ds", "qh", {})
+    records = [r for r in caplog.records if "absent from profile_map" in r.getMessage()]
+    assert len(records) == 1
+    assert records[0].levelno == logging.WARNING
+    assert "Ghost" in records[0].getMessage()
+    op = session.calls[0][1]["opinions"][0]
+    assert op["weight"] == pytest.approx(0.8 * 0.5 * (1 + 0.0) / 2)  # unchanged fallback math

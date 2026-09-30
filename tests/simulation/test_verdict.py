@@ -1,4 +1,6 @@
 """Tests for VerdictSynthesizer."""
+import logging
+
 import pytest
 from unittest.mock import MagicMock
 
@@ -199,3 +201,50 @@ class TestSynthesize:
         verdict = synthesizer.synthesize(fixture_rounds, fixture_profiles)
         assert "POSITIVE" in verdict.summary
         assert "Confidence score" in verdict.summary
+
+
+class TestMissingProfileWarning:
+    """A speaker absent from profile_map must be observable (P0-T4)."""
+
+    @staticmethod
+    def _missing_records(caplog):
+        return [r for r in caplog.records
+                if "absent from profile_map" in r.getMessage()]
+
+    def test_missing_profile_warns_once_per_synthesis(self, caplog):
+        synthesizer = VerdictSynthesizer()
+        # Same absent speaker twice in one cluster: one warning, not one per turn.
+        rounds = [make_round(1, [
+            make_turn("a1", "Ghost", "POSITIVE", 0.8),
+            make_turn("a1", "Ghost", "POSITIVE", 0.6),
+        ])]
+        with caplog.at_level(logging.WARNING, logger="src.simulation.verdict"):
+            verdict = synthesizer.synthesize(rounds, [make_profile("Alice")])
+
+        records = self._missing_records(caplog)
+        assert len(records) == 1
+        assert records[0].levelno == logging.WARNING
+        assert "Ghost" in records[0].getMessage()
+        # no behavior change: fallback weight is confidence * 0.5 per turn
+        assert pytest.approx(
+            verdict.cluster_details[Stance.POSITIVE].total_weight, rel=1e-6
+        ) == 0.4 + 0.3
+
+    def test_all_profiles_present_logs_no_warning(self, caplog):
+        synthesizer = VerdictSynthesizer()
+        rounds = [make_round(1, [make_turn("a1", "Alice", "POSITIVE", 0.8)])]
+        with caplog.at_level(logging.WARNING, logger="src.simulation.verdict"):
+            synthesizer.synthesize(rounds, [make_profile("Alice", conviction=0.9, cior=1.0)])
+        assert self._missing_records(caplog) == []
+
+    def test_calibrate_cior_direct_call_warns(self, caplog):
+        """The orchestrator's _weighted_share path calls _calibrate_cior directly."""
+        synthesizer = VerdictSynthesizer()
+        clusters = {s: [] for s in Stance}
+        clusters[Stance.POSITIVE] = [make_turn("x", "Ghost", "POSITIVE", 0.8)]
+        with caplog.at_level(logging.WARNING, logger="src.simulation.verdict"):
+            weights = synthesizer._calibrate_cior(clusters, {})
+        assert pytest.approx(weights[Stance.POSITIVE], rel=1e-6) == 0.4
+        records = self._missing_records(caplog)
+        assert len(records) == 1
+        assert "Ghost" in records[0].getMessage()
