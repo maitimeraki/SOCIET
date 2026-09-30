@@ -7,6 +7,7 @@ from src.persona.agent import Agent, ConfidenceBreakdown, DiscoveryType, Experti
 from src.simulation.llm_batch import BatchedLLMRunner
 from src.simulation.round_runner import RoundRunner, _build_system_prompt, _build_user_prompt, _parse_response_stance
 from src.simulation.pair_turn import RoundResult, CommPair
+from src.utils.queryIntend import QueryIntent
 
 
 def make_profile(name: str, domain_tags: list[str], perspective: str, confidence: float) -> tuple[uuid.UUID, Agent]:
@@ -301,3 +302,64 @@ async def test_execute_round_passes_society_into_prompts():
                            round_num=2, query="Q?", history=[], society=snap)
     for c in mock_llm.generate.call_args_list:
         assert "SOCIETY STATE" in c.kwargs["user_prompt"]
+
+
+# ------------------------------------------------------------------
+# Intent context (S3)
+# ------------------------------------------------------------------
+
+def make_intent(core_question: str = "Should carbon emissions be taxed?",
+                stance_axis: str = "Support = backing a carbon tax; oppose = rejecting it.") -> QueryIntent:
+    return QueryIntent(
+        direct_keywords=["carbon tax"],
+        latent_sectors=["energy"],
+        search_perspectives=["Economic"],
+        core_question=core_question,
+        stance_axis=stance_axis,
+    )
+
+
+def test_user_prompt_includes_intent_context():
+    _, alice = make_profile("Alice", ["x"], "x", 0.8)
+    _, bob = make_profile("Bob", ["y"], "y", 0.7)
+    prompt = _build_user_prompt(alice, bob, "Tax carbon?", [], intent=make_intent())
+    assert "INTENT CONTEXT" in prompt
+    assert "Should carbon emissions be taxed?" in prompt
+    assert "Support = backing a carbon tax; oppose = rejecting it." in prompt
+    # Compact block, not a raw JSON dump of the intent object.
+    assert "direct_keywords" not in prompt
+    assert "latent_sectors" not in prompt
+
+
+def test_user_prompt_without_intent_is_unchanged():
+    _, alice = make_profile("Alice", ["x"], "x", 0.8)
+    _, bob = make_profile("Bob", ["y"], "y", 0.7)
+    baseline = _build_user_prompt(alice, bob, "Tax carbon?", [])
+    # No intent (older callers) and an intent with neither field both degrade to no block.
+    assert _build_user_prompt(alice, bob, "Tax carbon?", [], intent=None) == baseline
+    blank = QueryIntent(direct_keywords=[], latent_sectors=[], search_perspectives=[])
+    assert _build_user_prompt(alice, bob, "Tax carbon?", [], intent=blank) == baseline
+
+
+def test_user_prompt_includes_partial_intent_block():
+    _, alice = make_profile("Alice", ["x"], "x", 0.8)
+    _, bob = make_profile("Bob", ["y"], "y", 0.7)
+    # A fallback intent has the core question but no stance axis.
+    prompt = _build_user_prompt(alice, bob, "Tax carbon?", [], intent=make_intent(stance_axis=""))
+    assert "Core question: Should carbon emissions be taxed?" in prompt
+    assert "Stance axis" not in prompt
+
+
+@pytest.mark.asyncio
+async def test_execute_round_passes_intent_into_prompts():
+    mock_llm = AsyncMock()
+    mock_llm.generate = AsyncMock(return_value="Response")
+    rr = RoundRunner(BatchedLLMRunner(mock_llm), intent=make_intent())
+    _, alice = make_profile("Alice", ["x"], "x", 0.8)
+    _, bob = make_profile("Bob", ["y"], "y", 0.7)
+    await rr.execute_round([alice, bob], [make_pair("Alice", "Bob", [])],
+                           round_num=1, query="Tax carbon?", history=[])
+    assert len(mock_llm.generate.call_args_list) == 2
+    for c in mock_llm.generate.call_args_list:
+        assert "INTENT CONTEXT" in c.kwargs["user_prompt"]
+        assert "Should carbon emissions be taxed?" in c.kwargs["user_prompt"]

@@ -23,6 +23,7 @@ from src.persona.agent import (
     GraphSnapshot,
     PersonaIdentity,
 )
+from src.utils.queryIntend import QueryIntent
 
 
 def _make_profile(agent_id: int, name: str) -> Agent:
@@ -560,3 +561,61 @@ async def test_activation_disabled_by_config():
     # F41.1: activation is off, but the commit path is still exercised — not silently degraded
     sent = [c.args[0] for c in ws_broadcast.call_args_list if c.args]
     assert any(m.get("type") == "commit" for m in sent)
+
+
+@pytest.mark.asyncio
+async def test_run_threads_intent_to_round_runner_and_result():
+    """S3: the run's intent reaches the prompt builder and is exposed on the result."""
+    synth = AsyncMock(spec=ProfileSynthesizer)
+    topo = AsyncMock(spec=CommunicationTopology)
+    society_memory = AsyncMock(spec=SocietyMemory)
+    society_memory.commit_round.return_value = _ok_receipt()
+    synth.synthesize.return_value = [_make_profile(1, "Alice")]
+    topo.compute_round_pairs.return_value = [
+        CommPair(agent_a="Alice", agent_b="Bob", shared_entities=[], score=0.5)
+    ]
+    llm_runner = MagicMock(spec=BatchedLLMRunner)
+    llm_runner.gather = MagicMock(side_effect=lambda *a, **kw: _AsyncEmptyIter())
+    verdict_synth = MagicMock(spec=VerdictSynthesizer)
+    verdict_synth.asynthesize.return_value = _make_verdict()
+    intent = QueryIntent(
+        direct_keywords=["carbon"], latent_sectors=[], search_perspectives=[],
+        core_question="Tax carbon?", stance_axis="Support = tax it.",
+    )
+
+    orch = _orch(synth, topo, society_memory, verdict_synth, llm_runner)
+    with patch("src.simulation.orchestrator.RoundRunner") as patched_rr_class:
+        patched_rr_instance = MagicMock()
+        patched_rr_instance.execute_round = AsyncMock(
+            return_value=RoundResult(round_num=1, turns=[], pairs=[])
+        )
+        patched_rr_class.return_value = patched_rr_instance
+
+        result = await orch.run(
+            "q", "ds1", DebateConfig(max_agents=5, max_rounds=1), AsyncMock(), intent=intent
+        )
+
+        assert patched_rr_class.call_args.kwargs["intent"] is intent
+    assert result.intent is intent
+
+
+@pytest.mark.asyncio
+async def test_run_without_intent_exposes_none():
+    """Backward compatibility: older callers pass no intent and the run still completes."""
+    synth = AsyncMock(spec=ProfileSynthesizer)
+    topo = AsyncMock(spec=CommunicationTopology)
+    society_memory = AsyncMock(spec=SocietyMemory)
+    society_memory.commit_round.return_value = _ok_receipt()
+    synth.synthesize.return_value = [_make_profile(1, "Alice")]
+    topo.compute_round_pairs.return_value = [
+        CommPair(agent_a="Alice", agent_b="Bob", shared_entities=[], score=0.5)
+    ]
+    llm_runner = MagicMock(spec=BatchedLLMRunner)
+    llm_runner.gather = MagicMock(side_effect=lambda *a, **kw: _AsyncEmptyIter())
+    verdict_synth = MagicMock(spec=VerdictSynthesizer)
+    verdict_synth.asynthesize.return_value = _make_verdict()
+
+    orch = _orch(synth, topo, society_memory, verdict_synth, llm_runner)
+    result = await orch.run("q", "ds1", DebateConfig(max_agents=5, max_rounds=1), AsyncMock())
+    assert result.intent is None
+    assert result.rounds_executed == 1

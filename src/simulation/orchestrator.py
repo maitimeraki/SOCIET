@@ -12,6 +12,7 @@ from src.simulation.verdict import VerdictSynthesizer
 from src.simulation.society_memory import SocietyMemory
 from src.simulation.debate_config import DebateConfig
 from src.simulation.pair_turn import RoundResult
+from src.utils.queryIntend import QueryIntent
 
 
 @dataclass
@@ -22,6 +23,7 @@ class OrchestratedDebateResult:
     final_stances: dict[str, str]
     warnings: list[str]
     rounds_executed: int
+    intent: Optional[QueryIntent] = None
 
 
 class DebateOrchestrator:
@@ -55,6 +57,7 @@ class DebateOrchestrator:
         config: DebateConfig,
         ws_broadcast: Callable[[dict[str, Any]], Awaitable[None]],
         llm_client: Optional[Any] = None,
+        intent: Optional[QueryIntent] = None,
     ) -> OrchestratedDebateResult:
         """
         Run the full debate pipeline with WebSocket streaming.
@@ -62,6 +65,10 @@ class DebateOrchestrator:
         `llm_client` is optional; when supplied the verdict summary is
         produced by the LLM via `asynthesize` (no asyncio.run, no loop
         collision). When omitted a deterministic template summary is used.
+
+        `intent` is the S3 query intent extracted by the caller (the debate
+        job path); it is read-only here and is threaded into the round
+        prompts and exposed on the result for later stages.
         """
         warnings: list[str] = []
         all_turns: list = []
@@ -81,11 +88,12 @@ class DebateOrchestrator:
                 final_stances={},
                 warnings=["No relevant entities found for query"],
                 rounds_executed=0,
+                intent=intent,
             )
 
         # Step 2: Run debate rounds
         rounds: list[RoundResult] = []
-        round_runner = RoundRunner(_llm=self._llm_runner, ws_broadcast=ws_broadcast)
+        round_runner = RoundRunner(_llm=self._llm_runner, ws_broadcast=ws_broadcast, intent=intent)
         debate_history: list[dict[str, Any]] = []
         snapshot = None  # graph-side society state, read at the start of rounds >= 2
         query_hash = hashlib.sha256(query.encode("utf-8")).hexdigest()[:16]
@@ -234,6 +242,7 @@ class DebateOrchestrator:
             final_stances=final_stances,
             warnings=warnings,
             rounds_executed=len(rounds),
+            intent=intent,
         )
 
     def _weighted_share(self, rounds: list[RoundResult], profiles: List[Agent]) -> Optional[tuple[str, float]]:

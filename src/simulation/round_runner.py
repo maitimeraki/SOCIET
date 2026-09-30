@@ -6,6 +6,7 @@ from src.persona.agent import Agent
 from src.simulation.llm_batch import BatchedLLMRunner, PairPrompt
 from src.simulation.pair_turn import AgentTurn, RoundResult, CommPair
 from src.simulation.society_memory import SocietySnapshot
+from src.utils.queryIntend import QueryIntent
 
 
 def _parse_response_stance(
@@ -72,12 +73,29 @@ def _build_system_prompt(agent: Agent, opponent: Agent, shared_entities: list[st
     )
 
 
+def _intent_context_block(intent: Optional[QueryIntent]) -> str:
+    """Compact intent context for the prompt: restated question + what support/oppose mean here.
+
+    Empty string when there is no intent (older callers) or the intent carries
+    neither field — prompts stay valid either way.
+    """
+    if intent is None:
+        return ""
+    lines = []
+    if intent.core_question:
+        lines.append(f"Core question: {intent.core_question}")
+    if intent.stance_axis:
+        lines.append(f'Stance axis (what "support" vs "oppose" means for this question): {intent.stance_axis}')
+    return "INTENT CONTEXT:\n" + "\n".join(lines) if lines else ""
+
+
 def _build_user_prompt(
     agent: Agent,
     opponent: Agent,
     query: str,
     history: list[dict],
     society: Optional[SocietySnapshot] = None,
+    intent: Optional[QueryIntent] = None,
 ) -> str:
     history_str = ""
     if history:
@@ -99,8 +117,12 @@ def _build_user_prompt(
         if block:
             society_str = f"{block}\n\n"
 
+    intent_block = _intent_context_block(intent)
+    intent_str = f"{intent_block}\n\n" if intent_block else ""
+
     return (
         f"DEBATE TOPIC: {query}\n\n"
+        f"{intent_str}"
         f"You are responding to: {opponent.identity.name}\n"
         f"Their stance: {their_stance or 'NEUTRAL'} (latest on record)\n\n"
         f"{society_str}"
@@ -115,6 +137,7 @@ class RoundRunner:
 
     _llm: BatchedLLMRunner
     ws_broadcast: Optional[Callable] = None
+    intent: Optional[QueryIntent] = None
 
     async def execute_round(
         self,
@@ -145,7 +168,7 @@ class RoundRunner:
             meta_a = {"pair": pair, "speaker": agent_a, "opponent": agent_b}
             prompt_a = PairPrompt(
                 system_prompt=_build_system_prompt(agent_a, agent_b, shared),
-                user_prompt=_build_user_prompt(agent_a, agent_b, query, history, society=society),
+                user_prompt=_build_user_prompt(agent_a, agent_b, query, history, society=society, intent=self.intent),
                 pair_id=f"{dataset_id}:{pair.agent_a}:{pair.agent_b}",
             )
             prompts.append(prompt_a)
@@ -154,7 +177,7 @@ class RoundRunner:
             meta_b = {"pair": pair, "speaker": agent_b, "opponent": agent_a}
             prompt_b = PairPrompt(
                 system_prompt=_build_system_prompt(agent_b, agent_a, shared),
-                user_prompt=_build_user_prompt(agent_b, agent_a, query, history, society=society),
+                user_prompt=_build_user_prompt(agent_b, agent_a, query, history, society=society, intent=self.intent),
                 pair_id=f"{dataset_id}:{pair.agent_b}:{pair.agent_a}",
             )
             prompts.append(prompt_b)

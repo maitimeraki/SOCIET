@@ -1,6 +1,9 @@
 """
 Tests for Debate API endpoints.
 """
+import uuid
+from dataclasses import asdict
+
 import pytest
 from unittest.mock import AsyncMock, patch, MagicMock
 from fastapi.testclient import TestClient
@@ -9,9 +12,21 @@ from src.api.debate_api import (
     router,
     DebateRequest,
     DebateConfigRequest,
+    _run_debate_async,
     _DEBATE_JOBS,
     _DEBATE_JOBS_LOCK,
 )
+from src.persona.agent import (
+    Agent,
+    ConfidenceBreakdown,
+    DiscoveryType,
+    ExpertiseLevel,
+    GraphSnapshot,
+    PersonaIdentity,
+    Stance,
+)
+from src.simulation.debate_config import DebateConfig
+from src.simulation.pair_turn import CommPair, DebateVerdict
 
 
 @pytest.fixture
@@ -89,6 +104,7 @@ class TestDebateConfigRequest:
         )
         assert request.query == "Test query?"
         assert request.graph_id == "test-graph"
+        assert request.selected_domains == []
         assert isinstance(request.config, DebateConfigRequest)
 
     def test_config_request_validation(self):
@@ -206,3 +222,92 @@ class TestDebateOrchestrator:
         assert "dataset_id" in params
         assert "config" in params
         assert "ws_broadcast" in params
+        assert "intent" in params
+
+
+def _stub_profile(name: str) -> Agent:
+    return Agent(
+        agent_id=uuid.uuid4(),
+        identity=PersonaIdentity(name=name, archetype="Expert", communication_style="Formal"),
+        discovery_type=DiscoveryType.INTENT_DRIVEN,
+        expertise_level=ExpertiseLevel.TECHNICAL,
+        bio=f"{name} bio",
+        detailed_perspective=f"{name} perspective",
+        domain_tags=[f"{name}_domain"],
+        confidence=0.7,
+        confidence_breakdown=ConfidenceBreakdown(
+            source_breadth=1, node_density=1, relationship_connectivity=0.5
+        ),
+        graph_snapshot=GraphSnapshot(dataset_id="ds1"),
+    )
+
+
+def _stub_verdict() -> DebateVerdict:
+    return DebateVerdict(
+        overall_stance=Stance.POSITIVE,
+        confidence_score=0.9,
+        supporting_entities=[],
+        opposing_entities=[],
+        summary="Test verdict.",
+        cluster_details={},
+        rounds_executed=1,
+    )
+
+
+class TestDebateJobIntent:
+    """S3: the job path extracts intent once per run; an LLM outage degrades to the fallback."""
+
+    @pytest.mark.asyncio
+    async def test_job_run_uses_fallback_intent_when_llm_fails(self, caplog):
+        """A failing provider must not block the debate: fallback intent, run still completes."""
+        job_id = f"intent-fallback-{uuid.uuid4()}"
+        query = "Should we expand into Europe?"
+        config = DebateConfig(max_agents=5, max_rounds=1, max_new_agents_per_round=0)
+
+        failing_llm = MagicMock()
+        failing_llm.generate = AsyncMock(side_effect=RuntimeError("provider down"))
+
+        ctx = MagicMock()
+        ctx.__aenter__ = AsyncMock(return_value=ctx)
+        ctx.__aexit__ = AsyncMock(return_value=False)
+
+        profiler = MagicMock()
+        profiler.synthesize = AsyncMock(return_value=[_stub_profile("Alice"), _stub_profile("Bob")])
+        topo = MagicMock()
+        topo.compute_round_pairs = AsyncMock(return_value=[
+            CommPair(agent_a="Alice", agent_b="Bob", shared_entities=[], score=0.5)
+        ])
+        verdict_synth = MagicMock()
+        verdict_synth.asynthesize = AsyncMock(return_value=_stub_verdict())
+        society_memory = MagicMock()
+        society_memory.commit_round = AsyncMock(return_value={
+            "round": 1, "dataset_id": "ds1", "query_hash": "qh",
+            "opinions": 0, "edges": 0, "failed": False,
+        })
+
+        _DEBATE_JOBS[job_id] = {
+            "job_id": job_id, "status": "queued", "query": query,
+            "graph_id": "ds1", "config": asdict(config), "result": None, "error": None,
+        }
+        try:
+            with patch("src.llm.client.LLMClient", return_value=failing_llm), \
+                 patch("src.persona.graph_context.GraphContext", return_value=ctx), \
+                 patch("src.persona.repository.PersonaRepository"), \
+                 patch("src.simulation.profile_synthesizer.ProfileSynthesizer", return_value=profiler), \
+                 patch("src.simulation.topology.CommunicationTopology", return_value=topo), \
+                 patch("src.simulation.verdict.VerdictSynthesizer", return_value=verdict_synth), \
+                 patch("src.simulation.society_memory.SocietyMemory", return_value=society_memory):
+                await _run_debate_async(
+                    job_id=job_id, query=query, graph_id="ds1",
+                    config=config, selected_domains=["legal"],
+                )
+        finally:
+            job = _DEBATE_JOBS.pop(job_id, None)
+
+        assert job["status"] == "complete"
+        intent = job["result"]["intent"]
+        assert intent["extraction_confidence"] == 0.2  # FALLBACK, not the 0.9 LLM value
+        assert intent["core_question"] == query
+        assert intent["domain_tags"] == ["legal"]  # selected_domains carried into the fallback
+        assert intent["stance_axis"] == ""
+        assert "deterministic fallback" in caplog.text

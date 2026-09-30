@@ -4,7 +4,7 @@ Debate API: Async debate simulation with streaming support.
 import asyncio
 import uuid
 from dataclasses import asdict
-from typing import Dict, Any, Optional
+from typing import Dict, Any, List, Optional
 
 from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel, Field
@@ -30,6 +30,9 @@ class DebateRequest(BaseModel):
     """Request to start a debate simulation."""
     graph_id: str = Field(default="simulation_runtime", description="Graph/dataset ID")
     query: str = Field(..., description="Debate topic/question")
+    selected_domains: List[str] = Field(
+        default_factory=list, description="Domain filter, also carried into the intent fallback"
+    )
     config: DebateConfigRequest = Field(default_factory=DebateConfigRequest)
 
 
@@ -83,6 +86,7 @@ async def _run_debate_async(
     query: str,
     graph_id: str,
     config: DebateConfig,
+    selected_domains: Optional[List[str]] = None,
 ) -> None:
     """Background task to run debate and stream results via WebSocket."""
     ws_manager = _DebateWSManager()
@@ -91,6 +95,17 @@ async def _run_debate_async(
         async with _DEBATE_JOBS_LOCK:
             _DEBATE_JOBS[job_id]["status"] = "running"
             _DEBATE_JOBS[job_id]["ws_manager"] = ws_manager
+
+        # S3 intent extraction: once per run, before the debate starts. Never
+        # raises — on an LLM failure `expand_user_query` yields the deterministic
+        # fallback, so a provider outage cannot block the debate.
+        from src.llm.client import LLMClient
+        from src.utils.queryIntend import QueryIntend
+
+        llm = LLMClient()
+        intent = await QueryIntend(client=llm).expand_user_query(
+            query, selected_domains=selected_domains
+        )
 
         # Create GraphContext with proper signature
         from src.persona.graph_context import GraphContext
@@ -106,9 +121,7 @@ async def _run_debate_async(
             from src.simulation.llm_batch import BatchedLLMRunner
             from src.simulation.verdict import VerdictSynthesizer
             from src.simulation.society_memory import SocietyMemory
-            from src.llm.client import LLMClient
 
-            llm = LLMClient()
             llm_runner = BatchedLLMRunner(llm, concurrency=config.llm_concurrency)
 
             orchestrator = DebateOrchestrator(
@@ -130,6 +143,7 @@ async def _run_debate_async(
                 dataset_id=graph_id,
                 config=config,
                 ws_broadcast=ws_manager.broadcast,
+                intent=intent,
             )
 
         # Store result
@@ -141,6 +155,7 @@ async def _run_debate_async(
                 "final_stances": result.final_stances,
                 "warnings": result.warnings,
                 "rounds_executed": result.rounds_executed,
+                "intent": result.intent.model_dump() if result.intent else None,
             }
 
         # Send completion event
@@ -228,6 +243,7 @@ async def create_debate(request: DebateRequest):
         query=request.query,
         graph_id=request.graph_id,
         config=config,
+        selected_domains=request.selected_domains,
     ))
 
     return DebateJobResponse(job_id=job_id, status="queued")
