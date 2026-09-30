@@ -785,7 +785,7 @@ class PersonaRepository:
     ) -> List[Agent]:
         """Main entry point: Query → Intent → Sectors → Agents"""
         from src.utils.queryIntend import QueryIntend
-        intent_extractor = QueryIntend(model="gemma4:e4b")
+        intent_extractor = QueryIntend()
         
         # 1. Extract intent using LLM (from your QueryIntentExtractor)
         intent = await intent_extractor.expand_user_query(user_query)
