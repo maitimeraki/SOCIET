@@ -3,18 +3,10 @@
 Chunking is sentence-aware (shared owner: chunkProcessor.split_text_sentences);
 these assertions fail under the retired fixed character windows.
 """
-import sys
-
 import pytest
 
 from src.api.api_server import _chunk_documents
 from src.graph.models_graph import GlobalInputDocument
-
-# api_server imports src.graph.graph_build at module scope. tests/graph/test_graph_build.py
-# mocks llama_index in an autouse fixture and (re)imports graph_build per test; a real
-# graph_build left cached here would bypass that mock and send those tests to a live Neo4j.
-# Drop only our copy — api_server keeps its own reference.
-sys.modules.pop("src.graph.graph_build", None)
 
 
 SENTENCES = [

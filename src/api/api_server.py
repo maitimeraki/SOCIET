@@ -26,7 +26,6 @@ from src.api.config_api import (
 from src.graph.config_graph import GraphConfig
 from src.graph.models_graph import GlobalInputDocument, ProcessedChunk
 from src.graph.ontology import OntologyDiscoveryStage
-from src.graph.graph_build import GraphExtractionStage
 from src.graph.normalization import GraphNormalizationStage
 from src.llm.client import global_llm_client
 from src.llm.config_llm import get_llm_config
@@ -186,7 +185,7 @@ async def _process_chunk(
     dataset_id: str,
     chunk_doc: ProcessedChunk,
     discovery_stage: OntologyDiscoveryStage,
-    extraction_stage: Optional[GraphExtractionStage],
+    extraction_stage: Optional["GraphExtractionStage"],
     timeout_seconds: int,
     retry_attempts: int,
     retry_backoff_seconds: float,
@@ -248,6 +247,11 @@ async def _execute_unified_job(
     documents: List[GlobalInputDocument],
 ) -> None:
     cfg = GraphConfig()
+    # Lazy: graph_build pulls in llama_index graph stores at import time, and
+    # tests/graph/test_graph_build.py mocks llama_index at its own import — a
+    # module-scope import here would bypass that mock and hit a live Neo4j.
+    from src.graph.graph_build import GraphExtractionStage
+
     discovery_stage = OntologyDiscoveryStage(model=cfg.discovery_model, temperature=cfg.temperature)
     extraction_stage = GraphExtractionStage(cfg) if mode == "build_graph" else None
     normalization_stage = GraphNormalizationStage(cfg) if mode == "build_graph" else None
