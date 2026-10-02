@@ -138,7 +138,7 @@ async def test_one_document_row_per_parent_doc_id_with_deduped_tags(graph_env):
     ]
     assert "UNWIND $docs AS row" in query
     assert _DOCUMENT_MERGE in query
-    assert "SET d.dataset_id = row.dataset_id, d.domain_tags = row.domain_tags" in query
+    assert "coalesce(d.domain_tags, [])" in query  # accumulates, never overwrites
 
 
 @pytest.mark.asyncio
@@ -149,6 +149,30 @@ async def test_single_document_batch_writes_one_row(graph_env):
     assert store.calls[0][1]["docs"] == [
         {"document_id": "doc-9", "dataset_id": "ds-1", "domain_tags": ["a"]}
     ]
+
+
+@pytest.mark.asyncio
+async def test_repeat_calls_accumulate_to_the_document_wide_union(graph_env):
+    """The live path calls the stage one chunk at a time: each call writes only its
+    chunk's tags, and the shipped statement accumulates into the node's existing
+    list (it reads `d.domain_tags` and filters the tags already there), so two
+    calls for one document converge to the deduped union — not last-chunk-wins."""
+    stage, store, _ = graph_env
+    await _run(stage, [_chunk("c1", "doc-1", ["a", "b"])])
+    await _run(stage, [_chunk("c2", "doc-1", ["b", "c"], index=1)])
+
+    merges = [params["docs"][0] for query, params in store.calls if _DOCUMENT_MERGE in query]
+    assert [row["domain_tags"] for row in merges] == [["a", "b"], ["b", "c"]]
+
+    query = store.calls[0][0]
+    assert "d.domain_tags = coalesce(d.domain_tags, [])" in query  # reads the existing value
+    assert "+ [t IN row.domain_tags WHERE NOT t IN coalesce(d.domain_tags, [])]" in query
+
+    # those two writes, under that expression, converge to the union
+    accumulated: list[str] = []
+    for row in merges:
+        accumulated += [tag for tag in row["domain_tags"] if tag not in accumulated]
+    assert accumulated == ["a", "b", "c"]
 
 
 @pytest.mark.asyncio

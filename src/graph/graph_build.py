@@ -29,10 +29,14 @@ logger = setup_logging()  # Ensure logging is configured with handler clearing t
 
 # Document-first node model (P4-T1): a Document node per source document, created
 # before extraction, and a DERIVED_FROM edge from every extracted concept to it.
+# `domain_tags` accumulates and dedupes instead of overwriting: the live path
+# calls the stage one chunk at a time, so repeated calls for one document must
+# converge to the document-wide union.
 _MERGE_DOCUMENTS = """
 UNWIND $docs AS row
 MERGE (d:Document {document_id: row.document_id})
-SET d.dataset_id = row.dataset_id, d.domain_tags = row.domain_tags
+SET d.dataset_id = row.dataset_id,
+    d.domain_tags = coalesce(d.domain_tags, []) + [t IN row.domain_tags WHERE NOT t IN coalesce(d.domain_tags, [])]
 """
 
 _LINK_CONCEPTS_TO_DOCUMENTS = """
