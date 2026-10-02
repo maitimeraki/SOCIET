@@ -20,8 +20,8 @@ def _vectors():
     return [(cypher, params) for cypher, params in _statements() if "CREATE VECTOR INDEX" in cypher]
 
 
-def test_statement_count_is_ten():
-    assert len(_statements()) == 10
+def test_statement_count_is_eleven():
+    assert len(_statements()) == 11
 
 
 def test_every_placeholder_has_a_param_and_every_param_is_used():
@@ -37,6 +37,13 @@ def test_vector_statements_use_literal_index_config():
         assert params == {}, cypher
         assert "768" in cypher
         assert "'cosine'" in cypher
+
+
+def test_document_id_uniqueness_constraint_present():
+    matches = [cypher for cypher, _ in _statements() if "CONSTRAINT document_id" in cypher]
+    assert len(matches) == 1
+    assert "FOR (d:Document) REQUIRE d.document_id IS UNIQUE" in matches[0]
+    assert matches[0].startswith("CREATE CONSTRAINT document_id IF NOT EXISTS ")
 
 
 def test_opinion_lookup_index_present():

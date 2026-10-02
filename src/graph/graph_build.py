@@ -26,6 +26,38 @@ logging.basicConfig(level=logging.ERROR, format="%(asctime)s - %(levelname)s - %
 # Create logger instance
 # logger = logging.getLogger(__name__)
 logger = setup_logging()  # Ensure logging is configured with handler clearing to prevent duplication
+
+# Document-first node model (P4-T1): a Document node per source document, created
+# before extraction, and a DERIVED_FROM edge from every extracted concept to it.
+_MERGE_DOCUMENTS = """
+UNWIND $docs AS row
+MERGE (d:Document {document_id: row.document_id})
+SET d.dataset_id = row.dataset_id, d.domain_tags = row.domain_tags
+"""
+
+_LINK_CONCEPTS_TO_DOCUMENTS = """
+UNWIND $rows AS row
+MATCH (c:__Node__ {id: row.chunk_id})-[:MENTIONS]->(e:__Entity__)
+MATCH (d:Document {document_id: row.document_id})
+MERGE (e)-[:DERIVED_FROM]->(d)
+"""
+
+
+def _document_rows(dataset_id: str, documents: List[ProcessedChunk]) -> List[dict]:
+    """One row per unique `parent_doc_id`: its dataset plus the deduped,
+    order-stable union of its chunks' `domain_tags`."""
+    rows: dict[str, dict] = {}
+    for d in documents:
+        row = rows.setdefault(
+            d.parent_doc_id,
+            {"document_id": d.parent_doc_id, "dataset_id": dataset_id, "domain_tags": []},
+        )
+        for tag in d.domain_tags or []:
+            if tag not in row["domain_tags"]:
+                row["domain_tags"].append(tag)
+    return list(rows.values())
+
+
 class GraphExtractionStage:
     """Extracts entities and relationships from documents using LLMs and stores them in a Neo4j graph database.
     This stage is responsible for taking raw text documents, applying the defined ontology schema to extract structured information."""
@@ -120,7 +152,13 @@ class GraphExtractionStage:
             for d in documents:
                 md = dict(d.metadata)
                 md["dataset_id"] = dataset_id
-                md["document_id"] = d.chunk_id
+                # llama-index overwrites the graph `document_id` property with the
+                # split node's ref_doc_id at write time (node_to_metadata_dict) —
+                # `document_anchor` is the graph-level carrier of the source
+                # document id, and `chunk_id` the original chunk id.
+                md["document_id"] = d.parent_doc_id
+                md["chunk_id"] = d.chunk_id
+                md["document_anchor"] = d.parent_doc_id
                 md["chunk_index"] = d.chunk_index
                 md["content_hash"] = d.content_hash
                 md["summary_context"] = d.summary_context
@@ -133,8 +171,8 @@ class GraphExtractionStage:
                 new_doc = Document(text=d.content, metadata=md)
                 
                 
-                new_doc.excluded_llm_metadata_keys = ["dataset_id", "ontology_id", "document_id", "content_hash", "chunk_index"]  # Exclude sensitive or non-informative metadata from LLM input
-                new_doc.excluded_embed_metadata_keys = ["dataset_id", "ontology_id", "document_id", "content_hash", "chunk_index"]  # Exclude from embedding metadata as well to prevent noise in vector representations
+                new_doc.excluded_llm_metadata_keys = ["dataset_id", "ontology_id", "document_id", "chunk_id", "document_anchor", "content_hash", "chunk_index"]  # Exclude sensitive or non-informative metadata from LLM input
+                new_doc.excluded_embed_metadata_keys = ["dataset_id", "ontology_id", "document_id", "chunk_id", "document_anchor", "content_hash", "chunk_index"]  # Exclude from embedding metadata as well to prevent noise in vector representations
                 llama_docs.append(new_doc)
 
             logger.info(f"Building property graph for dataset {dataset_id}")
@@ -153,12 +191,35 @@ class GraphExtractionStage:
                     show_progress=True,
                 )
 
+            # Document-first: the Document nodes exist before extraction so the
+            # DERIVED_FROM pass below has something to link to.
+            await asyncio.to_thread(self._write_documents, dataset_id, documents)
+
             index = await asyncio.to_thread(_build_index)
+
+            await asyncio.to_thread(self._link_concepts_to_documents, index)
             return len(index.docstore.docs)
-            
+
         except Exception as e:
             logger.error(f"Error during graph extraction for dataset {dataset_id}: {e}")
             raise
+
+    def _write_documents(self, dataset_id: str, documents: List[ProcessedChunk]) -> None:
+        """MERGE one Document node per unique source document. Sync — called off the loop."""
+        rows = _document_rows(dataset_id, documents)
+        if rows:
+            self.graph_store.structured_query(_MERGE_DOCUMENTS, param_map={"docs": rows})
+
+    def _link_concepts_to_documents(self, index) -> None:
+        """MERGE `(concept)-[:DERIVED_FROM]->(Document)` for every stored chunk
+        that carries a `document_anchor`. Sync — called off the loop."""
+        rows = []
+        for node_id, node in (index.docstore.docs or {}).items():
+            document_id = (getattr(node, "metadata", None) or {}).get("document_anchor")
+            if document_id:
+                rows.append({"chunk_id": node_id, "document_id": document_id})
+        if rows:
+            self.graph_store.structured_query(_LINK_CONCEPTS_TO_DOCUMENTS, param_map={"rows": rows})
 
 
 def extract_graph(

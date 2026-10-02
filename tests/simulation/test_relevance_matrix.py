@@ -186,3 +186,54 @@ def test_rows_carry_deduped_stable_provenance_anchors():
         {"kind": "node", "name": "Alice"},
         {"kind": "node", "name": "Bob"},
     )
+
+
+def test_zero_evidence_density_is_a_float():
+    """P2-B minor m3: zero evidence must yield float 0.0, not int 0."""
+    assert isinstance(density_component([]), float)
+    assert isinstance(density_component([{"total_relevance": None}]), float)
+
+
+def test_string_evidence_nodes_is_one_name_not_per_character_anchors():
+    """P2-B minor m4: a bare string is a single name, not a character fan-out."""
+    rows = rank_candidates([SelectionCandidate(
+        name="sector", text="", evidence=[{"total_relevance": 1.0, "evidence_nodes": "Alice"}],
+    )], None, DebateConfig())
+
+    assert rows[0].anchors == ({"kind": "node", "name": "Alice"},)
+
+
+def test_triplet_source_id_becomes_a_chunk_anchor_without_moving_density():
+    """P4-T1: an entity's `triplet_source_id` is its chunk node id."""
+    rows = rank_candidates([SelectionCandidate(
+        name="node_row", text="",
+        evidence=[_Entity(id="e-1", name="Entity", score=2.0,
+                          properties={"triplet_source_id": "node-7"})],
+    )], None, DebateConfig())
+
+    assert rows[0].density == pytest.approx(1.0)  # normalized batch peak, unchanged
+    assert rows[0].anchors == (
+        {"kind": "node", "id": "e-1", "name": "Entity"},
+        {"kind": "chunk", "id": "node-7"},
+    )
+
+
+def test_document_anchor_and_document_ids_become_document_anchors():
+    """P4-T1: `document_anchor` / `document_ids` are tolerated on both row shapes."""
+    evidence = [
+        _Entity(id="e-1", name="Entity", score=2.0, properties={
+            "triplet_source_id": "node-7",
+            "document_anchor": "doc-1",
+            "document_ids": ["doc-2", "doc-2"],
+        }),
+        {"total_relevance": 1.0, "evidence_nodes": ["Alice"], "document_anchor": "doc-1"},
+    ]
+    rows = rank_candidates([SelectionCandidate(name="row", text="", evidence=evidence)], None, DebateConfig())
+
+    assert rows[0].anchors == (
+        {"kind": "node", "id": "e-1", "name": "Entity"},
+        {"kind": "chunk", "id": "node-7"},
+        {"kind": "document", "id": "doc-1"},  # deduped across evidence and shapes
+        {"kind": "document", "id": "doc-2"},
+        {"kind": "node", "name": "Alice"},
+    )

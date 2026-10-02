@@ -12,10 +12,10 @@ Both selection surfaces route through `rank_candidates` so the score exists once
   * `/hatch`        — `PersonaRepository.find_agent_sectors`
 
 `density_component` is the single density entry point for both, and its whole
-shape read lives in `_evidence_row` — the graph-row adapter (S4 design rule:
-the Phase 4 graph change touches that one body, and nothing else reads evidence
-rows). Selected rows also carry the provenance `anchors` of their evidence,
-read through the same adapter.
+shape read lives in `_evidence_row` — the graph-row adapter, so the
+Document-first graph model (P4-T1) is read in that one body and nothing else
+reads evidence rows. Selected rows also carry the provenance `anchors` of their
+evidence, read through the same adapter.
 """
 import logging
 import re
@@ -73,9 +73,9 @@ def density_component(evidence: Sequence[Any]) -> float:
 
     THE density entry point for S4: each surface hands in its own graph rows
     (entity nodes for the debate path, sector rows for `/hatch`) and reads the
-    sum back. The one shape read is `_evidence_row` — P4-T1 updates that body.
+    sum back. The one shape read is `_evidence_row`.
     """
-    return sum(_evidence_row(item)[0] for item in evidence or ())
+    return sum((_evidence_row(item)[0] for item in evidence or ()), 0.0)
 
 
 def _evidence_row(item: Any) -> tuple[float, tuple[dict[str, str], ...]]:
@@ -84,21 +84,29 @@ def _evidence_row(item: Any) -> tuple[float, tuple[dict[str, str], ...]]:
     Returns `(raw_density, anchors)` for either surface's row shape:
       * a mapping (a `/hatch` sector row): density from `total_relevance`
         (falling back to `relevance_score`); anchors are the persona names in
-        `evidence_nodes` — Persona nodes are identified by name, no id exists.
+        `evidence_nodes` — Persona nodes are identified by name, no id exists —
+        plus any `document_anchor` / `document_ids` the row carries.
       * an object (a debate-path `EntityNode`): density from `.relevance_score`;
-        anchors from `.id` / `.name` plus any `chunk_id` / `chunk_ids` its
-        `.properties` carries. Ids are only ever carried, never invented.
+        anchors from `.id` / `.name` plus, from its `.properties`, the chunk refs
+        (`chunk_id`, `triplet_source_id`, `chunk_ids`) and the document refs
+        (`document_anchor`, `document_ids`) of the Document-first model. Ids are
+        only ever carried, never invented.
 
-    P4-T1 replaces this one body for the Document-first graph model; density
-    and anchors on both surfaces are read through here and nowhere else.
+    Density and anchors on both surfaces are read through here and nowhere else.
     """
     if isinstance(item, Mapping):
         raw = item.get("total_relevance", item.get("relevance_score", 0.0))
+        names = item.get("evidence_nodes") or ()
+        if isinstance(names, str):
+            names = (names,)
+        elif not isinstance(names, (list, tuple, set)):
+            names = ()
         anchors = tuple(
             {"kind": "node", "name": str(name)}
-            for name in (item.get("evidence_nodes") or [])
+            for name in names
             if str(name or "").strip()
         )
+        anchors += _document_anchors(item)
     else:
         raw = getattr(item, "relevance_score", 0.0)
         node: dict[str, str] = {"kind": "node"}
@@ -109,7 +117,7 @@ def _evidence_row(item: Any) -> tuple[float, tuple[dict[str, str], ...]]:
         anchors = (node,) if len(node) > 1 else ()
         properties = getattr(item, "properties", None)
         if isinstance(properties, Mapping):
-            chunk_refs = [properties.get("chunk_id")]
+            chunk_refs = [properties.get("chunk_id"), properties.get("triplet_source_id")]
             chunk_ids = properties.get("chunk_ids")
             if isinstance(chunk_ids, (list, tuple, set)):
                 chunk_refs.extend(chunk_ids)
@@ -118,11 +126,25 @@ def _evidence_row(item: Any) -> tuple[float, tuple[dict[str, str], ...]]:
                 for ref in chunk_refs
                 if str(ref or "").strip()
             )
+            anchors += _document_anchors(properties)
     try:
         density = float(raw or 0.0)
     except (TypeError, ValueError):
         density = 0.0
     return density, anchors
+
+
+def _document_anchors(source: Mapping) -> tuple[dict[str, str], ...]:
+    """The document refs an evidence row carries: `document_anchor` / `document_ids`."""
+    refs = [source.get("document_anchor")]
+    document_ids = source.get("document_ids")
+    if isinstance(document_ids, (list, tuple, set)):
+        refs.extend(document_ids)
+    return tuple(
+        {"kind": "document", "id": str(ref)}
+        for ref in refs
+        if str(ref or "").strip()
+    )
 
 
 def _anchors_of(evidence: Sequence[Any]) -> tuple[dict[str, str], ...]:

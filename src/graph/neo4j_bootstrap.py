@@ -12,12 +12,14 @@ Production-grade invariants enforced here:
   1. (Persona {name, dataset_id}) is unique — SocietyMemory's MERGE becomes
      a single indexed lookup, not a graph scan.
   2. (Chunk {chunk_id}) is unique — provenance lookups are O(log n).
-  3. Vector indexes `persona_embeddings` (Persona.embedding) and
+  3. (Document {document_id}) is unique — Phase 4's DERIVED_FROM joins land on
+     an indexed key.
+  4. Vector indexes `persona_embeddings` (Persona.embedding) and
      `entity_embeddings` (`__Entity__.embedding`, llama-index store shape) —
      vector retrieval never hits "no such index".
-  4. Lookup indexes for chunk.doc_id, agent.updated_at — hot read paths
+  5. Lookup indexes for chunk.doc_id, agent.updated_at — hot read paths
      become O(log n) instead of full scans.
-  5. Composite index on Opinion (dataset_id, query_hash, round_no) — snapshot
+  6. Composite index on Opinion (dataset_id, query_hash, round_no) — snapshot
      reads and activation queries become O(log n). (Single-property uniqueness
      constraints require Enterprise Neo4j; idempotency is enforced by MERGE
      semantics, so Community edition is fine.)
@@ -65,6 +67,11 @@ def _statements() -> list[tuple[str, dict]]:
         (
             "CREATE CONSTRAINT agent_id IF NOT EXISTS "
             "FOR (a:Agent) REQUIRE a.id IS UNIQUE",
+            {},
+        ),
+        (
+            "CREATE CONSTRAINT document_id IF NOT EXISTS "
+            "FOR (d:Document) REQUIRE d.document_id IS UNIQUE",
             {},
         ),
         # ---- Lookup indexes ----
@@ -169,6 +176,7 @@ def _statement_label(cypher: str) -> str:
         "CONSTRAINT persona_name_dataset",
         "CONSTRAINT chunk_id",
         "CONSTRAINT agent_id",
+        "CONSTRAINT document_id",
         "INDEX chunk_doc_dataset",
         "INDEX persona_dataset",
         "INDEX agent_archetype",
