@@ -235,14 +235,20 @@ class PersonaRepository:
         return await loop.run_in_executor(None, func, text)
 
     async def fetch_nodes_by_names(self, names: List[str]) -> Dict[str, Dict[str, Any]]:
-        """Batch-fetch nodes by their `name` property and return a map name->props."""
+        """Batch-fetch nodes by their `name` property and return a map name->props.
+
+        A name can be held by both a `:Persona` (round commits) and a
+        `:__Entity__` node. The entity row wins whatever order the driver
+        returns rows in, so entity props (`triplet_source_id` etc.) are never
+        shadowed by a persona's.
+        """
         if not names:
             return {}
 
         query = """
         MATCH (n)
         WHERE n.name IN $names
-        RETURN n.name AS name, n
+        RETURN n.name AS name, n, n:__Entity__ AS is_entity
         """
         async with self._driver.session(database=self._db) as session:
             res = await session.run(cast(LiteralString, query), names=names)
@@ -254,7 +260,8 @@ class PersonaRepository:
             node = r.get("n")
             if not node or not name:
                 continue
-            out[name] = self._node_props(node) if node else {}
+            if name not in out or r.get("is_entity"):
+                out[name] = self._node_props(node)
         return out
 
     async def build_agent_profiles_from_sectors(
@@ -497,10 +504,6 @@ class PersonaRepository:
             return [t.strip() for t in v.split(",") if t.strip()]
         return []
 
-    # Backwards-compatible alias for any caller still expecting the old name.
-    async def _legacy_build_agent_profile(self, *args, **kwargs) -> AgentProfile:
-        return await self.build_single_agent_profile_from_node(*args, **kwargs)
-    
     async def calculate_agent_metrics_and_context_for_llm(
         self,
         agent_name: str,
@@ -659,145 +662,6 @@ class PersonaRepository:
             "context_text": context_text,
         }
 
-    async def _generate_description_and_perspective(
-        self,
-        agent_name: str,
-        node: Dict[str, Any],
-        sector_results: List[Dict[str, Any]],
-        provenance: List[ProvenanceLink],
-        user_query: Optional[str] = None,
-        recent_memories: List[Dict[str, Any]] | None = None,
-        neighbors_map: Dict[str, Dict[str, Any]] | None = None,
-    ) -> Tuple[str, str]:
-        """Produce a short `description` and a first-person `detailed_perspective`.
-
-        Attempts to use an injected async `llm_client` if available; otherwise falls
-        back to a deterministic template-based synthesizer using node text,
-        matched sectors, and provenance titles.
-        """
-        # collect matched sectors
-        matched = [r.get("domain_tag") for r in (sector_results or node.get("domain_tags") or []) if agent_name in (r.get("evidence_nodes") or [agent_name] or [])]
-
-        # gather evidence snippets (prefer summary_context)
-        evidence: List[str] = []
-        # summary = node.get("summary_context") or node.get("summary") or ""
-        # if summary:
-        #     evidence.append(summary.strip()[:800])
-
-        # provenance titles as lightweight evidence
-        for p in (provenance or [])[:3]:
-            try:
-                evidence.append(f"{p.title} (source={p.doc_id})")
-            except Exception:
-                continue
-
-        # If recent_memories not provided, fetch a modest window to ground perspective
-        try:
-            mem_rows = recent_memories if recent_memories is not None else await self.fetch_recent_memories(agent_name, memory_limit=50)
-        except Exception:
-            mem_rows = []
-
-        # Build neighbor context from mem_rows and optional neighbors_map
-        neighbor_context: List[str] = []
-        relation_map: Dict[str, List[str]] = {}
-        neighbor_names = []
-        for r in (mem_rows or []):
-            tgt = r.get("target_name")
-            if not tgt:
-                continue
-            neighbor_names.append(tgt)
-            rel = r.get("relation_type") or r.get("type") or "RELATED_TO"
-            summ = (r.get("summary") or "").strip()
-            relation_map.setdefault(tgt, []).append(f"{rel}: {summ}" if summ else rel)
-
-        # fetch neighbor node props if not supplied
-        try:
-            if neighbors_map is None and neighbor_names:
-                neighbors_map = await self.fetch_nodes_by_names(list(dict.fromkeys(neighbor_names)))
-        except Exception:
-            neighbors_map = neighbors_map or {}
-
-        # summarize neighbor context: include tag and short summary for top neighbors
-        for n in list(dict.fromkeys(neighbor_names))[:6]:
-            nprops = (neighbors_map or {}).get(n) or {}
-            n_summary = nprops.get("summary") or nprops.get("summary_context") or ""
-            tags = nprops.get("domain_tags") or nprops.get("tags") or []
-            tags_text = ", ".join(tags) if isinstance(tags, (list, tuple)) else str(tags)
-            rels = relation_map.get(n, [])
-            rel_text = "; ".join(rels[:2]) if rels else ""
-            snippet = f"{n} (tags: {tags_text})" + (f": {n_summary[:200]}" if n_summary else "") + (f" — relations: {rel_text}" if rel_text else "")
-            neighbor_context.append(snippet)
-
-        # build a compact prompt/text block including neighbor context
-        matched_text = ", ".join([m for m in matched if m]) or ", ".join(node.get("domain_tags") or [])
-
-        # try to use injected LLM client if present
-        llm = getattr(self, "llm_client", None)
-        llm_func = None
-        if llm:
-            for name in ("chat", "generate", "complete", "invoke"):
-                if hasattr(llm, name):
-                    llm_func = getattr(llm, name)
-                    break
-
-        prompt_parts = [
-            f"Agent: {agent_name}",
-            f"Expertise: {node.get('expertise_level') or node.get('expertise') or ''}",
-            f"Matched Sectors: {matched_text}",
-            "Evidence:",
-        ]
-        for ev in evidence[:3]:
-            prompt_parts.append(f"- {ev}")
-
-        if neighbor_context:
-            prompt_parts.append("Neighbor Context:")
-            for nc in neighbor_context:
-                prompt_parts.append(f"- {nc}")
-
-        prompt_parts.append(f"User query: {user_query or ''}")
-        prompt_parts.append("")
-        prompt_parts.append("Produce two outputs:\nDESCRIPTION: one concise UI-friendly sentence (10-25 words).\nPERSPECTIVE: a 5-8 sentence first-person worldview that references neighbor context, relations, and provenance.")
-
-        prompt = "\n".join(prompt_parts)
-
-        text_out = None
-        try:
-            if llm_func and inspect.iscoroutinefunction(llm_func):
-                resp = await llm_func(prompt)
-                text_out = resp if isinstance(resp, str) else getattr(resp, "text", str(resp))
-            elif llm_func:
-                loop = asyncio.get_event_loop()
-                resp = await loop.run_in_executor(None, llm_func, prompt)
-                text_out = resp if isinstance(resp, str) else getattr(resp, "text", str(resp))
-        except Exception:
-            text_out = None
-
-        if text_out:
-            # parse DESCRIPTION: and PERSPECTIVE:
-            desc = ""
-            pers = ""
-            try:
-                parts = text_out.split("DESCRIPTION:")
-                if len(parts) > 1:
-                    rest = parts[1]
-                    dparts = rest.split("PERSPECTIVE:")
-                    desc = dparts[0].strip()
-                    pers = dparts[1].strip() if len(dparts) > 1 else ""
-                else:
-                    # fallback: first sentence -> desc, rest -> perspective
-                    sents = text_out.strip().split(". ")
-                    desc = sents[0].strip() + ("." if not sents[0].endswith(".") else "")
-                    pers = " ".join(sents[1:]).strip()
-            except Exception:
-                desc = (evidence[0].split(".")[0] if evidence else agent_name)[:200]
-                pers = (f"I am {agent_name}. I focus on {matched_text}. " + (evidence[0] or ""))[:1000]
-
-            if desc:
-                return desc, pers or desc
-
-        # deterministic fallback that includes neighbor hints
-        return self._template_profile_text(agent_name, evidence, matched_text, neighbor_names)
-
     @staticmethod
     def _template_profile_text(
         agent_name: str,
@@ -807,8 +671,8 @@ class PersonaRepository:
     ) -> Tuple[str, str]:
         """The deterministic `(description, perspective)` template.
 
-        Shared by `_generate_description_and_perspective`'s fallback and the S5
-        batch distillation, so template text is produced in exactly one place.
+        The S5 batch distillation's fallback, so template text is produced in
+        exactly one place.
         """
         head = evidence[0] if evidence else ""
         neighbor_hint = ", ".join([n for n in (list(dict.fromkeys(neighbor_names))[:3])])
@@ -833,8 +697,7 @@ class PersonaRepository:
 
         `personas` is the ordered selection set — each entry a mapping with:
           * `name`           the persona's graph name (required)
-          * `node`           its node properties (the same context family
-                             `_generate_description_and_perspective` reads)
+          * `node`           its node properties (domain tags / summary text)
           * `sector_results` its matched-sector rows
           * `evidence`       grounding snippets synthesis already holds
           * `anchors`        the S4 provenance anchors of its selection row
@@ -1112,156 +975,6 @@ class PersonaRepository:
             return cleaned
         return "REACTED_TO"
 
-    async def write_reaction_edge(
-        self,
-        source_name: str,
-        target_name: str,
-        relation_type: str,
-        summary: str,
-        round_no: int,
-        dataset_id: str,
-    ) -> None:
-        """Write an edge representing a reaction from source_name to target_name with the given relation_type and summary."""
-        if source_name == target_name:
-            return
-
-        safe_relation = self._sanitize_relation_type(relation_type)
-
-        query = f"""
-        MATCH (a:Persona {{name: $agent_name}})
-        MATCH (b {{name: $target_name}})
-        MERGE (a)-[r:{safe_relation}]->(b)
-        SET
-          r.summary = $summary,
-          r.round_no = $round_no,
-          r.dataset_id = $dataset_id,
-          r.timestamp = datetime().epochMillis
-        """
-        async with self._driver.session(database=self._db) as session:
-            await session.run(
-                cast(LiteralString, query),
-                source_name=source_name,
-                target_name=target_name,
-                summary=summary,
-                round_no=round_no,
-                dataset_id=dataset_id,
-            )
-
-
-    # async def write_profile_to_node(
-    #     self,
-    #     agent_name: str,
-    #     description: str | None = None,
-    #     detailed_perspective: str | None = None,
-    #     summary_provenance: Dict[str, Any] | None = None,
-    #     last_summary_at: Optional[str] = None,
-    # ) -> None:
-    #     """Persist generated profile fields back onto the graph node (best-effort).
-
-    #     Writes `description`, `detailed_perspective`, `summary_provenance`, and
-    #     `last_summary_at` if provided. Silent on failure to avoid blocking simulation.
-    #     """
-    #     try:
-    #         sets: List[str] = []
-    #         params: Dict[str, Any] = {"name": agent_name}
-    #         if description is not None:
-    #             sets.append("n.description = $description")
-    #             params["description"] = str(description)
-    #         if detailed_perspective is not None:
-    #             sets.append("n.detailed_perspective = $detailed_perspective")
-    #             params["detailed_perspective"] = str(detailed_perspective)
-    #         if summary_provenance is not None:
-    #             sets.append("n.summary_provenance = $summary_provenance")
-    #             params["summary_provenance"] = summary_provenance
-    #         if last_summary_at is not None:
-    #             sets.append("n.last_summary_at = $last_summary_at")
-    #             params["last_summary_at"] = last_summary_at
-
-    #         if not sets:
-    #             return
-
-    #         cypher = f"""
-    #         MATCH (n {{name: $name}})
-    #         SET {', '.join(sets)}
-    #         RETURN id(n) AS node_id
-    #         """
-    #         async with self._driver.session(database=self._db) as session:
-    #             await session.run(cast(LiteralString, cypher), **params)
-    #     except Exception:
-    #         logger.exception("Failed to persist profile fields for %s", agent_name)
-
-
-    # async def generate_and_persist_if_missing(
-    #     self,
-    #     agent_name: str,
-    #     node: Dict[str, Any] | None = None,
-    #     force: bool = False,
-    # ) -> Tuple[str, str]:
-    #     """Generate `description` and `detailed_perspective` only when missing (best-effort).
-
-    #     - If `node` is not provided, fetch it.
-    #     - If fields already exist and `force` is False, returns existing values.
-    #     - Otherwise calls `_generate_description_and_perspective`, persists results,
-    #       and returns them.
-    #     """
-    #     if node is None:
-    #         node = await self.fetch_agent_node_props(agent_name) or {"name": agent_name}
-
-    #     existing_desc = node.get("description") or node.get("summary")
-    #     existing_persp = node.get("detailed_perspective") or node.get("perspective")
-
-    #     if not force and existing_desc and existing_persp:
-    #         return str(existing_desc), str(existing_persp)
-
-    #     # prepare grounding: fetch recent memories and neighbor props
-    #     try:
-    #         recent_memories = await self.fetch_recent_memories(agent_name, memory_limit=80)
-    #     except Exception:
-    #         recent_memories = []
-
-    #     neighbor_names = [r.get("target_name") for r in (recent_memories or []) if r.get("target_name")]
-    #     neighbor_map = {}
-    #     try:
-    #         if neighbor_names:
-    #             neighbor_map = await self.fetch_nodes_by_names(neighbor_names)
-    #     except Exception:
-    #         neighbor_map = {}
-
-    #     try:
-    #         desc, persp = await self._generate_description_and_perspective(
-    #             agent_name=agent_name,
-    #             node=node or {},
-    #             sector_results=[],
-    #             provenance=await self.get_provenance(agent_name, limit=5),
-    #             user_query=None,
-    #             recent_memories=recent_memories,
-    #             neighbors_map=neighbor_map,
-    #         )
-    #     except Exception:
-    #         # fallback deterministic
-    #         desc = existing_desc or f"{agent_name} - domain expert"
-    #         persp = existing_persp or desc
-
-    #     # persist best-effort
-    #     try:
-    #         now_iso = datetime.utcnow().isoformat()
-    #         prov = {"generated_at": now_iso, "method": "on_demand_generation"}
-    #         await self.write_profile_to_node(
-    #             agent_name=agent_name,
-    #             description=desc,
-    #             detailed_perspective=persp,
-    #             summary_provenance=prov,
-    #             last_summary_at=now_iso,
-    #         )
-    #     except Exception:
-    #         logger.exception("Failed to write generated profile for %s", agent_name)
-
-    #     return desc, persp
-
-
-            
-            
-            
 if __name__ == "__main__":
     import asyncio
     async def test():

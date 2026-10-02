@@ -178,22 +178,3 @@ async def test_empty_selection_makes_no_call_and_no_warning():
 
     assert await repo.distill_profiles(personas=[], query="q", warnings=warnings) == {}
     assert client.calls == [] and warnings == []
-
-
-@pytest.mark.asyncio
-async def test_single_persona_generator_still_uses_the_shared_template():
-    """The pre-S5 method's no-client fallback is unchanged by the shared helper."""
-    repo = _repo(None)
-
-    desc, persp = await repo._generate_description_and_perspective(
-        agent_name="Alice",
-        node={"domain_tags": ["economics"]},
-        sector_results=[{"domain_tag": "economics", "evidence_nodes": ["Alice"]}],
-        provenance=[],
-        user_query="q",
-        recent_memories=[],
-        neighbors_map={},
-    )
-
-    assert desc.startswith("Alice:") and "economics" in desc
-    assert "I am Alice. I specialize in economics." in persp
