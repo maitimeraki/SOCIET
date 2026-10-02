@@ -62,7 +62,7 @@ export default function IdleFloor() {
           stroke="var(--color-accent)"
           strokeWidth={1.5}
           variants={reduced ? { idle: { opacity: 0 }, trace: { opacity: 0.4 } } : { idle: { pathLength: 0, opacity: 0 }, trace: { pathLength: 1, opacity: 0.5 } }}
-          transition={{ duration: 0.6, ease: [0.2, 0, 0, 1] }}
+          transition={reduced ? { duration: 0 } : { duration: 0.6, ease: [0.2, 0, 0, 1] }}
         />
       ))}
     </motion.svg>

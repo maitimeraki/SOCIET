@@ -2,9 +2,9 @@ import type { Stance } from '../../run/events'
 
 export const FLOOR_VIEWBOX = { width: 1200, height: 520 }
 const CX = 600
-const CY = 560
-export const RADIUS_FRONT = 480
-export const RADIUS_BACK = 560
+const CY = 520
+export const RADIUS_FRONT = 430
+export const RADIUS_BACK = 510
 
 /** Four stance sectors, canonical order left→right (§3.5, §8.1). */
 export const SECTORS: { stance: Stance; label: string; from: number; to: number }[] = [
