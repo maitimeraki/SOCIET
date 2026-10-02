@@ -905,3 +905,40 @@ async def test_synthesize_survives_a_failing_writer_with_one_warning():
     assert "Lead" in warnings[0]
     assert [p.identity.name for p in profiles] == ["Lead"]
     repo.build_single_agent_profile_from_node.assert_awaited()
+
+
+"""P5: the S4 rows and each built profile are emitted to the caller's live sinks."""
+
+
+@pytest.mark.asyncio
+async def test_synthesize_emits_selection_before_profiles_in_completion_order():
+    """on_selection fires once before any on_profile; ordinals are 1-based and total matches."""
+    synthesizer = _selection_synth(_SELECTION_ENTITIES)
+    events: list = []
+
+    async def on_selection(rows):
+        events.append(("selection", [row.name for row in rows]))
+
+    async def on_profile(profile, index, total):
+        events.append(("agent", profile.identity.name, index, total))
+
+    profiles = await synthesizer.synthesize(
+        query="test query", dataset_id="ds1", on_selection=on_selection, on_profile=on_profile,
+    )
+
+    assert events[0][0] == "selection"
+    assert [entry[1] for entry in events[1:]] == [profile.identity.name for profile in profiles]
+    assert [entry[2] for entry in events[1:]] == list(range(1, len(profiles) + 1))
+    assert all(entry[3] == len(profiles) for entry in events[1:])
+
+
+@pytest.mark.asyncio
+async def test_synthesize_survives_a_raising_profile_emitter():
+    """A broken WS emitter is logged, never allowed to break profile synthesis."""
+    synthesizer = _selection_synth(_SELECTION_ENTITIES)
+
+    async def broken(profile, index, total):
+        raise RuntimeError("ws down")
+
+    profiles = await synthesizer.synthesize(query="test query", dataset_id="ds1", on_profile=broken)
+    assert len(profiles) == 2  # the same count the arrange block produces without emitters

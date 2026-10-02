@@ -20,7 +20,8 @@ boundary can hand in `ws_manager.broadcast` unchanged:
               selection   {}                          (S4 ranking starts)
               synthesis   {"agents": int}             (roster built; 0 when none resolvable)
               round       {"round": n, "pairs": int, "turns": int}
-              convergence {"converged": bool, "rounds_executed": int}
+              convergence {"converged": bool, "rounds_executed": int,
+                           "share": float | None, "threshold": float}
               verdict     {"converged": bool, "rounds_executed": int}
 
 A run that stops early (nothing synthesized) emits intake, selection, synthesis,
@@ -35,7 +36,7 @@ deliberately omits `intent`/`selection`.
 """
 import hashlib
 import logging
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from typing import Callable, Awaitable, Any, List, Optional
 
 from src.persona.agent import Agent, Stance
@@ -130,6 +131,14 @@ class DebateOrchestrator:
         selection_rows: list[SelectionRow] = []
         stage_index = await self._emit_stage(on_stage, 0, "intake", query=query)
 
+        async def _emit_selection(rows: list[SelectionRow]) -> None:
+            await ws_broadcast({"type": "selection", "rows": [asdict(row) for row in rows]})
+
+        async def _emit_profile(profile: Agent, index: int, total: int) -> None:
+            await ws_broadcast(
+                {"type": "agent", "profile": profile.model_dump(mode="json"), "index": index, "total": total}
+            )
+
         # Step 1: Synthesize profiles from graph (S4 selection consumes the intent)
         stage_index = await self._emit_stage(on_stage, stage_index, "selection")
         profiles = await self._profile_synthesizer.synthesize(
@@ -141,6 +150,8 @@ class DebateOrchestrator:
             warnings=warnings,
             selection_rows=selection_rows,
             distill=distill,
+            on_selection=_emit_selection,
+            on_profile=_emit_profile,
         )
         stage_index = await self._emit_stage(on_stage, stage_index, "synthesis", agents=len(profiles))
 
@@ -165,6 +176,7 @@ class DebateOrchestrator:
 
         for round_num in range(1, config.max_rounds + 1):
             try:
+                warnings_before = len(warnings)
                 if round_num > 1:
                     try:
                         snapshot = await self._society_memory.read_snapshot(
@@ -210,6 +222,18 @@ class DebateOrchestrator:
                     })
                     all_turns.append(turn)
 
+                share = self._weighted_share([round_result], profiles)
+                weights = self._round_weight_shares(round_result, profiles)
+                consensus = (
+                    {
+                        "stance": share[0],
+                        "weight_share": round(share[1], 4),
+                        "threshold": config.convergence_threshold,
+                        "weights": {key: round(value, 4) for key, value in weights.items()},
+                    }
+                    if share and weights
+                    else None
+                )
                 await ws_broadcast({
                     "type": "round",
                     "round": round_num,
@@ -228,6 +252,8 @@ class DebateOrchestrator:
                         }
                         for t in round_result.turns
                     ],
+                    "consensus": consensus,
+                    "warnings": list(warnings[warnings_before:]),
                 })
 
                 # Commit this round to the graph (idempotent; failure-isolated)
@@ -240,8 +266,7 @@ class DebateOrchestrator:
                     )
                     if receipt.get("failed"):
                         warnings.append(f"Round {round_num}: commit failed: {receipt.get('error')}")
-                    else:
-                        await ws_broadcast({"type": "commit", **receipt})
+                    await ws_broadcast({"type": "commit", **receipt})
                 except Exception as exc:
                     warnings.append(f"Round {round_num}: commit failed: {exc}")
 
@@ -294,9 +319,12 @@ class DebateOrchestrator:
         # convergence check is a pure function of the final rounds, so it is
         # evaluated once here and reused for the event and the result.
         converged = self._check_convergence(rounds, profiles, config=config)
+        share = self._weighted_share(rounds[-2:], profiles)
         stage_index = await self._emit_stage(
             on_stage, stage_index, "convergence",
             converged=converged, rounds_executed=len(rounds),
+            share=round(share[1], 4) if share else None,
+            threshold=config.convergence_threshold,
         )
 
         # Step 3: Synthesize verdict (async path -- no asyncio.run collision)
@@ -374,6 +402,27 @@ class DebateOrchestrator:
         dominant = max(weights, key=lambda s: weights[s])
         share_val = max(weights.values()) / total
         return (dominant.value if hasattr(dominant, "value") else str(dominant), share_val)
+
+    def _round_weight_shares(self, round_result: RoundResult, profiles: List[Agent]) -> Optional[dict[str, float]]:
+        """Normalized CIOR weight share per stance for one round (sums to 1). None when no turns."""
+        clusters: dict[Stance, list] = {
+            Stance.POSITIVE: [], Stance.NEGATIVE: [], Stance.NEUTRAL: [], Stance.AMBIVALENT: [],
+        }
+        for turn in round_result.turns:
+            try:
+                stance = Stance(turn.stance) if isinstance(turn.stance, str) else turn.stance
+                clusters[stance].append(turn)
+            except ValueError:
+                clusters[Stance.NEUTRAL].append(turn)
+        if not profiles:
+            weights: dict[Stance, float] = {stance: float(len(turns)) for stance, turns in clusters.items()}
+        else:
+            profile_map = {p.identity.name: p for p in profiles}
+            weights = dict(self._verdict_synthesizer._calibrate_cior(clusters, profile_map))
+        total = sum(weights.values())
+        if total <= 0:
+            return None
+        return {stance.value: weight / total for stance, weight in weights.items()}
 
     def _check_convergence(
         self,

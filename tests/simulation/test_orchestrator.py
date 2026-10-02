@@ -2,7 +2,7 @@
 import uuid
 
 import pytest
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import ANY, AsyncMock, MagicMock, patch
 import asyncio
 
 from src.simulation.orchestrator import DebateOrchestrator, OrchestratedDebateResult
@@ -120,6 +120,7 @@ async def test_five_step_flow():
     synth.synthesize.assert_awaited_once_with(
         query="test query", dataset_id="ds1", max_agents=5, intent=None, config=config,
         warnings=result.warnings, selection_rows=result.selection_rows, distill=False,
+        on_selection=ANY, on_profile=ANY,
     )
 
     # Step 2: topology called per round (max_rounds=3)
@@ -766,3 +767,194 @@ async def test_no_emitter_and_failing_emitter_both_leave_the_run_intact():
     )
     assert result.rounds_executed == 1
     assert result.verdict == "Test verdict."
+
+
+"""P5: the run streams the S4 selection, each built profile and the round's weights."""
+
+
+def _orchestrator_with(synth, topo, llm_runner, verdict_synth, society_memory):
+    return DebateOrchestrator(
+        profile_synthesizer=synth,
+        topology=topo,
+        llm_runner=llm_runner,
+        verdict_synthesizer=verdict_synth,
+        society_memory=society_memory,
+    )
+
+
+@pytest.mark.asyncio
+async def test_selection_and_agent_events_are_broadcast():
+    """S4/S5 progression is visible: selection once, then one agent event per profile, in order."""
+    from src.simulation.relevance_matrix import SelectionRow
+
+    synth = AsyncMock(spec=ProfileSynthesizer)
+    topo = AsyncMock(spec=CommunicationTopology)
+    llm_runner = MagicMock(spec=BatchedLLMRunner)
+    verdict_synth = MagicMock(spec=VerdictSynthesizer)
+    society_memory = AsyncMock(spec=SocietyMemory)
+
+    profiles = [_make_profile(1, "Alice"), _make_profile(2, "Bob")]
+    row = SelectionRow(name="Alice", semantic=0.8, density=0.6, blended=0.72)
+
+    async def fake_synthesize(**kwargs):
+        await kwargs["on_selection"]([row])
+        for index, profile in enumerate(profiles, start=1):
+            await kwargs["on_profile"](profile, index, len(profiles))
+        return profiles
+
+    synth.synthesize.side_effect = fake_synthesize
+    topo.compute_round_pairs.return_value = []
+    verdict_synth.synthesize.return_value = _make_verdict()
+    verdict_synth.asynthesize.return_value = _make_verdict()
+
+    orchestrator = _orchestrator_with(synth, topo, llm_runner, verdict_synth, society_memory)
+    ws_calls = []
+
+    async def fake_ws(msg):
+        ws_calls.append(msg)
+
+    await orchestrator.run("test query", "ds1", DebateConfig(max_agents=5, max_rounds=1), fake_ws)
+
+    types = [m["type"] for m in ws_calls]
+    assert types.index("selection") < types.index("agent")
+    agents = [m for m in ws_calls if m["type"] == "agent"]
+    assert [m["index"] for m in agents] == [1, 2]
+    assert all(m["total"] == 2 for m in agents)
+    assert agents[0]["profile"]["identity"]["name"] == "Alice"
+
+
+@pytest.mark.asyncio
+async def test_round_events_carry_consensus_weights():
+    """Each round exposes the per-stance weight share — the convergence tape's input."""
+    synth = AsyncMock(spec=ProfileSynthesizer)
+    topo = AsyncMock(spec=CommunicationTopology)
+    llm_runner = MagicMock(spec=BatchedLLMRunner)
+    verdict_synth = MagicMock(spec=VerdictSynthesizer)
+    society_memory = AsyncMock(spec=SocietyMemory)
+
+    profiles = [_make_profile(1, "Alice"), _make_profile(2, "Bob")]
+    synth.synthesize.return_value = profiles
+    topo.compute_round_pairs.return_value = [
+        CommPair(agent_a="Alice", agent_b="Bob", shared_entities=[], score=0.5)
+    ]
+    verdict_synth.asynthesize.return_value = _make_verdict()
+    verdict_synth._calibrate_cior.return_value = {
+        Stance.POSITIVE: 60.0, Stance.NEGATIVE: 40.0, Stance.NEUTRAL: 0.0, Stance.AMBIVALENT: 0.0,
+    }
+    society_memory.commit_round.return_value = _ok_receipt()
+
+    rounds = [
+        RoundResult(
+            round_num=1,
+            pairs=[CommPair(agent_a="Alice", agent_b="Bob", shared_entities=[], score=0.5)],
+            turns=[_make_turn("id-1", "Alice", "POSITIVE"), _make_turn("id-2", "Bob", "NEGATIVE")],
+        )
+    ]
+
+    with patch("src.simulation.orchestrator.RoundRunner") as patched_rr_class:
+        instance = MagicMock()
+        instance.execute_round = AsyncMock(side_effect=rounds)
+        patched_rr_class.return_value = instance
+
+        orchestrator = _orchestrator_with(synth, topo, llm_runner, verdict_synth, society_memory)
+        ws_calls = []
+
+        async def fake_ws(msg):
+            ws_calls.append(msg)
+
+        await orchestrator.run("test query", "ds1", DebateConfig(max_agents=5, max_rounds=1), fake_ws)
+
+    round_msg = next(m for m in ws_calls if m["type"] == "round")
+    assert round_msg["consensus"]["weights"]["POSITIVE"] == 0.6
+    assert round_msg["consensus"]["weights"]["NEGATIVE"] == 0.4
+
+
+@pytest.mark.asyncio
+async def test_failed_commit_is_still_broadcast():
+    """A failed commit is an event (the stream shows the warning), not a swallowed error."""
+    synth = AsyncMock(spec=ProfileSynthesizer)
+    topo = AsyncMock(spec=CommunicationTopology)
+    llm_runner = MagicMock(spec=BatchedLLMRunner)
+    verdict_synth = MagicMock(spec=VerdictSynthesizer)
+    society_memory = AsyncMock(spec=SocietyMemory)
+
+    profiles = [_make_profile(1, "Alice"), _make_profile(2, "Bob")]
+    synth.synthesize.return_value = profiles
+    topo.compute_round_pairs.return_value = [
+        CommPair(agent_a="Alice", agent_b="Bob", shared_entities=[], score=0.5)
+    ]
+    verdict_synth.asynthesize.return_value = _make_verdict()
+    society_memory.commit_round.return_value = {"round": 1, "opinions": 0, "edges": 0, "failed": True, "error": "neo4j down"}
+
+    rounds = [
+        RoundResult(
+            round_num=1,
+            pairs=[CommPair(agent_a="Alice", agent_b="Bob", shared_entities=[], score=0.5)],
+            turns=[_make_turn("id-1", "Alice")],
+        )
+    ]
+
+    with patch("src.simulation.orchestrator.RoundRunner") as patched_rr_class:
+        instance = MagicMock()
+        instance.execute_round = AsyncMock(side_effect=rounds)
+        patched_rr_class.return_value = instance
+
+        orchestrator = _orchestrator_with(synth, topo, llm_runner, verdict_synth, society_memory)
+        ws_calls = []
+
+        async def fake_ws(msg):
+            ws_calls.append(msg)
+
+        result = await orchestrator.run("test query", "ds1", DebateConfig(max_agents=5, max_rounds=1), fake_ws)
+
+    commit_msg = next(m for m in ws_calls if m["type"] == "commit")
+    assert commit_msg["failed"] is True
+    assert any("commit failed" in warning for warning in result.warnings)
+
+
+@pytest.mark.asyncio
+async def test_convergence_stage_carries_share_and_threshold():
+    """The convergence event exposes the decision's inputs, not just its outcome."""
+    synth = AsyncMock(spec=ProfileSynthesizer)
+    topo = AsyncMock(spec=CommunicationTopology)
+    llm_runner = MagicMock(spec=BatchedLLMRunner)
+    verdict_synth = MagicMock(spec=VerdictSynthesizer)
+    society_memory = AsyncMock(spec=SocietyMemory)
+
+    profiles = [_make_profile(1, "Alice"), _make_profile(2, "Bob")]
+    synth.synthesize.return_value = profiles
+    topo.compute_round_pairs.return_value = [
+        CommPair(agent_a="Alice", agent_b="Bob", shared_entities=[], score=0.5)
+    ]
+    verdict_synth.asynthesize.return_value = _make_verdict()
+    verdict_synth._calibrate_cior.return_value = {
+        Stance.POSITIVE: 60.0, Stance.NEGATIVE: 40.0, Stance.NEUTRAL: 0.0, Stance.AMBIVALENT: 0.0,
+    }
+    society_memory.commit_round.return_value = _ok_receipt()
+
+    rounds = [
+        RoundResult(
+            round_num=1,
+            pairs=[CommPair(agent_a="Alice", agent_b="Bob", shared_entities=[], score=0.5)],
+            turns=[_make_turn("id-1", "Alice", "POSITIVE"), _make_turn("id-2", "Bob", "NEGATIVE")],
+        )
+    ]
+
+    with patch("src.simulation.orchestrator.RoundRunner") as patched_rr_class:
+        instance = MagicMock()
+        instance.execute_round = AsyncMock(side_effect=rounds)
+        patched_rr_class.return_value = instance
+
+        orchestrator = _orchestrator_with(synth, topo, llm_runner, verdict_synth, society_memory)
+        ws_calls = []
+
+        async def fake_ws(msg):
+            ws_calls.append(msg)
+
+        await orchestrator.run(
+            "test query", "ds1", DebateConfig(max_agents=5, max_rounds=1), fake_ws, on_stage=fake_ws,
+        )
+
+    stage_event = next(m for m in ws_calls if m["type"] == "stage" and m["stage"] == "convergence")
+    assert stage_event["threshold"] == 0.8
+    assert "share" in stage_event

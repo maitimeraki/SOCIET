@@ -4,7 +4,7 @@ import inspect
 import logging
 import math
 from collections import defaultdict
-from collections.abc import Mapping
+from collections.abc import Awaitable, Callable, Mapping
 from typing import Any
 
 from src.persona.agent import Agent
@@ -51,6 +51,8 @@ class ProfileSynthesizer:
         warnings: list[str] | None = None,
         selection_rows: list[SelectionRow] | None = None,
         distill: bool = False,
+        on_selection: "Callable[[list[SelectionRow]], Awaitable[None]] | None" = None,
+        on_profile: "Callable[[Agent, int, int], Awaitable[None]] | None" = None,
     ) -> list[Agent]:
         """Synthesize agent profiles from relevant graph entities.
 
@@ -148,6 +150,14 @@ class ProfileSynthesizer:
         rows = rank_candidates(candidates, intent, config or DebateConfig(), warnings=warnings)
         if selection_rows is not None:
             selection_rows.extend(rows)
+        # S9 visibility: expose the S4 decomposition the moment it exists, so the
+        # roster view builds ② before ③. Degradation mirrors `on_stage`: a
+        # raising emitter is logged and never breaks synthesis.
+        if on_selection is not None:
+            try:
+                await on_selection(list(rows))
+            except Exception as exc:
+                logger.warning("on_selection emitter failed: %s", exc)
         # Pair each ranked row with its own cluster — candidates and clusters are
         # positionally aligned (built by the same comprehension), so a name-keyed
         # collapse is never needed: each row consumes its cluster from a per-name
@@ -245,9 +255,26 @@ class ProfileSynthesizer:
                     distilled=distilled.get(cluster_id) if distilled else None,
                 )
 
-        # Process clusters in parallel
+        # S9 visibility: one `agent` event per completed profile, in completion
+        # order — the roster seats members one by one as they are built.
+        completed = 0
+        completed_lock = asyncio.Lock()
+
+        async def _build_and_notify(row: SelectionRow, cluster_entities: list[EntityNode]) -> Agent | None:
+            nonlocal completed
+            profile = await _build_profile(row.name, cluster_entities)
+            if profile is not None and on_profile is not None:
+                async with completed_lock:
+                    completed += 1
+                    index = completed
+                try:
+                    await on_profile(profile, index, len(top_clusters))
+                except Exception as exc:
+                    logger.warning("on_profile emitter failed for %r: %s", profile.identity.name, exc)
+            return profile
+
         tasks = [
-            _build_profile(row.name, cluster_entities)
+            _build_and_notify(row, cluster_entities)
             for row, cluster_entities in top_clusters
         ]
         results = await asyncio.gather(*tasks)

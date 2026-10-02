@@ -117,6 +117,7 @@ async def _run_debate_async(
         intent = await QueryIntend(client=llm).expand_user_query(
             query, selected_domains=selected_domains
         )
+        await ws_manager.broadcast({"type": "intent", "intent": intent.model_dump()})
 
         # Create GraphContext with proper signature
         from src.persona.graph_context import GraphContext
@@ -207,10 +208,15 @@ async def _run_debate_async(
 
 
 class _DebateWSManager:
-    """Manages WebSocket connections for debate streaming."""
+    """Manages WebSocket connections for debate streaming.
+
+    Keeps the full per-job event buffer so a (re)connecting client replays the
+    run from the start (§12.5) — reconnect and mid-run joins are deterministic.
+    """
 
     def __init__(self):
         self.connections: list[WebSocket] = []
+        self.buffer: list[Dict[str, Any]] = []
         self._lock = asyncio.Lock()
 
     async def add(self, ws: WebSocket):
@@ -222,8 +228,19 @@ class _DebateWSManager:
             if ws in self.connections:
                 self.connections.remove(ws)
 
+    async def attach(self, ws: WebSocket):
+        """Replay the buffer, then subscribe — atomic with respect to broadcasts."""
+        async with self._lock:
+            for event in self.buffer:
+                try:
+                    await ws.send_json(event)
+                except Exception:
+                    return
+            self.connections.append(ws)
+
     async def broadcast(self, data: Dict[str, Any]):
         async with self._lock:
+            self.buffer.append(data)
             connections = list(self.connections)
 
         for ws in connections:
@@ -313,27 +330,9 @@ async def stream_debate(websocket: WebSocket, job_id: str):
                 _DEBATE_JOBS[job_id]["ws_manager"] = ws_manager
 
     await websocket.accept()
-    await ws_manager.add(websocket)
+    await ws_manager.attach(websocket)
 
     try:
-        # Send current status if job already has results
-        async with _DEBATE_JOBS_LOCK:
-            current_job = _DEBATE_JOBS.get(job_id)
-            if current_job:
-                if current_job["status"] == "complete" and current_job.get("result"):
-                    await websocket.send_json({
-                        "type": "complete",
-                        "converged": current_job["result"].get("converged", False),
-                        "verdict": current_job["result"].get("verdict", ""),
-                        "final_stances": current_job["result"].get("final_stances", {}),
-                        "warnings": current_job["result"].get("warnings", []),
-                    })
-                elif current_job["status"] == "failed":
-                    await websocket.send_json({
-                        "type": "error",
-                        "error": current_job.get("error", "Unknown error"),
-                    })
-
         # Keep connection alive and relay messages
         while True:
             try:

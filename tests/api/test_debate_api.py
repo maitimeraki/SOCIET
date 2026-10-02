@@ -8,7 +8,7 @@ from dataclasses import asdict
 
 import pytest
 from unittest.mock import AsyncMock, patch, MagicMock
-from fastapi import WebSocketDisconnect
+from fastapi import FastAPI, WebSocketDisconnect
 from fastapi.testclient import TestClient
 
 from src.api.debate_api import (
@@ -38,8 +38,37 @@ from src.simulation.pair_turn import CommPair, DebateVerdict, RoundResult
 
 @pytest.fixture
 def client():
-    """Create test client."""
-    return TestClient(router)
+    """Create test client.
+
+    FastAPI >=0.135 requires the app-level AsyncExitStack middleware; a bare
+    router lacks it ("fastapi_middleware_astack not found in request scope"),
+    so the previous `TestClient(router)` could not serve a request at all.
+    """
+    app = FastAPI()
+    app.include_router(router)
+    return TestClient(app)
+
+
+class TestRoutesThroughTheApp:
+    """The fixture serves the real router inside a real app."""
+
+    def test_unknown_job_is_404(self, client):
+        assert client.get("/simulate/no-such-job").status_code == 404
+
+    def test_queued_job_status_is_reported(self, client):
+        job_id = f"route-{uuid.uuid4()}"
+        _DEBATE_JOBS[job_id] = {
+            "job_id": job_id, "status": "queued", "query": "q",
+            "graph_id": "ds1", "config": {}, "result": None, "error": None,
+        }
+        try:
+            response = client.get(f"/simulate/{job_id}")
+        finally:
+            _DEBATE_JOBS.pop(job_id, None)
+        assert (response.status_code, response.json()["status"]) == (200, "queued")
+
+    def test_create_debate_rejects_a_blank_query(self, client):
+        assert client.post("/simulate/debate", json={"query": "   "}).status_code == 400
 
 
 class TestDebateRequest:
@@ -475,6 +504,14 @@ class TestDebateJobIntent:
         failing_llm = MagicMock()
         failing_llm.generate = AsyncMock(side_effect=RuntimeError("provider down"))
 
+        messages: list = []
+        ws_manager = MagicMock()
+
+        async def capture(msg):
+            messages.append(msg)
+
+        ws_manager.broadcast = capture
+
         ctx = MagicMock()
         ctx.__aenter__ = AsyncMock(return_value=ctx)
         ctx.__aexit__ = AsyncMock(return_value=False)
@@ -504,7 +541,8 @@ class TestDebateJobIntent:
                  patch("src.simulation.profile_synthesizer.ProfileSynthesizer", return_value=profiler), \
                  patch("src.simulation.topology.CommunicationTopology", return_value=topo), \
                  patch("src.simulation.verdict.VerdictSynthesizer", return_value=verdict_synth), \
-                 patch("src.simulation.society_memory.SocietyMemory", return_value=society_memory):
+                 patch("src.simulation.society_memory.SocietyMemory", return_value=society_memory), \
+                 patch("src.api.debate_api._DebateWSManager", return_value=ws_manager):
                 await _run_debate_async(
                     job_id=job_id, query=query, graph_id="ds1",
                     config=config, selected_domains=["legal"],
@@ -524,6 +562,10 @@ class TestDebateJobIntent:
             "deterministic fallback intent" in w
             for w in job["result"]["warnings"]
         )
+        # P5: the S3 intent is the first event on the stream — a client joining
+        # later gets it replayed from the buffer.
+        assert messages[0]["type"] == "intent"
+        assert messages[0]["intent"]["core_question"] == query
 
 
 class TestSimulationDepth:
@@ -651,3 +693,18 @@ class TestManagerlessJobStream:
 
         assert ws.accepted
         assert isinstance(registered, _DebateWSManager)
+
+
+class TestWSBufferReplay:
+    @pytest.mark.asyncio
+    async def test_attach_replays_the_buffer_before_live_events(self):
+        manager = _DebateWSManager()
+        await manager.broadcast({"type": "stage", "stage": "intake", "index": 0})
+        await manager.broadcast({"type": "round", "round": 1, "pairs": [], "turns": []})
+
+        ws = AsyncMock()
+        await manager.attach(ws)
+        assert [call.args[0]["type"] for call in ws.send_json.call_args_list] == ["stage", "round"]
+
+        await manager.broadcast({"type": "complete", "converged": True})
+        assert [call.args[0]["type"] for call in ws.send_json.call_args_list] == ["stage", "round", "complete"]
