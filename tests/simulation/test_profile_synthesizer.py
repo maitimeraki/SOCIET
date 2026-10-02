@@ -545,6 +545,48 @@ async def test_synthesize_from_names_filters_none_for_resolved_name(repo, synth)
     repo.build_single_agent_profile_from_node.assert_awaited()
 
 
+@pytest.mark.asyncio
+async def test_synthesize_from_names_writes_the_joiner_provenance_before_building(repo, synth):
+    """I2: a joiner whose node carries `triplet_source_id` gets the D2 write."""
+    order: list[str] = []
+    repo.fetch_nodes_by_names = AsyncMock(return_value={
+        "Carl": {"name": "Carl", "domain_tags": ["regulation"], "triplet_source_id": " node-7 "},
+    })
+    repo.write_persona_provenance = AsyncMock(side_effect=lambda **kw: order.append("write") or 1)
+    repo.build_single_agent_profile_from_node = AsyncMock(
+        side_effect=lambda **kw: order.append("build") or MagicMock(name=kw["agent_name"])
+    )
+
+    profiles = await synth.synthesize_from_names(["Carl"], "q", "ds1")
+
+    repo.write_persona_provenance.assert_awaited_once_with(
+        persona_name="Carl", dataset_id="ds1", chunk_node_ids=["node-7"],
+    )
+    assert order == ["write", "build"]  # written BEFORE the build reads it
+    assert len(profiles) == 1
+
+
+@pytest.mark.asyncio
+async def test_synthesize_from_names_skips_the_write_without_a_chunk_ref(repo, synth):
+    """The fixture node has no `triplet_source_id`: nothing is written, never invented."""
+    await synth.synthesize_from_names(["Carl"], "q", "ds1")
+
+    repo.write_persona_provenance.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_synthesize_from_names_survives_a_failing_writer(repo, synth):
+    """Same tolerance as `_build_profile`: logged and continued, never raised."""
+    repo.fetch_nodes_by_names = AsyncMock(return_value={
+        "Carl": {"name": "Carl", "triplet_source_id": "node-7"},
+    })
+    repo.write_persona_provenance = AsyncMock(side_effect=RuntimeError("neo4j down"))
+
+    profiles = await synth.synthesize_from_names(["Carl"], "q", "ds1")
+
+    assert len(profiles) == 1
+
+
 """S4: the debate path's selection consumes the S3 intent."""
 
 
@@ -620,6 +662,29 @@ async def test_synthesize_without_intent_keeps_the_density_only_order():
     )
 
     assert [p.identity.name for p in profiles] == ["Carbon Analyst", "Grid Engineer"]
+
+
+@pytest.mark.asyncio
+async def test_synthesize_keeps_both_clusters_when_representatives_share_a_name():
+    """Two clusters whose representative entities share a name both survive (P2-A m1).
+
+    The row→cluster pairing is positional, so the second row never rebuilds the
+    first cluster's entities: each build receives its own cluster's evidence.
+    """
+    first = _cluster_entity("Twin", 0.9, ["alpha"], "alpha twin")
+    second = _cluster_entity("Twin", 0.5, ["beta"], "beta twin")
+    first.id, second.id = "e-a", "e-b"  # distinct nodes → distinct clusters
+    synth = _selection_synth([first, second])
+    repo = synth._repo
+
+    profiles = await synth.synthesize(query="q", dataset_id="ds", max_agents=2)
+
+    assert [p.identity.name for p in profiles] == ["Twin", "Twin"]  # roster keeps both
+    totals = [
+        call.kwargs["sector_results"][0]["total_relevance"]
+        for call in repo.build_single_agent_profile_from_node.await_args_list
+    ]
+    assert sorted(totals) == [0.5, 0.9]  # each build saw its own cluster, not the twin's
 
 
 @pytest.mark.asyncio

@@ -14,7 +14,14 @@ if TYPE_CHECKING:
 
 
 class CommunicationTopology:
-    """Computes agent communication pairs via Cypher queries against Neo4j."""
+    """Computes agent communication pairs via Cypher queries against Neo4j.
+
+    The pairing/activation patterns score *entity* overlap, so their untyped
+    middle node carries an explicit `NOT e:Chunk` guard: the graph also holds
+    `(Persona)-[:MENTIONS]->(Chunk)` provenance edges, and without the guard a
+    shared source chunk would count as a shared entity (and, having no `name`,
+    would contribute an empty `shared_entities` entry).
+    """
 
     def __init__(self, driver: "AsyncGraphDatabase", db: str):
         self._driver = driver
@@ -68,6 +75,7 @@ class CommunicationTopology:
         MATCH (a:Persona)-[r1]-(e)-[r2]-(b:Persona)
         WHERE a.name IN $agent_names AND b.name IN $agent_names
           AND a <> b
+          AND NOT e:Chunk
           AND coalesce(a.dataset_id, '') = $dataset_id
         WITH a, b, count(DISTINCT e) AS shared_count,
              collect(DISTINCT e.name) AS shared_entities
@@ -122,6 +130,7 @@ class CommunicationTopology:
         MATCH (a:Persona)-[r1*1..{radius}]-(e)-[r2*1..{radius}]-(b:Persona)
         WHERE a.name IN $agent_names AND b.name IN $agent_names
           AND a <> b
+          AND NOT e:Chunk
           AND coalesce(a.dataset_id, '') = $dataset_id
         WITH a, b, count(DISTINCT e) AS shared_count,
              collect(DISTINCT e.name) AS shared_entities
@@ -171,6 +180,7 @@ class CommunicationTopology:
       AND coalesce(p.dataset_id, '') = $ds
       AND coalesce(part.dataset_id, '') = $ds
       AND p <> part
+      AND NOT e:Chunk
       AND NOT p.name IN $participants
     WITH p, count(DISTINCT e) AS shared_count, collect(DISTINCT e.name) AS shared_entities
     WHERE shared_count >= 1

@@ -148,8 +148,17 @@ class ProfileSynthesizer:
         rows = rank_candidates(candidates, intent, config or DebateConfig(), warnings=warnings)
         if selection_rows is not None:
             selection_rows.extend(rows)
-        entities_by_name = {candidate.name: ents for candidate, ents in zip(candidates, clusters.values())}
-        top_clusters = [(row, entities_by_name[row.name]) for row in rows[:target]]
+        # Pair each ranked row with its own cluster — candidates and clusters are
+        # positionally aligned (built by the same comprehension), so a name-keyed
+        # collapse is never needed: each row consumes its cluster from a per-name
+        # bucket in rank order, and two clusters whose representative entities
+        # share a name both survive (P2-A m1).
+        clusters_by_name: dict[str, list[list[EntityNode]]] = defaultdict(list)
+        for candidate, ents in zip(candidates, clusters.values()):
+            clusters_by_name[candidate.name].append(ents)
+        top_clusters = [
+            (row, clusters_by_name[row.name].pop(0)) for row in rows[:target]
+        ]
 
         # S5: ONE batched distillation call for the whole selection set — the S3
         # stance axis plus each row's anchors give every persona a question-aware
@@ -257,6 +266,10 @@ class ProfileSynthesizer:
 
         Activation path: candidates surfaced by topology are converted through
         the same repository pipeline as query-driven synthesis, minus clustering.
+        Joiners are deliberately **not** distilled (no mid-loop LLM calls), so
+        they keep the template bio/perspective; they do get the same D2
+        provenance write as the initial roster when their node carries a
+        `triplet_source_id`, with the same log-and-continue tolerance.
         """
         if not names:
             return []
@@ -284,6 +297,28 @@ class ProfileSynthesizer:
                 metrics = await self._repo.calculate_agent_metrics_and_context_for_llm(
                     agent_name=name, node=node, sector_results=sector_results, max_relevance=1.0,
                 )
+
+                # D2 on the activation path: write the joiner's real provenance
+                # edge BEFORE the build (which reads it), tolerantly — a failed
+                # write is logged and the profile still builds.
+                chunk_id = (
+                    node.get("triplet_source_id") if isinstance(node, dict)
+                    else getattr(node, "triplet_source_id", None)
+                )
+                if isinstance(chunk_id, str) and chunk_id.strip():
+                    try:
+                        pending = self._repo.write_persona_provenance(
+                            persona_name=name,
+                            dataset_id=dataset_id,
+                            chunk_node_ids=[chunk_id.strip()],
+                        )
+                        if inspect.iscoroutine(pending):
+                            await pending
+                    except Exception as exc:
+                        logger.warning(
+                            "provenance write failed for joiner %r: %s", name, exc,
+                        )
+
                 return await self._repo.build_single_agent_profile_from_node(
                     agent_name=name, node=node, user_query=query, dataset_id=dataset_id,
                     agent_metrics=metrics, sector_results=sector_results, llm_output=None,

@@ -250,6 +250,27 @@ class TestCypherGeneration:
         assert params["threshold"] == 0.15
         assert params["max_pairs"] == 10
 
+    def test_pairing_and_activation_patterns_exclude_chunk_intermediaries(
+        self, sample_profiles, debate_config
+    ):
+        """A shared source chunk must never count as a shared entity (I1).
+
+        `(Persona)-[:MENTIONS]->(Chunk)` provenance edges make the untyped
+        middle node reachable as a Chunk: two personas whose chunks overlap then
+        match with `e = the chunk node`, inflating `shared_count`/the Jaccard
+        score in every pattern. The guard restores the pre-provenance semantics.
+        """
+        topology = CommunicationTopology(MagicMock(), "test_db")
+        round1, _ = topology._round1_cypher(["Alice", "Bob"], "ds_001", debate_config)
+        round_n, _ = topology._round_n_cypher(["Alice", "Bob"], "ds_001", debate_config, 2)
+
+        for cypher in (round1, round_n, topology._ACTIVATION_ADJACENCY_CYPHER):
+            assert "NOT e:Chunk" in cypher
+
+        # the guarded node is still the untyped middle node of the same patterns
+        assert "MATCH (a:Persona)-[r1]-(e)-[r2]-(b:Persona)" in round1
+        assert "MATCH (p:Persona)-[r1]-(e)-[r2]-(part:Persona)" in topology._ACTIVATION_ADJACENCY_CYPHER
+
     def test_round_n_cypher_with_custom_radius(self, sample_profiles):
         """Verify round N Cypher uses configurable comm_radius."""
         config = DebateConfig(comm_radius=3)
