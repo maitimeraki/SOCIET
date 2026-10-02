@@ -412,8 +412,9 @@ Rules:
 
 > **Implementation status.** Implemented today: **LiteLLM**, **Neo4j**, **FastAPI**, **Pydantic v2**, **asyncio**.
 > Planned, not yet implemented: the **document extractors** (PyMuPDF, python-docx, markdown-it-py,
-> BeautifulSoup) and the **job-queue tier** (Redis, Celery) — none are installed and no extractor or
-> job-queue code exists. The bullets below are the target stack, not a description of the current tree.
+> BeautifulSoup) and the **job-queue tier** (Redis, Celery). Two of those six are installed but unused
+> (`beautifulsoup4` 4.14.3, `redis` 5.0.1, pinned in `requirements.txt`); the rest are absent. No extractor
+> or job-queue code exists in `src/`. The bullets below are the target stack, not the current tree.
 
 ### LLM Gateway (Production-Grade)
 - **LiteLLM** - Universal LLM abstraction for 100+ providers
