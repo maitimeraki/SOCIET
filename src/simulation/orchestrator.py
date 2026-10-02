@@ -1,10 +1,42 @@
-"""DebateOrchestrator: coordinates the full debate pipeline with all 5 dependencies."""
+"""DebateOrchestrator: coordinates the full debate pipeline with all 5 dependencies.
+
+S9 stage-event contract
+-----------------------
+`run(on_stage=...)` emits one event per **real** stage transition, from the
+orchestrator itself (never fabricated at the API edge), in this order:
+
+    intake → selection → synthesis → round (once per executed round) → convergence → verdict
+
+The emitter is an optional async callable receiving one complete event dict —
+the same shape the debate WebSocket pushes (`ws_broadcast`), so the job
+boundary can hand in `ws_manager.broadcast` unchanged:
+
+    {"type": "stage", "stage": <name>, "index": <int>, ...stage fields}
+
+    type      always "stage" (additive to the existing round/commit/complete events)
+    stage     "intake" | "selection" | "synthesis" | "round" | "convergence" | "verdict"
+    index     monotonic 0-based counter, one per event, per run — order/gap detection
+    fields    intake      {"query": str}
+              selection   {}                          (S4 ranking starts)
+              synthesis   {"agents": int}             (roster built; 0 when none resolvable)
+              round       {"round": n, "pairs": int, "turns": int}
+              convergence {"converged": bool, "rounds_executed": int}
+              verdict     {"converged": bool, "rounds_executed": int}
+
+A run that stops early (nothing synthesized) emits intake, selection, synthesis,
+verdict — no round or convergence event, because neither happened.
+
+Degradation: no emitter (`None`) → no events; an emitter that raises is logged
+and the run continues. Job state is authoritative; WS delivery is best-effort.
+"""
 import hashlib
-from dataclasses import dataclass
+import logging
+from dataclasses import dataclass, field
 from typing import Callable, Awaitable, Any, List, Optional
 
 from src.persona.agent import Agent, Stance
 from src.simulation.profile_synthesizer import ProfileSynthesizer
+from src.simulation.relevance_matrix import SelectionRow
 from src.simulation.topology import CommunicationTopology
 from src.simulation.llm_batch import BatchedLLMRunner
 from src.simulation.round_runner import RoundRunner
@@ -13,6 +45,11 @@ from src.simulation.society_memory import SocietyMemory
 from src.simulation.debate_config import DebateConfig
 from src.simulation.pair_turn import RoundResult
 from src.utils.queryIntend import QueryIntent
+
+logger = logging.getLogger(__name__)
+
+#: Async callable that delivers one stage event; see the module docstring.
+StageEmitter = Callable[[dict[str, Any]], Awaitable[None]]
 
 
 @dataclass
@@ -24,6 +61,9 @@ class OrchestratedDebateResult:
     warnings: list[str]
     rounds_executed: int
     intent: Optional[QueryIntent] = None
+    #: S4 ranked decomposition (all candidates, best first) — the "why these
+    #: agents" answer the job payload renders; empty when selection could not run.
+    selection_rows: list[SelectionRow] = field(default_factory=list)
 
 
 class DebateOrchestrator:
@@ -58,6 +98,7 @@ class DebateOrchestrator:
         ws_broadcast: Callable[[dict[str, Any]], Awaitable[None]],
         llm_client: Optional[Any] = None,
         intent: Optional[QueryIntent] = None,
+        on_stage: Optional[StageEmitter] = None,
     ) -> OrchestratedDebateResult:
         """
         Run the full debate pipeline with WebSocket streaming.
@@ -70,21 +111,31 @@ class DebateOrchestrator:
         job path); it is read-only here and is threaded into the round
         prompts and into S4 selection, and exposed on the result for later
         stages.
+
+        `on_stage` is the optional S9 stage-event emitter (see the module
+        docstring for the contract). `None` means no events, no crash.
         """
         warnings: list[str] = []
         all_turns: list = []
         profiles: List[Agent] = []
+        selection_rows: list[SelectionRow] = []
+        stage_index = await self._emit_stage(on_stage, 0, "intake", query=query)
 
         # Step 1: Synthesize profiles from graph (S4 selection consumes the intent)
+        stage_index = await self._emit_stage(on_stage, stage_index, "selection")
         profiles = await self._profile_synthesizer.synthesize(
             query=query,
             dataset_id=dataset_id,
             max_agents=config.max_agents,
             intent=intent,
             config=config,
+            warnings=warnings,
+            selection_rows=selection_rows,
         )
+        stage_index = await self._emit_stage(on_stage, stage_index, "synthesis", agents=len(profiles))
 
         if not profiles:
+            await self._emit_stage(on_stage, stage_index, "verdict", converged=False, rounds_executed=0)
             return OrchestratedDebateResult(
                 converged=False,
                 verdict="No agents could be synthesized for this query.",
@@ -92,6 +143,7 @@ class DebateOrchestrator:
                 warnings=["No relevant entities found for query"],
                 rounds_executed=0,
                 intent=intent,
+                selection_rows=selection_rows,
             )
 
         # Step 2: Run debate rounds
@@ -132,6 +184,10 @@ class DebateOrchestrator:
                     query=query, history=debate_history, society=snapshot,
                 )
                 rounds.append(round_result)
+                stage_index = await self._emit_stage(
+                    on_stage, stage_index, "round", round=round_num,
+                    pairs=len(round_result.pairs), turns=len(round_result.turns),
+                )
 
                 for turn in round_result.turns:
                     debate_history.append({
@@ -224,9 +280,22 @@ class DebateOrchestrator:
                 warnings.append(f"Round {round_num} failed: {exc}")
                 continue
 
+        # The loop is over (converged, exhausted, or no pairs ever): the
+        # convergence check is a pure function of the final rounds, so it is
+        # evaluated once here and reused for the event and the result.
+        converged = self._check_convergence(rounds, profiles, config=config)
+        stage_index = await self._emit_stage(
+            on_stage, stage_index, "convergence",
+            converged=converged, rounds_executed=len(rounds),
+        )
+
         # Step 3: Synthesize verdict (async path -- no asyncio.run collision)
         verdict = await self._verdict_synthesizer.asynthesize(
             rounds=rounds, profiles=profiles, llm_client=llm_client
+        )
+        await self._emit_stage(
+            on_stage, stage_index, "verdict",
+            converged=converged, rounds_executed=len(rounds),
         )
 
         # Step 4: Collect final stances
@@ -240,13 +309,34 @@ class DebateOrchestrator:
                 final_stances[profile.identity.name] = "NEUTRAL"
 
         return OrchestratedDebateResult(
-            converged=self._check_convergence(rounds, profiles, config=config),
+            converged=converged,
             verdict=verdict.summary if verdict else "Debate completed.",
             final_stances=final_stances,
             warnings=warnings,
             rounds_executed=len(rounds),
             intent=intent,
+            selection_rows=selection_rows,
         )
+
+    async def _emit_stage(
+        self,
+        on_stage: Optional[StageEmitter],
+        index: int,
+        stage: str,
+        **fields: Any,
+    ) -> int:
+        """Deliver one stage event; returns the next monotonic index.
+
+        Observability never breaks a run: no emitter → no event; an emitter
+        that raises is logged and ignored (job state stays authoritative).
+        """
+        if on_stage is None:
+            return index + 1
+        try:
+            await on_stage({"type": "stage", "stage": stage, "index": index, **fields})
+        except Exception as exc:
+            logger.warning("stage event %r (index %d) not delivered: %s", stage, index, exc)
+        return index + 1
 
     def _weighted_share(self, rounds: list[RoundResult], profiles: List[Agent]) -> Optional[tuple[str, float]]:
         """(dominant stance, weight share) via CIOR weights. None when no turns."""

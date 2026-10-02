@@ -13,6 +13,7 @@ from src.simulation.debate_config import DebateConfig
 from src.simulation.relevance_matrix import (
     NoAgentsDerivableError,
     SelectionCandidate,
+    SelectionRow,
     rank_candidates,
 )
 from src.utils.queryIntend import QueryIntent
@@ -46,6 +47,8 @@ class ProfileSynthesizer:
         max_agents: int = 5,
         intent: QueryIntent | None = None,
         config: DebateConfig | None = None,
+        warnings: list[str] | None = None,
+        selection_rows: list[SelectionRow] | None = None,
     ) -> list[Agent]:
         """Synthesize agent profiles from relevant graph entities.
 
@@ -60,6 +63,11 @@ class ProfileSynthesizer:
         carries the S4 blend weights. Raises `NoAgentsDerivableError` when the
         graph yields no candidate at all — an empty roster is a failed job, not
         a debate with nobody in it.
+
+        `warnings` and `selection_rows` are optional caller-owned sinks the S4
+        degradation message and the full ranked decomposition (all rows, best
+        first — not just the ones cut into agents) are written to, so the run
+        result can explain the roster (S9).
         """
         # Adaptive target: sqrt(n) * 4, capped at max_agents
         search_limit = max_agents * 3
@@ -128,7 +136,9 @@ class ProfileSynthesizer:
             )
             for ents in clusters.values()
         ]
-        rows = rank_candidates(candidates, intent, config or DebateConfig())
+        rows = rank_candidates(candidates, intent, config or DebateConfig(), warnings=warnings)
+        if selection_rows is not None:
+            selection_rows.extend(rows)
         entities_by_name = {candidate.name: ents for candidate, ents in zip(candidates, clusters.values())}
         top_clusters = [(row.name, entities_by_name[row.name]) for row in rows[:target]]
 

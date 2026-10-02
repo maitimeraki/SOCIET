@@ -1,6 +1,7 @@
 """
 Tests for Debate API endpoints.
 """
+import json
 import uuid
 from dataclasses import asdict
 
@@ -26,7 +27,7 @@ from src.persona.agent import (
     Stance,
 )
 from src.simulation.debate_config import DebateConfig
-from src.simulation.pair_turn import CommPair, DebateVerdict
+from src.simulation.pair_turn import CommPair, DebateVerdict, RoundResult
 
 
 @pytest.fixture
@@ -254,6 +255,184 @@ def _stub_verdict() -> DebateVerdict:
     )
 
 
+_INTENT_REPLY = json.dumps({
+    "core_question": "Should we tax carbon?",
+    "domain_tags": ["economic"],
+    "direct_keywords": ["carbon", "tax"],
+    "latent_sectors": [],
+    "entity_frame": [],
+    "search_perspectives": ["Economic"],
+    "stance_axis": "Support = tax carbon.",
+})
+
+# The denser cluster is the OFF-topic one, so the intent visibly flips the
+# ranking — that is what makes the delivered selection explain the roster.
+_SELECTION_ENTITIES = [
+    ("Quarterly Logistics Review", 0.9, ["operations"], "quarterly logistics report"),
+    ("Carbon Analyst", 0.5, ["economics"], "carbon tax economic policy"),
+]
+
+
+def _selection_entity_nodes():
+    nodes = []
+    for name, score, tags, summary in _SELECTION_ENTITIES:
+        node = MagicMock()
+        node.id = name  # unique provenance → each entity is its own cluster
+        node.name = name
+        node.label = "Persona"
+        node.properties = {"name": name}
+        node.relevance_score = score
+        node.domain_tags = tags
+        node.summary = summary
+        nodes.append(node)
+    return nodes
+
+
+async def _run_stubbed_job(job_id, config, query="Should we tax carbon?"):
+    """Run the real job path — real orchestrator, S4 selection and S9 wiring —
+    with only the graph (Neo4j), round LLM calls and verdict seams stubbed.
+    """
+    llm = MagicMock()
+    llm.generate = AsyncMock(return_value=_INTENT_REPLY)
+
+    ctx = MagicMock()
+    ctx.__aenter__ = AsyncMock(return_value=ctx)
+    ctx.__aexit__ = AsyncMock(return_value=False)
+    ctx.find_relevant_entities = AsyncMock(return_value=_selection_entity_nodes())
+
+    repo = MagicMock()
+    repo.fetch_nodes_by_names = AsyncMock(return_value={})
+    repo.calculate_agent_metrics_and_context_for_llm = AsyncMock(return_value={})
+    repo.build_single_agent_profile_from_node = AsyncMock(
+        side_effect=lambda **kw: _stub_profile(kw["agent_name"])
+    )
+
+    topo = MagicMock()
+    topo.compute_round_pairs = AsyncMock(return_value=[
+        CommPair(agent_a="Carbon Analyst", agent_b="Quarterly Logistics Review",
+                 shared_entities=[], score=0.5)
+    ])
+    verdict_synth = MagicMock()
+    verdict_synth.asynthesize = AsyncMock(return_value=_stub_verdict())
+    society_memory = MagicMock()
+    society_memory.commit_round = AsyncMock(return_value={
+        "round": 1, "dataset_id": "ds1", "query_hash": "qh",
+        "opinions": 0, "edges": 0, "failed": False,
+    })
+    ws_manager = MagicMock()
+    ws_manager.broadcast = AsyncMock()
+
+    _DEBATE_JOBS[job_id] = {
+        "job_id": job_id, "status": "queued", "query": query,
+        "graph_id": "ds1", "config": asdict(config), "result": None, "error": None,
+    }
+    try:
+        with patch("src.llm.client.LLMClient", return_value=llm), \
+             patch("src.persona.graph_context.GraphContext", return_value=ctx), \
+             patch("src.persona.repository.PersonaRepository", return_value=repo), \
+             patch("src.simulation.topology.CommunicationTopology", return_value=topo), \
+             patch("src.simulation.orchestrator.RoundRunner") as rr_cls, \
+             patch("src.simulation.verdict.VerdictSynthesizer", return_value=verdict_synth), \
+             patch("src.simulation.society_memory.SocietyMemory", return_value=society_memory), \
+             patch("src.api.debate_api._DebateWSManager", return_value=ws_manager):
+            rr_instance = MagicMock()
+            rr_instance.execute_round = AsyncMock(
+                return_value=RoundResult(round_num=1, turns=[], pairs=[])
+            )
+            rr_cls.return_value = rr_instance
+            await _run_debate_async(
+                job_id=job_id, query=query, graph_id="ds1", config=config,
+                selected_domains=None,
+            )
+    finally:
+        job = _DEBATE_JOBS.pop(job_id, None)
+    return job, ws_manager
+
+
+def _stage_events(ws_manager):
+    return [
+        call.args[0] for call in ws_manager.broadcast.call_args_list
+        if call.args and call.args[0].get("type") == "stage"
+    ]
+
+
+class TestDebateJobPayload:
+    """S9: the delivered job result self-explains — intent, selection, stage events."""
+
+    @pytest.mark.asyncio
+    async def test_job_result_carries_intent_selection_and_stage_events(self):
+        job_id = f"payload-{uuid.uuid4()}"
+        config = DebateConfig(max_agents=5, max_rounds=1, max_new_agents_per_round=0)
+
+        job, ws_manager = await _run_stubbed_job(job_id, config)
+
+        assert job["status"] == "complete"
+        result = job["result"]
+
+        # intent: the real extraction path, persisted on the result
+        assert result["intent"]["core_question"] == "Should we tax carbon?"
+        assert result["intent"]["extraction_confidence"] == 0.9
+
+        # selection: the S4 decomposition, best first. The intent outranks the
+        # denser but off-topic cluster — the payload explains the roster.
+        selection = result["selection"]
+        assert [row["name"] for row in selection] == [
+            "Carbon Analyst", "Quarterly Logistics Review",
+        ]
+        assert set(selection[0]) >= {"name", "semantic", "density", "blended"}
+        assert selection[0]["semantic"] > selection[1]["semantic"]
+        assert selection[0]["density"] < selection[1]["density"]
+        assert selection[0]["blended"] == pytest.approx(
+            0.6 * selection[0]["semantic"] + 0.4 * selection[0]["density"]
+        )
+
+        # stage events: real transitions pushed through the job's WS manager
+        assert [e["stage"] for e in _stage_events(ws_manager)] == [
+            "intake", "selection", "synthesis", "round", "convergence", "verdict",
+        ]
+        assert [e["index"] for e in _stage_events(ws_manager)] == list(range(6))
+
+    @pytest.mark.asyncio
+    async def test_job_result_warns_when_selection_falls_back_to_density(self):
+        """Nothing clears the S4 threshold → the degradation is in the payload."""
+        job_id = f"payload-{uuid.uuid4()}"
+        config = DebateConfig(
+            max_agents=5, max_rounds=1, max_new_agents_per_round=0,
+            selection_score_threshold=0.99,
+        )
+
+        job, _ = await _run_stubbed_job(job_id, config)
+
+        assert job["status"] == "complete"
+        assert any(
+            "falling back to density-only ordering" in w
+            for w in job["result"]["warnings"]
+        )
+        # the fallback reorders to density; the decomposition is still delivered
+        assert [row["name"] for row in job["result"]["selection"]] == [
+            "Quarterly Logistics Review", "Carbon Analyst",
+        ]
+
+
+class TestWSManagerResilience:
+    """S9: WS delivery is per-connection and best-effort — the run never depends on it."""
+
+    @pytest.mark.asyncio
+    async def test_broadcast_survives_a_disconnected_client(self):
+        from src.api.debate_api import _DebateWSManager
+
+        manager = _DebateWSManager()
+        dead, alive = MagicMock(), MagicMock()
+        dead.send_json = AsyncMock(side_effect=RuntimeError("client gone"))
+        alive.send_json = AsyncMock()
+        await manager.add(dead)
+        await manager.add(alive)
+
+        await manager.broadcast({"type": "stage", "stage": "intake", "index": 0})
+
+        alive.send_json.assert_awaited_once()  # the dead socket does not stop delivery
+
+
 class TestDebateJobIntent:
     """S3: the job path extracts intent once per run; an LLM outage degrades to the fallback."""
 
@@ -311,3 +490,8 @@ class TestDebateJobIntent:
         assert intent["domain_tags"] == ["legal"]  # selected_domains carried into the fallback
         assert intent["stance_axis"] == ""
         assert "deterministic fallback" in caplog.text
+        # S9: the degradation is delivered, not only logged
+        assert any(
+            "deterministic fallback intent" in w
+            for w in job["result"]["warnings"]
+        )

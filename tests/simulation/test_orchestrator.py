@@ -114,10 +114,12 @@ async def test_five_step_flow():
 
     result = await orchestrator.run("test query", "ds1", config, ws_broadcast)
 
-    # Step 1: profile_synthesizer called — with the S3 intent and the run's
-    # config, so S4 selection can blend against it
+    # Step 1: profile_synthesizer called — with the S3 intent, the run's config
+    # (so S4 selection can blend against it) and the run's S9 sinks (so the
+    # selection decomposition and any S4 degradation land on the result)
     synth.synthesize.assert_awaited_once_with(
-        query="test query", dataset_id="ds1", max_agents=5, intent=None, config=config
+        query="test query", dataset_id="ds1", max_agents=5, intent=None, config=config,
+        warnings=result.warnings, selection_rows=result.selection_rows,
     )
 
     # Step 2: topology called per round (max_rounds=3)
@@ -620,3 +622,113 @@ async def test_run_without_intent_exposes_none():
     result = await orch.run("q", "ds1", DebateConfig(max_agents=5, max_rounds=1), AsyncMock())
     assert result.intent is None
     assert result.rounds_executed == 1
+
+
+"""S9: real stage events emitted from the orchestrator (P5-T1)."""
+
+
+def _stage_spy() -> tuple[list[dict], object]:
+    """(events, emitter) — an emitter that records what it is handed."""
+    events: list[dict] = []
+
+    async def emit(event):
+        events.append(event)
+
+    return events, emit
+
+
+def _stage_ready_orch(max_rounds: int = 3, profiles=None):
+    """An orchestrator whose stubbed run executes `max_rounds` real rounds."""
+    synth = AsyncMock(spec=ProfileSynthesizer)
+    topo = AsyncMock(spec=CommunicationTopology)
+    society_memory = AsyncMock(spec=SocietyMemory)
+    society_memory.commit_round.return_value = _ok_receipt()
+    synth.synthesize.return_value = profiles if profiles is not None else [_make_profile(1, "Alice")]
+    topo.compute_round_pairs.side_effect = lambda *a, **kw: [
+        CommPair(agent_a="Alice", agent_b="Bob", shared_entities=[], score=0.5)
+    ]
+    llm_runner = MagicMock(spec=BatchedLLMRunner)
+    llm_runner.gather = MagicMock(side_effect=lambda *a, **kw: _AsyncEmptyIter())
+    verdict_synth = MagicMock(spec=VerdictSynthesizer)
+    verdict_synth.asynthesize.return_value = _make_verdict()
+    return _orch(synth, topo, society_memory, verdict_synth, llm_runner)
+
+
+@pytest.mark.asyncio
+async def test_stage_events_follow_the_documented_sequence():
+    """A WS consumer sees every real transition, in order, with a monotonic index."""
+    synth = AsyncMock(spec=ProfileSynthesizer)
+    topo = AsyncMock(spec=CommunicationTopology)
+    society_memory = AsyncMock(spec=SocietyMemory)
+    society_memory.commit_round.return_value = _ok_receipt()
+    synth.synthesize.return_value = [_make_profile(1, "Alice")]
+    topo.compute_round_pairs.side_effect = lambda *a, **kw: [
+        CommPair(agent_a="Alice", agent_b="Bob", shared_entities=[], score=0.5)
+    ]
+    verdict_synth = MagicMock(spec=VerdictSynthesizer)
+    verdict_synth.asynthesize.return_value = _make_verdict()
+    orch = _orch(synth, topo, society_memory, verdict_synth)
+    events, emit = _stage_spy()
+
+    pair = CommPair(agent_a="Alice", agent_b="Bob", shared_entities=[], score=0.5)
+    with patch("src.simulation.orchestrator.RoundRunner") as rr_cls:
+        rr_instance = MagicMock()
+        rr_instance.execute_round = AsyncMock(side_effect=lambda **kw: RoundResult(
+            round_num=kw["round_num"], turns=[_make_turn("1", "Alice")], pairs=[pair],
+        ))
+        rr_cls.return_value = rr_instance
+
+        result = await orch.run(
+            "q", "ds1", DebateConfig(max_agents=5, max_rounds=3), AsyncMock(), on_stage=emit
+        )
+
+    assert [(e["stage"], e.get("round")) for e in events] == [
+        ("intake", None), ("selection", None), ("synthesis", None),
+        ("round", 1), ("round", 2), ("round", 3),
+        ("convergence", None), ("verdict", None),
+    ]
+    assert all(e["type"] == "stage" for e in events)
+    assert [e["index"] for e in events] == list(range(len(events)))
+    assert events[0]["query"] == "q"
+    assert events[2]["agents"] == 1
+    # the round event reports that round's own execution
+    assert (events[3]["round"], events[3]["pairs"], events[3]["turns"]) == (1, 1, 1)
+    assert events[4]["round"] == 2 and events[5]["round"] == 3
+    assert events[-2]["converged"] is result.converged
+    assert events[-2]["rounds_executed"] == result.rounds_executed == 3
+
+
+@pytest.mark.asyncio
+async def test_stage_events_stop_at_verdict_when_nothing_is_synthesized():
+    """No roster → no round/convergence event, but the run still says how it ended."""
+    orch = _stage_ready_orch(profiles=[])
+    events, emit = _stage_spy()
+
+    result = await orch.run(
+        "q", "ds1", DebateConfig(max_agents=5, max_rounds=3), AsyncMock(), on_stage=emit
+    )
+
+    assert [e["stage"] for e in events] == ["intake", "selection", "synthesis", "verdict"]
+    assert events[2]["agents"] == 0
+    assert events[3]["converged"] is False and events[3]["rounds_executed"] == 0
+    assert result.rounds_executed == 0
+
+
+@pytest.mark.asyncio
+async def test_no_emitter_and_failing_emitter_both_leave_the_run_intact():
+    """Observability degrades, the run never does: None → no events; raising → logged."""
+    orch = _stage_ready_orch(max_rounds=1)
+    result = await orch.run(
+        "q", "ds1", DebateConfig(max_agents=5, max_rounds=1), AsyncMock(), on_stage=None
+    )
+    assert result.rounds_executed == 1
+
+    async def exploding_emitter(event):
+        raise RuntimeError("socket closed")
+
+    result = await orch.run(
+        "q", "ds1", DebateConfig(max_agents=5, max_rounds=1), AsyncMock(),
+        on_stage=exploding_emitter,
+    )
+    assert result.rounds_executed == 1
+    assert result.verdict == "Test verdict."

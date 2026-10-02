@@ -100,7 +100,7 @@ async def _run_debate_async(
         # raises — on an LLM failure `expand_user_query` yields the deterministic
         # fallback, so a provider outage cannot block the debate.
         from src.llm.client import LLMClient
-        from src.utils.queryIntend import QueryIntend
+        from src.utils.queryIntend import FALLBACK_EXTRACTION_CONFIDENCE, QueryIntend
 
         llm = LLMClient()
         intent = await QueryIntend(client=llm).expand_user_query(
@@ -137,13 +137,25 @@ async def _run_debate_async(
                 society_memory=SocietyMemory(ctx._driver, ctx._db),
             )
 
-            # Run debate with orchestrator
+            # Run debate with orchestrator. The S9 stage emitter is the job's
+            # own WS manager: real transitions, pushed alongside round events.
             result = await orchestrator.run(
                 query=query,
                 dataset_id=graph_id,
                 config=config,
                 ws_broadcast=ws_manager.broadcast,
+                on_stage=ws_manager.broadcast,
                 intent=intent,
+            )
+
+        # S9: this layer owns the intent extraction, so it reports the
+        # degradation the run cannot see (the fallback intent is a valid
+        # object — only `extraction_confidence` tells them apart). Still logged
+        # by QueryIntend.fallback_intent; here it reaches the delivered payload.
+        if intent is not None and intent.extraction_confidence == FALLBACK_EXTRACTION_CONFIDENCE:
+            result.warnings.append(
+                "S3 intent: extraction failed — the deterministic fallback intent "
+                f"was used (extraction_confidence={FALLBACK_EXTRACTION_CONFIDENCE})."
             )
 
         # Store result
@@ -156,6 +168,9 @@ async def _run_debate_async(
                 "warnings": result.warnings,
                 "rounds_executed": result.rounds_executed,
                 "intent": result.intent.model_dump() if result.intent else None,
+                # S4 decomposition, rendered field-by-field so later additions
+                # (e.g. P2-B's provenance anchor) flow through automatically.
+                "selection": [asdict(row) for row in result.selection_rows],
             }
 
         # Send completion event

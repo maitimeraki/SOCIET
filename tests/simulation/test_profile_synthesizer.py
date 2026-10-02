@@ -635,3 +635,37 @@ async def test_synthesize_falls_back_to_density_order_and_warns(caplog):
 
     assert [p.identity.name for p in profiles] == ["Carbon Analyst", "Grid Engineer"]
     assert "falling back to density-only ordering" in caplog.text
+
+
+"""S9: the selection decomposition and the S4 fallback reach the caller's sinks."""
+
+
+@pytest.mark.asyncio
+async def test_synthesize_fills_the_selection_rows_sink():
+    """The full ranked decomposition is handed back — not just the built agents."""
+    intent = QueryIntent(direct_keywords=["carbon", "tax"], latent_sectors=[], search_perspectives=[])
+    rows: list = []
+
+    profiles = await _selection_synth(_SELECTION_ENTITIES).synthesize(
+        query="q", dataset_id="ds", max_agents=1, intent=intent, selection_rows=rows,
+    )
+
+    assert [row.name for row in rows] == ["Carbon Analyst", "Grid Engineer"]  # all rows, best first
+    assert [p.identity.name for p in profiles] == ["Carbon Analyst"]  # only the top one is built
+    top = rows[0]
+    assert top.blended == pytest.approx(0.6 * top.semantic + 0.4 * top.density)
+
+
+@pytest.mark.asyncio
+async def test_synthesize_reports_the_selection_fallback_to_the_warnings_sink():
+    """S4's degradation reaches the run result, not only the log stream."""
+    intent = QueryIntent(direct_keywords=["energy"], latent_sectors=[], search_perspectives=[])
+    warnings: list[str] = []
+
+    await _selection_synth(_SELECTION_ENTITIES).synthesize(
+        query="q", dataset_id="ds", max_agents=2, intent=intent,
+        config=DebateConfig(selection_score_threshold=0.99), warnings=warnings,
+    )
+
+    assert len(warnings) == 1
+    assert "falling back to density-only ordering" in warnings[0]
