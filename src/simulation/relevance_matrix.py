@@ -11,9 +11,11 @@ Both selection surfaces route through `rank_candidates` so the score exists once
   * the debate path — `ProfileSynthesizer.synthesize`
   * `/hatch`        — `PersonaRepository.find_agent_sectors`
 
-`density_component` is the single density entry point for both: P2-B replaces
-that one body with the graph-model adapter (S4 design rule — the Phase 4 graph
-change touches one location).
+`density_component` is the single density entry point for both, and its whole
+shape read lives in `_evidence_row` — the graph-row adapter (S4 design rule:
+the Phase 4 graph change touches that one body, and nothing else reads evidence
+rows). Selected rows also carry the provenance `anchors` of their evidence,
+read through the same adapter.
 """
 import logging
 import re
@@ -53,14 +55,17 @@ class SelectionRow:
 
     `semantic` and `density` are the two components of `blended`
     (`w1*semantic + w2*density`); `density` is normalized to [0, 1] across the
-    batch so the decomposition adds up as documented. P2-B adds the provenance
-    anchor field here.
+    batch so the decomposition adds up as documented. `anchors` are the
+    provenance anchors of the candidate's evidence — source node ids/names and
+    chunk ids where the row carries them, deduped and in evidence order — the
+    stable join key Phase 3 and Phase 4 use to link a row back to the graph.
     """
 
     name: str
     semantic: float
     density: float
     blended: float
+    anchors: tuple[dict[str, str], ...] = ()
 
 
 def density_component(evidence: Sequence[Any]) -> float:
@@ -68,19 +73,71 @@ def density_component(evidence: Sequence[Any]) -> float:
 
     THE density entry point for S4: each surface hands in its own graph rows
     (entity nodes for the debate path, sector rows for `/hatch`) and reads the
-    sum back, so P2-B's graph-model adapter replaces this one body.
+    sum back. The one shape read is `_evidence_row` — P4-T1 updates that body.
     """
-    total = 0.0
+    return sum(_evidence_row(item)[0] for item in evidence or ())
+
+
+def _evidence_row(item: Any) -> tuple[float, tuple[dict[str, str], ...]]:
+    """THE graph-row adapter — the single place that reads an evidence row.
+
+    Returns `(raw_density, anchors)` for either surface's row shape:
+      * a mapping (a `/hatch` sector row): density from `total_relevance`
+        (falling back to `relevance_score`); anchors are the persona names in
+        `evidence_nodes` — Persona nodes are identified by name, no id exists.
+      * an object (a debate-path `EntityNode`): density from `.relevance_score`;
+        anchors from `.id` / `.name` plus any `chunk_id` / `chunk_ids` its
+        `.properties` carries. Ids are only ever carried, never invented.
+
+    P4-T1 replaces this one body for the Document-first graph model; density
+    and anchors on both surfaces are read through here and nowhere else.
+    """
+    if isinstance(item, Mapping):
+        raw = item.get("total_relevance", item.get("relevance_score", 0.0))
+        anchors = tuple(
+            {"kind": "node", "name": str(name)}
+            for name in (item.get("evidence_nodes") or [])
+            if str(name or "").strip()
+        )
+    else:
+        raw = getattr(item, "relevance_score", 0.0)
+        node: dict[str, str] = {"kind": "node"}
+        for key in ("id", "name"):
+            value = str(getattr(item, key, "") or "").strip()
+            if value:
+                node[key] = value
+        anchors = (node,) if len(node) > 1 else ()
+        properties = getattr(item, "properties", None)
+        if isinstance(properties, Mapping):
+            chunk_refs = [properties.get("chunk_id")]
+            chunk_ids = properties.get("chunk_ids")
+            if isinstance(chunk_ids, (list, tuple, set)):
+                chunk_refs.extend(chunk_ids)
+            anchors += tuple(
+                {"kind": "chunk", "id": str(ref)}
+                for ref in chunk_refs
+                if str(ref or "").strip()
+            )
+    try:
+        density = float(raw or 0.0)
+    except (TypeError, ValueError):
+        density = 0.0
+    return density, anchors
+
+
+def _anchors_of(evidence: Sequence[Any]) -> tuple[dict[str, str], ...]:
+    """The provenance anchors of one candidate's evidence: source node ids and
+    names (and chunk ids where the row carries them), deduped, evidence order
+    kept."""
+    seen: set[tuple[str | None, str | None, str | None]] = set()
+    anchors: list[dict[str, str]] = []
     for item in evidence or ():
-        if isinstance(item, Mapping):
-            raw = item.get("total_relevance", item.get("relevance_score", 0.0))
-        else:
-            raw = getattr(item, "relevance_score", 0.0)
-        try:
-            total += float(raw or 0.0)
-        except (TypeError, ValueError):
-            continue
-    return total
+        for anchor in _evidence_row(item)[1]:
+            key = (anchor.get("kind"), anchor.get("id"), anchor.get("name"))
+            if key not in seen:
+                seen.add(key)
+                anchors.append(anchor)
+    return tuple(anchors)
 
 
 def intent_terms(intent: Any) -> list[str]:
@@ -129,6 +186,7 @@ def rank_candidates(
     candidates: Sequence[SelectionCandidate],
     intent: Any,
     config: DebateConfig,
+    warnings: list[str] | None = None,
 ) -> list[SelectionRow]:
     """Score, blend and order candidates best-first.
 
@@ -137,6 +195,12 @@ def rank_candidates(
     previous density-only ordering is restored and a warning says so. With no
     intent terms at all there is nothing to clear: density-only ordering, no
     warning — the pre-S4 behaviour for callers that pass no intent.
+
+    `warnings` is an optional caller-owned list the fallback message is also
+    appended to, so the degradation reaches the run result (S9) and not only
+    the log stream. Every row carries the provenance `anchors` of its
+    candidate's evidence. Pure function otherwise; nothing is mutated but
+    that list.
     """
     candidates = list(candidates)
     raw_density = [density_component(candidate.evidence) for candidate in candidates]
@@ -152,6 +216,7 @@ def rank_candidates(
             semantic=semantic,
             density=density,
             blended=blended_score(semantic, density, config),
+            anchors=_anchors_of(candidate.evidence),
         ))
 
     if terms and any(row.blended >= config.selection_score_threshold for row in rows):
@@ -159,11 +224,14 @@ def rank_candidates(
         return rows
 
     if terms:
-        logger.warning(
-            "S4 selection: no candidate cleared selection_score_threshold=%.2f "
-            "(best blended=%.3f) — falling back to density-only ordering.",
-            config.selection_score_threshold,
-            max((row.blended for row in rows), default=0.0),
+        message = (
+            "S4 selection: no candidate cleared selection_score_threshold="
+            f"{config.selection_score_threshold:.2f} "
+            f"(best blended={max((row.blended for row in rows), default=0.0):.3f})"
+            " — falling back to density-only ordering."
         )
+        logger.warning("%s", message)
+        if warnings is not None:
+            warnings.append(message)
     rows.sort(key=lambda row: row.density, reverse=True)
     return rows

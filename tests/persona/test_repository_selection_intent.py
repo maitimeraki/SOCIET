@@ -105,3 +105,30 @@ async def test_find_agent_sectors_empty_graph_returns_no_rows():
     repo = _repo_returning([])
 
     assert await repo.find_agent_sectors(llm_output={}, dataset_id="ds") == []
+
+
+@pytest.mark.asyncio
+async def test_find_agent_sectors_rows_carry_provenance_anchors():
+    """P2-T4 on /hatch: the selection dict anchors each row's persona names."""
+    repo = _repo_returning(SECTOR_ROWS)
+
+    result = await repo.find_agent_sectors(llm_output={}, dataset_id="ds")
+
+    assert result[0]["selection"]["anchors"] == (
+        {"kind": "node", "name": "Alice"},
+        {"kind": "node", "name": "Bob"},
+    )
+    assert result[1]["selection"]["anchors"] == ({"kind": "node", "name": "Carol"},)
+
+
+@pytest.mark.asyncio
+async def test_find_agent_sectors_density_flows_through_the_single_adapter(monkeypatch):
+    """P2-T3 on /hatch: patching the one adapter moves the rows' density."""
+    import src.simulation.relevance_matrix as matrix
+
+    monkeypatch.setattr(matrix, "_evidence_row", lambda item: (7.0, ()))
+
+    repo = _repo_returning(SECTOR_ROWS)
+    result = await repo.find_agent_sectors(llm_output={}, dataset_id="ds")
+
+    assert all(row["selection"]["density"] == pytest.approx(1.0) for row in result)
