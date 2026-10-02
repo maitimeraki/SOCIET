@@ -88,9 +88,9 @@ def _evidence_row(item: Any) -> tuple[float, tuple[dict[str, str], ...]]:
         plus any `document_anchor` / `document_ids` the row carries.
       * an object (a debate-path `EntityNode`): density from `.relevance_score`;
         anchors from `.id` / `.name` plus, from its `.properties`, the chunk refs
-        (`chunk_id`, `triplet_source_id`, `chunk_ids`) and the document refs
-        (`document_anchor`, `document_ids`) of the Document-first model. Ids are
-        only ever carried, never invented.
+        (`chunk_id`, `triplet_source_id`, `chunk_ids`) and the tolerant document
+        refs (`document_anchor`, `document_ids` — no producer writes those on
+        entity rows today). Ids are only ever carried, never invented.
 
     Density and anchors on both surfaces are read through here and nowhere else.
     """
@@ -135,7 +135,12 @@ def _evidence_row(item: Any) -> tuple[float, tuple[dict[str, str], ...]]:
 
 
 def _document_anchors(source: Mapping) -> tuple[dict[str, str], ...]:
-    """The document refs an evidence row carries: `document_anchor` / `document_ids`."""
+    """The document refs an evidence row carries: `document_anchor` / `document_ids`.
+
+    A tolerant read, not a production shape: nothing writes `document_anchor`
+    onto entity or sector rows today (the Document-first model writes it into
+    *chunk* metadata), so a ref surfaces here only if a row ever carries one.
+    """
     refs = [source.get("document_anchor")]
     document_ids = source.get("document_ids")
     if isinstance(document_ids, (list, tuple, set)):

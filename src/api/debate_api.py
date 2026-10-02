@@ -94,7 +94,10 @@ async def _run_debate_async(
     simulation_depth: str = "standard",
 ) -> None:
     """Background task to run debate and stream results via WebSocket."""
-    ws_manager = _DebateWSManager()
+    # Reuse the manager the job already holds: a client that connected before
+    # the task started created and stored one (`stream_debate`), and replacing
+    # it would silently drop that client from the S9 stage-event stream.
+    ws_manager = (_DEBATE_JOBS.get(job_id) or {}).get("ws_manager") or _DebateWSManager()
 
     # D3: the depth gate — distillation is on for standard/deep, off for shallow.
     distill = simulation_depth in {"standard", "deep"}

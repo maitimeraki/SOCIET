@@ -291,9 +291,12 @@ def _selection_entity_nodes():
     return nodes
 
 
-async def _run_stubbed_job(job_id, config, query="Should we tax carbon?"):
+async def _run_stubbed_job(job_id, config, query="Should we tax carbon?", pre_stored_ws_manager=None):
     """Run the real job path — real orchestrator, S4 selection and S9 wiring —
     with only the graph (Neo4j), round LLM calls and verdict seams stubbed.
+
+    `pre_stored_ws_manager` stands in for a client that connected before the
+    task started (`stream_debate` stores its manager on the job).
     """
     llm = MagicMock()
     llm.generate = AsyncMock(return_value=_INTENT_REPLY)
@@ -332,6 +335,8 @@ async def _run_stubbed_job(job_id, config, query="Should we tax carbon?"):
         "job_id": job_id, "status": "queued", "query": query,
         "graph_id": "ds1", "config": asdict(config), "result": None, "error": None,
     }
+    if pre_stored_ws_manager is not None:
+        _DEBATE_JOBS[job_id]["ws_manager"] = pre_stored_ws_manager
     try:
         with patch("src.llm.client.LLMClient", return_value=llm), \
              patch("src.persona.graph_context.GraphContext", return_value=ctx), \
@@ -437,6 +442,21 @@ class TestWSManagerResilience:
         await manager.broadcast({"type": "stage", "stage": "intake", "index": 0})
 
         alive.send_json.assert_awaited_once()  # the dead socket does not stop delivery
+
+    @pytest.mark.asyncio
+    async def test_a_client_connected_before_the_run_keeps_the_stage_events(self):
+        """M1: the job reuses the manager a pre-connected client stored on it."""
+        job_id = f"ws-reuse-{uuid.uuid4()}"
+        config = DebateConfig(max_agents=5, max_rounds=1, max_new_agents_per_round=0)
+        connected = MagicMock()
+        connected.broadcast = AsyncMock()
+
+        job, _ = await _run_stubbed_job(job_id, config, pre_stored_ws_manager=connected)
+
+        assert job["status"] == "complete"
+        assert [e["stage"] for e in _stage_events(connected)] == [
+            "intake", "selection", "synthesis", "round", "convergence", "verdict",
+        ]
 
 
 class TestDebateJobIntent:

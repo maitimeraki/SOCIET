@@ -28,6 +28,10 @@ verdict — no round or convergence event, because neither happened.
 
 Degradation: no emitter (`None`) → no events; an emitter that raises is logged
 and the run continues. Job state is authoritative; WS delivery is best-effort.
+
+Delivery: the payload surface is the **job-result record** (`GET /simulate/{job_id}`)
+— the WebSocket `complete` event carries the verdict summary only and
+deliberately omits `intent`/`selection`.
 """
 import hashlib
 import logging
