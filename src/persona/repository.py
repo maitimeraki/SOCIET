@@ -1,4 +1,3 @@
-import re
 from dataclasses import asdict
 from typing import TYPE_CHECKING, List, Dict, Any, cast, LiteralString, Callable, Sequence, Tuple, Optional
 from uuid import uuid4
@@ -9,7 +8,6 @@ import hashlib
 from datetime import datetime
 from src.persona.agent import (
     Agent,
-    Agent as AgentProfile,  # back-compat alias — old name in same module
     ConfidenceBreakdown,
     DiscoveryType,
     ExpertiseLevel,
@@ -968,13 +966,6 @@ class PersonaRepository:
         return profiles
     
     
-    @staticmethod
-    def _sanitize_relation_type(relation_type: str) -> str:
-        cleaned = (relation_type or "").strip().upper().replace(" ", "_")
-        if cleaned and re.match(r"^[A-Z_][A-Z0-9_]*$", cleaned):
-            return cleaned
-        return "REACTED_TO"
-
 if __name__ == "__main__":
     import asyncio
     async def test():
