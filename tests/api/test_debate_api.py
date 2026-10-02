@@ -8,14 +8,17 @@ from dataclasses import asdict
 
 import pytest
 from unittest.mock import AsyncMock, patch, MagicMock
+from fastapi import WebSocketDisconnect
 from fastapi.testclient import TestClient
 
 from src.api.debate_api import (
     router,
     create_debate,
+    stream_debate,
     DebateRequest,
     DebateConfigRequest,
     _run_debate_async,
+    _DebateWSManager,
     _DEBATE_JOBS,
     _DEBATE_JOBS_LOCK,
 )
@@ -610,3 +613,41 @@ class TestSimulationDepthGate:
             assert runner.call_args.kwargs["simulation_depth"] == "deep"
         finally:
             _DEBATE_JOBS.pop(response.job_id, None)
+
+
+class _DisconnectingWSStub:
+    """A WS client that is already gone: `accept` succeeds, the first read disconnects."""
+
+    def __init__(self):
+        self.accepted = False
+
+    async def accept(self):
+        self.accepted = True
+
+    async def receive_text(self):
+        raise WebSocketDisconnect()
+
+    async def send_json(self, payload):
+        pass
+
+
+class TestManagerlessJobStream:
+    """Re-review obs #1: a client on a job with no manager must not deadlock."""
+
+    @pytest.mark.asyncio
+    async def test_managerless_job_registers_a_manager_and_returns(self):
+        job_id = f"ws-{uuid.uuid4()}"
+        _DEBATE_JOBS[job_id] = {
+            "job_id": job_id, "status": "queued", "query": "q",
+            "graph_id": "ds1", "config": {}, "result": None, "error": None,
+        }
+        ws = _DisconnectingWSStub()
+        try:
+            # Pre-fix the handler re-takes the lock it already holds → hangs here.
+            await asyncio.wait_for(stream_debate(ws, job_id), timeout=2)
+            registered = _DEBATE_JOBS[job_id].get("ws_manager")
+        finally:
+            _DEBATE_JOBS.pop(job_id, None)
+
+        assert ws.accepted
+        assert isinstance(registered, _DebateWSManager)

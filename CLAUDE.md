@@ -52,6 +52,7 @@ SimulationResponse (society_opinion, confidence_metrics, dissenting_views)
 | `verdict.py` | VerdictSynthesizer | CIOR-weighted consensus synthesis |
 | `society_memory.py` | SocietyMemory | Per-round commit (Opinion/STATED/REACTED_TO) + snapshot read-back |
 | `profile_synthesizer.py` | ProfileSynthesizer | Graph → Agent creation |
+| `relevance_matrix.py` | SelectionRow, rank_candidates | Intent-aware candidate ranking (semantic + density blend, decomposed scores) for the selection step |
 | `pair_turn.py` | CommPair, AgentTurn, RoundResult | Data classes |
 | `llm_batch.py` | BatchedLLMRunner | Parallel LLM calls per round |
 | `debate_config.py` | DebateConfig | Validated debate settings |
@@ -110,6 +111,7 @@ src/
 │   ├── round_runner.py          # Single round execution
 │   ├── topology.py              # CommunicationTopology (Cypher pair scoring)
 │   ├── profile_synthesizer.py   # ProfileSynthesizer (graph → Agent)
+│   ├── relevance_matrix.py      # Intent-aware candidate ranking (semantic + density blend)
 │   ├── verdict.py               # VerdictSynthesizer (CIOR-weighted consensus)
 │   ├── society_memory.py        # SocietyMemory (round commit + snapshot read-back)
 │   ├── pair_turn.py             # CommPair, AgentTurn, RoundResult
@@ -184,6 +186,11 @@ pytest tests/persona/            # Persona layer tests
 ```
 
 ### Graph Pipeline Demo
+> **Parked — not runnable today.** `UniversalGraphPipeline.run` (`src/graph/graph_pipeline.py`) hands
+> `List[GlobalInputDocument]` to stages that require `List[ProcessedChunk]`, so `src.main:main()` fails on
+> the first stage call. The demo entry is kept for reference pending the pipeline wiring fix; the working
+> graph path today is the API job pipeline (`src/api/api_server.py`).
+
 ```python
 from src.main import main
 asyncio.run(main())
@@ -403,6 +410,11 @@ Rules:
 
 ## Technology Stack
 
+> **Implementation status.** Implemented today: **LiteLLM**, **Neo4j**, **FastAPI**, **Pydantic v2**, **asyncio**.
+> Planned, not yet implemented: the **document extractors** (PyMuPDF, python-docx, markdown-it-py,
+> BeautifulSoup) and the **job-queue tier** (Redis, Celery) — none are installed and no extractor or
+> job-queue code exists. The bullets below are the target stack, not a description of the current tree.
+
 ### LLM Gateway (Production-Grade)
 - **LiteLLM** - Universal LLM abstraction for 100+ providers
 - Supports: OpenAI, Anthropic, Azure, AWS Bedrock, Ollama, LocalAI, vLLM, any OpenAI-compatible endpoint
@@ -429,7 +441,7 @@ Rules:
 ```
 INPUT: PDF, DOCX, MD, TXT, URL
     ↓
-EXTRACTION (parallel per format)
+EXTRACTION (parallel per format)          # planned — no extractor is implemented yet
     ↓
 CHUNKING (semantic, sentence boundaries, overlap)
     ↓
@@ -466,4 +478,4 @@ CRITICAL RULES:
 
 - `docs/TECHNOLOGY_STACK.md` - Production tech stack and architecture (source of truth)
 - `docs/ARCHITECTURE.md` - Detailed component documentation
-- `docs/DESIGN.md` - Frontend design specification (Neural Observatory)
+- `docs/DESIGN.md` - Frontend design specification ("The Chamber", draft pending approval; supersedes the retired "Neural Observatory" demo shell)

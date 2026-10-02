@@ -9,7 +9,7 @@ from src.api.middleware import LoggingMiddleware
 from fastapi import FastAPI, BackgroundTasks, HTTPException, status, Request
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
-from typing import List, Dict, Optional, AsyncGenerator, Any, Set
+from typing import TYPE_CHECKING, List, Dict, Optional, AsyncGenerator, Any, Set
 from contextlib import asynccontextmanager
 from src.api.config_api import (
     UserQuery,
@@ -30,6 +30,11 @@ from src.graph.normalization import GraphNormalizationStage
 from src.llm.client import global_llm_client
 from src.llm.config_llm import get_llm_config
 from src.utils.chunkProcessor import ChunkProcessor, split_text_sentences
+
+if TYPE_CHECKING:
+    # Annotation-only: `_process_chunk`'s `extraction_stage` hint. The runtime
+    # import stays lazy inside `_execute_unified_job` (see the comment there).
+    from src.graph.graph_build import GraphExtractionStage
 
 # Configure basic logging
 logging.basicConfig(

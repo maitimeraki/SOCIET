@@ -306,11 +306,11 @@ async def stream_debate(websocket: WebSocket, job_id: str):
 
         ws_manager = job.get("ws_manager")
         if ws_manager is None:
-            # Job not started yet, create a new manager
+            # Job not started yet, create a new manager. The outer lock is
+            # already held here, so this write is atomic without re-taking it.
             ws_manager = _DebateWSManager()
-            async with _DEBATE_JOBS_LOCK:
-                if "ws_manager" not in _DEBATE_JOBS[job_id]:
-                    _DEBATE_JOBS[job_id]["ws_manager"] = ws_manager
+            if "ws_manager" not in _DEBATE_JOBS[job_id]:
+                _DEBATE_JOBS[job_id]["ws_manager"] = ws_manager
 
     await websocket.accept()
     await ws_manager.add(websocket)
