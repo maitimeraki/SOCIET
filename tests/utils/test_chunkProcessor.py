@@ -7,6 +7,7 @@ from fastapi import UploadFile
 from src.utils.chunkProcessor import (
     ChunkProcessor,
     process_documents,
+    split_text_sentences,
     _read_upload_file,
     _read_csv,
     _read_json,
@@ -14,6 +15,48 @@ from src.utils.chunkProcessor import (
     _create_processed_chunk,
 )
 from src.graph.models_graph import ProcessedChunk
+
+
+# --- Sentence-aware chunking fixtures -------------------------------------
+# Ten uniform sentences; chunk_size/overlap are SentenceSplitter token budgets
+# (sentences are ~20 tokens, so 64/32 yields 3-sentence chunks with a
+# whole-sentence overlap).
+QUALITY_SENTENCES = [
+    f"Fact number {i:02d} about the migration plan states that the northern region will grow slowly."
+    for i in range(10)
+]
+QUALITY_TEXT = " ".join(QUALITY_SENTENCES)
+QUALITY_CHUNK_SIZE = 64
+QUALITY_OVERLAP = 32
+
+
+def sentences_of(chunk: str) -> list:
+    """Split a chunk at sentence boundaries (period followed by a space)."""
+    parts = []
+    start = 0
+    while True:
+        found = chunk.find(". ", start)
+        if found == -1:
+            parts.append(chunk[start:].strip())
+            break
+        parts.append(chunk[start:found + 1].strip())
+        start = found + 2
+    return [part for part in parts if part]
+
+
+def fixed_window_chunks(text: str, chunk_size: int, overlap: int) -> list:
+    """The retired api_server._chunk_text, kept so the quality assertions can
+    prove they actually discriminate against fixed character windows."""
+    cleaned = (text or "").strip()
+    if not cleaned:
+        return []
+    step = max(1, chunk_size - overlap)
+    chunks = []
+    for start in range(0, len(cleaned), step):
+        chunk = cleaned[start:start + chunk_size].strip()
+        if chunk:
+            chunks.append(chunk)
+    return chunks
 
 
 class MockUploadFile(UploadFile):
@@ -243,6 +286,17 @@ class TestProcessDocuments:
         parent_ids = set(c.parent_doc_id for c in chunks)
         assert len(parent_ids) == 2, "Different files should have different parent_doc_ids"
 
+    def test_splits_through_the_sentence_splitter(self):
+        file = MockUploadFile("sentences.txt", QUALITY_TEXT.encode("utf-8"))
+
+        chunks = process_documents(
+            [file], chunk_size=QUALITY_CHUNK_SIZE, chunk_overlap=QUALITY_OVERLAP
+        )
+
+        assert len(chunks) > 2
+        for chunk in chunks[:-1]:
+            assert chunk.content.endswith("."), f"cut mid-sentence: ...{chunk.content[-40:]!r}"
+
 
 class TestChunkProcessor:
     """Tests for the ChunkProcessor adapter used by api_server._chunk_documents."""
@@ -284,6 +338,61 @@ class TestChunkProcessor:
             )
 
             assert chunk.metadata["source_document"] == "unknown"
+
+
+class TestSplitTextSentences:
+    """Quality tests for the single splitting owner (chunkProcessor.split_text_sentences).
+
+    The invariants fail under fixed character windows — pinned by
+    TestFixedWindowDiscrimination below.
+    """
+
+    def test_blank_text_returns_no_chunks(self):
+        assert split_text_sentences("", QUALITY_CHUNK_SIZE, QUALITY_OVERLAP) == []
+        assert split_text_sentences("   \n\t ", QUALITY_CHUNK_SIZE, QUALITY_OVERLAP) == []
+
+    def test_every_chunk_ends_at_a_sentence_boundary(self):
+        chunks = split_text_sentences(QUALITY_TEXT, QUALITY_CHUNK_SIZE, QUALITY_OVERLAP)
+
+        assert len(chunks) > 2
+        for chunk in chunks[:-1]:
+            assert chunk.endswith("."), f"cut mid-sentence: ...{chunk[-40:]!r}"
+        assert chunks[-1].endswith("."), "trailing sentence was truncated"
+
+    def test_adjacent_chunks_share_whole_sentences(self):
+        chunks = split_text_sentences(QUALITY_TEXT, QUALITY_CHUNK_SIZE, QUALITY_OVERLAP)
+
+        assert len(chunks) > 2
+        for current, following in zip(chunks, chunks[1:]):
+            assert sentences_of(current)[-1] in following, "tail sentence not repeated"
+            assert sentences_of(following)[0] in current, "head sentence is not overlap"
+
+    def test_chunks_preserve_source_order_without_inventing_text(self):
+        chunks = split_text_sentences(QUALITY_TEXT, QUALITY_CHUNK_SIZE, QUALITY_OVERLAP)
+
+        cursor = 0
+        for chunk in chunks:
+            position = QUALITY_TEXT.find(chunk, cursor)
+            assert position != -1, f"chunk not found in source order: {chunk[:40]!r}"
+            cursor = position
+
+
+class TestFixedWindowDiscrimination:
+    """Guards the quality tests: they must fail on the retired fixed-window slicing."""
+
+    def test_fixed_windows_violate_the_sentence_boundary_invariant(self):
+        chunks = fixed_window_chunks(QUALITY_TEXT, QUALITY_CHUNK_SIZE, QUALITY_OVERLAP)
+
+        assert len(chunks) > 2
+        assert any(not chunk.endswith(".") for chunk in chunks[:-1])
+
+    def test_fixed_windows_do_not_share_whole_sentences(self):
+        chunks = fixed_window_chunks(QUALITY_TEXT, QUALITY_CHUNK_SIZE, QUALITY_OVERLAP)
+
+        assert any(
+            sentences_of(current)[-1] not in following
+            for current, following in zip(chunks, chunks[1:])
+        )
 
 
 if __name__ == "__main__":

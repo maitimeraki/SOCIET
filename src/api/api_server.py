@@ -30,7 +30,7 @@ from src.graph.graph_build import GraphExtractionStage
 from src.graph.normalization import GraphNormalizationStage
 from src.llm.client import global_llm_client
 from src.llm.config_llm import get_llm_config
-from src.utils.chunkProcessor import ChunkProcessor
+from src.utils.chunkProcessor import ChunkProcessor, split_text_sentences
 
 # Configure basic logging
 logging.basicConfig(
@@ -146,45 +146,28 @@ async def _persist_run(job_id: str, run: Dict[str, Any]) -> None:
     path = _RUNS_RUNTIME_DIR / f"{job_id}.json"
     await asyncio.to_thread(path.write_text, json.dumps(run, ensure_ascii=False, indent=2), "utf-8")
 
-def _chunk_text(text: str, chunk_size: int, overlap: int) -> List[str]:
-    cleaned = (text or "").strip()
-    if not cleaned:
-        return []
-    step = max(1, chunk_size - overlap)
-    chunks: List[str] = []
-    for start in range(0, len(cleaned), step):
-        chunk = cleaned[start:start + chunk_size].strip()
-        if chunk:
-            chunks.append(chunk)
-    return chunks
-
 async def _chunk_documents(
     documents: List[GlobalInputDocument],
     chunk_size: int,
     overlap: int,
 ) -> List[ProcessedChunk]:
-    import asyncio
-
     processor = ChunkProcessor()
 
-    async def _process_all():
-        chunks: List[ProcessedChunk] = []
-        for doc in documents:
-            # Split document into text chunks
-            doc_chunks = _chunk_text(doc.text or "", chunk_size, overlap)
-            
-            # Process each chunk
-            for idx, chunk_text in enumerate(doc_chunks):
-                processed_chunk = await processor.process_document(
-                    chunk=chunk_text,
-                    chunk_index=idx,
-                    parent_doc_id=doc.document_id,
-                    metadata=doc.metadata or {}
-                )
-                chunks.append(processed_chunk)
-        
-        return chunks
-    return await _process_all()
+    chunks: List[ProcessedChunk] = []
+    for doc in documents:
+        # Sentence-aware splitting (single owner: chunkProcessor.split_text_sentences)
+        doc_chunks = split_text_sentences(doc.text or "", chunk_size, overlap)
+
+        for idx, chunk_text in enumerate(doc_chunks):
+            processed_chunk = await processor.process_document(
+                chunk=chunk_text,
+                chunk_index=idx,
+                parent_doc_id=doc.document_id,
+                metadata=doc.metadata or {},
+            )
+            chunks.append(processed_chunk)
+
+    return chunks
 
 def _merge_labels(items: List[str], fallback: str) -> List[str]:
     seen: Set[str] = set()

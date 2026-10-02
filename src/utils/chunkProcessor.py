@@ -117,6 +117,21 @@ def _create_processed_chunk(
     )
 
 
+def split_text_sentences(text: str, chunk_size: int, chunk_overlap: int) -> List[str]:
+    """Sentence-aware splitting with whole-sentence overlap — the single splitting owner.
+
+    Both ingestion paths (process_documents, api_server._chunk_documents) route
+    through here. chunk_size / chunk_overlap go straight to SentenceSplitter,
+    whose native budget is tokens (llama-index default tokenizer), not characters.
+    """
+    cleaned = (text or "").strip()
+    if not cleaned:
+        return []
+
+    splitter = SentenceSplitter(chunk_size=chunk_size, chunk_overlap=chunk_overlap)
+    return [chunk for chunk in (raw.strip() for raw in splitter.split_text(cleaned)) if chunk]
+
+
 def process_documents(
     files: List[UploadFile],
     chunk_size: int = 512,
@@ -127,19 +142,14 @@ def process_documents(
 
     Args:
         files: List of FastAPI UploadFile objects
-        chunk_size: Target size for each chunk (in characters)
-        chunk_overlap: Number of overlapping characters between chunks
+        chunk_size: Target size for each chunk (SentenceSplitter token budget)
+        chunk_overlap: Overlap between chunks (SentenceSplitter token budget)
 
     Returns:
         List of ProcessedChunk objects with chunk_id, text, source_document, chunk_index
     """
     if not files:
         return []
-
-    splitter = SentenceSplitter(
-        chunk_size=chunk_size,
-        chunk_overlap=chunk_overlap,
-    )
 
     all_chunks: List[ProcessedChunk] = []
 
@@ -155,8 +165,7 @@ def process_documents(
         if not text.strip():
             continue
 
-        # Split into chunks using SentenceSplitter
-        text_chunks = splitter.split_text(text)
+        text_chunks = split_text_sentences(text, chunk_size, chunk_overlap)
 
         for idx, chunk_text in enumerate(text_chunks):
             chunk = _create_processed_chunk(
