@@ -742,3 +742,101 @@ async def test_distill_off_makes_no_llm_call_and_keeps_the_pre_s5_path():
 
     repo.distill_profiles.assert_not_called()
     assert set(_build_calls(repo).values()) == {None}
+
+
+"""D2: the provenance writer runs per persona, before the profile build that reads it."""
+
+
+def _anchored_entity(name: str, anchor, score: float = 0.9) -> MagicMock:
+    """An entity whose `properties` carries the raw `triplet_source_id`."""
+    node = MagicMock()
+    node.id = name
+    node.name = name
+    node.label = "Persona"
+    node.properties = {"name": name}
+    if anchor is not None:
+        node.properties["triplet_source_id"] = anchor
+    node.relevance_score = score
+    node.domain_tags = ["test"]
+    node.summary = f"{name} summary"
+    return node
+
+
+def _provenance_synth(entities, ctx_provenance=None):
+    """A synthesizer whose repo records the write/build call order."""
+    order: list[str] = []
+
+    async def write(**kwargs):
+        order.append(f"write:{kwargs['persona_name']}")
+        return 1
+
+    async def build(**kwargs):
+        order.append(f"build:{kwargs['agent_name']}")
+        return MagicMock(identity=PersonaIdentity(
+            name=kwargs["agent_name"], archetype="Analyst", communication_style="factual",
+        ))
+
+    repo = MagicMock()
+    repo.fetch_nodes_by_names = AsyncMock(return_value={})
+    repo.calculate_agent_metrics_and_context_for_llm = AsyncMock(return_value={})
+    repo.write_persona_provenance = AsyncMock(side_effect=write)
+    repo.build_single_agent_profile_from_node = AsyncMock(side_effect=build)
+
+    ctx = MagicMock()
+    ctx.find_relevant_entities = AsyncMock(return_value=entities)
+    if ctx_provenance is not None:
+        ctx.get_provenance = AsyncMock(return_value=ctx_provenance)
+    return ProfileSynthesizer(persona_repo=repo, graph_context=ctx), repo, order
+
+
+@pytest.mark.asyncio
+async def test_synthesize_writes_each_cluster_entity_anchor_before_building():
+    """Two entities sharing a doc cluster; the writer gets their real chunk node ids."""
+    from types import SimpleNamespace
+
+    lead = _anchored_entity("Lead", "node-7", 0.9)
+    second = _anchored_entity("Second", " node-9 ", 0.5)
+    synth, repo, order = _provenance_synth(
+        [lead, second], ctx_provenance=[SimpleNamespace(doc_id="doc:1")],
+    )
+
+    profiles = await synth.synthesize(query="q", dataset_id="ds", max_agents=2)
+
+    repo.write_persona_provenance.assert_awaited_once_with(
+        persona_name="Lead", dataset_id="ds", chunk_node_ids=["node-7", "node-9"],
+    )
+    assert order == ["write:Lead", "build:Lead"]  # written BEFORE the build reads it
+    assert [p.identity.name for p in profiles] == ["Lead"]
+
+
+@pytest.mark.asyncio
+async def test_synthesize_skips_the_write_when_no_entity_carries_an_anchor():
+    synth, repo, _ = _provenance_synth([_anchored_entity("Bare", None)])
+
+    profiles = await synth.synthesize(query="q", dataset_id="ds", max_agents=1)
+
+    repo.write_persona_provenance.assert_not_awaited()
+    assert [p.identity.name for p in profiles] == ["Bare"]
+
+
+def test_cluster_chunk_ids_tolerates_non_mapping_properties():
+    """A non-mapping `properties` contributes nothing — never invented."""
+    from src.simulation.profile_synthesizer import ProfileSynthesizer
+
+    odd = MagicMock()
+    odd.properties = ["not", "a", "mapping"]
+    assert ProfileSynthesizer._cluster_chunk_ids([odd]) == []
+
+
+@pytest.mark.asyncio
+async def test_synthesize_survives_a_failing_writer_with_one_warning():
+    synth, repo, _ = _provenance_synth([_anchored_entity("Lead", "node-7")])
+    repo.write_persona_provenance = AsyncMock(side_effect=RuntimeError("neo4j down"))
+    warnings: list[str] = []
+
+    profiles = await synth.synthesize(query="q", dataset_id="ds", max_agents=1, warnings=warnings)
+
+    assert len(warnings) == 1
+    assert "Lead" in warnings[0]
+    assert [p.identity.name for p in profiles] == ["Lead"]
+    repo.build_single_agent_profile_from_node.assert_awaited()

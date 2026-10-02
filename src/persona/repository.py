@@ -1,6 +1,6 @@
 import re
 from dataclasses import asdict
-from typing import TYPE_CHECKING, List, Dict, Any, cast, LiteralString, Callable, Tuple, Optional
+from typing import TYPE_CHECKING, List, Dict, Any, cast, LiteralString, Callable, Sequence, Tuple, Optional
 from uuid import uuid4
 import uuid as _uuid
 import asyncio
@@ -996,6 +996,47 @@ class PersonaRepository:
                     )
                 results[name] = _template(entry)
         return results
+
+    #: Bound on the provenance write: at most this many chunk ids per persona, per call.
+    _PROVENANCE_CHUNK_CAP = 20
+
+    async def write_persona_provenance(
+        self,
+        persona_name: str,
+        dataset_id: str,
+        chunk_node_ids: Sequence[str],
+    ) -> int:
+        """D2: write the `(Persona)-[:MENTIONS]->(Chunk)` edges `get_provenance` reads.
+
+        `chunk_node_ids` are graph chunk node ids — each entity's
+        `triplet_source_id`. Ids are stripped, deduped and capped at
+        `_PROVENANCE_CHUNK_CAP`, then written in ONE idempotent statement; empty
+        input issues no query and returns 0. The Persona MERGE keys match
+        `SocietyMemory.commit_round` exactly, so this composes with the
+        round-commit node instead of shadowing it. Returns the number of edges
+        ensured (ids with no matching chunk node are skipped).
+        """
+        chunk_ids = list(
+            dict.fromkeys(str(cid).strip() for cid in chunk_node_ids if str(cid or "").strip())
+        )[: self._PROVENANCE_CHUNK_CAP]
+        if not chunk_ids:
+            return 0
+
+        cypher = """
+        UNWIND $chunk_ids AS cid
+        MATCH (c:__Node__ {id: cid})
+        MERGE (p:Persona {name: $name, dataset_id: $dataset_id})
+        MERGE (p)-[:MENTIONS]->(c)
+        RETURN count(*) AS written
+        """
+
+        async with self._driver.session(database=self._db) as session:
+            result = await session.run(
+                cypher, chunk_ids=chunk_ids, name=persona_name, dataset_id=dataset_id,
+            )
+            rows = await result.data()
+
+        return int(rows[0]["written"]) if rows else 0
 
     async def get_provenance(self, agent_name: str, limit: int = 5) -> List[ProvenanceLink]:
         """Single, efficient provenance fetch."""

@@ -4,6 +4,7 @@ import inspect
 import logging
 import math
 from collections import defaultdict
+from collections.abc import Mapping
 from typing import Any
 
 from src.persona.agent import Agent
@@ -201,6 +202,28 @@ class ProfileSynthesizer:
                     max_relevance=max_relevance,
                 )
 
+                # D2: write this persona's real provenance edges BEFORE the build,
+                # so the `get_provenance` inside it finds them instead of falling
+                # back to the uuid5 sector fabrication. Never raises into synthesis.
+                chunk_ids = self._cluster_chunk_ids(cluster_entities)
+                if chunk_ids:
+                    try:
+                        pending = self._repo.write_persona_provenance(
+                            persona_name=agent_name,
+                            dataset_id=dataset_id,
+                            chunk_node_ids=chunk_ids,
+                        )
+                        if inspect.iscoroutine(pending):
+                            await pending
+                    except Exception as exc:
+                        logger.warning(
+                            "provenance write failed for persona %r: %s", agent_name, exc,
+                        )
+                        if warnings is not None:
+                            warnings.append(
+                                f"provenance write failed for persona {agent_name!r}: {exc}"
+                            )
+
                 # Build profile
                 return await self._repo.build_single_agent_profile_from_node(
                     agent_name=agent_name,
@@ -301,6 +324,23 @@ class ProfileSynthesizer:
             parts.extend(str(tag) for tag in (getattr(entity, "domain_tags", None) or []))
             parts.append(str(getattr(entity, "summary", "") or ""))
         return " ".join(part for part in parts if part)
+
+    @staticmethod
+    def _cluster_chunk_ids(cluster_entities: list[EntityNode]) -> list[str]:
+        """The cluster's chunk node ids: each entity's `triplet_source_id`.
+
+        Tolerant `Mapping` reads — a non-mapping `properties` or a missing/blank
+        value contributes nothing; ids are stripped and deduped. Never invents.
+        """
+        ids: list[str] = []
+        for entity in cluster_entities:
+            properties = getattr(entity, "properties", None)
+            if not isinstance(properties, Mapping):
+                continue
+            value = properties.get("triplet_source_id")
+            if isinstance(value, str) and value.strip():
+                ids.append(value.strip())
+        return list(dict.fromkeys(ids))
 
     def _build_sector_results_from_cluster(
         self, cluster_entities: list[EntityNode]
