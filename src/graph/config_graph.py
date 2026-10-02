@@ -14,8 +14,11 @@ class GraphConfig:
     discovery_retry_backoff_seconds: float = float(
         os.getenv("GRAPH_DISCOVERY_RETRY_BACKOFF_SECONDS", "1.0")
     )
-    ontology_chunk_size_chars: int = int(os.getenv("GRAPH_ONTOLOGY_CHUNK_SIZE_CHARS", "2000"))
-    ontology_chunk_overlap_chars: int = int(os.getenv("GRAPH_ONTOLOGY_CHUNK_OVERLAP_CHARS", "200"))
+    # Units are SentenceSplitter *tokens* (llama-index's native budget), not
+    # characters. The env var names keep their historical CHARS spelling for
+    # operator compatibility — renaming them would silently drop overrides.
+    ontology_chunk_size_tokens: int = int(os.getenv("GRAPH_ONTOLOGY_CHUNK_SIZE_CHARS", "2000"))
+    ontology_chunk_overlap_tokens: int = int(os.getenv("GRAPH_ONTOLOGY_CHUNK_OVERLAP_CHARS", "200"))
     ontology_max_concurrency: int = int(os.getenv("GRAPH_ONTOLOGY_MAX_CONCURRENCY", "4"))
 
     neo4j_uri: str = os.getenv("NEO4J_URI", "bolt://localhost:7687")

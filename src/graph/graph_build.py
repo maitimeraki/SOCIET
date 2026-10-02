@@ -34,15 +34,14 @@ logger = setup_logging()  # Ensure logging is configured with handler clearing t
 # converge to the document-wide union.
 _MERGE_DOCUMENTS = """
 UNWIND $docs AS row
-MERGE (d:Document {document_id: row.document_id})
-SET d.dataset_id = row.dataset_id,
-    d.domain_tags = coalesce(d.domain_tags, []) + [t IN row.domain_tags WHERE NOT t IN coalesce(d.domain_tags, [])]
+MERGE (d:Document {document_id: row.document_id, dataset_id: row.dataset_id})
+SET d.domain_tags = coalesce(d.domain_tags, []) + [t IN row.domain_tags WHERE NOT t IN coalesce(d.domain_tags, [])]
 """
 
 _LINK_CONCEPTS_TO_DOCUMENTS = """
 UNWIND $rows AS row
 MATCH (c:__Node__ {id: row.chunk_id})-[:MENTIONS]->(e:__Entity__)
-MATCH (d:Document {document_id: row.document_id})
+MATCH (d:Document {document_id: row.document_id, dataset_id: $dataset_id})
 MERGE (e)-[:DERIVED_FROM]->(d)
 """
 
@@ -171,7 +170,9 @@ class GraphExtractionStage:
                 md["breadcrumb"] = d.breadcrumb
                 md["header_level"] = d.header_level
                 md["ontology_id"] = ontology.metadata.ontology_id
-                md["title"] = md.get("title") or "Untitled Document"  
+                # `_create_processed_chunk` carries the filename as `source_document`;
+                # without the fallback every provenance link title is "Untitled Document".
+                md["title"] = md.get("title") or md.get("source_document") or "Untitled Document"
                 new_doc = Document(text=d.content, metadata=md)
                 
                 
@@ -201,7 +202,7 @@ class GraphExtractionStage:
 
             index = await asyncio.to_thread(_build_index)
 
-            await asyncio.to_thread(self._link_concepts_to_documents, index)
+            await asyncio.to_thread(self._link_concepts_to_documents, index, dataset_id)
             return len(index.docstore.docs)
 
         except Exception as e:
@@ -214,7 +215,7 @@ class GraphExtractionStage:
         if rows:
             self.graph_store.structured_query(_MERGE_DOCUMENTS, param_map={"docs": rows})
 
-    def _link_concepts_to_documents(self, index) -> None:
+    def _link_concepts_to_documents(self, index, dataset_id: str) -> None:
         """MERGE `(concept)-[:DERIVED_FROM]->(Document)` for every stored chunk
         that carries a `document_anchor`. Sync — called off the loop."""
         rows = []
@@ -223,7 +224,10 @@ class GraphExtractionStage:
             if document_id:
                 rows.append({"chunk_id": node_id, "document_id": document_id})
         if rows:
-            self.graph_store.structured_query(_LINK_CONCEPTS_TO_DOCUMENTS, param_map={"rows": rows})
+            self.graph_store.structured_query(
+                _LINK_CONCEPTS_TO_DOCUMENTS,
+                param_map={"rows": rows, "dataset_id": dataset_id},
+            )
 
 
 def extract_graph(

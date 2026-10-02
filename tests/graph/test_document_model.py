@@ -14,7 +14,7 @@ import pytest
 
 from src.graph.models_graph import LocalOntology, OntologyMetadata, ProcessedChunk
 
-_DOCUMENT_MERGE = "MERGE (d:Document {document_id: row.document_id})"
+_DOCUMENT_MERGE = "MERGE (d:Document {document_id: row.document_id, dataset_id: row.dataset_id})"
 
 
 class _RecorderStore:
@@ -219,10 +219,50 @@ async def test_derived_from_rows_and_cypher_match_the_contract(graph_env):
         {"chunk_id": "node-1", "document_id": "doc-1"},
         {"chunk_id": "node-2", "document_id": "doc-2"},
     ]
+    assert params["dataset_id"] == "ds-1"
     assert "UNWIND $rows AS row" in query
     assert "MATCH (c:__Node__ {id: row.chunk_id})-[:MENTIONS]->(e:__Entity__)" in query
-    assert "MATCH (d:Document {document_id: row.document_id})" in query
+    # both Document writes are dataset-scoped: one dataset's document_id can
+    # never merge into another dataset's Document node
+    assert "MATCH (d:Document {document_id: row.document_id, dataset_id: $dataset_id})" in query
     assert "MERGE (e)-[:DERIVED_FROM]->(d)" in query
+
+
+@pytest.mark.asyncio
+async def test_document_writes_are_dataset_scoped(graph_env):
+    """The `:Document` MERGE key and the DERIVED_FROM match both carry dataset_id."""
+    stage, store, _ = graph_env
+    await _run(stage, [_chunk("c1", "doc-1", ["a"])], dataset_id="ds-2")
+
+    merge_query, merge_params = store.calls[0]
+    assert merge_params["docs"][0]["dataset_id"] == "ds-2"
+    assert "MERGE (d:Document {document_id: row.document_id, dataset_id: row.dataset_id})" in merge_query
+    assert "SET d.dataset_id = row.dataset_id" not in merge_query  # keyed, not last-writer-wins
+
+
+@pytest.mark.asyncio
+async def test_llama_document_title_falls_back_to_the_source_document(graph_env):
+    """M7: the chunk metadata's filename becomes the title, not "Untitled Document"."""
+    stage, store, _ = graph_env
+    named = _chunk("c1", "doc-1", ["a"])
+    named.metadata = {"source_document": "carbon-report.pdf"}
+    await _run(stage, [named])
+
+    assert _FakePropertyGraphIndex.received_docs[0].metadata["title"] == "carbon-report.pdf"
+
+
+@pytest.mark.asyncio
+async def test_llama_document_title_prefers_an_explicit_title(graph_env):
+    """An explicit `title` wins over the filename; a bare chunk stays "Untitled Document"."""
+    stage, store, _ = graph_env
+    titled = _chunk("c1", "doc-1", ["a"])
+    titled.metadata = {"title": "Executive Summary", "source_document": "carbon-report.pdf"}
+    bare = _chunk("c2", "doc-2", ["b"], index=1)
+    await _run(stage, [titled, bare])
+
+    docs = _FakePropertyGraphIndex.received_docs
+    assert docs[0].metadata["title"] == "Executive Summary"
+    assert docs[1].metadata["title"] == "Untitled Document"
 
 
 @pytest.mark.asyncio
