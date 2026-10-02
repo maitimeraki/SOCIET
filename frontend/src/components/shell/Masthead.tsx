@@ -1,4 +1,5 @@
 import { NavLink, Link } from 'react-router-dom'
+import HealthDot from './HealthDot'
 
 function ChamberMark() {
   const seats = [-4.5, -3, -1.5, 0, 1.5, 3, 4.5]
@@ -27,7 +28,12 @@ export default function Masthead() {
         <NavLink to="/runs" className={navItem}>Runs</NavLink>
         <NavLink to="/agents" className={navItem}>Agents</NavLink>
       </nav>
-      <div className="flex items-center gap-4">{/* HealthDot arrives in Task 5 */}</div>
+      <div className="flex items-center gap-4">
+        <HealthDot />
+        <Link to="/new/ingest" className="inline-flex h-10 select-none items-center rounded-[4px] bg-accent px-4 text-body font-medium text-ink-1000 transition-colors hover:bg-accent-strong">
+          Convene a society
+        </Link>
+      </div>
     </header>
   )
 }
