@@ -1,6 +1,7 @@
 """
 Tests for Debate API endpoints.
 """
+import asyncio
 import json
 import uuid
 from dataclasses import asdict
@@ -11,12 +12,14 @@ from fastapi.testclient import TestClient
 
 from src.api.debate_api import (
     router,
+    create_debate,
     DebateRequest,
     DebateConfigRequest,
     _run_debate_async,
     _DEBATE_JOBS,
     _DEBATE_JOBS_LOCK,
 )
+from src.simulation.orchestrator import OrchestratedDebateResult
 from src.persona.agent import (
     Agent,
     ConfidenceBreakdown,
@@ -303,6 +306,9 @@ async def _run_stubbed_job(job_id, config, query="Should we tax carbon?"):
     repo = MagicMock()
     repo.fetch_nodes_by_names = AsyncMock(return_value={})
     repo.calculate_agent_metrics_and_context_for_llm = AsyncMock(return_value={})
+    # The product path defaults to depth=standard, so S5 distillation is ON here:
+    # the stub repo must satisfy the batch seam (empty result = template path).
+    repo.distill_profiles = AsyncMock(return_value={})
     repo.build_single_agent_profile_from_node = AsyncMock(
         side_effect=lambda **kw: _stub_profile(kw["agent_name"])
     )
@@ -495,3 +501,92 @@ class TestDebateJobIntent:
             "deterministic fallback intent" in w
             for w in job["result"]["warnings"]
         )
+
+
+class TestSimulationDepth:
+    """D3: the request carries the depth gate, defaulting to standard."""
+
+    def test_depth_defaults_to_standard(self):
+        assert DebateRequest(query="q").simulation_depth == "standard"
+
+    def test_depth_accepts_the_three_levels(self):
+        for depth in ("shallow", "standard", "deep"):
+            assert DebateRequest(query="q", simulation_depth=depth).simulation_depth == depth
+
+    def test_depth_rejects_unknown_values(self):
+        with pytest.raises(Exception):
+            DebateRequest(query="q", simulation_depth="turbo")
+
+
+async def _run_with_depth(job_id: str, depth: str):
+    """Run the real boundary with the orchestrator + repo seams patched.
+
+    Returns what the boundary wired: the finished job, the repository
+    constructor call, the orchestrator instance and the run's LLM client.
+    """
+    llm = MagicMock()
+    llm.generate = AsyncMock(return_value=_INTENT_REPLY)
+
+    ctx = MagicMock()
+    ctx.__aenter__ = AsyncMock(return_value=ctx)
+    ctx.__aexit__ = AsyncMock(return_value=False)
+
+    repo = MagicMock()
+    result = OrchestratedDebateResult(
+        converged=False, verdict="stub", final_stances={}, warnings=[], rounds_executed=0,
+    )
+    orch = MagicMock()
+    orch.run = AsyncMock(return_value=result)
+    ws_manager = MagicMock()
+    ws_manager.broadcast = AsyncMock()
+
+    _DEBATE_JOBS[job_id] = {
+        "job_id": job_id, "status": "queued", "query": "Should we tax carbon?",
+        "graph_id": "ds1", "config": {}, "result": None, "error": None,
+    }
+    try:
+        with patch("src.llm.client.LLMClient", return_value=llm), \
+             patch("src.persona.graph_context.GraphContext", return_value=ctx), \
+             patch("src.persona.repository.PersonaRepository", return_value=repo) as repo_cls, \
+             patch("src.simulation.orchestrator.DebateOrchestrator", return_value=orch), \
+             patch("src.api.debate_api._DebateWSManager", return_value=ws_manager):
+            await _run_debate_async(
+                job_id=job_id, query="Should we tax carbon?", graph_id="ds1",
+                config=DebateConfig(max_agents=5, max_rounds=1), simulation_depth=depth,
+            )
+    finally:
+        job = _DEBATE_JOBS.pop(job_id, None)
+    return job, repo_cls, orch, llm
+
+
+class TestSimulationDepthGate:
+    """D3: shallow → distillation off; standard/deep → on; the client is injected."""
+
+    @pytest.mark.asyncio
+    async def test_shallow_turns_distillation_off(self):
+        job, repo_cls, orch, llm = await _run_with_depth(f"depth-{uuid.uuid4()}", "shallow")
+
+        assert job["status"] == "complete"
+        assert orch.run.await_args.kwargs["distill"] is False
+        assert repo_cls.call_args.kwargs["llm_client"] is llm
+
+    @pytest.mark.asyncio
+    async def test_standard_and_deep_turn_distillation_on(self):
+        for depth in ("standard", "deep"):
+            job, repo_cls, orch, llm = await _run_with_depth(f"depth-{depth}-{uuid.uuid4()}", depth)
+
+            assert job["status"] == "complete"
+            assert orch.run.await_args.kwargs["distill"] is True
+            assert repo_cls.call_args.kwargs["llm_client"] is llm
+
+    @pytest.mark.asyncio
+    async def test_create_debate_threads_the_requested_depth_to_the_job(self):
+        with patch("src.api.debate_api._run_debate_async", new=AsyncMock()) as runner:
+            response = await create_debate(
+                DebateRequest(query="Should we tax carbon?", simulation_depth="deep")
+            )
+            await asyncio.sleep(0)  # let the scheduled job task start
+        try:
+            assert runner.call_args.kwargs["simulation_depth"] == "deep"
+        finally:
+            _DEBATE_JOBS.pop(response.job_id, None)

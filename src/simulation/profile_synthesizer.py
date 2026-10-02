@@ -49,6 +49,7 @@ class ProfileSynthesizer:
         config: DebateConfig | None = None,
         warnings: list[str] | None = None,
         selection_rows: list[SelectionRow] | None = None,
+        distill: bool = False,
     ) -> list[Agent]:
         """Synthesize agent profiles from relevant graph entities.
 
@@ -68,6 +69,13 @@ class ProfileSynthesizer:
         degradation message and the full ranked decomposition (all rows, best
         first — not just the ones cut into agents) are written to, so the run
         result can explain the roster (S9).
+
+        `distill=True` (the S5 gate, decided by the caller from the simulation
+        depth) makes ONE batched distillation call for the whole selection set
+        before any profile is built, feeding it the S3 stance axis and each
+        persona's S4 anchors; the returned `(description, perspective)` supplies
+        that persona's `bio`/`detailed_perspective`, with a per-persona template
+        fallback + warning. `False` (default) is exactly the pre-S5 path.
         """
         # Adaptive target: sqrt(n) * 4, capped at max_agents
         search_limit = max_agents * 3
@@ -140,7 +148,24 @@ class ProfileSynthesizer:
         if selection_rows is not None:
             selection_rows.extend(rows)
         entities_by_name = {candidate.name: ents for candidate, ents in zip(candidates, clusters.values())}
-        top_clusters = [(row.name, entities_by_name[row.name]) for row in rows[:target]]
+        top_clusters = [(row, entities_by_name[row.name]) for row in rows[:target]]
+
+        # S5: ONE batched distillation call for the whole selection set — the S3
+        # stance axis plus each row's anchors give every persona a question-aware
+        # voice. Only runs when the caller's depth gate asked for it; per-persona
+        # failures fall back to the deterministic template and warn (never raise).
+        distilled: dict[str, tuple[str, str]] = {}
+        if distill:
+            distilled = await self._repo.distill_profiles(
+                personas=[
+                    self._distillation_entry(row, cluster_entities)
+                    for row, cluster_entities in top_clusters
+                ],
+                query=query,
+                core_question=intent.core_question if intent is not None else "",
+                stance_axis=intent.stance_axis if intent is not None else "",
+                warnings=warnings,
+            )
 
         # Build profiles for each cluster
         profiles: list[Agent] = []
@@ -185,12 +210,13 @@ class ProfileSynthesizer:
                     agent_metrics=metrics,
                     sector_results=sector_results,
                     llm_output=None,
+                    distilled=distilled.get(cluster_id) if distilled else None,
                 )
 
         # Process clusters in parallel
         tasks = [
-            _build_profile(row_name, cluster_entities)
-            for row_name, cluster_entities in top_clusters
+            _build_profile(row.name, cluster_entities)
+            for row, cluster_entities in top_clusters
         ]
         results = await asyncio.gather(*tasks)
         profiles = [p for p in results if p is not None]
@@ -242,6 +268,29 @@ class ProfileSynthesizer:
 
         results = await asyncio.gather(*(_build(n) for n in names))
         return [p for p in results if p is not None]
+
+    def _distillation_entry(self, row: SelectionRow, cluster_entities: list[EntityNode]) -> dict:
+        """One persona's S5 distillation input: identity, the grounding synthesis
+        already holds (node properties, matched sectors, cluster summaries) and
+        the S4 provenance anchors of its selection row. No extra graph reads —
+        the entry is name-keyed by `row.name`, the same key profiles build under.
+        """
+        representative = (
+            max(cluster_entities, key=lambda e: e.relevance_score) if cluster_entities else None
+        )
+        properties = getattr(representative, "properties", None) if representative is not None else None
+        summaries = [
+            e.summary.strip()
+            for e in cluster_entities
+            if isinstance(getattr(e, "summary", None), str) and e.summary.strip()
+        ]
+        return {
+            "name": row.name,
+            "node": dict(properties) if isinstance(properties, dict) else {},
+            "sector_results": self._build_sector_results_from_cluster(cluster_entities),
+            "evidence": summaries,
+            "anchors": [dict(anchor) for anchor in row.anchors],
+        }
 
     @staticmethod
     def _candidate_text(cluster_entities: list[EntityNode]) -> str:

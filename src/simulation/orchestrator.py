@@ -99,6 +99,7 @@ class DebateOrchestrator:
         llm_client: Optional[Any] = None,
         intent: Optional[QueryIntent] = None,
         on_stage: Optional[StageEmitter] = None,
+        distill: bool = False,
     ) -> OrchestratedDebateResult:
         """
         Run the full debate pipeline with WebSocket streaming.
@@ -114,6 +115,10 @@ class DebateOrchestrator:
 
         `on_stage` is the optional S9 stage-event emitter (see the module
         docstring for the contract). `None` means no events, no crash.
+
+        `distill` is the S5 gate (decided by the job boundary from the
+        simulation depth, D3): when True, profile synthesis makes ONE batched
+        persona-distillation call for the whole selection set.
         """
         warnings: list[str] = []
         all_turns: list = []
@@ -131,6 +136,7 @@ class DebateOrchestrator:
             config=config,
             warnings=warnings,
             selection_rows=selection_rows,
+            distill=distill,
         )
         stage_index = await self._emit_stage(on_stage, stage_index, "synthesis", agents=len(profiles))
 
@@ -140,7 +146,7 @@ class DebateOrchestrator:
                 converged=False,
                 verdict="No agents could be synthesized for this query.",
                 final_stances={},
-                warnings=["No relevant entities found for query"],
+                warnings=warnings + ["No relevant entities found for query"],
                 rounds_executed=0,
                 intent=intent,
                 selection_rows=selection_rows,

@@ -4,7 +4,7 @@ Debate API: Async debate simulation with streaming support.
 import asyncio
 import uuid
 from dataclasses import asdict
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Literal, Optional
 
 from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel, Field
@@ -32,6 +32,10 @@ class DebateRequest(BaseModel):
     query: str = Field(..., description="Debate topic/question")
     selected_domains: List[str] = Field(
         default_factory=list, description="Domain filter, also carried into the intent fallback"
+    )
+    simulation_depth: Literal["shallow", "standard", "deep"] = Field(
+        default="standard",
+        description="Depth gate (D3): shallow skips S5 persona distillation; standard/deep run it.",
     )
     config: DebateConfigRequest = Field(default_factory=DebateConfigRequest)
 
@@ -87,9 +91,13 @@ async def _run_debate_async(
     graph_id: str,
     config: DebateConfig,
     selected_domains: Optional[List[str]] = None,
+    simulation_depth: str = "standard",
 ) -> None:
     """Background task to run debate and stream results via WebSocket."""
     ws_manager = _DebateWSManager()
+
+    # D3: the depth gate — distillation is on for standard/deep, off for shallow.
+    distill = simulation_depth in {"standard", "deep"}
 
     try:
         async with _DEBATE_JOBS_LOCK:
@@ -130,6 +138,7 @@ async def _run_debate_async(
                     neo4j_user=cfg.neo4j_username,
                     neo4j_password=cfg.neo4j_password,
                     neo4j_database=cfg.neo4j_database,
+                    llm_client=llm,
                 ), ctx),
                 topology=CommunicationTopology(ctx._driver, ctx._db),
                 llm_runner=llm_runner,
@@ -146,6 +155,7 @@ async def _run_debate_async(
                 ws_broadcast=ws_manager.broadcast,
                 on_stage=ws_manager.broadcast,
                 intent=intent,
+                distill=distill,
             )
 
         # S9: this layer owns the intent extraction, so it reports the
@@ -259,6 +269,7 @@ async def create_debate(request: DebateRequest):
         graph_id=request.graph_id,
         config=config,
         selected_domains=request.selected_domains,
+        simulation_depth=request.simulation_depth,
     ))
 
     return DebateJobResponse(job_id=job_id, status="queued")

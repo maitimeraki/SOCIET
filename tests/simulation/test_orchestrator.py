@@ -119,7 +119,7 @@ async def test_five_step_flow():
     # selection decomposition and any S4 degradation land on the result)
     synth.synthesize.assert_awaited_once_with(
         query="test query", dataset_id="ds1", max_agents=5, intent=None, config=config,
-        warnings=result.warnings, selection_rows=result.selection_rows,
+        warnings=result.warnings, selection_rows=result.selection_rows, distill=False,
     )
 
     # Step 2: topology called per round (max_rounds=3)
@@ -234,6 +234,40 @@ async def test_no_profiles_returns_early():
     verdict_synth.asynthesize.assert_not_called()
     society_memory.commit_round.assert_not_awaited()
     society_memory.read_snapshot.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_empty_roster_result_keeps_accumulated_warnings():
+    """P5-A m1: the early return carries what earlier stages already warned about."""
+    synth = AsyncMock(spec=ProfileSynthesizer)
+    topo = AsyncMock(spec=CommunicationTopology)
+    society_memory = AsyncMock(spec=SocietyMemory)
+
+    async def synthesize(**kwargs):
+        kwargs["warnings"].append("S4 selection: degraded to density-only ordering")
+        return []
+
+    synth.synthesize.side_effect = synthesize
+    orch = _orch(synth, topo, society_memory)
+
+    result = await orch.run("q", "ds1", DebateConfig(max_agents=5, max_rounds=1), AsyncMock())
+
+    assert result.warnings == [
+        "S4 selection: degraded to density-only ordering",
+        "No relevant entities found for query",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_run_threads_the_distill_gate_to_synthesis():
+    """S5/D3: the boundary's gate reaches profile synthesis unchanged."""
+    orch = _stage_ready_orch(max_rounds=1)
+
+    await orch.run(
+        "q", "ds1", DebateConfig(max_agents=5, max_rounds=1), AsyncMock(), distill=True,
+    )
+
+    assert orch._profile_synthesizer.synthesize.await_args.kwargs["distill"] is True
 
 
 @pytest.mark.asyncio

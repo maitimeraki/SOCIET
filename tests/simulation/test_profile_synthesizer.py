@@ -669,3 +669,76 @@ async def test_synthesize_reports_the_selection_fallback_to_the_warnings_sink():
 
     assert len(warnings) == 1
     assert "falling back to density-only ordering" in warnings[0]
+
+
+"""S5: the `distill` keyword gates ONE batch call and threads its results per persona."""
+
+
+def _distill_synth(entities, distilled_by_name: dict):
+    """A synthesizer whose repo records the distillation and profile-build calls."""
+    async def build_profile(**kwargs):
+        return MagicMock(identity=PersonaIdentity(
+            name=kwargs["agent_name"], archetype="Analyst", communication_style="factual",
+        ))
+
+    repo = MagicMock()
+    repo.fetch_nodes_by_names = AsyncMock(return_value={})
+    repo.calculate_agent_metrics_and_context_for_llm = AsyncMock(return_value={})
+    repo.distill_profiles = AsyncMock(return_value=distilled_by_name)
+    repo.build_single_agent_profile_from_node = AsyncMock(side_effect=build_profile)
+
+    ctx = MagicMock()
+    ctx.find_relevant_entities = AsyncMock(return_value=entities)
+    return ProfileSynthesizer(persona_repo=repo, graph_context=ctx), repo
+
+
+def _build_calls(repo) -> dict:
+    """{agent_name: distilled kwarg} across every profile-build call."""
+    return {
+        call.kwargs["agent_name"]: call.kwargs["distilled"]
+        for call in repo.build_single_agent_profile_from_node.await_args_list
+    }
+
+
+@pytest.mark.asyncio
+async def test_distill_makes_one_batch_call_and_threads_results_per_persona():
+    intent = QueryIntent(
+        direct_keywords=["carbon"], latent_sectors=[], search_perspectives=[],
+        core_question="Tax carbon?", stance_axis="Support = tax it.",
+    )
+    distilled = {
+        "Carbon Analyst": ("Carbon one-liner.", "I am the carbon analyst."),
+        "Grid Engineer": ("Grid one-liner.", "I am the grid engineer."),
+    }
+    synth, repo = _distill_synth(_SELECTION_ENTITIES, distilled)
+
+    profiles = await synth.synthesize(
+        query="q", dataset_id="ds", max_agents=2, intent=intent, distill=True,
+    )
+
+    # ONE batched call for the whole selection set, fed the S3 question context
+    repo.distill_profiles.assert_awaited_once()
+    call = repo.distill_profiles.await_args.kwargs
+    assert [entry["name"] for entry in call["personas"]] == ["Carbon Analyst", "Grid Engineer"]
+    assert call["query"] == "q"
+    assert call["core_question"] == "Tax carbon?"
+    assert call["stance_axis"] == "Support = tax it."
+    # ...and each entry carries its own grounding + S4 anchors
+    carbon_entry = call["personas"][0]
+    assert carbon_entry["evidence"] == ["carbon tax economics policy"]
+    assert carbon_entry["anchors"][0]["id"] == "Carbon Analyst"
+
+    # every persona's distilled pair reaches its own profile build
+    assert _build_calls(repo) == distilled
+    assert [p.identity.name for p in profiles] == ["Carbon Analyst", "Grid Engineer"]
+
+
+@pytest.mark.asyncio
+async def test_distill_off_makes_no_llm_call_and_keeps_the_pre_s5_path():
+    """The default keyword is byte-identical behavior: no call, no distilled text."""
+    synth, repo = _distill_synth(_SELECTION_ENTITIES, {})
+
+    await synth.synthesize(query="q", dataset_id="ds", max_agents=2)
+
+    repo.distill_profiles.assert_not_called()
+    assert set(_build_calls(repo).values()) == {None}

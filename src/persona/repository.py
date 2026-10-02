@@ -33,7 +33,15 @@ logger = setup_logging()
 
 
 class PersonaRepository:
-    def __init__(self, neo4j_uri: str, neo4j_user: str, neo4j_password: str, neo4j_database: str):
+    def __init__(
+        self,
+        neo4j_uri: str,
+        neo4j_user: str,
+        neo4j_password: str,
+        neo4j_database: str,
+        llm_client: Any | None = None,
+    ):
+        self.llm_client = llm_client
         self.embed_model = OllamaEmbedding(
             model_name="nomic-embed-text:v1.5",
             base_url="http://localhost:11434",
@@ -323,6 +331,7 @@ class PersonaRepository:
         agent_metrics: Dict[str, Any],
         sector_results: List[Dict[str, Any]],
         llm_output: Optional[Dict[str, List[str]]],
+        distilled: Optional[Tuple[str, str]] = None,
     ) -> Agent:
         """Build the canonical Agent from an already-fetched node (avoids extra DB calls).
 
@@ -331,6 +340,10 @@ class PersonaRepository:
         expertise_areas) so downstream consumers — verdict CIOR weighting,
         round-runner prompt construction, topology pair scoring — never
         silently fall back to a default.
+
+        `distilled` is the S5 batch-distillation result for this persona
+        (`(description, perspective)`); when supplied it is the sole source of
+        `bio`/`detailed_perspective`. `None` keeps the metrics-derived text.
         """
         # Identity
         identity = PersonaIdentity(
@@ -356,10 +369,12 @@ class PersonaRepository:
         if isinstance(domain_tags, str):
             domain_tags = [t.strip() for t in domain_tags.split(",") if t.strip()]
 
-        # Description and perspective
+        # Description and perspective — the S5 distillation wins when supplied
         description = agent_metrics.get("context_text") or node.get("summary") or f"{agent_name} - Domain expert"
         matched_sectors = agent_metrics.get("matched_sectors", [])
-        if matched_sectors:
+        if distilled is not None:
+            description, perspective = str(distilled[0]), str(distilled[1])
+        elif matched_sectors:
             perspective = f"I specialize in {', '.join(matched_sectors[:3])}. {agent_metrics.get('neighbor_context', node.get('perspective', description))+agent_metrics.get('context_text', '')}"
         else:
             perspective = node.get("context_text") or node.get("perspective") or description
@@ -781,12 +796,207 @@ class PersonaRepository:
                 return desc, pers or desc
 
         # deterministic fallback that includes neighbor hints
+        return self._template_profile_text(agent_name, evidence, matched_text, neighbor_names)
+
+    @staticmethod
+    def _template_profile_text(
+        agent_name: str,
+        evidence: List[str],
+        matched_text: str,
+        neighbor_names: List[str],
+    ) -> Tuple[str, str]:
+        """The deterministic `(description, perspective)` template.
+
+        Shared by `_generate_description_and_perspective`'s fallback and the S5
+        batch distillation, so template text is produced in exactly one place.
+        """
+        head = evidence[0] if evidence else ""
         neighbor_hint = ", ".join([n for n in (list(dict.fromkeys(neighbor_names))[:3])])
-        desc_fb = f"{agent_name}: { (evidence[0].split('.')[:1][0] if evidence else ('Expert in ' + (matched_text or 'multiple domains'))) }"
-        pers_fb = f"I am {agent_name}. I specialize in {matched_text or 'multiple domains'}. I frequently interact with {neighbor_hint or 'related nodes'}. { (evidence[0].split('.')[:2] and ' '.join(evidence[0].split('.')[:2])) or '' }"
+        desc_fb = f"{agent_name}: { head.split('.')[:1][0] if head else ('Expert in ' + (matched_text or 'multiple domains')) }"
+        pers_fb = f"I am {agent_name}. I specialize in {matched_text or 'multiple domains'}. I frequently interact with {neighbor_hint or 'related nodes'}. {' '.join(head.split('.')[:2])}"
         return desc_fb[:1000], pers_fb[:4000]
-        
-        
+
+    #: Bounded prompt: at most this many evidence snippets / anchors per persona.
+    _DISTILL_EVIDENCE_CAP = 3
+    _DISTILL_ANCHOR_CAP = 4
+    _DISTILL_SNIPPET_CHARS = 200
+
+    async def distill_profiles(
+        self,
+        personas: List[Dict[str, Any]],
+        query: str,
+        core_question: str = "",
+        stance_axis: str = "",
+        warnings: Optional[List[str]] = None,
+    ) -> Dict[str, Tuple[str, str]]:
+        """S5: ONE batched LLM call that gives every selected persona its question-aware voice.
+
+        `personas` is the ordered selection set — each entry a mapping with:
+          * `name`           the persona's graph name (required)
+          * `node`           its node properties (the same context family
+                             `_generate_description_and_perspective` reads)
+          * `sector_results` its matched-sector rows
+          * `evidence`       grounding snippets synthesis already holds
+          * `anchors`        the S4 provenance anchors of its selection row
+        The run-level question context (`query`, `core_question`, `stance_axis`)
+        frames the whole prompt. No per-persona graph reads happen here.
+
+        Returns `{name: (description, perspective)}` for EVERY persona. Fallback
+        matrix: no client / no callable client method / the call raising → every
+        persona gets the deterministic template plus ONE warning; a persona whose
+        block is missing or unparseable gets the template plus a warning naming
+        it. `warnings` is the caller-owned sink. Never raises.
+
+        The prompt is bounded: at most `_DISTILL_EVIDENCE_CAP` snippets
+        (`_DISTILL_SNIPPET_CHARS` chars each) and `_DISTILL_ANCHOR_CAP` anchors
+        are shown per persona.
+        """
+        results: Dict[str, Tuple[str, str]] = {}
+        if not personas:
+            return results
+
+        def _entry_node(entry: Dict[str, Any]) -> Dict[str, Any]:
+            node = entry.get("node")
+            return node if isinstance(node, dict) else {}
+
+        def _template(entry: Dict[str, Any]) -> Tuple[str, str]:
+            node = _entry_node(entry)
+            sectors = [
+                str(row.get("domain_tag"))
+                for row in (entry.get("sector_results") or [])
+                if isinstance(row, dict) and row.get("domain_tag")
+            ]
+            matched_text = ", ".join(sectors) or ", ".join(
+                str(tag) for tag in (node.get("domain_tags") or []) if str(tag).strip()
+            )
+            evidence = [str(e) for e in (entry.get("evidence") or []) if str(e).strip()]
+            return self._template_profile_text(str(entry.get("name") or ""), evidence, matched_text, [])
+
+        def _block(entry: Dict[str, Any]) -> str:
+            node = _entry_node(entry)
+            name = str(entry.get("name") or "")
+            lines = [f"PERSONA: {name}"]
+            tags = ", ".join(str(tag) for tag in (node.get("domain_tags") or []) if str(tag).strip())
+            if tags:
+                lines.append(f"DOMAIN TAGS: {tags}")
+            sectors = [
+                str(row.get("domain_tag"))
+                for row in (entry.get("sector_results") or [])
+                if isinstance(row, dict) and row.get("domain_tag")
+            ]
+            if sectors:
+                lines.append(f"MATCHED SECTORS: {', '.join(sectors)}")
+            evidence = [str(e).strip() for e in (entry.get("evidence") or []) if str(e).strip()]
+            if evidence:
+                lines.append("EVIDENCE:")
+                lines.extend(f"- {e[: self._DISTILL_SNIPPET_CHARS]}" for e in evidence[: self._DISTILL_EVIDENCE_CAP])
+            anchors = [a for a in (entry.get("anchors") or []) if isinstance(a, dict)]
+            if anchors:
+                lines.append("ANCHORS:")
+                for anchor in anchors[: self._DISTILL_ANCHOR_CAP]:
+                    ref = anchor.get("id") or anchor.get("name") or ""
+                    lines.append(f"- {anchor.get('kind', 'ref')}:{ref}")
+            lines.append("")
+            return "\n".join(lines)
+
+        system_prompt = (
+            "You write the public profile of each debate participant listed below, "
+            "for a multi-agent debate on the given question. Ground every statement in "
+            "the participant's own evidence; make clear what the question means from "
+            "that participant's perspective.\n"
+            "Reply with one block per participant, in the given order, exactly in this "
+            "form and nothing else:\n"
+            "PERSONA: <name>\n"
+            "DESCRIPTION: <one concise UI-friendly sentence, 10-25 words>\n"
+            "PERSPECTIVE: <a 5-8 sentence first-person worldview grounded in the "
+            "evidence and the question>"
+        )
+        header = [f"QUERY: {query}", f"CORE QUESTION: {core_question or query}"]
+        if stance_axis:
+            header.append(f"STANCE AXIS: {stance_axis}")
+        user_prompt = "\n".join(header) + "\n\n" + "\n".join(_block(entry) for entry in personas)
+
+        llm = getattr(self, "llm_client", None)
+        llm_func = None
+        if llm is not None:
+            for name in ("generate", "chat", "complete", "invoke"):
+                if hasattr(llm, name):
+                    llm_func = getattr(llm, name)
+                    break
+
+        call_error: Optional[str] = None
+        text_out: Optional[str] = None
+        if llm is None:
+            call_error = "no LLM client configured"
+        elif llm_func is None:
+            call_error = "the LLM client has no generate/chat/complete/invoke method"
+        else:
+            try:
+                if inspect.iscoroutinefunction(llm_func):
+                    resp = await llm_func(system_prompt=system_prompt, user_prompt=user_prompt)
+                else:
+                    loop = asyncio.get_event_loop()
+                    resp = await loop.run_in_executor(
+                        None,
+                        lambda: llm_func(system_prompt=system_prompt, user_prompt=user_prompt),
+                    )
+                text_out = resp if isinstance(resp, str) else getattr(resp, "text", str(resp))
+            except Exception as exc:
+                call_error = f"batch call failed: {exc}"
+
+        if call_error is not None or not text_out:
+            reason = call_error or "the batch call returned no text"
+            if warnings is not None:
+                warnings.append(
+                    f"S5 distillation: {reason}; all {len(personas)} personas fell back to "
+                    "the deterministic template."
+                )
+            return {str(entry.get("name") or ""): _template(entry) for entry in personas}
+
+        # Parse the per-persona blocks out of the single response.
+        blocks_by_name: Dict[str, str] = {}
+        current_name: Optional[str] = None
+        current_lines: List[str] = []
+        for line in text_out.splitlines():
+            stripped = line.strip()
+            if stripped.upper().startswith("PERSONA:"):
+                if current_name is not None:
+                    blocks_by_name[current_name] = "\n".join(current_lines)
+                current_name = stripped.split(":", 1)[1].strip()
+                current_lines = []
+            elif current_name is not None:
+                current_lines.append(line)
+        if current_name is not None:
+            blocks_by_name[current_name] = "\n".join(current_lines)
+        blocks_by_key = {
+            " ".join(name.split()).casefold(): block for name, block in blocks_by_name.items()
+        }
+
+        for entry in personas:
+            name = str(entry.get("name") or "")
+            block = blocks_by_key.get(" ".join(name.split()).casefold(), "")
+            desc = pers = ""
+            if block:
+                parts = block.split("DESCRIPTION:")
+                if len(parts) > 1:
+                    dparts = parts[1].split("PERSPECTIVE:")
+                    desc = dparts[0].strip()
+                    pers = dparts[1].strip() if len(dparts) > 1 else ""
+                else:
+                    sents = block.strip().split(". ")
+                    desc = sents[0].strip() + ("." if not sents[0].endswith(".") else "")
+                    pers = " ".join(sents[1:]).strip()
+            if desc:
+                results[name] = (desc, pers or desc)
+            else:
+                if warnings is not None:
+                    warnings.append(
+                        f"S5 distillation: no parseable output for persona {name!r}; "
+                        "the deterministic template was used."
+                    )
+                results[name] = _template(entry)
+        return results
+
     async def get_provenance(self, agent_name: str, limit: int = 5) -> List[ProvenanceLink]:
         """Single, efficient provenance fetch."""
         from uuid import UUID
