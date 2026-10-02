@@ -18,3 +18,8 @@ llama-index-llms-openai
 llama-index-llms-openai-like
 neo4j
 litellm>=1.40.0
+python-multipart
+PyMuPDF
+python-docx
+beautifulsoup4
+requests

@@ -140,6 +140,10 @@ app.include_router(persona_router)
 from src.api.debate_api import router as debate_router
 app.include_router(debate_router)
 
+# Ingest API (documents → GlobalInputDocument payloads)
+from src.api.ingest_api import router as ingest_router
+app.include_router(ingest_router)
+
 
 RUNS: Dict[str, Dict[str, Any]] = {}
 _RUNS_LOCK = asyncio.Lock()
