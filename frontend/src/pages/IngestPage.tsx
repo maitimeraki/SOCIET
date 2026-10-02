@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useLocation, useNavigate } from 'react-router-dom'
 import { ArrowRight } from '@phosphor-icons/react'
 import { ingestFiles, ingestUrl } from '../api/rest'
 import FileDrop from '../components/ingest/FileDrop'
@@ -15,6 +15,8 @@ import type { DraftDoc } from '../wizard/draftStore'
 
 export default function IngestPage() {
   const navigate = useNavigate()
+  const location = useLocation()
+  const note = (location.state as { note?: string } | null)?.note
   const { corpusName, docs, setCorpusName, addDocs, updateDoc, removeDoc, setDatasetId } = useDraftStore()
   const [fetchingUrl, setFetchingUrl] = useState(false)
 
@@ -92,6 +94,10 @@ export default function IngestPage() {
           Add the documents your experts would have read — PDFs, Word files, Markdown, plain text, or a web page.
         </p>
       </div>
+
+      {note && (
+        <p className="rounded-[6px] border border-brass/40 bg-ink-800 px-4 py-3 text-body text-paper-dim">{note}</p>
+      )}
 
       <FileDrop onFiles={handleFiles} />
       <UrlFetchRow onFetch={handleUrl} busy={fetchingUrl} />
