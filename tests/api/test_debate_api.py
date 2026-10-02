@@ -435,6 +435,17 @@ class TestDebateJobPayload:
         ]
         assert [e["index"] for e in _stage_events(ws_manager)] == list(range(6))
 
+        # complete: the verdict rides the wire — same fields as the job result
+        complete_msg = next(
+            call.args[0] for call in ws_manager.broadcast.call_args_list
+            if call.args and call.args[0].get("type") == "complete"
+        )
+        assert "confidence_score" in complete_msg
+        assert "cluster_details" in complete_msg
+        assert "supporting_entities" in complete_msg
+        assert "opposing_entities" in complete_msg
+        assert complete_msg["confidence_score"] == result["confidence_score"] == 0.9
+
     @pytest.mark.asyncio
     async def test_job_result_warns_when_selection_falls_back_to_density(self):
         """Nothing clears the S4 threshold → the degradation is in the payload."""

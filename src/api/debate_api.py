@@ -185,15 +185,24 @@ async def _run_debate_async(
                 # S4 decomposition, rendered field-by-field so later additions
                 # (e.g. P2-B's provenance anchor) flow through automatically.
                 "selection": [asdict(row) for row in result.selection_rows],
+                "confidence_score": result.confidence_score,
+                "cluster_details": result.cluster_details,
+                "supporting_entities": result.supporting_entities,
+                "opposing_entities": result.opposing_entities,
             }
 
-        # Send completion event
+        # Send completion event (the verdict fields ride along — §12.3 item 5)
         await ws_manager.broadcast({
             "type": "complete",
             "converged": result.converged,
             "verdict": result.verdict,
             "final_stances": result.final_stances,
             "warnings": result.warnings,
+            "rounds_executed": result.rounds_executed,
+            "confidence_score": result.confidence_score,
+            "cluster_details": result.cluster_details,
+            "supporting_entities": result.supporting_entities,
+            "opposing_entities": result.opposing_entities,
         })
 
     except Exception as exc:

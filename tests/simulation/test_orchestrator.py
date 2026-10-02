@@ -160,7 +160,7 @@ async def test_ws_broadcast_passed_to_round_runner():
     topo.compute_round_pairs.return_value = [
         CommPair(agent_a="Alice", agent_b="Bob", shared_entities=[], score=0.5)
     ]
-    verdict_synth.synthesize.return_value = _make_verdict()
+    verdict_synth.asynthesize.return_value = _make_verdict()
     llm_runner.gather = MagicMock(return_value=_AsyncEmptyIter())
     # Explicit successful receipt: an unset AsyncMock return degrades to the commit-failed branch.
     society_memory.commit_round.return_value = _ok_receipt()
@@ -289,7 +289,7 @@ async def test_convergence_check_breaks_loop():
     topo.compute_round_pairs.side_effect = lambda *a, **kw: [
         CommPair(agent_a="Alice", agent_b="Bob", shared_entities=[], score=0.5)
     ]
-    verdict_synth.synthesize.return_value = _make_verdict()
+    verdict_synth.asynthesize.return_value = _make_verdict()
     # Fresh iterator per call so each round gets an empty async iterator
     llm_runner.gather = MagicMock(side_effect=lambda *a, **kw: _AsyncEmptyIter())
     # Explicit successful receipt: an unset AsyncMock return degrades to the commit-failed branch.
@@ -335,7 +335,7 @@ async def test_convergence_false_when_insufficient_rounds():
     profiles = [_make_profile(1, "Alice")]
     synth.synthesize.return_value = profiles
     topo.compute_round_pairs.return_value = []
-    verdict_synth.synthesize.return_value = _make_verdict()
+    verdict_synth.asynthesize.return_value = _make_verdict()
     llm_runner.gather = MagicMock(return_value=_AsyncEmptyIter())
 
     orchestrator = DebateOrchestrator(
@@ -368,7 +368,7 @@ async def test_check_convergence_domimant_stance_threshold():
     topo.compute_round_pairs.return_value = [
         CommPair(agent_a="Alice", agent_b="Bob", shared_entities=[], score=0.5)
     ]
-    verdict_synth.synthesize.return_value = _make_verdict()
+    verdict_synth.asynthesize.return_value = _make_verdict()
 
     # Build RoundResults with controlled turn stances so we can test
     # _check_convergence directly without wiring through the full LLM stack.
@@ -419,7 +419,7 @@ async def test_commit_failure_degrades_to_warning():
     topo.compute_round_pairs.side_effect = lambda *a, **kw: [
         CommPair(agent_a="Alice", agent_b="Bob", shared_entities=[], score=0.5)
     ]
-    verdict_synth.synthesize.return_value = _make_verdict()
+    verdict_synth.asynthesize.return_value = _make_verdict()
     society_memory.commit_round.side_effect = RuntimeError("db down")
     llm_runner.gather = MagicMock(side_effect=lambda *a, **kw: _AsyncEmptyIter())
 
@@ -443,7 +443,7 @@ async def test_commit_failure_first_round_does_not_abort_loop():
     topo.compute_round_pairs.side_effect = lambda *a, **kw: [
         CommPair(agent_a="Alice", agent_b="Bob", shared_entities=[], score=0.5)
     ]
-    verdict_synth.synthesize.return_value = _make_verdict()
+    verdict_synth.asynthesize.return_value = _make_verdict()
     llm_runner.gather = MagicMock(side_effect=lambda *a, **kw: _AsyncEmptyIter())
     # Round 1 blows up, round 2 commits fine — the loop must survive the first.
     society_memory.commit_round.side_effect = [RuntimeError("db down"), _ok_receipt()]
@@ -474,7 +474,7 @@ async def test_convergence_uses_config_threshold():
     topo.compute_round_pairs.side_effect = lambda *a, **kw: [
         CommPair(agent_a="Alice", agent_b="Bob", shared_entities=[], score=0.5)
     ]
-    verdict_synth.synthesize.return_value = _make_verdict()
+    verdict_synth.asynthesize.return_value = _make_verdict()
     llm_runner.gather = MagicMock(side_effect=lambda *a, **kw: _AsyncEmptyIter())
     society_memory = AsyncMock(spec=SocietyMemory)
     orchestrator = DebateOrchestrator(
@@ -494,10 +494,14 @@ async def test_convergence_uses_config_threshold():
 
 
 def _orch(synth, topo, society_memory, verdict_synth=None, llm_runner=None):
+    if verdict_synth is None:
+        verdict_synth = MagicMock(spec=VerdictSynthesizer)
+        # run() awaits asynthesize; an unconfigured AsyncMock cannot yield verdict fields.
+        verdict_synth.asynthesize.return_value = _make_verdict()
     return DebateOrchestrator(
         profile_synthesizer=synth, topology=topo,
         llm_runner=llm_runner or MagicMock(spec=BatchedLLMRunner),
-        verdict_synthesizer=verdict_synth or MagicMock(spec=VerdictSynthesizer),
+        verdict_synthesizer=verdict_synth,
         society_memory=society_memory,
     )
 
@@ -521,7 +525,7 @@ async def test_activation_pulls_in_candidates_after_commit():
     llm_runner = MagicMock(spec=BatchedLLMRunner)
     llm_runner.gather = MagicMock(side_effect=lambda *a, **kw: _AsyncEmptyIter())
     verdict_synth = MagicMock(spec=VerdictSynthesizer)
-    verdict_synth.synthesize.return_value = _make_verdict()
+    verdict_synth.asynthesize.return_value = _make_verdict()
 
     ws_calls = []
 
@@ -557,7 +561,7 @@ async def test_no_activation_event_when_no_candidate_resolves():
     llm_runner = MagicMock(spec=BatchedLLMRunner)
     llm_runner.gather = MagicMock(side_effect=lambda *a, **kw: _AsyncEmptyIter())
     verdict_synth = MagicMock(spec=VerdictSynthesizer)
-    verdict_synth.synthesize.return_value = _make_verdict()
+    verdict_synth.asynthesize.return_value = _make_verdict()
 
     ws_calls = []
 
@@ -804,7 +808,6 @@ async def test_selection_and_agent_events_are_broadcast():
 
     synth.synthesize.side_effect = fake_synthesize
     topo.compute_round_pairs.return_value = []
-    verdict_synth.synthesize.return_value = _make_verdict()
     verdict_synth.asynthesize.return_value = _make_verdict()
 
     orchestrator = _orchestrator_with(synth, topo, llm_runner, verdict_synth, society_memory)
@@ -958,3 +961,42 @@ async def test_convergence_stage_carries_share_and_threshold():
     stage_event = next(m for m in ws_calls if m["type"] == "stage" and m["stage"] == "convergence")
     assert stage_event["threshold"] == 0.8
     assert "share" in stage_event
+
+
+@pytest.mark.asyncio
+async def test_result_carries_the_verdict_payload_for_the_ui():
+    """`complete` needs the full verdict: confidence, cluster breakdown, entities (§12.3 item 5)."""
+    from src.simulation.pair_turn import ClusterSummary
+
+    synth = AsyncMock(spec=ProfileSynthesizer)
+    topo = AsyncMock(spec=CommunicationTopology)
+    llm_runner = MagicMock(spec=BatchedLLMRunner)
+    verdict_synth = MagicMock(spec=VerdictSynthesizer)
+    society_memory = AsyncMock(spec=SocietyMemory)
+
+    synth.synthesize.return_value = [_make_profile(1, "Alice")]
+    topo.compute_round_pairs.return_value = []
+    verdict = _make_verdict()
+    verdict.cluster_details = {
+        Stance.POSITIVE: ClusterSummary(
+            stance=Stance.POSITIVE, count=2, total_weight=0.6,
+            avg_confidence=0.7, avg_conviction=0.6, agents=["Alice"],
+        )
+    }
+    verdict.supporting_entities = ["Steel tariffs"]
+    verdict.opposing_entities = ["Entry cost"]
+    verdict_synth.asynthesize.return_value = verdict
+
+    orchestrator = _orchestrator_with(synth, topo, llm_runner, verdict_synth, society_memory)
+    ws_calls = []
+
+    async def fake_ws(msg):
+        ws_calls.append(msg)
+
+    result = await orchestrator.run("test query", "ds1", DebateConfig(max_agents=5, max_rounds=1), fake_ws)
+
+    assert result.confidence_score == 0.9
+    assert result.cluster_details["POSITIVE"]["count"] == 2
+    assert result.cluster_details["POSITIVE"]["stance"] == "POSITIVE"
+    assert result.supporting_entities == ["Steel tariffs"]
+    assert result.opposing_entities == ["Entry cost"]

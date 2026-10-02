@@ -31,7 +31,8 @@ Degradation: no emitter (`None`) → no events; an emitter that raises is logged
 and the run continues. Job state is authoritative; WS delivery is best-effort.
 
 Delivery: the payload surface is the **job-result record** (`GET /simulate/{job_id}`)
-— the WebSocket `complete` event carries the verdict summary only and
+— the WebSocket `complete` event carries the verdict payload (confidence,
+cluster breakdown, supporting/opposing entities — §12.3 item 5) and
 deliberately omits `intent`/`selection`.
 """
 import hashlib
@@ -69,6 +70,11 @@ class OrchestratedDebateResult:
     #: S4 ranked decomposition (all candidates, best first) — the "why these
     #: agents" answer the job payload renders; empty when selection could not run.
     selection_rows: list[SelectionRow] = field(default_factory=list)
+    #: Verdict payload for the UI (S9/§12.3 item 5) — additive, JSON-safe.
+    confidence_score: Optional[float] = None
+    cluster_details: Optional[dict[str, dict]] = None
+    supporting_entities: list[str] = field(default_factory=list)
+    opposing_entities: list[str] = field(default_factory=list)
 
 
 class DebateOrchestrator:
@@ -331,6 +337,12 @@ class DebateOrchestrator:
         verdict = await self._verdict_synthesizer.asynthesize(
             rounds=rounds, profiles=profiles, llm_client=llm_client
         )
+        cluster_details = None
+        if verdict is not None and verdict.cluster_details:
+            cluster_details = {
+                stance.value: {**asdict(summary), "stance": stance.value}
+                for stance, summary in verdict.cluster_details.items()
+            }
         await self._emit_stage(
             on_stage, stage_index, "verdict",
             converged=converged, rounds_executed=len(rounds),
@@ -354,6 +366,10 @@ class DebateOrchestrator:
             rounds_executed=len(rounds),
             intent=intent,
             selection_rows=selection_rows,
+            confidence_score=verdict.confidence_score if verdict else None,
+            cluster_details=cluster_details,
+            supporting_entities=list(verdict.supporting_entities) if verdict else [],
+            opposing_entities=list(verdict.opposing_entities) if verdict else [],
         )
 
     async def _emit_stage(
