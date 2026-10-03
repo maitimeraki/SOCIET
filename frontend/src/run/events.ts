@@ -58,6 +58,7 @@ export interface AgentProfile {
   communication_radius: number
   summary_provenance: ProvenanceLink[]
   confidence_breakdown: ConfidenceBreakdown
+  graph_snapshot?: { dataset_id: string; ontology_id?: string | null; chunk_count: number; version_hash: string }
 }
 
 export interface PairInfo {

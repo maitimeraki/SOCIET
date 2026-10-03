@@ -9,6 +9,7 @@ import RunHeader from '../components/run/RunHeader'
 import RosterStage from '../components/run/RosterStage'
 import EventStream from '../components/run/EventStream'
 import ArtifactsTab from '../components/run/ArtifactsTab'
+import AgentsTab from '../components/run/AgentsTab'
 import ChamberFloor from '../components/chamber/ChamberFloor'
 import ConvergenceTape from '../components/chamber/ConvergenceTape'
 import VerdictHero from '../components/verdict/VerdictHero'
@@ -199,11 +200,7 @@ export default function RunPage() {
           <p className="text-body text-paper-mute">The verdict appears when the debate completes.</p>
         )
       )}
-      {tab === 'agents' && (
-        <p className="text-body text-paper-mute">
-          {run.roster.length} agents seated{run.activations.length > 0 ? ` · ${run.activations.length} activations` : ''}
-        </p>
-      )}
+      {tab === 'agents' && <AgentsTab run={run} />}
       {tab === 'artifacts' && <ArtifactsTab run={run} events={events} />}
     </div>
   )
