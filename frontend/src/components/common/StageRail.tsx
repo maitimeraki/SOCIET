@@ -31,8 +31,9 @@ export default function StageRail({
           ) : (
             <span aria-hidden="true" className="h-2.5 w-2.5 rounded-full border border-paper-faint" />
           )
+        const current = stage.key === activeKey
         const inner = (
-          <span className={`inline-flex items-center gap-2 ${stage.key === activeKey ? 'text-paper' : 'text-paper-dim'}`}>
+          <span className={`inline-flex items-center gap-2 ${current ? 'text-paper' : 'text-paper-dim'}`}>
             {glyph}
             <span className="text-label uppercase">{stage.label}</span>
             {stage.note && <span className="tnum font-mono text-micro text-paper-mute">{stage.note}</span>}
@@ -44,13 +45,14 @@ export default function StageRail({
             {onSelect ? (
               <button
                 type="button"
+                aria-current={current ? 'step' : undefined}
                 onClick={() => onSelect(stage.key)}
                 className="rounded-[4px] px-1 py-0.5 transition-colors hover:bg-ink-800"
               >
                 {inner}
               </button>
             ) : (
-              inner
+              <span aria-current={current ? 'step' : undefined}>{inner}</span>
             )}
           </div>
         )

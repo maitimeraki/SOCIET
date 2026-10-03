@@ -19,7 +19,7 @@ import EntityChips from '../components/verdict/EntityChips'
 
 const TABS = ['roster', 'floor', 'verdict', 'agents', 'artifacts'] as const
 export type RunTab = (typeof TABS)[number]
-export const isRunTab = (value: string | undefined): value is RunTab =>
+const isRunTab = (value: string | undefined): value is RunTab =>
   (TABS as readonly string[]).includes(value ?? '')
 
 const RAIL_TARGETS: Record<string, RunTab> = {
@@ -73,12 +73,14 @@ export default function RunPage() {
   const location = useLocation()
   const replayFrom = (location.state as { replayFrom?: number } | null)?.replayFrom
   const [scrubbed, setScrubbed] = useState<number | null>(replayFrom ?? null)
+  const [lastReplayFrom, setLastReplayFrom] = useState(replayFrom)
 
   // The verdict's "Replay this run" navigates within this same route, so the component
   // never remounts and the initializer above cannot see the arriving replay state.
-  useEffect(() => {
-    if (replayFrom != null) setScrubbed(replayFrom)
-  }, [replayFrom])
+  if (replayFrom != null && replayFrom !== lastReplayFrom) {
+    setLastReplayFrom(replayFrom)
+    setScrubbed(replayFrom)
+  }
 
   const series = convergenceSeries(run)
   const latestRound = run.rounds.length > 0 ? run.rounds[run.rounds.length - 1].round : null
@@ -135,7 +137,7 @@ export default function RunPage() {
       {tab === 'floor' && (
         <div className="grid gap-6 min-[900px]:grid-cols-[3fr_2fr]">
           <div className="space-y-4">
-            <div className="rounded-[12px] border border-ink-700 bg-ink-900 p-4">
+            <div className={`rounded-[12px] border border-ink-700 bg-ink-900 p-4 ${run.status === 'failed' ? 'opacity-40' : ''}`}>
               <ChamberFloor
                 roster={run.roster}
                 rounds={run.rounds}
@@ -162,7 +164,24 @@ export default function RunPage() {
               </div>
             )}
           </div>
-          <EventStream items={streamItems(run)} live={isLive(run)} />
+          <div className="space-y-3">
+            {run.status === 'failed' && (
+              <div className="rounded-[6px] border border-critical/40 bg-ink-800 px-4 py-3">
+                <p className="text-body text-paper">The debate stopped: {run.error ?? 'unknown error'}.</p>
+                <div className="mt-2 flex items-center gap-4">
+                  <a href="#run-stream" className="text-body text-accent hover:text-accent-strong">
+                    See what happened ↓
+                  </a>
+                  <Link to="/new/society" className="text-body text-paper-dim hover:text-paper">
+                    Start a new run
+                  </Link>
+                </div>
+              </div>
+            )}
+            <div id="run-stream">
+              <EventStream items={streamItems(run)} live={isLive(run)} />
+            </div>
+          </div>
         </div>
       )}
       {tab === 'verdict' && (

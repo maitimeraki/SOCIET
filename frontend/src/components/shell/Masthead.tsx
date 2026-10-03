@@ -18,17 +18,17 @@ const navItem = ({ isActive }: { isActive: boolean }) =>
 
 export default function Masthead() {
   return (
-    <header className="flex h-14 items-center justify-between border-b border-ink-700 bg-ink-1000 px-6">
+    <header className="flex min-h-14 flex-wrap items-center justify-between gap-y-2 border-b border-ink-700 bg-ink-1000 px-6 py-2">
       <div className="flex items-center gap-2.5">
         <ChamberMark />
         <Link to="/" className="font-serif text-[18px] leading-none text-paper">Simulation World</Link>
       </div>
-      <nav className="flex items-center gap-1">
+      <nav aria-label="Primary" className="flex items-center gap-1">
         <NavLink to="/" end className={navItem}>Home</NavLink>
         <NavLink to="/runs" className={navItem}>Runs</NavLink>
         <NavLink to="/agents" className={navItem}>Agents</NavLink>
       </nav>
-      <div className="flex items-center gap-4">
+      <div className="ml-auto flex items-center gap-4">
         <HealthDot />
         <Link to="/new/ingest" className="inline-flex h-10 select-none items-center rounded-[4px] bg-accent px-4 text-body font-medium text-ink-1000 transition-colors hover:bg-accent-strong">
           Convene a society

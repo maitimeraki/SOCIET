@@ -1,7 +1,8 @@
 import type { RunState } from '../../run/reducer'
 import { rosterById } from '../../run/selectors'
 import { fmtScore } from '../../utils/format'
-import StanceChip, { asStance } from '../common/StanceChip'
+import { asStance } from '../../run/events'
+import StanceChip from '../common/StanceChip'
 
 export default function FinalStanceTable({ run }: { run: RunState }) {
   const byName = rosterById(run)

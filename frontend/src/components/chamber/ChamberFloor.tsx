@@ -73,8 +73,21 @@ export default function ChamberFloor({ roster, rounds, activeRound, livePairs, o
 
   const seated = seats.find((seat) => seat.profile.identity.name === selected)
 
+  const focusSeat = (name: string) => {
+    document.querySelector<SVGGElement>(`[aria-label^="${name.replace(/"/g, '')}"]`)?.focus()
+  }
+  const closePopover = () => {
+    if (selected) focusSeat(selected)
+    setSelected(null)
+  }
+
   return (
-    <div className="relative">
+    <div
+      className="relative"
+      onKeyDown={(event) => {
+        if (event.key === 'Escape' && selected) closePopover()
+      }}
+    >
       <svg
         viewBox={`0 0 ${FLOOR_VIEWBOX.width} ${FLOOR_VIEWBOX.height}`}
         className="hidden w-full sm:block"
@@ -122,7 +135,7 @@ export default function ChamberFloor({ roster, rounds, activeRound, livePairs, o
               const index = list.indexOf(seat.profile.identity.name)
               const next = list[(index + delta + list.length) % list.length]
               setSelected(null)
-              document.querySelector<SVGGElement>(`[aria-label^="${next.replace(/"/g, '')}"]`)?.focus()
+              focusSeat(next)
             }}
           />
         ))}
@@ -132,7 +145,7 @@ export default function ChamberFloor({ roster, rounds, activeRound, livePairs, o
         <div className="absolute right-3 top-3 w-[240px] rounded-[6px] border border-ink-600 bg-ink-800 p-3">
           <div className="flex items-start justify-between gap-2">
             <p className="text-body text-paper">{seated.profile.identity.name}</p>
-            <button type="button" aria-label="Close popover" onClick={() => setSelected(null)} className="text-paper-mute hover:text-paper">
+            <button type="button" aria-label="Close popover" onClick={closePopover} className="text-paper-mute hover:text-paper">
               <X size={12} aria-hidden="true" />
             </button>
           </div>

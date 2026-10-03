@@ -15,7 +15,7 @@ export default function SelectionTable({
   const sorted = [...rows].sort((a, b) => b.blended - a.blended)
   return (
     <div className="rounded-[6px] border border-ink-700 bg-ink-900 p-4">
-      <div className="grid grid-cols-[1fr_auto_auto_minmax(180px,240px)] items-center gap-x-4 gap-y-2">
+      <div className="grid grid-cols-[1fr_auto_auto_minmax(0,240px)] items-center gap-x-4 gap-y-2 sm:grid-cols-[1fr_auto_auto_minmax(180px,240px)]">
         <span className="text-label uppercase text-paper-mute">Name</span>
         <span className="text-label uppercase text-paper-mute">semantic</span>
         <span className="text-label uppercase text-paper-mute">density</span>
@@ -26,7 +26,7 @@ export default function SelectionTable({
             <span className="tnum font-mono text-mono text-paper-dim">{fmtScore(row.semantic)}</span>
             <span className="tnum font-mono text-mono text-paper-dim">{fmtScore(row.density)}</span>
             <span className="flex items-center gap-2">
-              <span className="relative h-1.5 flex-1 rounded-[4px] bg-ink-700">
+              <span className="relative hidden h-1.5 flex-1 rounded-[4px] bg-ink-700 sm:block">
                 <span
                   className="absolute inset-y-0 left-0 rounded-[4px] bg-accent"
                   style={{ width: `${Math.min(1, row.blended) * 100}%` }}

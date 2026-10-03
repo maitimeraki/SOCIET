@@ -93,6 +93,7 @@ export default function GraphPage() {
     }
     if (bootRef.current) return // StrictMode double-invoke guard
     bootRef.current = true
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- boot guard: run() owns the phase machine and must start synchronously once per mount
     void run()
     // No abort on unmount: the job continues server-side; the persisted job ids resume it on return (§7.3).
   }, [datasetId, navigate, run])

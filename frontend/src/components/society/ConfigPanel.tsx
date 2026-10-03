@@ -4,7 +4,7 @@ import Disclosure from '../ui/Disclosure'
 import Field from '../ui/Field'
 import NumberField from '../ui/NumberField'
 
-export const FIELD_LABELS: Record<keyof DebateConfig, string> = {
+const FIELD_LABELS: Record<keyof DebateConfig, string> = {
   max_agents: 'Max agents',
   max_rounds: 'Rounds',
   comm_radius: 'Comm radius',

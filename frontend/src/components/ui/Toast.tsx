@@ -13,7 +13,7 @@ interface ToastStore {
 
 let nextId = 1
 
-export const useToastStore = create<ToastStore>((set, get) => ({
+const useToastStore = create<ToastStore>((set, get) => ({
   toasts: [],
   push: (kind, message) => {
     const id = nextId++
@@ -23,6 +23,7 @@ export const useToastStore = create<ToastStore>((set, get) => ({
   dismiss: (id) => set({ toasts: get().toasts.filter((t) => t.id !== id) }),
 }))
 
+// eslint-disable-next-line react-refresh/only-export-components -- toast() is the store's imperative API, shared app-wide
 export function toast(kind: ToastKind, message: string) {
   useToastStore.getState().push(kind, message)
 }

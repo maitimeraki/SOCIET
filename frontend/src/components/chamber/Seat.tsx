@@ -43,14 +43,30 @@ export default function Seat({ seat, tabIndex, onKeyNav }: { seat: SeatSpec; tab
           event.preventDefault()
           onKeyNav(-1)
         }
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault()
+          seat.onSelect()
+        }
       }}
       onClick={seat.onSelect}
       initial={reduced ? false : { opacity: 0, y: 12 }}
       animate={{ opacity, y: 0 }}
       transition={{ duration: reduced ? 0 : 0.25, ease: [0.2, 0, 0, 1] }}
-      className="cursor-pointer focus:outline-none"
+      className="group cursor-pointer focus:outline-none"
     >
       <title>{`${profile.identity.name} · ${profile.identity.archetype} · ${stance} · conf ${profile.confidence.toFixed(2)}`}</title>
+      <rect
+        aria-hidden="true"
+        className="opacity-0 transition-opacity duration-150 group-focus-visible:opacity-100"
+        x={x - SEAT_W / 2 - 2}
+        y={y - SEAT_H / 2 - 2}
+        width={SEAT_W + 4}
+        height={SEAT_H + 4}
+        rx={4}
+        fill="none"
+        stroke="var(--color-accent)"
+        strokeWidth={1.5}
+      />
       <rect
         x={x - SEAT_W / 2}
         y={y - SEAT_H / 2}

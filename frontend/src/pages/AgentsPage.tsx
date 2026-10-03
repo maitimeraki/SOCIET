@@ -11,8 +11,10 @@ export default function AgentsPage() {
   const [datasets, setDatasets] = useState<{ id: string; runId: string }[]>([])
   const [datasetId, setDatasetId] = useState<string>('')
   const [roster, setRoster] = useState<AgentProfile[]>([])
-  const [loading, setLoading] = useState(true)
+  const [runsLoaded, setRunsLoaded] = useState(false)
+  const [loadedDatasetId, setLoadedDatasetId] = useState<string | null>(null)
   const [selected, setSelected] = useState<string | null>(null)
+  const loading = !runsLoaded || (datasetId !== '' && loadedDatasetId !== datasetId)
 
   useEffect(() => {
     listRuns()
@@ -22,22 +24,21 @@ export default function AgentsPage() {
         const entries = [...seen.entries()].map(([id, runId]) => ({ id, runId }))
         setDatasets(entries)
         if (entries.length > 0) setDatasetId(entries[0].id)
-        else setLoading(false)
+        setRunsLoaded(true)
       })
-      .catch(() => setLoading(false))
+      .catch(() => setRunsLoaded(true))
   }, [])
 
   useEffect(() => {
     const entry = datasets.find((dataset) => dataset.id === datasetId)
     if (!entry) return
-    setLoading(true)
     getRun(entry.runId)
       .then((doc) => {
         const profiles = doc.events.flatMap((event) => (event.type === 'agent' ? [event.profile] : []))
         setRoster(profiles)
       })
       .catch(() => setRoster([]))
-      .finally(() => setLoading(false))
+      .finally(() => setLoadedDatasetId(datasetId))
   }, [datasetId, datasets])
 
   const profile = selected ? roster.find((entry) => entry.identity.name === selected) ?? null : null

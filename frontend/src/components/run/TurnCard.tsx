@@ -1,6 +1,7 @@
 import type { TurnInfo } from '../../run/events'
+import { asStance } from '../../run/events'
 import { fmtScore } from '../../utils/format'
-import StanceChip, { asStance } from '../common/StanceChip'
+import StanceChip from '../common/StanceChip'
 import Tag from '../ui/Tag'
 
 export default function TurnCard({ turn, round }: { turn: TurnInfo; round: number }) {

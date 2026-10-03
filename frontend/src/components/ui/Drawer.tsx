@@ -2,6 +2,7 @@ import { useEffect, useRef } from 'react'
 import type { ReactNode, RefObject } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
 
+// eslint-disable-next-line react-refresh/only-export-components -- useModalA11y is shared by Drawer and Dialog
 export function useModalA11y(panel: RefObject<HTMLElement | null>, open: boolean, onClose: () => void) {
   useEffect(() => {
     if (!open) return

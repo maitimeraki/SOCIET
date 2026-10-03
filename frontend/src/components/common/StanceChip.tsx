@@ -1,17 +1,10 @@
 import type { Stance } from '../../run/events'
-import { asStance } from '../../run/events'
-
-export { asStance }
 
 const DOT: Record<Stance, string> = {
   POSITIVE: 'bg-stance-pos',
   NEUTRAL: 'bg-stance-neu',
   AMBIVALENT: 'bg-stance-amb',
   NEGATIVE: 'bg-stance-neg',
-}
-
-export function stanceDotClass(stance: Stance): string {
-  return DOT[stance]
 }
 
 export default function StanceChip({ stance, size = 'md' }: { stance: Stance; size?: 'sm' | 'md' }) {

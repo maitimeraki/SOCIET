@@ -29,17 +29,15 @@ export default function VerdictHero({
 }) {
   const reduced = useReducedMotion()
   const target = confidence ?? 0
-  const [display, setDisplay] = useState(reduced ? target : 0)
+  const [animated, setAnimated] = useState(0)
+  const display = reduced || confidence === null ? target : animated
 
   useEffect(() => {
-    if (reduced || confidence === null) {
-      setDisplay(target)
-      return
-    }
+    if (reduced || confidence === null) return
     const controls = animate(0, target, {
       duration: 0.6,
       ease: [0.2, 0, 0, 1],
-      onUpdate: (value) => setDisplay(value),
+      onUpdate: setAnimated,
     })
     return () => controls.stop()
   }, [target, reduced, confidence])

@@ -11,6 +11,7 @@ const VARIANT: Record<ButtonVariant, string> = {
   danger: 'border border-critical text-critical hover:bg-critical/10',
 }
 
+// eslint-disable-next-line react-refresh/only-export-components -- buttonClasses is the shared Link-as-button styling API (HomePage, ui barrel)
 export function buttonClasses(variant: ButtonVariant = 'secondary', size: ButtonSize = 40, extra = ''): string {
   const h = size === 40 ? 'h-10 px-4 text-body' : 'h-8 px-3 text-micro'
   return `inline-flex select-none items-center justify-center gap-2 rounded-[4px] font-medium transition-colors duration-150 disabled:cursor-not-allowed disabled:opacity-50 ${VARIANT[variant]} ${h} ${extra}`

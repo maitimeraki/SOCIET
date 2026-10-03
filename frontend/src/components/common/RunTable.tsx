@@ -3,7 +3,8 @@ import { CheckCircle, Warning, XCircle } from '@phosphor-icons/react'
 import type { RunSummary } from '../../api/types'
 import { fmtDate } from '../../utils/format'
 import Skeleton from '../ui/Skeleton'
-import StanceChip, { asStance } from './StanceChip'
+import { asStance } from '../../run/events'
+import StanceChip from './StanceChip'
 
 function OutcomeCell({ run }: { run: RunSummary }) {
   if (run.status === 'failed')
@@ -46,33 +47,35 @@ export default function RunTable({ runs, loading = false }: { runs: RunSummary[]
   }
   if (runs.length === 0) return null // callers own the empty state (§13)
   return (
-    <table className="w-full border-collapse text-body">
-      <thead>
-        <tr className="text-label uppercase text-paper-mute">
-          <th className="py-2 pr-4 text-left font-medium">Question</th>
-          <th className="py-2 pr-4 text-left font-medium">Corpus</th>
-          <th className="tnum py-2 pr-4 text-right font-medium">Rounds</th>
-          <th className="py-2 pr-4 text-left font-medium">Outcome</th>
-          <th className="py-2 text-right font-medium">Created</th>
-        </tr>
-      </thead>
-      <tbody className="text-paper-dim">
-        {runs.map((run) => (
-          <tr key={run.run_id} className="border-t border-ink-700 transition-colors hover:bg-ink-800">
-            <td className="max-w-[360px] py-2.5 pr-4">
-              <Link to={`/runs/${run.run_id}`} className="block truncate text-paper hover:text-accent">
-                {run.query}
-              </Link>
-            </td>
-            <td className="tnum py-2.5 pr-4 font-mono text-mono text-paper-mute">{run.dataset_id}</td>
-            <td className="tnum py-2.5 pr-4 text-right">{run.rounds_executed}</td>
-            <td className="py-2.5 pr-4">
-              <OutcomeCell run={run} />
-            </td>
-            <td className="tnum py-2.5 text-right font-mono text-mono text-paper-mute">{fmtDate(run.created_at)}</td>
+    <div className="overflow-x-auto">
+      <table className="w-full border-collapse text-body">
+        <thead>
+          <tr className="text-label uppercase text-paper-mute">
+            <th className="py-2 pr-4 text-left font-medium">Question</th>
+            <th className="py-2 pr-4 text-left font-medium">Corpus</th>
+            <th className="tnum py-2 pr-4 text-right font-medium">Rounds</th>
+            <th className="py-2 pr-4 text-left font-medium">Outcome</th>
+            <th className="py-2 text-right font-medium">Created</th>
           </tr>
-        ))}
-      </tbody>
-    </table>
+        </thead>
+        <tbody className="text-paper-dim">
+          {runs.map((run) => (
+            <tr key={run.run_id} className="border-t border-ink-700 transition-colors hover:bg-ink-800">
+              <td className="max-w-[360px] py-2.5 pr-4">
+                <Link to={`/runs/${run.run_id}`} className="block truncate text-paper hover:text-accent">
+                  {run.query}
+                </Link>
+              </td>
+              <td className="tnum py-2.5 pr-4 font-mono text-mono text-paper-mute">{run.dataset_id}</td>
+              <td className="tnum py-2.5 pr-4 text-right">{run.rounds_executed}</td>
+              <td className="py-2.5 pr-4">
+                <OutcomeCell run={run} />
+              </td>
+              <td className="tnum py-2.5 text-right font-mono text-mono text-paper-mute">{fmtDate(run.created_at)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
   )
 }

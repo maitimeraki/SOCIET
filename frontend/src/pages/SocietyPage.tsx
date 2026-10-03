@@ -8,6 +8,7 @@ import StageRail from '../components/common/StageRail'
 import QueryComposer from '../components/society/QueryComposer'
 import ConfigPanel from '../components/society/ConfigPanel'
 import Button from '../components/ui/Button'
+import { toast } from '../components/ui/Toast'
 import { fmtInt } from '../utils/format'
 
 export default function SocietyPage() {
@@ -38,6 +39,7 @@ export default function SocietyPage() {
         config,
       })
       clear() // documents are done with; datasetId survives for the run views
+      toast('success', 'Run convened')
       navigate(`/runs/${job_id}/roster`)
     } catch (err) {
       setError(
