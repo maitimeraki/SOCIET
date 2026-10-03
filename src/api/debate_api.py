@@ -2,15 +2,20 @@
 Debate API: Async debate simulation with streaming support.
 """
 import asyncio
+import logging
 import uuid
 from dataclasses import asdict
+from datetime import datetime, timezone
 from typing import Dict, Any, List, Literal, Optional
 
 from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel, Field
 
+from src.api import run_doc
 from src.simulation.debate_config import DebateConfig
 
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/simulate", tags=["debate"])
 
@@ -100,7 +105,7 @@ async def _run_debate_async(
     # Reuse the manager the job already holds: a client that connected before
     # the task started created and stored one (`stream_debate`), and replacing
     # it would silently drop that client from the S9 stage-event stream.
-    ws_manager = (_DEBATE_JOBS.get(job_id) or {}).get("ws_manager") or _DebateWSManager()
+    ws_manager = (_DEBATE_JOBS.get(job_id) or {}).get("ws_manager") or _DebateWSManager(job_id=job_id)
 
     # D3: the depth gate — distillation is on for standard/deep, off for shallow.
     distill = simulation_depth in {"standard", "deep"}
@@ -109,6 +114,8 @@ async def _run_debate_async(
         async with _DEBATE_JOBS_LOCK:
             _DEBATE_JOBS[job_id]["status"] = "running"
             _DEBATE_JOBS[job_id]["ws_manager"] = ws_manager
+
+        await _persist_debate_run(job_id)  # written at job start, events empty (§12.4)
 
         # S3 intent extraction: once per run, before the debate starts. Never
         # raises — on an LLM failure `expand_user_query` yields the deterministic
@@ -226,7 +233,8 @@ class _DebateWSManager:
     run from the start (§12.5) — reconnect and mid-run joins are deterministic.
     """
 
-    def __init__(self):
+    def __init__(self, job_id: str | None = None):
+        self.job_id = job_id
         self.connections: list[WebSocket] = []
         self.buffer: list[Dict[str, Any]] = []
         self._lock = asyncio.Lock()
@@ -255,11 +263,36 @@ class _DebateWSManager:
             self.buffer.append(data)
             connections = list(self.connections)
 
+        if self.job_id is not None:
+            await _persist_debate_run(self.job_id)
+
         for ws in connections:
             try:
                 await ws.send_json(data)
             except Exception:
                 pass  # Client disconnected
+
+
+async def _persist_debate_run(job_id: str) -> None:
+    """Mirror the live job to its run document. Log-and-continue — persistence never breaks a run."""
+    try:
+        job = _DEBATE_JOBS.get(job_id)
+        manager = job.get("ws_manager") if job else None
+        if not job or manager is None:
+            return
+        doc = {
+            "run_id": job_id,
+            "created_at": job.get("created_at"),
+            "query": job.get("query"),
+            "dataset_id": job.get("graph_id"),
+            "config": job.get("config"),
+            "status": job.get("status"),
+            "events": manager.buffer,
+            "result": job.get("result"),
+        }
+        await asyncio.to_thread(run_doc.write_run_doc, doc)
+    except Exception as exc:
+        logger.warning("run doc persist failed for %s: %s", job_id, exc)
 
 
 @router.post("/debate", response_model=DebateJobResponse, status_code=202)
@@ -293,6 +326,7 @@ async def create_debate(request: DebateRequest):
             "query": request.query,
             "graph_id": request.graph_id,
             "config": asdict(config),
+            "created_at": datetime.now(timezone.utc).isoformat(),
             "result": None,
             "error": None,
         }
@@ -308,6 +342,47 @@ async def create_debate(request: DebateRequest):
     ))
 
     return DebateJobResponse(job_id=job_id, status="queued")
+
+
+@router.get("/debates")
+async def list_debates():
+    """Newest-first run summaries for the history views (§12.4)."""
+    live = set(_DEBATE_JOBS.keys())
+    docs = await asyncio.to_thread(run_doc.list_run_docs)
+    return [_summarize_run_doc(doc, live) for doc in docs]
+
+
+@router.get("/debates/{run_id}")
+async def get_debate_doc(run_id: str):
+    doc = await asyncio.to_thread(run_doc.read_run_doc, run_id)
+    if doc is None:
+        raise HTTPException(status_code=404, detail="Run not found")
+    return doc
+
+
+def _summarize_run_doc(doc: dict, live: set[str]) -> dict:
+    result = doc.get("result") or {}
+    clusters = result.get("cluster_details") or {}
+    verdict_stance = None
+    if clusters:
+        dominant = max(clusters.values(), key=lambda cluster: cluster.get("total_weight", 0.0))
+        verdict_stance = dominant.get("stance")
+    status = doc.get("status", "unknown")
+    if status == "running" and doc.get("run_id") not in live:
+        status = "interrupted"  # server restarted; honest, no auto-resume (§7.10)
+    rounds_from_events = sum(
+        1 for event in doc.get("events", []) if event.get("type") == "stage" and event.get("stage") == "round"
+    )
+    return {
+        "run_id": doc.get("run_id"),
+        "created_at": doc.get("created_at"),
+        "query": doc.get("query"),
+        "dataset_id": doc.get("dataset_id"),
+        "status": status,
+        "rounds_executed": result.get("rounds_executed", rounds_from_events),
+        "converged": result.get("converged"),
+        "verdict_stance": verdict_stance,
+    }
 
 
 @router.get("/{job_id}", response_model=DebateStatusResponse)
@@ -340,7 +415,7 @@ async def stream_debate(websocket: WebSocket, job_id: str):
         if ws_manager is None:
             # Job not started yet, create a new manager. The outer lock is
             # already held here, so this write is atomic without re-taking it.
-            ws_manager = _DebateWSManager()
+            ws_manager = _DebateWSManager(job_id=job_id)
             if "ws_manager" not in _DEBATE_JOBS[job_id]:
                 _DEBATE_JOBS[job_id]["ws_manager"] = ws_manager
 

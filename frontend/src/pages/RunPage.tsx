@@ -2,7 +2,6 @@ import { useEffect, useState } from 'react'
 import { Link, NavLink, Navigate, useLocation, useNavigate, useParams } from 'react-router-dom'
 import { useRunStore } from '../run/runStore'
 import { convergenceSeries, isLive, railState, rosterProgress, streamItems, verdictView } from '../run/selectors'
-import { useDraftStore } from '../wizard/draftStore'
 import { toast } from '../components/ui/Toast'
 import StageRail from '../components/common/StageRail'
 import WarningList from '../components/common/WarningList'
@@ -38,7 +37,7 @@ export default function RunPage() {
   const events = useRunStore((s) => s.events)
   const connection = useRunStore((s) => s.connection)
   const loadAndConnect = useRunStore((s) => s.loadAndConnect)
-  const maxRounds = useDraftStore((s) => s.graphSummary) ? null : null // config max_rounds rides the run doc (Task 20); null until then
+  const maxRounds = run.config?.max_rounds ?? null
 
   useEffect(() => {
     if (runId) void loadAndConnect(runId)

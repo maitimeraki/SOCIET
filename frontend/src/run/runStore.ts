@@ -52,7 +52,10 @@ export const useRunStore = create<RunStoreState>((set, get) => ({
       const doc = await getRun(runId)
       if (generation !== loadGeneration) return
       set({
-        run: doc.events.reduce<RunState>((state, event) => applyEvent(state, event, Date.now()), { ...initialState, runId }),
+        run: doc.events.reduce<RunState>(
+          (state, event) => applyEvent(state, event, Date.now()),
+          { ...initialState, runId, config: doc.config ?? null },
+        ),
         events: doc.events,
       })
       if (doc.status === 'complete' || doc.status === 'failed') {
