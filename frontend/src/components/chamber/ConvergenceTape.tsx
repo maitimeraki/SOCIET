@@ -28,34 +28,36 @@ export default function ConvergenceTape({
         <span className="text-micro text-paper-mute">weighted share per round vs {threshold.toFixed(2)}</span>
       </div>
 
-      <div className="relative space-y-2">
+      <div className="relative">
         {/* brass threshold line across all tracks */}
-        <div aria-hidden="true" className="pointer-events-none absolute bottom-6 top-0 z-10 w-px border-l-2 border-dashed border-brass" style={{ left: `${threshold * 100}%` }}>
+        <div aria-hidden="true" className="pointer-events-none absolute inset-y-0 z-10 w-px border-l-2 border-dashed border-brass" style={{ left: `calc(2.25rem + ${threshold} * (100% - 2.25rem))` }}>
           <span className="absolute -top-1 left-1.5 rounded-[4px] bg-ink-900 px-1 font-mono text-micro text-brass">{threshold.toFixed(2)}</span>
         </div>
 
-        {ticks.length === 0 && <p className="text-body text-paper-mute">Waiting for round 1…</p>}
-        {ticks.map((tick) => (
-          <div key={tick.round} className="flex items-center gap-3">
-            <span className="tnum w-6 font-mono text-micro text-paper-mute">R{tick.round}</span>
-            <div className="flex h-3 flex-1 overflow-hidden rounded-[4px]">
-              {STANCE_ORDER.map((stance, index) => {
-                const share = tick.weights[stance] ?? 0
-                if (share <= 0) return null
-                return (
-                  <div
-                    key={stance}
-                    title={`round ${tick.round} · ${stance} ${share.toFixed(2)}`}
-                    className={`h-full ${SEGMENT_FILL[stance]} ${
-                      index === 0 ? 'rounded-l-[4px]' : ''
-                    } ${index === STANCE_ORDER.length - 1 ? 'rounded-r-[4px]' : ''} ${index > 0 ? 'ml-[2px]' : ''}`}
-                    style={{ width: `calc(${share * 100}% - 2px)` }}
-                  />
-                )
-              })}
+        <div className="space-y-2">
+          {ticks.length === 0 && <p className="text-body text-paper-mute">Waiting for round 1…</p>}
+          {ticks.map((tick) => (
+            <div key={tick.round} className="flex items-center gap-3">
+              <span className="tnum w-6 font-mono text-micro text-paper-mute">R{tick.round}</span>
+              <div className="flex h-3 flex-1 overflow-hidden rounded-[4px]">
+                {STANCE_ORDER.map((stance, index) => {
+                  const share = tick.weights[stance] ?? 0
+                  if (share <= 0) return null
+                  return (
+                    <div
+                      key={stance}
+                      title={`round ${tick.round} · ${stance} ${share.toFixed(2)}`}
+                      className={`h-full ${SEGMENT_FILL[stance]} ${
+                        index === 0 ? 'rounded-l-[4px]' : ''
+                      } ${index === STANCE_ORDER.length - 1 ? 'rounded-r-[4px]' : ''} ${index > 0 ? 'ml-[2px]' : ''}`}
+                      style={{ width: `calc(${share * 100}% - 2px)` }}
+                    />
+                  )
+                })}
+              </div>
             </div>
-          </div>
-        ))}
+          ))}
+        </div>
       </div>
 
       {active && (
