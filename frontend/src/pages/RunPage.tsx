@@ -1,13 +1,15 @@
-import { useEffect } from 'react'
-import { NavLink, Navigate, useNavigate, useParams } from 'react-router-dom'
+import { useEffect, useState } from 'react'
+import { Link, NavLink, Navigate, useNavigate, useParams } from 'react-router-dom'
 import { useRunStore } from '../run/runStore'
-import { isLive, railState, rosterProgress, streamItems } from '../run/selectors'
+import { convergenceSeries, isLive, railState, rosterProgress, streamItems } from '../run/selectors'
 import { useDraftStore } from '../wizard/draftStore'
 import StageRail from '../components/common/StageRail'
 import RunHeader from '../components/run/RunHeader'
 import RosterStage from '../components/run/RosterStage'
 import EventStream from '../components/run/EventStream'
 import ArtifactsTab from '../components/run/ArtifactsTab'
+import ChamberFloor from '../components/chamber/ChamberFloor'
+import ConvergenceTape from '../components/chamber/ConvergenceTape'
 
 const TABS = ['roster', 'floor', 'verdict', 'agents', 'artifacts'] as const
 export type RunTab = (typeof TABS)[number]
@@ -39,6 +41,11 @@ export default function RunPage() {
   useEffect(() => () => useRunStore.getState().disconnect(), [])
 
   const progress = rosterProgress(run)
+
+  const [scrubbed, setScrubbed] = useState<number | null>(null)
+  const series = convergenceSeries(run)
+  const latestRound = run.rounds.length > 0 ? run.rounds[run.rounds.length - 1].round : null
+  const activeRound = scrubbed ?? latestRound
 
   // Handoff: auto-switch to the floor only while the user is on the roster tab (§7.5).
   useEffect(() => {
@@ -85,12 +92,38 @@ export default function RunPage() {
           profiles={run.roster}
           progress={progress}
           onSkip={() => navigate(`/runs/${runId}/floor`)}
+          floorSlot={<ChamberFloor roster={run.roster} rounds={[]} activeRound={null} livePairs={{}} />}
         />
       )}
       {tab === 'floor' && (
-        <div className="grid gap-6 lg:grid-cols-[3fr_2fr]">
-          <div className="rounded-[6px] border border-ink-700 bg-ink-900 p-4 text-body text-paper-mute">
-            The floor arrives in Task 16 — {run.roster.length} seated so far.
+        <div className="grid gap-6 min-[900px]:grid-cols-[3fr_2fr]">
+          <div className="space-y-4">
+            <div className="rounded-[12px] border border-ink-700 bg-ink-900 p-4">
+              <ChamberFloor
+                roster={run.roster}
+                rounds={run.rounds}
+                activeRound={activeRound}
+                livePairs={run.livePairs}
+                onOpenProfile={() => navigate(`/runs/${runId}/agents`)}
+              />
+              <div className="mt-3 flex items-center justify-center gap-3 text-micro text-paper-mute">
+                <button type="button" disabled={activeRound === null || activeRound <= 1} onClick={() => setScrubbed(Math.max(1, (activeRound ?? 1) - 1))} className="rounded-[4px] px-2 py-0.5 hover:bg-ink-800 disabled:opacity-40">◀</button>
+                <span className="tnum font-mono">{activeRound === null ? 'live' : `round ${activeRound}`}</span>
+                <button type="button" disabled={scrubbed === null && activeRound === null} onClick={() => setScrubbed((current) => (current === null ? current : current >= (latestRound ?? 1) ? null : current + 1))} className="rounded-[4px] px-2 py-0.5 hover:bg-ink-800 disabled:opacity-40">▶</button>
+                <button type="button" onClick={() => setScrubbed(null)} className="rounded-[4px] px-2 py-0.5 text-accent hover:bg-ink-800">End — back to live</button>
+              </div>
+            </div>
+            <ConvergenceTape ticks={series} threshold={run.config?.convergence_threshold ?? 0.8} activeRound={activeRound} />
+            {run.verdict && (
+              <div className="flex items-center justify-between rounded-[6px] border border-ink-600 bg-ink-800 px-4 py-3">
+                <p className="text-body text-paper">
+                  {run.verdict.converged ? 'Converged — the verdict is ready.' : 'Verdict ready — a plurality, not a consensus.'}
+                </p>
+                <Link to={`/runs/${runId}/verdict`} className="text-body text-accent hover:text-accent-strong">
+                  Open verdict →
+                </Link>
+              </div>
+            )}
           </div>
           <EventStream items={streamItems(run)} live={isLive(run)} />
         </div>

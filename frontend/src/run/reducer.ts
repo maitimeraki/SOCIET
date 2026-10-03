@@ -1,3 +1,4 @@
+import type { DebateConfig } from '../api/types'
 import { parsePairId } from './events'
 import type { AgentProfile, ClusterSummary, ConsensusInfo, PairInfo, QueryIntent, RunEvent, SelectionRow, Stance, TurnInfo } from './events'
 
@@ -43,6 +44,8 @@ export interface RunState {
   status: 'queued' | 'running' | 'complete' | 'failed'
   query: string
   datasetId: string | null
+  /** Run config rides the run doc (Task 20); null until the doc provides it. */
+  config: DebateConfig | null
   stages: StageEntry[]
   intent: QueryIntent | null
   roster: AgentProfile[]
@@ -64,6 +67,7 @@ export const initialState: RunState = {
   status: 'queued',
   query: '',
   datasetId: null,
+  config: null,
   stages: [],
   intent: null,
   roster: [],

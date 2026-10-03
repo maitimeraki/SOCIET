@@ -1,8 +1,8 @@
 import type { Stance } from '../../run/events'
 
 export const FLOOR_VIEWBOX = { width: 1200, height: 520 }
-const CX = 600
-const CY = 520
+export const CX = 600
+export const CY = 520
 export const RADIUS_FRONT = 430
 export const RADIUS_BACK = 510
 
