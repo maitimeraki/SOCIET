@@ -131,8 +131,8 @@ export type RunEvent =
   | { type: 'ack' }
 
 /** `pair_id` is `"{dataset_id}:{agent_a}:{agent_b}"` — names may contain colons, so only the dataset prefix is stripped blindly (names never do). */
-export function parsePairId(pairId: string): { a: string; b: string } | null {
+export function parsePairId(pairId: string): { datasetId: string; a: string; b: string } | null {
   const parts = pairId.split(':')
   if (parts.length < 3) return null
-  return { a: parts[1], b: parts.slice(2).join(':') }
+  return { datasetId: parts[0], a: parts[1], b: parts.slice(2).join(':') }
 }
