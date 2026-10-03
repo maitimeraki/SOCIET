@@ -179,21 +179,15 @@ debate → read the verdict → reopen the run from Runs.
 
 ---
 
-## Quick Start
+## Environment
 
 ### 1. Environment Setup
 
 ```bash
-# Clone and navigate
-cd SIMULATION-WORLD
-
 # Create Python environment
 python -m venv .venv
 source .venv/bin/activate  # Linux/Mac
 .venv\Scripts\activate     # Windows
-
-# Install dependencies
-pip install -r requirements.txt
 ```
 
 ### 2. Configure Environment
@@ -212,22 +206,7 @@ NEO4J_PASSWORD=your_password
 NEO4J_DATABASE=neo4j
 ```
 
-### 3. Start Backend
-
-```bash
-# Start API server
-uvicorn src.api.api_server:app --host 127.0.0.1 --port 8000 --reload
-
-# API docs at http://localhost:8000/docs
-```
-
-### 4. Start Frontend (Development)
-
-```bash
-cd frontend
-npm install
-npm run dev
-```
+Startup (backend, frontend) and the golden path: see [Quickstart](#quickstart). API docs at http://localhost:8000/docs once the backend is up.
 
 ---
 
