@@ -1,15 +1,21 @@
 import { useEffect, useState } from 'react'
-import { Link, NavLink, Navigate, useNavigate, useParams } from 'react-router-dom'
+import { Link, NavLink, Navigate, useLocation, useNavigate, useParams } from 'react-router-dom'
 import { useRunStore } from '../run/runStore'
-import { convergenceSeries, isLive, railState, rosterProgress, streamItems } from '../run/selectors'
+import { convergenceSeries, isLive, railState, rosterProgress, streamItems, verdictView } from '../run/selectors'
 import { useDraftStore } from '../wizard/draftStore'
+import { toast } from '../components/ui/Toast'
 import StageRail from '../components/common/StageRail'
+import WarningList from '../components/common/WarningList'
 import RunHeader from '../components/run/RunHeader'
 import RosterStage from '../components/run/RosterStage'
 import EventStream from '../components/run/EventStream'
 import ArtifactsTab from '../components/run/ArtifactsTab'
 import ChamberFloor from '../components/chamber/ChamberFloor'
 import ConvergenceTape from '../components/chamber/ConvergenceTape'
+import VerdictHero from '../components/verdict/VerdictHero'
+import DivisionBars from '../components/verdict/DivisionBars'
+import FinalStanceTable from '../components/verdict/FinalStanceTable'
+import EntityChips from '../components/verdict/EntityChips'
 
 const TABS = ['roster', 'floor', 'verdict', 'agents', 'artifacts'] as const
 export type RunTab = (typeof TABS)[number]
@@ -41,8 +47,39 @@ export default function RunPage() {
   useEffect(() => () => useRunStore.getState().disconnect(), [])
 
   const progress = rosterProgress(run)
+  const view = verdictView(run)
+  const exportRun = () => {
+    const doc = {
+      run_id: run.runId,
+      query: run.query,
+      dataset_id: run.datasetId,
+      status: run.status,
+      config: run.config,
+      rounds_executed: run.rounds.length,
+      verdict: run.verdict,
+      roster: run.roster,
+      events,
+    }
+    const blob = new Blob([JSON.stringify(doc, null, 2)], { type: 'application/json' })
+    const url = URL.createObjectURL(blob)
+    const anchor = document.createElement('a')
+    anchor.href = url
+    anchor.download = `${run.runId ?? 'run'}_run.json`
+    anchor.click()
+    URL.revokeObjectURL(url)
+    toast('success', 'Export downloaded')
+  }
 
-  const [scrubbed, setScrubbed] = useState<number | null>(null)
+  const location = useLocation()
+  const replayFrom = (location.state as { replayFrom?: number } | null)?.replayFrom
+  const [scrubbed, setScrubbed] = useState<number | null>(replayFrom ?? null)
+
+  // The verdict's "Replay this run" navigates within this same route, so the component
+  // never remounts and the initializer above cannot see the arriving replay state.
+  useEffect(() => {
+    if (replayFrom != null) setScrubbed(replayFrom)
+  }, [replayFrom])
+
   const series = convergenceSeries(run)
   const latestRound = run.rounds.length > 0 ? run.rounds[run.rounds.length - 1].round : null
   const activeRound = scrubbed ?? latestRound
@@ -129,9 +166,39 @@ export default function RunPage() {
         </div>
       )}
       {tab === 'verdict' && (
-        <p className="text-body text-paper-mute">
-          {run.verdict ? run.verdict.summary : 'The verdict appears when the debate completes.'}
-        </p>
+        view ? (
+          <div className="space-y-10">
+            <VerdictHero
+              stance={view.stance}
+              confidence={view.confidence}
+              converged={view.converged}
+              summary={view.summary}
+              onReplay={() => navigate(`/runs/${runId}/floor`, { state: { replayFrom: 1 } })}
+              onExport={exportRun}
+              onNew={() => navigate('/new/society')}
+            />
+            <section>
+              <h2 className="mb-4 text-heading text-paper">The division</h2>
+              <DivisionBars clusters={view.clusters} />
+            </section>
+            <section>
+              <h2 className="mb-4 text-heading text-paper">Final stances</h2>
+              <FinalStanceTable run={run} />
+            </section>
+            <section>
+              <h2 className="mb-4 text-heading text-paper">On the record</h2>
+              <EntityChips supporting={view.supporting} opposing={view.opposing} />
+            </section>
+            {view.warnings.length > 0 && (
+              <section>
+                <h2 className="mb-4 text-heading text-paper">Warnings ({view.warnings.length})</h2>
+                <WarningList warnings={view.warnings} />
+              </section>
+            )}
+          </div>
+        ) : (
+          <p className="text-body text-paper-mute">The verdict appears when the debate completes.</p>
+        )
       )}
       {tab === 'agents' && (
         <p className="text-body text-paper-mute">
