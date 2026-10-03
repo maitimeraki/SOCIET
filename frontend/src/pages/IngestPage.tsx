@@ -20,6 +20,31 @@ export default function IngestPage() {
   const { corpusName, docs, setCorpusName, addDocs, updateDoc, removeDoc, setDatasetId } = useDraftStore()
   const [fetchingUrl, setFetchingUrl] = useState(false)
 
+  /** POST the files and reconcile the response onto the existing cards — consume-matched,
+   * so a duplicate-name batch updates each card exactly once. */
+  const ingest = async (placeholders: DraftDoc[], files: File[]) => {
+    try {
+      const response = await ingestFiles(files)
+      const pending = [...placeholders]
+      for (const doc of response.documents) {
+        const index = pending.findIndex((placeholder) => placeholder.title === doc.title)
+        if (index === -1) continue
+        const [target] = pending.splice(index, 1)
+        updateDoc(target.document_id, { ...doc, document_id: target.document_id, status: 'ready' })
+      }
+      for (const failure of response.failures) {
+        const index = pending.findIndex((placeholder) => placeholder.title === failure.filename)
+        if (index === -1) continue
+        const [target] = pending.splice(index, 1)
+        updateDoc(target.document_id, { status: 'failed', error: failure.detail })
+      }
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : 'unknown error'
+      for (const placeholder of placeholders) updateDoc(placeholder.document_id, { status: 'failed', error: reason })
+      toast('error', `Upload failed: ${reason}. Nothing was saved — try again.`)
+    }
+  }
+
   const handleFiles = async (files: File[]) => {
     const placeholders: DraftDoc[] = files.map((file) => ({
       document_id: crypto.randomUUID(),
@@ -31,21 +56,7 @@ export default function IngestPage() {
       file,
     }))
     addDocs(placeholders)
-    try {
-      const response = await ingestFiles(files)
-      for (const doc of response.documents) {
-        const target = placeholders.find((placeholder) => placeholder.title === doc.title)
-        if (target) updateDoc(target.document_id, { ...doc, document_id: target.document_id, status: 'ready' })
-      }
-      for (const failure of response.failures) {
-        const target = placeholders.find((placeholder) => placeholder.title === failure.filename)
-        if (target) updateDoc(target.document_id, { status: 'failed', error: failure.detail })
-      }
-    } catch (error) {
-      const reason = error instanceof Error ? error.message : 'unknown error'
-      for (const placeholder of placeholders) updateDoc(placeholder.document_id, { status: 'failed', error: reason })
-      toast('error', `Upload failed: ${reason}. Nothing was saved — try again.`)
-    }
+    await ingest(placeholders, files)
   }
 
   const handleUrl = async (url: string) => {
@@ -66,7 +77,7 @@ export default function IngestPage() {
       return
     }
     updateDoc(doc.document_id, { status: 'extracting', error: undefined })
-    await handleFiles([doc.file])
+    await ingest([doc], [doc.file])
   }
 
   const readyCount = docs.filter((doc) => doc.status === 'ready').length

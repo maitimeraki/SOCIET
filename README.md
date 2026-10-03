@@ -145,13 +145,13 @@ Verdict Synthesis → Society Opinion + Confidence + Dissenting Views
 - **Plain Text** - Built-in read
 - **URLs** - requests + BeautifulSoup web scraping
 
-### Frontend (In Progress)
-- **React 18** + **TypeScript**
-- **Vite** - Build tool
-- **Tailwind CSS** - Styling
-- **Zustand** - State management
-- **@xyflow/react** - Graph visualization
-- **Framer Motion** - Animations
+### Frontend
+- **React 19** + **TypeScript** - UI and type safety
+- **Vite 8** - Build tool
+- **Tailwind CSS 4** - Styling
+- **Zustand 5** - State management
+- **React Router 7** - Routing
+- **Framer Motion 11** - Animations
 
 ---
 
@@ -160,7 +160,7 @@ Verdict Synthesis → Society Opinion + Confidence + Dissenting Views
 ### Backend
 1. Install the runtime dependencies — `pip install -r requirements.txt` does not resolve
    (langchain pin conflict); install the runtime set directly:
-   `pip install "litellm>=1.40.0" fastapi uvicorn pydantic python-dotenv neo4j httpx \`
+   `pip install "litellm>=1.40.0" fastapi uvicorn websockets pydantic python-dotenv neo4j httpx \`
    `  python-multipart PyMuPDF python-docx beautifulsoup4 requests`
 2. Point `.env` at Neo4j and an LLM provider (`NEO4J_URI`, `NEO4J_USERNAME`,
    `NEO4J_PASSWORD`, plus your provider key), then bootstrap the schema:
@@ -233,6 +233,13 @@ Startup (backend, frontend) and the golden path: see [Quickstart](#quickstart). 
 | Endpoint | Method | Purpose |
 |----------|--------|---------|
 | `/simulate/debate` | POST | Graph-backed agent debate |
+
+### Runs History
+
+| Endpoint | Method | Purpose |
+|----------|--------|---------|
+| `/simulate/debates` | GET | List run summaries (newest first) |
+| `/simulate/debates/{run_id}` | GET | Fetch one run document (events + verdict) |
 
 ### Health
 
@@ -342,7 +349,7 @@ Debate stops when dominant stance reaches 80% weighted consensus.
 
 - [TECHNOLOGY_STACK.md](docs/TECHNOLOGY_STACK.md) - Complete tech stack and production architecture
 - [ARCHITECTURE.md](docs/ARCHITECTURE.md) - Detailed component architecture
-- [DESIGN.md](DESIGN.md) - Frontend design specification (Neural Observatory)
+- [DESIGN.md](docs/DESIGN.md) - Frontend design specification (The Chamber)
 
 ---
 

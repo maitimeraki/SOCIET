@@ -70,10 +70,19 @@ def test_stale_running_doc_reads_as_interrupted(client, store_dir):
 
 
 def test_run_doc_round_trip(client, store_dir):
-    run_doc.write_run_doc(_doc("r1", "2026-10-01T10:00:00+00:00"))
+    run_doc.write_run_doc(_doc("r1", "2026-10-01T10:00:00+00:00", result={"rounds_executed": 2, "converged": True}))
     fetched = client.get("/simulate/debates/r1").json()
     assert fetched["query"] == "question r1"
     assert fetched["events"] == []
+    assert fetched["status"] == "complete"
+    assert fetched["result"] == {"rounds_executed": 2, "converged": True}
+
+
+def test_list_skips_corrupt_docs(client, store_dir):
+    run_doc.write_run_doc(_doc("r1", "2026-10-01T10:00:00+00:00"))
+    (store_dir / "broken.json").write_text("{ not json", encoding="utf-8")
+    runs = client.get("/simulate/debates").json()
+    assert [run["run_id"] for run in runs] == ["r1"]
 
 
 def test_missing_run_doc_is_404(client, store_dir):
@@ -98,3 +107,24 @@ async def test_persist_debate_run_mirrors_the_live_job(store_dir):
     finally:
         async with _DEBATE_JOBS_LOCK:
             _DEBATE_JOBS.pop("job-x", None)
+
+
+@pytest.mark.asyncio
+async def test_job_bound_manager_broadcast_persists(store_dir):
+    """A manager constructed WITH a job_id auto-persists on every broadcast (§12.4)."""
+    manager = _DebateWSManager(job_id="job-y")
+    async with _DEBATE_JOBS_LOCK:
+        _DEBATE_JOBS["job-y"] = {
+            "job_id": "job-y", "status": "running", "query": "q", "graph_id": "ds-1",
+            "config": {"max_rounds": 2}, "created_at": "2026-10-02T10:00:00+00:00",
+            "result": None, "error": None, "ws_manager": manager,
+        }
+    try:
+        await manager.broadcast({"type": "stage", "stage": "intake", "index": 0})
+        doc = run_doc.read_run_doc("job-y")
+    finally:
+        async with _DEBATE_JOBS_LOCK:
+            _DEBATE_JOBS.pop("job-y", None)
+    assert doc is not None
+    assert doc["events"][0]["stage"] == "intake"
+    assert doc["status"] == "running"

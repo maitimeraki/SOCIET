@@ -1,6 +1,7 @@
 datetime
 fastapi
 uvicorn
+websockets
 pydantic
 openai
 python-dotenv

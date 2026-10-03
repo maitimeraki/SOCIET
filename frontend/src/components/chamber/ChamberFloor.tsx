@@ -18,7 +18,6 @@ export interface ChamberFloorProps {
   livePairs: Record<string, { a: string; b: string }>
   /** Profile navigation (floor tab); the control is hidden when omitted (roster seating mode). */
   onOpenProfile?: () => void
-  compact?: boolean
 }
 
 export default function ChamberFloor({ roster, rounds, activeRound, livePairs, onOpenProfile }: ChamberFloorProps) {

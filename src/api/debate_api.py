@@ -404,6 +404,10 @@ async def stream_debate(websocket: WebSocket, job_id: str):
     """
     WebSocket endpoint to stream debate rounds in real-time.
     """
+    # Accept before any close: ASGI servers drop a pre-accept close code, so the
+    # 4004 rejection below only reaches the client on an accepted connection.
+    await websocket.accept()
+
     # Verify job exists
     async with _DEBATE_JOBS_LOCK:
         job = _DEBATE_JOBS.get(job_id)
@@ -419,7 +423,6 @@ async def stream_debate(websocket: WebSocket, job_id: str):
             if "ws_manager" not in _DEBATE_JOBS[job_id]:
                 _DEBATE_JOBS[job_id]["ws_manager"] = ws_manager
 
-    await websocket.accept()
     await ws_manager.attach(websocket)
 
     try:

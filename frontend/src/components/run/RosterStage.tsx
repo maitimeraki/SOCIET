@@ -57,7 +57,6 @@ export default function RosterStage({
   profiles: AgentProfile[]
   progress: RosterProgress
   onSkip: () => void
-  /** Task 16 renders the seating floor here; until then it is undefined and beat ④ is text-only. */
   floorSlot?: ReactNode
 }) {
   const reduced = useReducedMotion()

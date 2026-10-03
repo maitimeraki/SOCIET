@@ -27,7 +27,9 @@ export const useRunStore = create<RunStoreState>((set, get) => ({
   connection: 'idle',
   socket: null,
 
-  reset: () => set((state) => ({ run: { ...initialState, runId: state.run.runId }, events: [] })),
+  // Config rides the run doc only — the replayed event buffer carries none, so a
+  // reset on (re)connect must keep it or the header/tape lose the run's settings.
+  reset: () => set((state) => ({ run: { ...initialState, runId: state.run.runId, config: state.run.config }, events: [] })),
 
   dispatch: (event) =>
     set((state) => ({

@@ -29,10 +29,12 @@ export default function ConvergenceTape({
       </div>
 
       <div className="relative">
-        {/* brass threshold line across all tracks */}
-        <div aria-hidden="true" className="pointer-events-none absolute inset-y-0 z-10 w-px border-l-2 border-dashed border-brass" style={{ left: `calc(2.25rem + ${threshold} * (100% - 2.25rem))` }}>
-          <span className="absolute -top-1 left-1.5 rounded-[4px] bg-ink-900 px-1 font-mono text-micro text-brass">{threshold.toFixed(2)}</span>
-        </div>
+        {/* brass threshold line across all tracks — only meaningful once a tick exists */}
+        {ticks.length > 0 && (
+          <div aria-hidden="true" className="pointer-events-none absolute inset-y-0 z-10 w-px border-l-2 border-dashed border-brass" style={{ left: `calc(2.25rem + ${threshold} * (100% - 2.25rem))` }}>
+            <span className="absolute -top-1 left-1.5 rounded-[4px] bg-ink-900 px-1 font-mono text-micro text-brass">{threshold.toFixed(2)}</span>
+          </div>
+        )}
 
         <div className="space-y-2">
           {ticks.length === 0 && <p className="text-body text-paper-mute">Waiting for round 1…</p>}

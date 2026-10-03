@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { getRun, listRuns } from '../api/rest'
 import type { AgentProfile } from '../run/events'
 import AgentCard from '../components/agents/AgentCard'
@@ -14,6 +14,8 @@ export default function AgentsPage() {
   const [runsLoaded, setRunsLoaded] = useState(false)
   const [loadedDatasetId, setLoadedDatasetId] = useState<string | null>(null)
   const [selected, setSelected] = useState<string | null>(null)
+  /** Supersession counter: only the latest roster request may write state (runStore pattern). */
+  const rosterGeneration = useRef(0)
   const loading = !runsLoaded || (datasetId !== '' && loadedDatasetId !== datasetId)
 
   useEffect(() => {
@@ -32,13 +34,21 @@ export default function AgentsPage() {
   useEffect(() => {
     const entry = datasets.find((dataset) => dataset.id === datasetId)
     if (!entry) return
+    const generation = ++rosterGeneration.current
     getRun(entry.runId)
       .then((doc) => {
+        if (generation !== rosterGeneration.current) return
         const profiles = doc.events.flatMap((event) => (event.type === 'agent' ? [event.profile] : []))
         setRoster(profiles)
       })
-      .catch(() => setRoster([]))
-      .finally(() => setLoadedDatasetId(datasetId))
+      .catch(() => {
+        if (generation !== rosterGeneration.current) return
+        setRoster([])
+      })
+      .finally(() => {
+        if (generation !== rosterGeneration.current) return
+        setLoadedDatasetId(datasetId)
+      })
   }, [datasetId, datasets])
 
   const profile = selected ? roster.find((entry) => entry.identity.name === selected) ?? null : null

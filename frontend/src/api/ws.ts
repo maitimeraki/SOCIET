@@ -40,8 +40,15 @@ export function connectRun(jobId: string, options: RunSocketOptions): RunSocket 
       if (event.type === 'ping' || event.type === 'ack') return // transport keep-alives, never folded
       options.onEvent(event)
     }
-    socket.onclose = () => {
+    socket.onclose = (event) => {
       if (closed) return
+      if (event.code === 4004) {
+        // Terminal: the job was rejected or is gone — a reconnect cannot succeed.
+        closed = true
+        if (timer !== undefined) window.clearTimeout(timer)
+        options.onStatus('closed')
+        return
+      }
       options.onStatus('reconnecting')
       const delay = BACKOFF_MS[Math.min(attempt, BACKOFF_MS.length - 1)]
       attempt += 1

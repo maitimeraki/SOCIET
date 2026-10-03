@@ -66,24 +66,38 @@ export default function RunPage() {
     anchor.href = url
     anchor.download = `${run.runId ?? 'run'}_run.json`
     anchor.click()
-    URL.revokeObjectURL(url)
+    // Deferred: revoking synchronously after click() is racy in Firefox.
+    setTimeout(() => URL.revokeObjectURL(url), 0)
     toast('success', 'Export downloaded')
   }
 
   const location = useLocation()
   const replayFrom = (location.state as { replayFrom?: number } | null)?.replayFrom
-  const [scrubbed, setScrubbed] = useState<number | null>(replayFrom ?? null)
-  const [lastReplayFrom, setLastReplayFrom] = useState(replayFrom)
-
-  // The verdict's "Replay this run" navigates within this same route, so the component
-  // never remounts and the initializer above cannot see the arriving replay state.
-  if (replayFrom != null && replayFrom !== lastReplayFrom) {
-    setLastReplayFrom(replayFrom)
-    setScrubbed(replayFrom)
-  }
+  const [scrubbed, setScrubbed] = useState<number | null>(null)
+  const [lastReplayFrom, setLastReplayFrom] = useState<number | undefined>(undefined)
+  const [lastRunId, setLastRunId] = useState(runId)
 
   const series = convergenceSeries(run)
   const latestRound = run.rounds.length > 0 ? run.rounds[run.rounds.length - 1].round : null
+
+  // A different runId is a different run — the previous run's scrub position must not leak.
+  if (runId !== lastRunId) {
+    setLastRunId(runId)
+    setLastReplayFrom(undefined)
+    setScrubbed(null)
+  }
+
+  // The verdict's "Replay this run" navigates within this same route, so the component
+  // never remounts — watch the arriving replay state instead of an initializer.
+  // Stale or out-of-range values are ignored; valid ones clamp to the latest round.
+  if (
+    replayFrom != null && Number.isInteger(replayFrom) && replayFrom >= 1 &&
+    replayFrom !== lastReplayFrom && latestRound !== null
+  ) {
+    setLastReplayFrom(replayFrom)
+    setScrubbed(Math.min(replayFrom, latestRound))
+  }
+
   const activeRound = scrubbed ?? latestRound
 
   // Handoff: auto-switch to the floor only while the user is on the roster tab (§7.5).
@@ -148,7 +162,7 @@ export default function RunPage() {
               <div className="mt-3 flex items-center justify-center gap-3 text-micro text-paper-mute">
                 <button type="button" disabled={activeRound === null || activeRound <= 1} onClick={() => setScrubbed(Math.max(1, (activeRound ?? 1) - 1))} className="rounded-[4px] px-2 py-0.5 hover:bg-ink-800 disabled:opacity-40">◀</button>
                 <span className="tnum font-mono">{activeRound === null ? 'live' : `round ${activeRound}`}</span>
-                <button type="button" disabled={scrubbed === null && activeRound === null} onClick={() => setScrubbed((current) => (current === null ? current : current >= (latestRound ?? 1) ? null : current + 1))} className="rounded-[4px] px-2 py-0.5 hover:bg-ink-800 disabled:opacity-40">▶</button>
+                <button type="button" disabled={scrubbed === null} onClick={() => setScrubbed((current) => (current === null ? current : current >= (latestRound ?? 1) ? null : current + 1))} className="rounded-[4px] px-2 py-0.5 hover:bg-ink-800 disabled:opacity-40">▶</button>
                 <button type="button" onClick={() => setScrubbed(null)} className="rounded-[4px] px-2 py-0.5 text-accent hover:bg-ink-800">End — back to live</button>
               </div>
             </div>

@@ -4,18 +4,27 @@ import { AnimatePresence, motion } from 'framer-motion'
 
 // eslint-disable-next-line react-refresh/only-export-components -- useModalA11y is shared by Drawer and Dialog
 export function useModalA11y(panel: RefObject<HTMLElement | null>, open: boolean, onClose: () => void) {
+  // Latest-ref: callers pass inline closures, so keying the effect on onClose would
+  // re-run it every parent render and steal focus back to the panel.
+  const onCloseRef = useRef(onClose)
+  useEffect(() => {
+    onCloseRef.current = onClose
+  })
+
   useEffect(() => {
     if (!open) return
     const node = panel.current
+    const opener = document.activeElement as HTMLElement | null
     node?.focus()
     const onKey = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') onClose()
+      if (event.key === 'Escape') onCloseRef.current()
       if (event.key === 'Tab' && node) {
         const focusables = node.querySelectorAll<HTMLElement>('a[href], button:not([disabled]), textarea, input, select, [tabindex]:not([tabindex="-1"])')
         if (focusables.length === 0) return
         const first = focusables[0]
         const last = focusables[focusables.length - 1]
-        if (event.shiftKey && document.activeElement === first) {
+        // The panel itself is a boundary: Shift+Tab right after open lands on it.
+        if (event.shiftKey && (document.activeElement === first || document.activeElement === node)) {
           event.preventDefault()
           last.focus()
         } else if (!event.shiftKey && document.activeElement === last) {
@@ -25,8 +34,11 @@ export function useModalA11y(panel: RefObject<HTMLElement | null>, open: boolean
       }
     }
     document.addEventListener('keydown', onKey)
-    return () => document.removeEventListener('keydown', onKey)
-  }, [open, onClose, panel])
+    return () => {
+      document.removeEventListener('keydown', onKey)
+      opener?.focus()
+    }
+  }, [open, panel])
 }
 
 export default function Drawer({ open, onClose, title, children }: { open: boolean; onClose: () => void; title: string; children: ReactNode }) {
