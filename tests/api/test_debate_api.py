@@ -85,6 +85,13 @@ class TestDebateRequest:
         assert config.llm_concurrency == 8
         assert config.topology_score_threshold == 0.15
 
+    def test_debate_request_exposes_all_panel_fields(self):
+        """All ten UI settings fields are real request fields (§7.4)."""
+        config = DebateConfigRequest()
+        assert config.max_pairs_per_round == 50
+        assert config.max_new_agents_per_round == 2
+        assert config.snapshot_top_k == 8
+
     def test_debate_request_custom_values(self):
         """Test custom config values."""
         config = DebateConfigRequest(

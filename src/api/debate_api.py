@@ -21,9 +21,12 @@ class DebateConfigRequest(BaseModel):
     max_rounds: int = Field(default=5, ge=1, le=20)
     comm_radius: int = Field(default=1, ge=1, le=5)
     min_entity_overlap: int = Field(default=1, ge=1, le=10)
+    max_pairs_per_round: int = Field(default=50, ge=1, le=200)
     convergence_threshold: float = Field(default=0.8, ge=0.0, le=1.0)
     llm_concurrency: int = Field(default=8, ge=1, le=32)
     topology_score_threshold: float = Field(default=0.15, ge=0.0, le=1.0)
+    max_new_agents_per_round: int = Field(default=2, ge=0, le=10)
+    snapshot_top_k: int = Field(default=8, ge=5, le=20)
 
 
 class DebateRequest(BaseModel):
@@ -275,9 +278,12 @@ async def create_debate(request: DebateRequest):
         max_rounds=request.config.max_rounds,
         comm_radius=request.config.comm_radius,
         min_entity_overlap=request.config.min_entity_overlap,
+        max_pairs_per_round=request.config.max_pairs_per_round,
         convergence_threshold=request.config.convergence_threshold,
         llm_concurrency=request.config.llm_concurrency,
         topology_score_threshold=request.config.topology_score_threshold,
+        max_new_agents_per_round=request.config.max_new_agents_per_round,
+        snapshot_top_k=request.config.snapshot_top_k,
     )
 
     async with _DEBATE_JOBS_LOCK:
