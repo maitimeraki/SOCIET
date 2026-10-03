@@ -155,6 +155,30 @@ Verdict Synthesis → Society Opinion + Confidence + Dissenting Views
 
 ---
 
+## Quickstart
+
+### Backend
+1. Install the runtime dependencies — `pip install -r requirements.txt` does not resolve
+   (langchain pin conflict); install the runtime set directly:
+   `pip install "litellm>=1.40.0" fastapi uvicorn pydantic python-dotenv neo4j httpx \`
+   `  python-multipart PyMuPDF python-docx beautifulsoup4 requests`
+2. Point `.env` at Neo4j and an LLM provider (`NEO4J_URI`, `NEO4J_USERNAME`,
+   `NEO4J_PASSWORD`, plus your provider key), then bootstrap the schema:
+   `python -m src.cli.bootstrap_neo4j`
+3. `uvicorn src.api.api_server:app --host 127.0.0.1 --port 8000`
+
+### Frontend
+1. `cd frontend && npm install`
+2. `npm run dev` → http://localhost:5173
+   The API base defaults to `http://127.0.0.1:8000`; override with `VITE_API_BASE`
+   in `frontend/.env.local`.
+
+### Golden path
+Ingest 2 PDFs → Build the graph → Set the question → watch the roster build and the
+debate → read the verdict → reopen the run from Runs.
+
+---
+
 ## Quick Start
 
 ### 1. Environment Setup
