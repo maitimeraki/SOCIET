@@ -41,7 +41,13 @@ def list_run_docs() -> list[dict[str, Any]]:
     docs: list[dict[str, Any]] = []
     for path in RUNS_DIR.glob("*.json"):
         try:
-            docs.append(json.loads(path.read_text(encoding="utf-8")))
-        except (OSError, json.JSONDecodeError) as exc:
+            # ValueError covers both bad JSON and undecodable bytes (UnicodeDecodeError).
+            doc = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError) as exc:
             logger.warning("skipping unreadable run doc %s: %s", path, exc)
+            continue
+        if not isinstance(doc, dict):
+            logger.warning("skipping non-document run file %s", path)
+            continue
+        docs.append(doc)
     return sorted(docs, key=lambda doc: doc.get("created_at") or "", reverse=True)

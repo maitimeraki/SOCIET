@@ -81,6 +81,8 @@ def test_run_doc_round_trip(client, store_dir):
 def test_list_skips_corrupt_docs(client, store_dir):
     run_doc.write_run_doc(_doc("r1", "2026-10-01T10:00:00+00:00"))
     (store_dir / "broken.json").write_text("{ not json", encoding="utf-8")
+    (store_dir / "null.json").write_text("null", encoding="utf-8")
+    (store_dir / "badbytes.json").write_bytes(b"\xff\xfe\x00")
     runs = client.get("/simulate/debates").json()
     assert [run["run_id"] for run in runs] == ["r1"]
 
