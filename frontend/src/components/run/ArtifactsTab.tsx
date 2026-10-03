@@ -2,6 +2,7 @@ import type { RunEvent } from '../../run/events'
 import type { RunState } from '../../run/reducer'
 import { fmtScore } from '../../utils/format'
 import SelectionTable from './SelectionTable'
+import EventLog from './EventLog'
 import WarningList from '../common/WarningList'
 
 export default function ArtifactsTab({ run, events }: { run: RunState; events: RunEvent[] }) {
@@ -75,14 +76,7 @@ export default function ArtifactsTab({ run, events }: { run: RunState; events: R
 
       <section>
         <h2 className="mb-3 text-heading text-paper">Raw event log</h2>
-        <div className="max-h-[420px] overflow-auto rounded-[6px] border border-ink-700 bg-ink-900 p-3">
-          {events.length === 0 && <p className="text-body text-paper-mute">No events yet.</p>}
-          {events.map((event, index) => (
-            <div key={index} className="tnum whitespace-pre-wrap break-all font-mono text-mono leading-[18px] text-paper-dim">
-              {String(index).padStart(4, '0')} {event.type} {JSON.stringify(event)}
-            </div>
-          ))}
-        </div>
+        <EventLog events={events} />
       </section>
     </div>
   )
