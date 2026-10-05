@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 class LLMClient:
     """Multi-provider LLM client over the LiteLLM gateway."""
 
-    PROVIDERS = ["openai", "anthropic", "huggingface", "ollama"]
+    PROVIDERS = ["openai", "anthropic", "huggingface", "ollama","nvidia_nim"]
     FALLBACK_ORDER = ["ollama", "openai", "anthropic", "huggingface"]
 
     @staticmethod
@@ -48,6 +48,9 @@ class LLMClient:
             kwargs["api_key"] = LLMConfig.anthropic_api_key
         elif provider == "huggingface" and LLMConfig.huggingface_api_key:
             os.environ.setdefault("HF_TOKEN", LLMConfig.huggingface_api_key)
+        elif provider == "nvidia_nim" and LLMConfig.nvidia_nim_api_key:
+            kwargs["api_key"] = LLMConfig.nvidia_nim_api_key
+            kwargs["api_base"] = LLMConfig.nvidia_nim_base_url
         return kwargs
 
     async def generate(

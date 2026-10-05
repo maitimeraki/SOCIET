@@ -24,12 +24,16 @@ class LLMConfig:
     ollama_model: str = os.getenv("OLLAMA_MODEL", "qwen3.5-16k:4b")  # or "mistral", "codellama", etc.
     ollama_base_url: str = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
     
+    # Nvidia Nim
+    nvidia_nim_api_key: str = os.getenv("NVIDIA_NIM_API_KEY","")
+    nvidia_nim_base_url: str = os.getenv("NVIDIA_NIM_BASE_URL", "")
+    
     # Default provider (user's favorite)
     default_llm_provider: str = os.getenv("DEFAULT_LLM_PROVIDER", "ollama")
-    default_model: str = ollama_model  # For backward compatibility
+    default_model: str = "nvidia/nemotron-3.5-lightning-30b-a3b"  # For backward compatibility
     
     @classmethod
-    def update_provider(cls, provider: str):
+    def update_provider(cls, provider: str): 
         """Update the default provider"""
         if provider in ["openai", "anthropic", "huggingface", "ollama"]:
             cls.default_llm_provider = provider

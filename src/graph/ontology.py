@@ -6,6 +6,7 @@ from typing import List, Dict, Any
 from llama_index.llms.openai_like import OpenAILike
 from src.logging.setup_logging import setup_logging
 from src.utils.hydrate_ontology import hydrate_ontology
+from src.llm.config_llm import LLMConfig
 from src.graph.models_graph import (
     ProcessedChunk,
     LocalOntology,
@@ -95,8 +96,8 @@ class OntologyDiscoveryStage:
     def __init__(self, model: str = "gemma4-e4b-64k:latest", temperature: float = 0.7):
         self.llm = OpenAILike(
             model=model,
-            api_base="http://localhost:11434/v1",
-            api_key="ollama",
+            api_base=LLMConfig.nvidia_nim_base_url or "https://integrate.api.nvidia.com/v1",
+            api_key=LLMConfig.nvidia_nim_api_key,
             is_chat_model=True,
             timeout=480,
             strict=True, # Reliable Structured Output

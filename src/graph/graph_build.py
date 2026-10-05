@@ -9,6 +9,7 @@ from llama_index.llms.openai_like import OpenAILike
 from llama_index.embeddings.ollama import OllamaEmbedding
 from llama_index.graph_stores.neo4j import Neo4jPropertyGraphStore
 from src.graph.config_graph import GraphConfig
+from src.llm.config_llm import LLMConfig
 from src.graph.models_graph import ProcessedChunk, LocalOntology
 
 
@@ -68,11 +69,9 @@ class GraphExtractionStage:
         self.config = config
         self.llm = OpenAILike(
                 model=self.config.extraction_model,
-                api_base="http://localhost:11434/v1",
-                api_key="ollama",
-                temperature=0.7,
-                timeout=900,
-                max_retries=3,
+                api_base=LLMConfig.nvidia_nim_base_url or "https://integrate.api.nvidia.com/v1",
+                api_key=LLMConfig.nvidia_nim_api_key,
+                temperature=0.7
             )
         self.embed_model = OllamaEmbedding(
             model_name="nomic-embed-text:v1.5",

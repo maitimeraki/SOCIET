@@ -1,4 +1,4 @@
-.venv
+.venv/
 .env
 .vscode
 __pycache__/
@@ -24,3 +24,4 @@ runtime/
 .claude/
 .serena/
 .superpowers/
+.gstack/
