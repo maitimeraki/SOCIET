@@ -1,12 +1,14 @@
 import os
-import dotenv
 from dataclasses import dataclass
-dotenv.load_dotenv()  # Load environment variables from .env file
+
+from src.llm.config_llm import LLMConfig
 
 @dataclass
 class GraphConfig:
-    discovery_model: str = os.getenv("GRAPH_DISCOVERY_MODEL", "gpt-4.1")
-    extraction_model: str = os.getenv("GRAPH_EXTRACTION_MODEL", "gpt-4.1-mini")
+    # Graph stages are the analysis tier — cheap but capable. Single source:
+    # LLMConfig (env: ANALYSIS_LLM_MODEL); .env is loaded there too.
+    discovery_model: str = LLMConfig.analysis_model
+    extraction_model: str = LLMConfig.analysis_model
     temperature: float = float(os.getenv("GRAPH_TEMPERATURE", "0.0"))
     discovery_sample_size: int = int(os.getenv("GRAPH_DISCOVERY_SAMPLE_SIZE", "12"))
     discovery_timeout_seconds: int = int(os.getenv("GRAPH_DISCOVERY_TIMEOUT_SECONDS", "90"))

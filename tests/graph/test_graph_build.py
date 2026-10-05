@@ -173,3 +173,39 @@ class TestGraphExtractionStage:
 
             with pytest.raises(RuntimeError, match="Extraction failed"):
                 await stage.run("test-dataset", sample_chunks, sample_ontology)
+
+
+class TestStageConfigWiring:
+    """Stage credentials come from central config, never literals."""
+
+    def test_nim_credentials_come_from_config(self, monkeypatch):
+        """OpenAILike receives the NIM key/base from LLMConfig (env-backed)."""
+        from src.graph.config_graph import GraphConfig
+        from src.graph.graph_build import GraphExtractionStage
+        from src.llm.config_llm import LLMConfig
+
+        monkeypatch.setattr(LLMConfig, "nvidia_nim_api_key", "sentinel-key")
+        monkeypatch.setattr(LLMConfig, "nvidia_nim_base_url", "http://sentinel-base/v1")
+
+        with patch('src.graph.graph_build.OpenAILike') as mock_llm, \
+             patch('src.graph.graph_build.OllamaEmbedding'), \
+             patch('src.graph.graph_build.Neo4jPropertyGraphStore'), \
+             patch('src.graph.graph_build.SentenceSplitter'):
+            GraphExtractionStage(GraphConfig())
+
+            assert mock_llm.call_args.kwargs["api_key"] == "sentinel-key"
+            assert mock_llm.call_args.kwargs["api_base"] == "http://sentinel-base/v1"
+
+    def test_discovery_model_defaults_to_analysis_tier(self):
+        """GraphConfig discovery default is the central analysis-tier model."""
+        from src.graph.config_graph import GraphConfig
+        from src.llm.config_llm import LLMConfig
+
+        assert GraphConfig().discovery_model == LLMConfig.analysis_model
+
+    def test_extraction_model_defaults_to_analysis_tier(self):
+        """GraphConfig extraction default is the central analysis-tier model."""
+        from src.graph.config_graph import GraphConfig
+        from src.llm.config_llm import LLMConfig
+
+        assert GraphConfig().extraction_model == LLMConfig.analysis_model

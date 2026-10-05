@@ -63,6 +63,8 @@ class LLMClient:
     ) -> str:
         """Generate a completion. Falls back through the provider chain on failure."""
         provider = provider or getattr(LLMConfig, "default_llm_provider", "ollama")
+        # LLMClient is the debate stack: with no model named, use the debate tier.
+        model = model or LLMConfig.debate_model
         if provider not in self.PROVIDERS:
             raise ValueError(f"Unknown provider: {provider}. Available: {self.PROVIDERS}")
 
@@ -98,6 +100,7 @@ class LLMClient:
     ) -> AsyncGenerator[str, None]:
         """Stream tokens; degrades to a single generate() call on failure."""
         provider = provider or getattr(LLMConfig, "default_llm_provider", "ollama")
+        model = model or LLMConfig.debate_model
         if provider not in self.PROVIDERS:
             raise ValueError(f"Unknown provider: {provider}. Available: {self.PROVIDERS}")
         try:

@@ -4,6 +4,10 @@ from typing import Optional
 import os
 from dataclasses import dataclass
 
+import dotenv
+
+dotenv.load_dotenv()  # Load .env before the class defaults below read os.getenv
+
 @dataclass
 class LLMConfig:
     """Configuration for LLM providers"""
@@ -30,7 +34,12 @@ class LLMConfig:
     
     # Default provider (user's favorite)
     default_llm_provider: str = os.getenv("DEFAULT_LLM_PROVIDER", "ollama")
-    default_model: str = "nvidia/nemotron-3.5-lightning-30b-a3b"  # For backward compatibility
+
+    # Two-tier model defaults — the single source for every model reference.
+    # ANALYSIS: cheap but capable — ontology discovery and graph analysis.
+    # DEBATE: the most powerful — agent debate in the simulation world.
+    analysis_model: str = os.getenv("ANALYSIS_LLM_MODEL", "claude-sonnet-5")
+    debate_model: str = os.getenv("DEBATE_LLM_MODEL", "claude-opus-5-5")
     
     @classmethod
     def update_provider(cls, provider: str): 

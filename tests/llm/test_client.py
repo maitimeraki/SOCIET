@@ -60,6 +60,27 @@ async def test_caller_model_not_leaked_to_fallback_legs():
 
 
 @pytest.mark.asyncio
+async def test_generate_defaults_to_configured_debate_model():
+    """No model given: the configured debate-tier default is used."""
+    with patch("src.llm.client.litellm.acompletion", new_callable=AsyncMock) as ac:
+        ac.return_value = _resp("ok")
+        await LLMClient().generate("sys", "usr", provider="openai")
+
+        assert ac.await_args.kwargs["model"] == f"openai/{LLMConfig.debate_model}"
+
+
+@pytest.mark.asyncio
+async def test_stream_generate_defaults_to_configured_debate_model():
+    """Streaming honours the same debate-tier default as generate()."""
+    with patch("src.llm.client.litellm.acompletion", new_callable=AsyncMock) as ac:
+        ac.return_value = _stream_of([_chunk("hi")])
+        out = [token async for token in LLMClient().stream_generate("sys", "usr", provider="openai")]
+
+        assert out == ["hi"]
+        assert ac.await_args.kwargs["model"] == f"openai/{LLMConfig.debate_model}"
+
+
+@pytest.mark.asyncio
 async def test_stream_generate_yields_deltas():
     chunks = [_chunk("he"), _chunk(None), SimpleNamespace(choices=[]), _chunk("llo")]
     with patch("src.llm.client.litellm.acompletion", new_callable=AsyncMock) as ac:

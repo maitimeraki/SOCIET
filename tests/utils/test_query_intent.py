@@ -154,14 +154,17 @@ def test_fallback_intent_serializes_round_trip():
     assert qi.QueryIntent.model_validate(json.loads(json.dumps(dumped))) == intent
 
 
-def test_model_defaults_to_configuration():
+def test_provider_defaults_to_configuration():
     extractor = qi.QueryIntend(client=StubClient())
 
-    config = get_llm_config()
+    assert extractor.provider == get_llm_config().default_llm_provider
 
-    assert extractor.provider == config.default_llm_provider
-    assert extractor.model == getattr(config, f"{config.default_llm_provider}_model")
-    assert extractor.model
+
+def test_model_default_is_deferred_to_the_client():
+    """Even for a provider with a `<provider>_model` config, no model is resolved here."""
+    extractor = qi.QueryIntend(provider="ollama", client=StubClient())
+
+    assert extractor.model is None
 
 
 def test_module_has_no_blocking_call_and_no_hardcoded_model():

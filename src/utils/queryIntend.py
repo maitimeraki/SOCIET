@@ -65,7 +65,8 @@ class QueryIntend:
     ):
         config = get_llm_config()
         self.provider = provider or getattr(config, "default_llm_provider", "ollama")
-        self.model = model or getattr(config, f"{self.provider}_model", None)
+        # No model named → the client applies the configured tier default.
+        self.model = model
         self.llm = client or global_llm_client
 
     async def expand_user_query(

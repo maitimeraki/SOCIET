@@ -94,7 +94,7 @@ async def lifespan(app: FastAPI)-> AsyncGenerator[None, None]:
             "You are a test system.",
             "Say 'OK' if working.",
             provider=get_llm_config().default_llm_provider,
-            model=get_llm_config().default_model,
+            model=get_llm_config().debate_model,
             temperature=0.7,
         )
         if test:
