@@ -14,9 +14,10 @@ Production-grade invariants enforced here:
   2. (Chunk {chunk_id}) is unique — provenance lookups are O(log n).
   3. (Document {document_id}) is unique — Phase 4's DERIVED_FROM joins land on
      an indexed key.
-  4. Vector indexes `persona_embeddings` (Persona.embedding) and
-     `entity_embeddings` (`__Entity__.embedding`, llama-index store shape) —
-     vector retrieval never hits "no such index".
+  4. Vector indexes `persona_embeddings` (Persona.embedding) and `entity`
+     (`__Entity__.embedding`, under llama-index's store-owned name) — Neo4j
+     allows only one vector index per label-property pair, so the bootstrap
+     must reuse the store's name; vector retrieval never hits "no such index".
   5. Lookup indexes for chunk.doc_id, agent.updated_at — hot read paths
      become O(log n) instead of full scans.
   6. Composite index on Opinion (dataset_id, query_hash, round_no) — snapshot
@@ -44,6 +45,15 @@ logger = logging.getLogger(__name__)
 # Default OllamaEmbeddings("nomic-embed-text:v1.5") produces 768-dim vectors.
 EMBEDDING_DIMENSIONS = 768
 EMBEDDING_SIMILARITY = "cosine"
+
+# `__Entity__.embedding` is owned by llama-index's Neo4jPropertyGraphStore,
+# which creates the index under its module constant `VECTOR_INDEX_NAME` and
+# writes the embeddings. Neo4j allows only ONE vector index per label-property
+# pair, so this exact name is the contract — a differently-named bootstrap
+# index is rejected as an equivalent schema rule and retrieval then fails with
+# "There is no such vector schema index". Keep in lockstep with the store
+# (pinned in tests/graph/test_neo4j_bootstrap.py).
+ENTITY_EMBEDDINGS_INDEX = "entity"
 
 
 def _statements() -> list[tuple[str, dict]]:
@@ -101,10 +111,12 @@ def _statements() -> list[tuple[str, dict]]:
             {},
         ),
         # ---- Vector index (entity embeddings; llama-index store writes __Entity__) ----
+        # Must reuse the store's index name (ENTITY_EMBEDDINGS_INDEX): Neo4j
+        # allows only one vector index per label-property pair.
         # Config values are literals, not parameters: Neo4j rejects parameters
         # inside OPTIONS { indexConfig: ... } (neo4j/neo4j#12956).
         (
-            "CREATE VECTOR INDEX entity_embeddings IF NOT EXISTS "
+            f"CREATE VECTOR INDEX {ENTITY_EMBEDDINGS_INDEX} IF NOT EXISTS "
             "FOR (n:__Entity__) ON (n.embedding) "
             "OPTIONS { "
             f"  indexConfig: {{ "
@@ -183,7 +195,7 @@ def _statement_label(cypher: str) -> str:
         "INDEX agent_updated",
         "INDEX opinion_round",
         "VECTOR INDEX persona_embeddings",
-        "VECTOR INDEX entity_embeddings",
+        "VECTOR INDEX entity IF NOT EXISTS",
     ):
         if kw in cypher:
             return kw

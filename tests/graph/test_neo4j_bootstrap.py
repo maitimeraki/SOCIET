@@ -50,3 +50,32 @@ def test_opinion_lookup_index_present():
     matches = [cypher for cypher, _ in _statements() if "INDEX opinion_round" in cypher]
     assert len(matches) == 1
     assert "(n.dataset_id, n.query_hash, n.round_no)" in matches[0]
+
+
+def test_entity_vector_index_name_matches_the_llama_index_store():
+    """Neo4j allows ONE vector index per label-property pair.
+
+    The llama-index Neo4jPropertyGraphStore owns the vector index on
+    `__Entity__.embedding` (its VECTOR_INDEX_NAME constant) and writes the
+    embeddings. A bootstrap index with any other name on the same
+    label-property pair is rejected as an equivalent schema rule, which
+    ``ensure_schema`` swallows — symptom: retrieval dies with
+    "There is no such vector schema index". Pin all three consumers to one
+    name so an upgrade that renames the store's index fails here, not in
+    production.
+    """
+    from llama_index.graph_stores.neo4j.neo4j_property_graph import VECTOR_INDEX_NAME
+
+    from src.graph.neo4j_bootstrap import ENTITY_EMBEDDINGS_INDEX
+    from src.persona import graph_context
+
+    assert ENTITY_EMBEDDINGS_INDEX == VECTOR_INDEX_NAME
+    assert graph_context.ENTITY_EMBEDDINGS_INDEX == VECTOR_INDEX_NAME
+
+    entity_stmts = [
+        cypher
+        for cypher, _ in _statements()
+        if "CREATE VECTOR INDEX" in cypher and "__Entity__" in cypher
+    ]
+    assert len(entity_stmts) == 1
+    assert f"CREATE VECTOR INDEX {ENTITY_EMBEDDINGS_INDEX} IF NOT EXISTS" in entity_stmts[0]
