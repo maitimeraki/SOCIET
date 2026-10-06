@@ -1039,3 +1039,106 @@ async def test_synthesize_falls_back_to_per_entity_fetch_for_a_batchless_context
 
     assert ctx.single_calls == 3  # the documented fallback, not the roster path
     assert [p.identity.name for p in profiles] == ["A", "C"]
+
+
+"""Task 10: each site fetches every node in ONE query, never one query per name."""
+
+from src.persona.repository import PersonaRepository
+
+
+def _repo_with_counted_queries(rows):
+    """A real `fetch_nodes_by_names` over a stubbed driver: executed queries counted.
+
+    One `session.run` is one round trip, so the count is the query count.
+    """
+    result = AsyncMock()
+    result.data = AsyncMock(return_value=rows)
+
+    session = AsyncMock()
+    session.run = AsyncMock(return_value=result)
+    session.__aenter__ = AsyncMock(return_value=session)
+    session.__aexit__ = AsyncMock(return_value=None)
+
+    driver = MagicMock()
+    driver.session = MagicMock(return_value=session)
+
+    repo = PersonaRepository.__new__(PersonaRepository)
+    repo._driver = driver
+    repo._db = "testdb"
+    return repo, session
+
+
+def _node_row(name: str, **props) -> dict:
+    return {"name": name, "n": {"name": name, **props}, "is_entity": True}
+
+
+async def _named_profile(**kwargs):
+    return MagicMock(identity=PersonaIdentity(
+        name=kwargs["agent_name"], archetype="Analyst", communication_style="factual",
+    ))
+
+
+def _nodes_by_agent(repo) -> dict:
+    """{agent_name: node} across every profile-build call."""
+    return {
+        call.kwargs["agent_name"]: call.kwargs["node"]
+        for call in repo.build_single_agent_profile_from_node.await_args_list
+    }
+
+
+@pytest.mark.asyncio
+async def test_synthesize_fetches_all_cluster_nodes_in_one_query():
+    """Two clusters → ONE node-fetch query whose rows map per name (Task 10)."""
+    doc = _shared_doc()
+    repo, session = _repo_with_counted_queries([
+        _node_row("A", domain_tags=["alpha"]),
+        _node_row("C", domain_tags=["gamma"]),
+    ])
+    repo.calculate_agent_metrics_and_context_for_llm = AsyncMock(return_value={})
+    repo.build_single_agent_profile_from_node = AsyncMock(side_effect=_named_profile)
+    synth = ProfileSynthesizer(repo, _CountingContext(list(_ROSTER), {"A": [doc], "B": [doc]}))
+
+    profiles = await synth.synthesize(query="q", dataset_id="ds", max_agents=3)
+
+    # A+B cluster under representative A; C solo → two profiles, ONE query.
+    assert session.run.await_count == 1
+    assert sorted(session.run.await_args.kwargs["names"]) == ["A", "C"]
+    assert _nodes_by_agent(repo) == {
+        "A": {"name": "A", "domain_tags": ["alpha"]},
+        "C": {"name": "C", "domain_tags": ["gamma"]},
+    }
+    assert [p.identity.name for p in profiles] == ["A", "C"]
+
+
+@pytest.mark.asyncio
+async def test_synthesize_falls_back_per_name_when_the_batch_misses_one():
+    """A cluster name absent from the batch keeps the old per-name fallback (Task 10)."""
+    doc = _shared_doc()
+    repo, session = _repo_with_counted_queries([_node_row("A", domain_tags=["alpha"])])
+    repo.calculate_agent_metrics_and_context_for_llm = AsyncMock(return_value={})
+    repo.build_single_agent_profile_from_node = AsyncMock(side_effect=_named_profile)
+    synth = ProfileSynthesizer(repo, _CountingContext(list(_ROSTER), {"A": [doc], "B": [doc]}))
+
+    await synth.synthesize(query="q", dataset_id="ds", max_agents=3)
+
+    assert session.run.await_count == 1
+    assert _nodes_by_agent(repo) == {
+        "A": {"name": "A", "domain_tags": ["alpha"]},
+        "C": {"name": "C"},  # no row → the representative's cluster properties
+    }
+
+
+@pytest.mark.asyncio
+async def test_synthesize_from_names_fetches_all_names_in_one_query():
+    """Three joiners → ONE node-fetch query; the per-name map still drives build-or-skip."""
+    repo, session = _repo_with_counted_queries([_node_row("Carl", domain_tags=["regulation"])])
+    repo.calculate_agent_metrics_and_context_for_llm = AsyncMock(return_value={})
+    repo.build_single_agent_profile_from_node = AsyncMock(side_effect=_named_profile)
+    synth = ProfileSynthesizer(repo, MagicMock())
+
+    profiles = await synth.synthesize_from_names(["Carl", "Dana", "Ghost"], "q", "ds")
+
+    assert session.run.await_count == 1
+    assert session.run.await_args.kwargs["names"] == ["Carl", "Dana", "Ghost"]
+    assert [p.identity.name for p in profiles] == ["Carl"]  # Dana/Ghost unresolved: skipped
+    assert _nodes_by_agent(repo) == {"Carl": {"name": "Carl", "domain_tags": ["regulation"]}}

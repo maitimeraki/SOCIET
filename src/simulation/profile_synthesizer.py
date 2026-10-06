@@ -209,6 +209,13 @@ class ProfileSynthesizer:
             )
 
         # Build profiles for each cluster
+        # ONE batched node fetch serves every profile (was one query per profile).
+        # The name list is the exact expression `_build_profile` resolves below,
+        # so the pre-fetch cannot diverge from the per-profile lookups; a name
+        # with no row keeps the cluster-properties fallback.
+        nodes_by_name = await self._repo.fetch_nodes_by_names(
+            [max(ents, key=lambda e: e.relevance_score).name for _, ents in top_clusters]
+        )
         profiles: list[Agent] = []
         semaphore = asyncio.Semaphore(8)
 
@@ -220,9 +227,8 @@ class ProfileSynthesizer:
                 representative = max(cluster_entities, key=lambda e: e.relevance_score)
                 agent_name = representative.name
 
-                # Fetch full node properties
-                nodes_map = await self._repo.fetch_nodes_by_names([agent_name])
-                node = nodes_map.get(agent_name) or {
+                # Full node properties, served by the roster's single batch fetch.
+                node = nodes_by_name.get(agent_name) or {
                     "name": agent_name,
                     **representative.properties,
                 }
@@ -322,12 +328,14 @@ class ProfileSynthesizer:
         if not names:
             return []
         relevant = {str(k): float(v) for k, v in (relevance_by_name or {}).items()}
+        # ONE batched node fetch for every joiner (was one query per name); the
+        # per-name map keeps the same build-or-skip handling below.
+        nodes_by_name = await self._repo.fetch_nodes_by_names(names)
         semaphore = asyncio.Semaphore(8)
 
         async def _build(name: str) -> Agent | None:
             async with semaphore:
-                nodes_map = await self._repo.fetch_nodes_by_names([name])
-                node = nodes_map.get(name)
+                node = nodes_by_name.get(name)
                 if node is None:
                     # No graph node backs this name. Skipping beats fabricating a
                     # default-archetype/-stance/-cior Agent from the bare string.
