@@ -1,8 +1,12 @@
 """Run-document persistence + the /simulate/debates routes (route order guarded)."""
+import json
+import time
+
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+import src.api.debate_api as debate_api
 import src.api.run_doc as run_doc
 from src.api.debate_api import _DEBATE_JOBS, _DEBATE_JOBS_LOCK, _DebateWSManager, _persist_debate_run, router
 
@@ -11,6 +15,40 @@ from src.api.debate_api import _DEBATE_JOBS, _DEBATE_JOBS_LOCK, _DebateWSManager
 def store_dir(tmp_path, monkeypatch):
     monkeypatch.setattr(run_doc, "RUNS_DIR", tmp_path / "debates")
     return tmp_path / "debates"
+
+
+@pytest.fixture
+def writes(monkeypatch, store_dir):
+    """Record every run-doc write while still writing for real."""
+    calls: list[str] = []
+    real_write = run_doc.write_run_doc
+
+    def spy(doc):
+        calls.append(doc["run_id"])
+        real_write(doc)
+
+    monkeypatch.setattr(run_doc, "write_run_doc", spy)
+    return calls
+
+
+@pytest.fixture
+def fake_clock(monkeypatch):
+    """The throttle's clock, advanced by hand — no real sleeping."""
+    state = {"now": 10_000.0}
+    monkeypatch.setattr(time, "monotonic", lambda: state["now"])
+    return state
+
+
+def _register_job(run_id: str, manager: _DebateWSManager, status: str = "running") -> None:
+    _DEBATE_JOBS[run_id] = {
+        "job_id": run_id, "status": status, "query": "q", "graph_id": "ds-1",
+        "config": {"max_rounds": 2}, "created_at": "2026-10-02T10:00:00+00:00",
+        "result": None, "error": None, "ws_manager": manager,
+    }
+
+
+def _stage_event(index: int) -> dict:
+    return {"type": "stage", "stage": "round", "index": index}
 
 
 @pytest.fixture
@@ -113,7 +151,7 @@ async def test_persist_debate_run_mirrors_the_live_job(store_dir):
 
 @pytest.mark.asyncio
 async def test_job_bound_manager_broadcast_persists(store_dir):
-    """A manager constructed WITH a job_id auto-persists on every broadcast (§12.4)."""
+    """A manager constructed WITH a job_id auto-persists on broadcast (§12.4)."""
     manager = _DebateWSManager(job_id="job-y")
     async with _DEBATE_JOBS_LOCK:
         _DEBATE_JOBS["job-y"] = {
@@ -130,3 +168,72 @@ async def test_job_bound_manager_broadcast_persists(store_dir):
     assert doc is not None
     assert doc["events"][0]["stage"] == "intake"
     assert doc["status"] == "running"
+
+
+@pytest.mark.asyncio
+async def test_rapid_broadcasts_coalesce_to_one_write_per_window(store_dir, writes, fake_clock):
+    """Events inside the 0.5 s window are skipped; the next write carries the full state."""
+    manager = _DebateWSManager(job_id="job-throttle")
+    _register_job("job-throttle", manager)
+    try:
+        for index in range(5):
+            await manager.broadcast(_stage_event(index))
+        assert writes == ["job-throttle"]
+
+        fake_clock["now"] += 0.5
+        await manager.broadcast(_stage_event(5))
+        assert writes == ["job-throttle", "job-throttle"]
+
+        doc = run_doc.read_run_doc("job-throttle")
+        assert [event["index"] for event in doc["events"]] == [0, 1, 2, 3, 4, 5]
+    finally:
+        _DEBATE_JOBS.pop("job-throttle", None)
+
+
+@pytest.mark.asyncio
+async def test_throttle_is_keyed_per_run(store_dir, writes, fake_clock):
+    """Run B's broadcast is not throttled by run A's window."""
+    manager_a = _DebateWSManager(job_id="job-run-a")
+    manager_b = _DebateWSManager(job_id="job-run-b")
+    _register_job("job-run-a", manager_a)
+    _register_job("job-run-b", manager_b)
+    try:
+        await manager_a.broadcast(_stage_event(0))
+        await manager_a.broadcast(_stage_event(1))  # coalesced
+        await manager_b.broadcast(_stage_event(0))  # own window — writes
+        assert writes == ["job-run-a", "job-run-b"]
+    finally:
+        _DEBATE_JOBS.pop("job-run-a", None)
+        _DEBATE_JOBS.pop("job-run-b", None)
+
+
+@pytest.mark.parametrize("terminal_status", ["complete", "failed"])
+@pytest.mark.asyncio
+async def test_terminal_status_write_bypasses_the_throttle(store_dir, writes, fake_clock, terminal_status):
+    """The final doc on disk is never stale, and the run's throttle state is dropped."""
+    manager = _DebateWSManager(job_id="job-terminal")
+    _register_job("job-terminal", manager)
+    try:
+        await manager.broadcast(_stage_event(0))
+        await manager.broadcast(_stage_event(1))  # coalesced
+        assert writes == ["job-terminal"]
+
+        _DEBATE_JOBS["job-terminal"]["status"] = terminal_status
+        await manager.broadcast({"type": "complete"})
+        assert writes == ["job-terminal", "job-terminal"]
+
+        doc = run_doc.read_run_doc("job-terminal")
+        assert doc["status"] == terminal_status
+        assert len(doc["events"]) == 3
+        assert "job-terminal" not in debate_api._LAST_PERSIST_AT
+    finally:
+        _DEBATE_JOBS.pop("job-terminal", None)
+
+
+def test_written_run_doc_is_compact_json(store_dir):
+    """Machine-read, not human-diffed: no indent whitespace on disk."""
+    doc = _doc("r-compact", "2026-10-01T10:00:00+00:00", result={"rounds_executed": 2})
+    run_doc.write_run_doc(doc)
+    raw = (store_dir / "r-compact.json").read_text(encoding="utf-8")
+    assert "\n" not in raw
+    assert json.loads(raw) == doc

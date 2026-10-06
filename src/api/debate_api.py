@@ -3,6 +3,7 @@ Debate API: Async debate simulation with streaming support.
 """
 import asyncio
 import logging
+import time
 import uuid
 from dataclasses import asdict
 from datetime import datetime, timezone
@@ -273,13 +274,34 @@ class _DebateWSManager:
                 pass  # Client disconnected
 
 
+# Run-doc persistence throttle: one disk write per run per window. The doc is
+# always written whole, so a skipped event is carried by the next write — disk
+# work no longer scales with event count. Keyed per run id; the entry is dropped
+# on the terminal write so finished runs leave no state behind.
+_PERSIST_MIN_INTERVAL_S = 0.5
+_TERMINAL_STATUSES = {"complete", "failed", "cancelled"}
+_LAST_PERSIST_AT: Dict[str, float] = {}
+
+
 async def _persist_debate_run(job_id: str) -> None:
-    """Mirror the live job to its run document. Log-and-continue — persistence never breaks a run."""
+    """Mirror the live job to its run document. Log-and-continue — persistence never breaks a run.
+
+    Throttled to one write per run per `_PERSIST_MIN_INTERVAL_S` (monotonic
+    clock). Terminal states bypass the throttle so the final doc is never stale.
+    """
     try:
         job = _DEBATE_JOBS.get(job_id)
         manager = job.get("ws_manager") if job else None
         if not job or manager is None:
             return
+        if job.get("status") in _TERMINAL_STATUSES:
+            _LAST_PERSIST_AT.pop(job_id, None)
+        else:
+            now = time.monotonic()
+            last = _LAST_PERSIST_AT.get(job_id)
+            if last is not None and now - last < _PERSIST_MIN_INTERVAL_S:
+                return
+            _LAST_PERSIST_AT[job_id] = now
         doc = {
             "run_id": job_id,
             "created_at": job.get("created_at"),
