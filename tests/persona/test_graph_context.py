@@ -2,6 +2,7 @@
 import os
 import pytest
 import asyncio
+from unittest.mock import patch
 from uuid import UUID
 
 import pytest_asyncio
@@ -326,3 +327,20 @@ async def test_get_provenance_batch_serves_a_live_roster(seeded_node, graph_ctx)
 
     single = await graph_ctx.get_provenance(seeded_node)
     assert [link.doc_id for link in single] == docs  # same result, same order
+
+
+# ---- Bounded embed calls: env-backed base URL + timeout (Task 11) ----
+
+def test_embed_model_is_bounded_and_env_addressed(monkeypatch):
+    """OllamaEmbedding gets LLMConfig's Ollama base URL plus a request timeout."""
+    from src.llm.config_llm import LLMConfig
+
+    monkeypatch.setattr(LLMConfig, "ollama_base_url", "http://sentinel-ollama:1234")
+
+    with patch('src.persona.graph_context.AsyncGraphDatabase'), \
+         patch('src.persona.graph_context.OllamaEmbedding') as mock_embed:
+        GraphContext(GraphConfig())
+
+    kwargs = mock_embed.call_args.kwargs
+    assert kwargs["base_url"] == "http://sentinel-ollama:1234"
+    assert kwargs["client_kwargs"]["timeout"] == 60

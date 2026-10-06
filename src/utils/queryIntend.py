@@ -15,7 +15,7 @@ from typing import List, Optional
 from pydantic import BaseModel, Field
 
 from src.llm.client import LLMClient, global_llm_client
-from src.llm.config_llm import get_llm_config
+from src.llm.config_llm import LLMConfig, get_llm_config
 from src.logging.setup_logging import setup_logging
 
 logger = setup_logging()
@@ -65,8 +65,9 @@ class QueryIntend:
     ):
         config = get_llm_config()
         self.provider = provider or getattr(config, "default_llm_provider", "ollama")
-        # No model named → the client applies the configured tier default.
-        self.model = model
+        # Intent extraction is analysis-grade work — resolve the analysis tier
+        # here; the client would otherwise default to the debate tier.
+        self.model = model or LLMConfig.analysis_model
         self.llm = client or global_llm_client
 
     async def expand_user_query(

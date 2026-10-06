@@ -13,7 +13,13 @@ from pydantic import BaseModel, Field
 from uuid import UUID, uuid4
 
 from src.graph.config_graph import GraphConfig
+from src.llm.config_llm import LLMConfig
 from src.persona.models_persona import ProvenanceLink
+
+
+# The ollama clients default to httpx `timeout=None` (unbounded) — a stuck
+# localhost embed call would wait forever. 60 s is a generous bound for it.
+_EMBED_TIMEOUT_SECONDS = 60
 
 
 # ---- Supporting Types ----
@@ -54,7 +60,8 @@ class GraphContext:
         self._db = self.config.neo4j_database
         self._embed_model = OllamaEmbedding(
             model_name="nomic-embed-text:v1.5",
-            base_url="http://localhost:11434",
+            base_url=LLMConfig.ollama_base_url,
+            client_kwargs={"timeout": _EMBED_TIMEOUT_SECONDS},
             ollama_additional_kwargs={"mirostat": 0},
         )
 

@@ -19,6 +19,7 @@ from src.persona.agent import (
 )
 from neo4j import AsyncGraphDatabase
 from llama_index.embeddings.ollama import OllamaEmbedding
+from src.llm.config_llm import LLMConfig
 from src.logging.setup_logging import setup_logging
 from src.simulation.debate_config import DebateConfig
 from src.simulation.relevance_matrix import SelectionCandidate, rank_candidates
@@ -27,6 +28,10 @@ if TYPE_CHECKING:
     from src.utils.queryIntend import QueryIntent
 
 logger = setup_logging()
+
+# The ollama clients default to httpx `timeout=None` (unbounded) — a stuck
+# localhost embed call would wait forever. 60 s is a generous bound for it.
+_EMBED_TIMEOUT_SECONDS = 60
 
 
 
@@ -42,7 +47,8 @@ class PersonaRepository:
         self.llm_client = llm_client
         self.embed_model = OllamaEmbedding(
             model_name="nomic-embed-text:v1.5",
-            base_url="http://localhost:11434",
+            base_url=LLMConfig.ollama_base_url,
+            client_kwargs={"timeout": _EMBED_TIMEOUT_SECONDS},
             ollama_additional_kwargs={"mirostat": 0},
         )
         self._driver = AsyncGraphDatabase.driver(

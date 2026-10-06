@@ -7,7 +7,7 @@ import json
 
 import pytest
 
-from src.llm.config_llm import get_llm_config
+from src.llm.config_llm import LLMConfig, get_llm_config
 from src.utils import queryIntend as qi
 
 QUERY = "Should the company expand into the European market?"
@@ -160,11 +160,23 @@ def test_provider_defaults_to_configuration():
     assert extractor.provider == get_llm_config().default_llm_provider
 
 
-def test_model_default_is_deferred_to_the_client():
-    """Even for a provider with a `<provider>_model` config, no model is resolved here."""
+def test_model_default_is_the_analysis_tier(monkeypatch):
+    """Intent is analysis-grade work: no model named → LLMConfig.analysis_model."""
+    monkeypatch.setattr(LLMConfig, "analysis_model", "sentinel-analysis-model")
+
     extractor = qi.QueryIntend(provider="ollama", client=StubClient())
 
-    assert extractor.model is None
+    assert extractor.model == "sentinel-analysis-model"
+
+
+@pytest.mark.asyncio
+async def test_expand_user_query_sends_the_analysis_model_by_default():
+    stub = StubClient(reply=LLM_JSON)
+
+    intent = await qi.QueryIntend(provider="openai", client=stub).expand_user_query(QUERY)
+
+    assert stub.calls[0]["model"] == LLMConfig.analysis_model
+    assert intent.llm_model == LLMConfig.analysis_model
 
 
 def test_module_has_no_blocking_call_and_no_hardcoded_model():
