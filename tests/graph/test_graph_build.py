@@ -284,3 +284,31 @@ class TestNetworkBounds:
             kwargs = mock_embed.call_args.kwargs
             assert kwargs["base_url"] == "http://sentinel-ollama:1234"
             assert kwargs["client_kwargs"]["timeout"] == 60
+
+    @pytest.mark.asyncio
+    async def test_extractors_pin_num_workers_to_one(self, sample_chunks, sample_ontology):
+        """Sync mode still fans out per document (run_jobs semaphore = num_workers).
+
+        One extraction call now carries a whole document's chunks, so the outer
+        document semaphore (ontology_max_concurrency) must be the only
+        concurrency lever: aggregate in-flight calls = semaphore × num_workers.
+        """
+        import sys
+
+        from src.graph.config_graph import GraphConfig
+        from src.graph.graph_build import GraphExtractionStage
+
+        with patch('src.graph.graph_build.OpenAILike'), \
+             patch('src.graph.graph_build.OllamaEmbedding'), \
+             patch('src.graph.graph_build.Neo4jPropertyGraphStore'), \
+             patch('src.graph.graph_build.SentenceSplitter'):
+            stage = GraphExtractionStage(GraphConfig(ontology_max_concurrency=8))
+
+        await stage.run("test-dataset", sample_chunks, sample_ontology)
+
+        property_graph = sys.modules['llama_index.core.indices.property_graph']
+        for extractor in (
+            property_graph.SimpleLLMPathExtractor,
+            property_graph.DynamicLLMPathExtractor,
+        ):
+            assert extractor.call_args.kwargs["num_workers"] == 1

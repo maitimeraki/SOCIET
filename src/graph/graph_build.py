@@ -159,11 +159,17 @@ class GraphExtractionStage:
                 DynamicLLMPathExtractor,
                 ImplicitPathExtractor,
             )
+            # num_workers=1: llama-index runs a call's chunks through
+            # run_jobs(jobs, workers=num_workers), so sync mode fans out for
+            # real. The outer semaphore (GraphConfig.ontology_max_concurrency,
+            # one slot per document) is the single concurrency lever: aggregate
+            # in-flight extraction calls = GRAPH_ONTOLOGY_MAX_CONCURRENCY ×
+            # num_workers. Raise num_workers only alongside cutting the semaphore.
             # Simple extractor - basic triple extraction without schema constraints(Simple extractor captures additional relationships the dynamic one might miss)
             simple_extractor = SimpleLLMPathExtractor(
                 llm=self.llm,
                 max_paths_per_chunk=10,
-                num_workers=self.config.ontology_max_concurrency,
+                num_workers=1,
             )
             # Dynamic extractor - schema-guided but flexible(Dynamic extractor captures labeled entities/relations following your schema)
             dynamic_extractor = DynamicLLMPathExtractor(
@@ -172,7 +178,7 @@ class GraphExtractionStage:
                 allowed_relation_types=relation_schemas,
                 allowed_entity_props=possible_ent_props,
                 allowed_relation_props=possible_rel_props,
-                num_workers=self.config.ontology_max_concurrency,
+                num_workers=1,
             )
             # Implicit extractor - from node relationships(Implicit extractor adds structural relationships between nodes that LLMs don't generate)
             implicit_extractor = ImplicitPathExtractor()

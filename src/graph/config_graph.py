@@ -24,6 +24,9 @@ class GraphConfig:
     # operator compatibility — renaming them would silently drop overrides.
     ontology_chunk_size_tokens: int = int(os.getenv("GRAPH_ONTOLOGY_CHUNK_SIZE_CHARS", "2000"))
     ontology_chunk_overlap_tokens: int = int(os.getenv("GRAPH_ONTOLOGY_CHUNK_OVERLAP_CHARS", "200"))
+    # Aggregate in-flight extraction LLM calls = this × each extractor's
+    # num_workers (pinned to 1 in graph_build.py — raise one only by lowering
+    # the other).
     ontology_max_concurrency: int = int(os.getenv("GRAPH_ONTOLOGY_MAX_CONCURRENCY", "8"))
 
     neo4j_uri: str = os.getenv("NEO4J_URI", "bolt://localhost:7687")
