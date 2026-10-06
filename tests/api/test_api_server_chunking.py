@@ -3,6 +3,8 @@
 Chunking is sentence-aware (shared owner: chunkProcessor.split_text_sentences);
 these assertions fail under the retired fixed character windows.
 """
+import json
+import logging
 from unittest.mock import AsyncMock
 
 import pytest
@@ -199,3 +201,38 @@ async def test_build_job_without_ontology_keeps_per_chunk_discovery(monkeypatch)
     result = api_server.RUNS[job_id]["result"]
     assert len(discovery.calls) == result["chunks_total"]     # standalone path unchanged
     assert len(extraction.calls) == 2                         # one run per document, not per chunk
+
+
+class TestOntologyFromRun:
+    """The persisted-run read must never raise: a bad read falls back to discovery."""
+
+    @pytest.mark.asyncio
+    async def test_valid_persisted_run_file_is_parsed(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(api_server, "_RUNS_RUNTIME_DIR", tmp_path)
+        api_server.RUNS.pop("onto-on-disk", None)
+        run = {
+            "job_id": "onto-on-disk",
+            "status": "completed",
+            "result": {"ontology": _ontology("PERSON").model_dump()},
+        }
+        (tmp_path / "onto-on-disk.json").write_text(json.dumps(run), encoding="utf-8")
+
+        ontology = await api_server._ontology_from_run("onto-on-disk")
+
+        assert ontology is not None
+        assert ontology.entity_labels == ["PERSON"]
+
+    @pytest.mark.asyncio
+    async def test_corrupt_persisted_run_file_returns_none_and_warns(
+        self, tmp_path, monkeypatch, caplog
+    ):
+        """A crash mid-`_persist_run` leaves invalid JSON; the read degrades, never raises."""
+        monkeypatch.setattr(api_server, "_RUNS_RUNTIME_DIR", tmp_path)
+        api_server.RUNS.pop("onto-corrupt", None)
+        (tmp_path / "onto-corrupt.json").write_text("{not json", encoding="utf-8")
+
+        with caplog.at_level(logging.WARNING, logger=api_server.logger.name):
+            ontology = await api_server._ontology_from_run("onto-corrupt")
+
+        assert ontology is None
+        assert "onto-corrupt" in caplog.text

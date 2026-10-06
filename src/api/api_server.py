@@ -156,16 +156,27 @@ async def _persist_run(job_id: str, run: Dict[str, Any]) -> None:
 
 
 async def _ontology_from_run(ontology_job_id: Optional[str]) -> Optional[LocalOntology]:
-    """The completed ontology job's merged schema, or None if absent/not finished."""
+    """The completed ontology job's merged schema, or None if absent/not finished.
+
+    Never raises: `_persist_run` writes non-atomically, so a crash mid-write
+    leaves invalid JSON — a raising read here would strand the build job in
+    "queued" forever. A bad read degrades to the per-chunk discovery path.
+    """
     if not ontology_job_id:
         return None
-    run = RUNS.get(ontology_job_id)
-    if run is None:
-        path = _RUNS_RUNTIME_DIR / f"{ontology_job_id}.json"
-        if path.exists():
-            run = json.loads(await asyncio.to_thread(path.read_text, "utf-8"))
-    payload = ((run or {}).get("result") or {}).get("ontology")
-    return LocalOntology.model_validate(payload) if payload else None
+    try:
+        run = RUNS.get(ontology_job_id)
+        if run is None:
+            path = _RUNS_RUNTIME_DIR / f"{ontology_job_id}.json"
+            if path.exists():
+                run = json.loads(await asyncio.to_thread(path.read_text, "utf-8"))
+        payload = ((run or {}).get("result") or {}).get("ontology")
+        return LocalOntology.model_validate(payload) if payload else None
+    except Exception as exc:
+        logger.warning(
+            f"Could not load ontology from job {ontology_job_id} ({exc}) — falling back to per-chunk discovery"
+        )
+        return None
 
 
 async def _chunk_documents(
