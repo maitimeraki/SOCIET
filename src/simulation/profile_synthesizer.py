@@ -41,6 +41,25 @@ class ProfileSynthesizer:
             return []
         return []
 
+    async def _safe_provenance_batch(self, entity_ids: list[str]) -> dict[str, list]:
+        """Fetch the whole roster's provenance in ONE query.
+
+        A context that answers with a real mapping is trusted outright;
+        anything else (a mock, or a context without the batch method) falls
+        back to the per-entity fetch, keeping today's behavior for them.
+        """
+        try:
+            batch = getattr(self._ctx, "get_provenance_batch", None)
+            if callable(batch):
+                result = batch(list(entity_ids))
+                if inspect.iscoroutine(result):
+                    result = await result
+                if isinstance(result, dict):
+                    return {eid: list(result.get(eid) or []) for eid in entity_ids}
+        except Exception:
+            pass
+        return {eid: await self._safe_provenance(eid) for eid in entity_ids}
+
     async def synthesize(
         self,
         query: str,
@@ -93,10 +112,12 @@ class ProfileSynthesizer:
             )
 
         # Co-occurrence clustering: entities sharing source chunks cluster together.
-        # Provenance fetch bounded by search_limit = max_agents * 3.
+        # Provenance fetch bounded by search_limit = max_agents * 3 and batched:
+        # ONE query serves the whole roster.
+        prov_by_id = await self._safe_provenance_batch([entity.id for entity in entities])
         prov_keys: list[tuple] = []
         for entity in entities:
-            prov = await self._safe_provenance(entity.id)
+            prov = prov_by_id.get(entity.id, [])
             doc_ids = sorted({p.doc_id for p in prov if getattr(p, "doc_id", None)})
             if doc_ids:
                 prov_keys.append(tuple(doc_ids))

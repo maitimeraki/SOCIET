@@ -942,3 +942,100 @@ async def test_synthesize_survives_a_raising_profile_emitter():
 
     profiles = await synthesizer.synthesize(query="test query", dataset_id="ds1", on_profile=broken)
     assert len(profiles) == 2  # the same count the arrange block produces without emitters
+
+
+"""Task 9: the roster's provenance is ONE batched query, never one per entity."""
+
+
+class _CountingContext:
+    """A GraphContext stand-in that counts provenance reads (no MagicMock auto-attrs)."""
+
+    def __init__(self, entities, provenance_by_id):
+        self._entities = entities
+        self._provenance_by_id = provenance_by_id
+        self.batch_calls: list[list[str]] = []
+        self.single_calls = 0
+
+    async def find_relevant_entities(self, query, limit=10):
+        return self._entities
+
+    async def get_provenance_batch(self, entity_ids):
+        self.batch_calls.append(list(entity_ids))
+        return {eid: list(self._provenance_by_id.get(eid, [])) for eid in entity_ids}
+
+    async def get_provenance(self, entity_id):
+        self.single_calls += 1
+        return list(self._provenance_by_id.get(entity_id, []))
+
+
+def _synth_over(ctx):
+    """A synthesizer over `ctx` whose repo names each built profile after its agent."""
+    async def build_profile(**kwargs):
+        return MagicMock(identity=PersonaIdentity(
+            name=kwargs["agent_name"], archetype="Analyst", communication_style="factual",
+        ))
+
+    repo = MagicMock()
+    repo.fetch_nodes_by_names = AsyncMock(return_value={})
+    repo.calculate_agent_metrics_and_context_for_llm = AsyncMock(return_value={})
+    repo.build_single_agent_profile_from_node = AsyncMock(side_effect=build_profile)
+    return ProfileSynthesizer(persona_repo=repo, graph_context=ctx), repo
+
+
+_ROSTER = [
+    _cluster_entity("A", 0.9, ["test"], "alpha summary"),
+    _cluster_entity("B", 0.8, ["test"], "beta summary"),
+    _cluster_entity("C", 0.7, ["test"], "gamma summary"),
+]
+
+
+def _shared_doc():
+    return ProvenanceLink(doc_id="doc:1", title="T", breadcrumb="", chunk_id=uuid4())
+
+
+@pytest.mark.asyncio
+async def test_synthesize_fetches_the_roster_provenance_in_one_batch_call():
+    doc = _shared_doc()
+    synth, repo = _synth_over(_CountingContext(list(_ROSTER), {"A": [doc], "B": [doc]}))
+    ctx = synth._ctx
+
+    profiles = await synth.synthesize(query="q", dataset_id="ds", max_agents=3)
+
+    assert ctx.batch_calls == [["A", "B", "C"]]  # ONE call for the whole roster
+    assert ctx.single_calls == 0  # never one fetch per entity
+    # ...and the per-entity mapping drove the clustering: A+B share doc:1, C
+    # has none → solo. Two agents, each built from its own cluster.
+    assert [p.identity.name for p in profiles] == ["A", "C"]
+    totals = {
+        call.kwargs["agent_name"]: call.kwargs["sector_results"][0]["total_relevance"]
+        for call in repo.build_single_agent_profile_from_node.await_args_list
+    }
+    assert totals["A"] == pytest.approx(1.7)
+    assert totals["C"] == pytest.approx(0.7)
+
+
+@pytest.mark.asyncio
+async def test_synthesize_falls_back_to_per_entity_fetch_for_a_batchless_context():
+    """A context that predates the batch method still clusters (mock tolerance)."""
+
+    class _LegacyContext:
+        def __init__(self, entities, provenance_by_id):
+            self._entities = entities
+            self._provenance_by_id = provenance_by_id
+            self.single_calls = 0
+
+        async def find_relevant_entities(self, query, limit=10):
+            return self._entities
+
+        async def get_provenance(self, entity_id):
+            self.single_calls += 1
+            return list(self._provenance_by_id.get(entity_id, []))
+
+    doc = _shared_doc()
+    ctx = _LegacyContext(list(_ROSTER), {"A": [doc], "B": [doc]})
+    synth, _ = _synth_over(ctx)
+
+    profiles = await synth.synthesize(query="q", dataset_id="ds", max_agents=3)
+
+    assert ctx.single_calls == 3  # the documented fallback, not the roster path
+    assert [p.identity.name for p in profiles] == ["A", "C"]

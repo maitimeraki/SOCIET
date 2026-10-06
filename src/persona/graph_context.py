@@ -280,6 +280,67 @@ class GraphContext:
 
         return provenance
 
+    async def get_provenance_batch(
+        self, entity_ids: List[str]
+    ) -> Dict[str, List[ProvenanceLink]]:
+        """Return source chunks for a whole roster in ONE query.
+
+        Same per-entity result as `get_provenance` (a row reaches every
+        requested key its node id or name matches, same chunk order), keyed by
+        the requested id/name; entities with no chunks map to an empty list.
+        """
+        by_key: Dict[str, List[ProvenanceLink]] = {key: [] for key in entity_ids}
+        if not by_key:
+            return by_key
+
+        cypher = """
+        MATCH (n)-[:MENTIONS]->(chunk:Chunk)
+        WHERE (n.id IN $entity_ids OR n.name IN $entity_ids)
+        AND chunk.doc_id IS NOT NULL
+        RETURN DISTINCT
+            n.id AS node_id,
+            n.name AS node_name,
+            chunk.doc_id AS doc_id,
+            chunk.title AS title,
+            chunk.breadcrumb AS breadcrumb,
+            chunk.chunk_id AS chunk_id
+        ORDER BY chunk.chunk_id
+        """
+        async with self._driver.session(database=self._db) as session:
+            result = await session.run(
+                cast(LiteralString, cypher),
+                entity_ids=list(by_key),
+            )
+            rows = await result.data()
+
+        for row in rows:
+            matched = {
+                value for value in (row.get("node_id"), row.get("node_name"))
+                if value is not None
+            } & by_key.keys()
+            if not matched:
+                continue
+
+            chunk_id = row.get("chunk_id")
+            if chunk_id:
+                try:
+                    chunk_uuid = UUID(chunk_id) if isinstance(chunk_id, str) else chunk_id
+                except (ValueError, TypeError):
+                    chunk_uuid = uuid4()
+            else:
+                chunk_uuid = uuid4()
+
+            link = ProvenanceLink(
+                doc_id=row.get("doc_id", ""),
+                title=row.get("title", "Unknown Source"),
+                breadcrumb=row.get("breadcrumb", ""),
+                chunk_id=chunk_uuid,
+            )
+            for key in matched:
+                by_key[key].append(link)
+
+        return by_key
+
 
 # ---- Factory ----
 
