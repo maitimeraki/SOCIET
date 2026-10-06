@@ -71,7 +71,8 @@ class GraphExtractionStage:
                 model=self.config.extraction_model,
                 api_base=LLMConfig.nvidia_nim_base_url or "https://integrate.api.nvidia.com/v1",
                 api_key=LLMConfig.nvidia_nim_api_key,
-                temperature=0.7
+                temperature=0.7,
+                is_chat_model=True
             )
         self.embed_model = OllamaEmbedding(
             model_name="nomic-embed-text:v1.5",
