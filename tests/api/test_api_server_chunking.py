@@ -105,11 +105,11 @@ class _CountingDiscovery:
 
 class _FakeExtraction:
     def __init__(self, *args, **kwargs):
-        self.calls = []
+        self.calls = []  # list of chunk counts per run
 
     async def run(self, dataset_id, documents, ontology):
-        self.calls.append(documents[0].chunk_id)
-        return 1
+        self.calls.append(len(documents))
+        return len(documents)  # simulate one docstore node per chunk
 
 
 def _docs() -> list[GlobalInputDocument]:
@@ -164,9 +164,26 @@ async def test_build_job_reuses_ontology_and_skips_discovery(monkeypatch):
     await api_server._execute_unified_job(job_id, "build_graph", "ds1", _docs(), ontology_job_id="onto-done")
 
     result = api_server.RUNS[job_id]["result"]
-    assert discovery.calls == []                              # zero re-discovery
-    assert len(extraction.calls) == result["chunks_total"]    # one extraction run per chunk
+    assert discovery.calls == []
+    assert len(extraction.calls) == 2                        # one run per source document
+    assert all(n > 1 for n in extraction.calls)              # each run received the doc's chunks
+    assert result["docs_built"] == result["chunks_total"]    # 1 docstore node per chunk, summed
     assert result["entity_types"] == ["PERSON"]               # the ontology job's schema
+
+
+@pytest.mark.asyncio
+async def test_build_extraction_runs_once_per_document(monkeypatch):
+    discovery = _CountingDiscovery()
+    extraction = _FakeExtraction()
+    _patch_build_pipeline(monkeypatch, discovery, extraction)
+    job_id = "test-build-per-doc"
+    api_server.RUNS[job_id] = {"job_id": job_id, "result": None}
+
+    await api_server._execute_unified_job(job_id, "build_graph", "ds1", _docs())
+
+    result = api_server.RUNS[job_id]["result"]
+    assert result["chunks_total"] > 2
+    assert len(extraction.calls) == 2                        # docs, not chunks
 
 
 @pytest.mark.asyncio
@@ -181,4 +198,4 @@ async def test_build_job_without_ontology_keeps_per_chunk_discovery(monkeypatch)
 
     result = api_server.RUNS[job_id]["result"]
     assert len(discovery.calls) == result["chunks_total"]     # standalone path unchanged
-    assert len(extraction.calls) == result["chunks_total"]
+    assert len(extraction.calls) == 2                         # one run per document, not per chunk

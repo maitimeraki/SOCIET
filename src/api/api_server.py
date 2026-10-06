@@ -32,7 +32,7 @@ from src.llm.config_llm import get_llm_config
 from src.utils.chunkProcessor import ChunkProcessor, split_text_sentences
 
 if TYPE_CHECKING:
-    # Annotation-only: `_process_chunk`'s `extraction_stage` hint. The runtime
+    # Annotation-only: `_process_document`'s `extraction_stage` hint. The runtime
     # import stays lazy inside `_execute_unified_job` (see the comment there).
     from src.graph.graph_build import GraphExtractionStage
 
@@ -230,49 +230,62 @@ async def _discover_for_chunk(
 
 
 async def _process_chunk(
-    mode: JobMode,
-    dataset_id: str,
     chunk_doc: ProcessedChunk,
-    ontology: Optional[LocalOntology],
-    discovery_stage: Optional[OntologyDiscoveryStage],
-    extraction_stage: Optional["GraphExtractionStage"],
+    discovery_stage: OntologyDiscoveryStage,
     timeout_seconds: int,
     retry_attempts: int,
     retry_backoff_seconds: float,
 ) -> ChunkProgress:
-    logger.info(f"Start of chunk progress for {chunk_doc.chunk_id} ")
-    discovered = None
-    if ontology is None:
-        discovered = await _discover_for_chunk(
-            discovery_stage, chunk_doc, timeout_seconds, retry_attempts, retry_backoff_seconds
-        )
-        ontology = discovered
+    ontology = await _discover_for_chunk(
+        discovery_stage, chunk_doc, timeout_seconds, retry_attempts, retry_backoff_seconds
+    )
+    view = ontology.to_public_view()
+    return {
+        "entity_types": view.entity_types,
+        "relation_types": view.relation_types,
+        "docs_built": 0,
+        "ontology": ontology.model_dump(),
+    }
 
-    docs_built = 0
-    if mode == "build_graph":
-        if extraction_stage is None:
-            raise RuntimeError("extraction_stage is required for build_graph mode")
-        logger.info(f"Start building the graph of {chunk_doc.chunk_id}")
-        try:
-            docs_built = await extraction_stage.run(
-                dataset_id=dataset_id,
-                documents=[chunk_doc],
-                ontology=ontology,
-            )
-            logger.info(f"Complete building graph of {chunk_doc.chunk_id}")
-        except asyncio.TimeoutError:
-            logger.error(f"Graph extraction timeout for {chunk_doc.chunk_id}")
-            raise
-        except Exception as exc:
-            logger.error(f"Graph extraction failed for {chunk_doc.chunk_id}: {exc}")
-            raise
+
+async def _process_document(
+    dataset_id: str,
+    doc_chunks: List[ProcessedChunk],
+    ontology: Optional[LocalOntology],
+    discovery_stage: Optional[OntologyDiscoveryStage],
+    extraction_stage: "GraphExtractionStage",
+    timeout_seconds: int,
+    retry_attempts: int,
+    retry_backoff_seconds: float,
+) -> ChunkProgress:
+    """Build-mode worker: ONE graph build per source document. Discovery stays per
+    chunk and only runs on the standalone fallback (no ontology provided)."""
+    if ontology is None:
+        discovered = await asyncio.gather(*(
+            _discover_for_chunk(discovery_stage, c, timeout_seconds, retry_attempts, retry_backoff_seconds)
+            for c in doc_chunks
+        ))
+        ontology = LocalOntology.merge(list(discovered))
+
+    try:
+        docs_built = await extraction_stage.run(
+            dataset_id=dataset_id,
+            documents=doc_chunks,
+            ontology=ontology,
+        )
+    except asyncio.TimeoutError:
+        logger.error(f"Graph extraction timeout for document {doc_chunks[0].parent_doc_id}")
+        raise
+    except Exception as exc:
+        logger.error(f"Graph extraction failed for document {doc_chunks[0].parent_doc_id}: {exc}")
+        raise
 
     view = ontology.to_public_view()
     return {
         "entity_types": view.entity_types,
         "relation_types": view.relation_types,
         "docs_built": docs_built,
-        "ontology": discovered.model_dump() if discovered is not None else None,
+        "ontology": None,
     }
 
 async def _execute_unified_job(
@@ -344,15 +357,27 @@ async def _execute_unified_job(
     docs_built = 0
     completed = 0
 
-    async def _worker(chunk_doc: ProcessedChunk) -> ChunkProgress:
+    if mode == "ontology":
+        units = [(c.parent_doc_id, [c]) for c in chunks]
+    else:
+        by_doc: Dict[str, List[ProcessedChunk]] = {}
+        for c in chunks:
+            by_doc.setdefault(c.parent_doc_id, []).append(c)
+        units = list(by_doc.items())
+
+    async def _worker(doc_id: str, doc_chunks: List[ProcessedChunk]) -> ChunkProgress:
         async with semaphore:
-             # ✅ FIX 6: Add small delay between chunks
-            await asyncio.sleep(0.1)
-            return await _process_chunk(
-                mode=mode,
-                # dataset_id should be passed from frontend when users put their documents, not generated here
+            if mode == "ontology":
+                return await _process_chunk(
+                    doc_chunks[0],
+                    discovery_stage,
+                    cfg.discovery_timeout_seconds,
+                    cfg.discovery_retry_attempts,
+                    cfg.discovery_retry_backoff_seconds,
+                )
+            return await _process_document(
                 dataset_id=dataset_id,
-                chunk_doc=chunk_doc,
+                doc_chunks=doc_chunks,
                 ontology=provided_ontology,
                 discovery_stage=discovery_stage,
                 extraction_stage=extraction_stage,
@@ -362,29 +387,41 @@ async def _execute_unified_job(
             )
 
     try:
-        tasks = [asyncio.create_task(_worker(chunk)) for chunk in chunks]
+        tasks: List[asyncio.Task] = []
+        counts: Dict[asyncio.Task, int] = {}
+        for doc_id, doc_chunks in units:
+            t = asyncio.create_task(_worker(doc_id, doc_chunks))
+            tasks.append(t)
+            counts[t] = len(doc_chunks)
         logger.info(f"Started {len(tasks)} tasks for job {job_id} in mode {mode}")
-        for fut in asyncio.as_completed(tasks):
-            partial = await fut
-            completed += 1
-            docs_built += int(partial.get("docs_built", 0))
-            entity_accumulator.extend(partial.get("entity_types", []))
-            relation_accumulator.extend(partial.get("relation_types", []))
-            if partial.get("ontology") is not None:
-                chunk_ontologies.append(partial["ontology"])
 
-            async with _RUNS_LOCK:
-                RUNS[job_id]["stage"] = f"{mode}_running"
-                RUNS[job_id]["progress"] = min(0.95, completed / max(1, total_chunks))
-                RUNS[job_id]["result"] = {
-                    "dataset_id": dataset_id,
-                    "chunks_total": total_chunks,
-                    "chunks_completed": completed,
-                    "docs_built": docs_built,
-                    "entity_types": _merge_labels(entity_accumulator, "ENTITY"),
-                    "relation_types": _merge_labels(relation_accumulator, "RELATED_TO"),
-                }
-                await _persist_run(job_id, RUNS[job_id])
+        # `asyncio.as_completed` yields coroutines on Python 3.11 (not the tasks),
+        # so the yielded item can't be keyed back to its chunk count. `asyncio.wait`
+        # yields the finished tasks themselves, keeping the counts map exact.
+        pending: Set[asyncio.Task] = set(tasks)
+        while pending:
+            done, pending = await asyncio.wait(pending, return_when=asyncio.FIRST_COMPLETED)
+            for fut in done:
+                partial = fut.result()
+                completed += counts[fut]
+                docs_built += int(partial.get("docs_built", 0))
+                entity_accumulator.extend(partial.get("entity_types", []))
+                relation_accumulator.extend(partial.get("relation_types", []))
+                if partial.get("ontology") is not None:
+                    chunk_ontologies.append(partial["ontology"])
+
+                async with _RUNS_LOCK:
+                    RUNS[job_id]["stage"] = f"{mode}_running"
+                    RUNS[job_id]["progress"] = min(0.95, completed / max(1, total_chunks))
+                    RUNS[job_id]["result"] = {
+                        "dataset_id": dataset_id,
+                        "chunks_total": total_chunks,
+                        "chunks_completed": completed,
+                        "docs_built": docs_built,
+                        "entity_types": _merge_labels(entity_accumulator, "ENTITY"),
+                        "relation_types": _merge_labels(relation_accumulator, "RELATED_TO"),
+                    }
+                    await _persist_run(job_id, RUNS[job_id])
 
         if mode == "build_graph" and normalization_stage is not None:
             # normalization_stage is our embedded class instance
