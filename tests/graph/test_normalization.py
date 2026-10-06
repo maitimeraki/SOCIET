@@ -220,17 +220,6 @@ class TestMergeCandidate:
         assert candidate.properties["name"] == "Bob"
 
 
-class _FakeAsyncResult:
-    """Minimal async-iterable stand-in for a Neo4j Result."""
-
-    def __init__(self, records):
-        self._records = records
-
-    async def __aiter__(self):
-        for record in self._records:
-            yield record
-
-
 class TestFindSurfaceDuplicates:
     """Regression tests for surface-duplicate detection keyed by elementId."""
 
@@ -253,13 +242,72 @@ class TestFindSurfaceDuplicates:
                 {"id": "4:abc:456", "labels": ["Person"], "props": {"name": "Alice", "source": "doc-b"}},
             ],
         }]
-        stage._run = AsyncMock(return_value=_FakeAsyncResult(records))
+        stage._run = AsyncMock(return_value=records)
 
         groups = await stage.find_surface_duplicates("ds-1")
 
         assert len(groups) == 1
         assert [c.node_id for c in groups[0]] == ["4:abc:123", "4:abc:456"]
         assert all(isinstance(c.node_id, str) for c in groups[0])
+
+
+class _ConsumeOnCloseResult:
+    """Mimics the neo4j driver: AsyncSession.close() consumes its autocommit
+    result, so any read afterwards raises (ResultConsumedError in the real driver)."""
+
+    def __init__(self, records):
+        self._records = records
+        self._consumed = False
+
+    async def data(self):
+        if self._consumed:
+            raise RuntimeError(
+                "The result has been consumed. Fetch all needed records "
+                "before calling Result.consume()."
+            )
+        return self._records
+
+    def consume(self):
+        self._consumed = True
+
+
+class _ConsumeOnCloseSession:
+    def __init__(self, result):
+        self._result = result
+
+    async def run(self, query, parameters=None):
+        return self._result
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *exc_info):
+        self._result.consume()
+
+
+class _ConsumeOnCloseDriver:
+    def __init__(self, records):
+        self._records = records
+
+    def session(self, **kwargs):
+        return _ConsumeOnCloseSession(_ConsumeOnCloseResult(self._records))
+
+
+class TestRunFetchesRecordsInsideTheSession:
+    """Regression: _run must return fetched records, not the driver Result.
+    Reading a Result after its session closed raises ResultConsumedError,
+    which is exactly how the graph build job failed."""
+
+    @pytest.mark.asyncio
+    async def test_run_returns_fetched_records(self):
+        records = [{"x": 1}]
+        with patch('src.graph.normalization.AsyncGraphDatabase') as mock_db:
+            mock_db.driver.return_value = _ConsumeOnCloseDriver(records)
+            stage = GraphNormalizationStage(MagicMock())
+
+        out = await stage._run("RETURN 1 AS x", {})
+
+        assert out == records
 
 
 class TestPairScoringConcurrency:
