@@ -77,6 +77,7 @@ class ChunkProgress(TypedDict):
     entity_types: List[str]
     relation_types: List[str]
     docs_built: int
+    ontology: Optional[dict]  # serialized LocalOntology; set only when this chunk ran discovery
 
 class UnifiedJobResult(TypedDict):
     dataset_id: str

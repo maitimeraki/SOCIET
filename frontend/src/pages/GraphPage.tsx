@@ -56,7 +56,7 @@ export default function GraphPage() {
       let buildId = useDraftStore.getState().graphJobId
       setPhase('build') // before the if: a resumed build (stored job id) must also leave the ontology phase
       if (!buildId) {
-        const started = await startGraphBuild(draft.datasetId!, readyDocs)
+        const started = await startGraphBuild(draft.datasetId!, readyDocs, ontologyId)
         buildId = started.job_id
         setJobs({ graphJobId: buildId })
       }

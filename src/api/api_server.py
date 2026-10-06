@@ -24,7 +24,7 @@ from src.api.config_api import (
     UnifiedJobResult,
 )
 from src.graph.config_graph import GraphConfig
-from src.graph.models_graph import GlobalInputDocument, ProcessedChunk
+from src.graph.models_graph import GlobalInputDocument, ProcessedChunk, LocalOntology
 from src.graph.ontology import OntologyDiscoveryStage
 from src.graph.normalization import GraphNormalizationStage
 from src.llm.client import global_llm_client
@@ -154,6 +154,20 @@ async def _persist_run(job_id: str, run: Dict[str, Any]) -> None:
     path = _RUNS_RUNTIME_DIR / f"{job_id}.json"
     await asyncio.to_thread(path.write_text, json.dumps(run, ensure_ascii=False, indent=2), "utf-8")
 
+
+async def _ontology_from_run(ontology_job_id: Optional[str]) -> Optional[LocalOntology]:
+    """The completed ontology job's merged schema, or None if absent/not finished."""
+    if not ontology_job_id:
+        return None
+    run = RUNS.get(ontology_job_id)
+    if run is None:
+        path = _RUNS_RUNTIME_DIR / f"{ontology_job_id}.json"
+        if path.exists():
+            run = json.loads(await asyncio.to_thread(path.read_text, "utf-8"))
+    payload = ((run or {}).get("result") or {}).get("ontology")
+    return LocalOntology.model_validate(payload) if payload else None
+
+
 async def _chunk_documents(
     documents: List[GlobalInputDocument],
     chunk_size: int,
@@ -189,26 +203,21 @@ def _merge_labels(items: List[str], fallback: str) -> List[str]:
         merged = [fallback]
     return merged
 
-async def _process_chunk(
-    mode: JobMode,
-    dataset_id: str,
-    chunk_doc: ProcessedChunk,
+async def _discover_for_chunk(
     discovery_stage: OntologyDiscoveryStage,
-    extraction_stage: Optional["GraphExtractionStage"],
+    chunk_doc: ProcessedChunk,
     timeout_seconds: int,
     retry_attempts: int,
     retry_backoff_seconds: float,
-) -> ChunkProgress:
+) -> LocalOntology:
+    """One bounded discovery call for this chunk, retried on failure."""
     last_exc: Optional[Exception] = None
-    ontology = None
-    logger.info(f"Start of chunk progress for {chunk_doc.chunk_id} ")
     for attempt in range(max(1, retry_attempts)):
         try:
-            ontology = await asyncio.wait_for(
+            return await asyncio.wait_for(
                 discovery_stage.run(documents=[chunk_doc], sample_size=1),
                 timeout=timeout_seconds,
             )
-            break
         except asyncio.TimeoutError:
             logger.warning(f"Ontology discovery timeout for {chunk_doc.chunk_id} on attempt {attempt + 1}")
             last_exc = RuntimeError(f"Ontology discovery timed out after {timeout_seconds} seconds")
@@ -216,23 +225,39 @@ async def _process_chunk(
             last_exc = exc
             if attempt < retry_attempts - 1:
                 await asyncio.sleep(retry_backoff_seconds * (2 ** attempt))
-                
             logger.warning(f"Ontology discovery attempt {attempt + 1} failed for {chunk_doc.chunk_id}: {exc}. Retrying...")
+    raise RuntimeError(f"ontology discovery failed for {chunk_doc.chunk_id}: {last_exc}")
 
+
+async def _process_chunk(
+    mode: JobMode,
+    dataset_id: str,
+    chunk_doc: ProcessedChunk,
+    ontology: Optional[LocalOntology],
+    discovery_stage: Optional[OntologyDiscoveryStage],
+    extraction_stage: Optional["GraphExtractionStage"],
+    timeout_seconds: int,
+    retry_attempts: int,
+    retry_backoff_seconds: float,
+) -> ChunkProgress:
+    logger.info(f"Start of chunk progress for {chunk_doc.chunk_id} ")
+    discovered = None
     if ontology is None:
-        raise RuntimeError(f"ontology discovery failed for {chunk_doc.chunk_id}: {last_exc}")
+        discovered = await _discover_for_chunk(
+            discovery_stage, chunk_doc, timeout_seconds, retry_attempts, retry_backoff_seconds
+        )
+        ontology = discovered
 
     docs_built = 0
     if mode == "build_graph":
         if extraction_stage is None:
             raise RuntimeError("extraction_stage is required for build_graph mode")
-        
         logger.info(f"Start building the graph of {chunk_doc.chunk_id}")
         try:
             docs_built = await extraction_stage.run(
                 dataset_id=dataset_id,
                 documents=[chunk_doc],
-                ontology=ontology
+                ontology=ontology,
             )
             logger.info(f"Complete building graph of {chunk_doc.chunk_id}")
         except asyncio.TimeoutError:
@@ -240,13 +265,14 @@ async def _process_chunk(
             raise
         except Exception as exc:
             logger.error(f"Graph extraction failed for {chunk_doc.chunk_id}: {exc}")
-            raise  # Re-raise to properly signal failure
+            raise
 
     view = ontology.to_public_view()
     return {
-        "entity_types": view.entity_types, # return types -> List[str]
-        "relation_types": view.relation_types, # return types -> List[str]
-        "docs_built": docs_built, 
+        "entity_types": view.entity_types,
+        "relation_types": view.relation_types,
+        "docs_built": docs_built,
+        "ontology": discovered.model_dump() if discovered is not None else None,
     }
 
 async def _execute_unified_job(
@@ -254,6 +280,7 @@ async def _execute_unified_job(
     mode: JobMode,
     dataset_id: str,
     documents: List[GlobalInputDocument],
+    ontology_job_id: Optional[str] = None,
 ) -> None:
     cfg = GraphConfig()
     # Lazy: graph_build pulls in llama_index graph stores at import time, and
@@ -261,7 +288,15 @@ async def _execute_unified_job(
     # module-scope import here would bypass that mock and hit a live Neo4j.
     from src.graph.graph_build import GraphExtractionStage
 
-    discovery_stage = OntologyDiscoveryStage(model=cfg.discovery_model, temperature=cfg.temperature)
+    provided_ontology = await _ontology_from_run(ontology_job_id) if mode == "build_graph" else None
+    if mode == "build_graph" and ontology_job_id and provided_ontology is None:
+        logger.warning(f"ontology job {ontology_job_id} has no completed ontology — falling back to per-chunk discovery")
+
+    discovery_stage = (
+        OntologyDiscoveryStage(model=cfg.discovery_model, temperature=cfg.temperature)
+        if provided_ontology is None
+        else None
+    )
     extraction_stage = GraphExtractionStage(cfg) if mode == "build_graph" else None
     normalization_stage = GraphNormalizationStage(cfg) if mode == "build_graph" else None
 
@@ -301,6 +336,7 @@ async def _execute_unified_job(
     semaphore = asyncio.Semaphore(max(1, cfg.ontology_max_concurrency))
     entity_accumulator: List[str] = []
     relation_accumulator: List[str] = []
+    chunk_ontologies: List[dict] = []
     docs_built = 0
     completed = 0
 
@@ -313,6 +349,7 @@ async def _execute_unified_job(
                 # dataset_id should be passed from frontend when users put their documents, not generated here
                 dataset_id=dataset_id,
                 chunk_doc=chunk_doc,
+                ontology=provided_ontology,
                 discovery_stage=discovery_stage,
                 extraction_stage=extraction_stage,
                 timeout_seconds=cfg.discovery_timeout_seconds,
@@ -329,6 +366,8 @@ async def _execute_unified_job(
             docs_built += int(partial.get("docs_built", 0))
             entity_accumulator.extend(partial.get("entity_types", []))
             relation_accumulator.extend(partial.get("relation_types", []))
+            if partial.get("ontology") is not None:
+                chunk_ontologies.append(partial["ontology"])
 
             async with _RUNS_LOCK:
                 RUNS[job_id]["stage"] = f"{mode}_running"
@@ -346,6 +385,12 @@ async def _execute_unified_job(
         if mode == "build_graph" and normalization_stage is not None:
             # normalization_stage is our embedded class instance
             await normalization_stage.run(dataset_id=dataset_id)
+
+        if mode == "ontology" and chunk_ontologies:
+            merged = LocalOntology.merge([LocalOntology.model_validate(o) for o in chunk_ontologies])
+            RUNS[job_id]["result"]["ontology"] = merged.model_dump()
+            RUNS[job_id]["result"]["entity_types"] = merged.entity_labels or ["ENTITY"]
+            RUNS[job_id]["result"]["relation_types"] = merged.relation_labels or ["RELATED_TO"]
 
         async with _RUNS_LOCK:
             RUNS[job_id]["status"] = "completed"
@@ -381,7 +426,11 @@ async def discover_ontology_async(dataset_id: str, documents: List[GlobalInputDo
     return {"job_id": job_id, "status": "queued", "message": "Ontology job accepted."}
 
 @app.post("/simulate/build_graph", status_code=status.HTTP_202_ACCEPTED)
-async def build_graph_async(dataset_id: str, documents: List[GlobalInputDocument]):
+async def build_graph_async(
+    dataset_id: str,
+    documents: List[GlobalInputDocument],
+    ontology_job_id: Optional[str] = None,
+):
     job_id = str(uuid.uuid4())
     run = {
         "job_id": job_id,
@@ -396,7 +445,9 @@ async def build_graph_async(dataset_id: str, documents: List[GlobalInputDocument
         RUNS[job_id] = run
         await _persist_run(job_id, run)
 
-    asyncio.create_task(_execute_unified_job(job_id, "build_graph", dataset_id, documents))
+    asyncio.create_task(
+        _execute_unified_job(job_id, "build_graph", dataset_id, documents, ontology_job_id=ontology_job_id)
+    )
     return {"job_id": job_id, "status": "queued", "message": "Build graph job accepted."}
 
 @app.get("/simulate/jobs/{job_id}")

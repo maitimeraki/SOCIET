@@ -241,3 +241,31 @@ class LocalOntology(BaseModel):
             entity_types=[ent.type_name for ent in self.entity_types],
             relation_types=[rel.type_name for rel in self.relation_types]
         )
+
+    @classmethod
+    def merge(cls, ontologies: "List[LocalOntology]") -> "LocalOntology":
+        """Union of per-chunk ontologies: first definition wins per type name,
+        properties unioned by name. One dataset-level schema instead of N
+        per-chunk schemas, so extraction constraints don't drift between chunks."""
+        entities: Dict[str, EntityTypeDefinition] = {}
+        relations: Dict[str, RelationTypeDefinition] = {}
+        for onto in ontologies:
+            for ent in onto.entity_types:
+                current = entities.get(ent.type_name)
+                if current is None:
+                    entities[ent.type_name] = ent.model_copy(deep=True)
+                else:
+                    known = {p.name for p in current.properties}
+                    current.properties.extend(p for p in ent.properties if p.name not in known)
+            for rel in onto.relation_types:
+                current = relations.get(rel.type_name)
+                if current is None:
+                    relations[rel.type_name] = rel.model_copy(deep=True)
+                else:
+                    known = {p.name for p in current.properties}
+                    current.properties.extend(p for p in rel.properties if p.name not in known)
+        metadata = next(
+            (o.metadata for o in ontologies if o.entity_types or o.relation_types),
+            OntologyMetadata(),
+        )
+        return cls(metadata=metadata, entity_types=list(entities.values()), relation_types=list(relations.values()))

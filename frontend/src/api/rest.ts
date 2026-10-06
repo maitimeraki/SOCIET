@@ -71,8 +71,11 @@ export const ingestUrl = (url: string) =>
 export const startOntology = (datasetId: string, docs: IngestedDoc[]) =>
   request<{ job_id: string }>(`/simulate/ontology?dataset_id=${encodeURIComponent(datasetId)}`, jsonInit('POST', docs))
 
-export const startGraphBuild = (datasetId: string, docs: IngestedDoc[]) =>
-  request<{ job_id: string }>(`/simulate/build_graph?dataset_id=${encodeURIComponent(datasetId)}`, jsonInit('POST', docs))
+export const startGraphBuild = (datasetId: string, docs: IngestedDoc[], ontologyJobId?: string) =>
+  request<{ job_id: string }>(
+    `/simulate/build_graph?dataset_id=${encodeURIComponent(datasetId)}${ontologyJobId ? `&ontology_job_id=${encodeURIComponent(ontologyJobId)}` : ''}`,
+    jsonInit('POST', docs),
+  )
 
 export const getJob = (jobId: string) => request<JobStatus>(`/simulate/jobs/${jobId}`)
 
