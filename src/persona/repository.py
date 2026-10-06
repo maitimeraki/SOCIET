@@ -386,7 +386,12 @@ class PersonaRepository:
         if distilled is not None:
             description, perspective = str(distilled[0]), str(distilled[1])
         elif matched_sectors:
-            perspective = f"I specialize in {', '.join(matched_sectors[:3])}. {agent_metrics.get('neighbor_context', node.get('perspective', description))+agent_metrics.get('context_text', '')}"
+            # `neighbor_context` is a list of snippets in the metrics payload —
+            # join it so the perspective never crashes on list + str.
+            guidance = agent_metrics.get("neighbor_context", node.get("perspective", description))
+            if isinstance(guidance, (list, tuple)):
+                guidance = " ".join(str(item) for item in guidance)
+            perspective = f"I specialize in {', '.join(matched_sectors[:3])}. {guidance}{agent_metrics.get('context_text', '')}"
         else:
             perspective = node.get("context_text") or node.get("perspective") or description
 
@@ -904,6 +909,49 @@ class PersonaRepository:
             rows = await result.data()
 
         return int(rows[0]["written"]) if rows else 0
+
+    async def write_persona_entity_links(
+        self,
+        persona_name: str,
+        dataset_id: str,
+        chunk_node_ids: Sequence[str],
+    ) -> int:
+        """Write the `(Persona)-[:MENTIONS]->(__Entity__)` edges the topology counts.
+
+        Round-1 pair scoring counts shared non-Chunk middle nodes between two
+        personas; without these edges every synthesized persona is an isolated
+        node and no pair can ever score. The linked entities are those mentioned
+        by the persona's source chunks — the content the persona was synthesized
+        from. The same statement (re)writes `domain_tags`/`entity_affinity` to
+        the linked entity names: the vocabulary both the pair scorer's Jaccard
+        denominator and the activation reader consume. Idempotent, bounded, and
+        tolerant exactly like `write_persona_provenance`.
+        """
+        chunk_ids = list(
+            dict.fromkeys(str(cid).strip() for cid in chunk_node_ids if str(cid or "").strip())
+        )[: self._PROVENANCE_CHUNK_CAP]
+        if not chunk_ids:
+            return 0
+
+        cypher = """
+        UNWIND $chunk_ids AS cid
+        MATCH (c:__Node__ {id: cid})-[:MENTIONS]->(e:__Entity__)
+        WITH DISTINCT e
+        MERGE (p:Persona {name: $name, dataset_id: $dataset_id})
+        MERGE (p)-[:MENTIONS]->(e)
+        WITH p, collect(DISTINCT e.name) AS names
+        WHERE size(names) > 0
+        SET p.domain_tags = names, p.entity_affinity = names
+        RETURN size(names) AS linked
+        """
+
+        async with self._driver.session(database=self._db) as session:
+            result = await session.run(
+                cypher, chunk_ids=chunk_ids, name=persona_name, dataset_id=dataset_id,
+            )
+            rows = await result.data()
+
+        return int(rows[0]["linked"]) if rows else 0
 
     async def get_provenance(self, agent_name: str, limit: int = 5) -> List[ProvenanceLink]:
         """Single, efficient provenance fetch."""

@@ -64,21 +64,24 @@ async def seeded_node(graph_ctx):
             desc="A test entity",
             tags=["test", "graph"],
         )
-        # Create a neighbor
+        # Create a neighbor (marked _test so the cleanup sweeps it too —
+        # an unmarked neighbor leaks one node per run).
         await session.run(
             """
             MERGE (n:Persona {name: $name})
             MERGE (n)-[:RELATED]->(neighbor:Persona {name: $neighbor_name})
+            SET neighbor._test = true
             """,
             name=node_id,
             neighbor_name="test_neighbor",
         )
-        # Create provenance via MENTIONS
+        # Provenance via MENTIONS — the chunk mentions the entity, matching the
+        # real graph shape the llama-index store writes (chunk → entity).
         await session.run(
             """
             MATCH (n:Persona {name: $name})
             CREATE (chunk:Chunk {doc_id: $doc_id, title: $title, breadcrumb: $breadcrumb, chunk_id: $chunk_id})
-            CREATE (n)-[:MENTIONS]->(chunk)
+            CREATE (chunk)-[:MENTIONS]->(n)
             """,
             name=node_id,
             doc_id="doc:test_doc",
@@ -148,6 +151,7 @@ async def test_get_provenance_traces_to_source(seeded_node, graph_ctx):
     """Test that provenance traces back to source chunks."""
     provenance = await graph_ctx.get_provenance(seeded_node)
     assert isinstance(provenance, list)
+    assert any(link.doc_id == "doc:test_doc" for link in provenance)  # seeded chunk found
     # Check that provenance entries have required fields
     for link in provenance:
         assert link.doc_id is not None

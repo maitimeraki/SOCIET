@@ -1163,3 +1163,43 @@ async def test_synthesize_from_names_fetches_all_names_in_one_query():
     assert session.run.await_args.kwargs["names"] == ["Carl", "Dana", "Ghost"]
     assert [p.identity.name for p in profiles] == ["Carl"]  # Dana/Ghost unresolved: skipped
     assert _nodes_by_agent(repo) == {"Carl": {"name": "Carl", "domain_tags": ["regulation"]}}
+
+
+"""Round-1 pairing prerequisite: synthesis writes the persona→entity links
+the topology counts."""
+
+
+def _linkable_synth(entities, provenance_by_id=None):
+    """A synthesizer recording the writer/build call order."""
+    order: list[str] = []
+
+    async def build_profile(**kwargs):
+        order.append("build")
+        return MagicMock(identity=PersonaIdentity(
+            name=kwargs["agent_name"], archetype="Analyst", communication_style="factual",
+        ))
+
+    repo = MagicMock()
+    repo.fetch_nodes_by_names = AsyncMock(return_value={})
+    repo.calculate_agent_metrics_and_context_for_llm = AsyncMock(return_value={})
+    repo.write_persona_provenance = AsyncMock(side_effect=lambda **kw: order.append("provenance") or 1)
+    repo.write_persona_entity_links = AsyncMock(side_effect=lambda **kw: order.append("entities") or 1)
+    repo.build_single_agent_profile_from_node = AsyncMock(side_effect=build_profile)
+    ctx = _CountingContext(list(entities), provenance_by_id or {})
+    return ProfileSynthesizer(repo, ctx), repo, order
+
+
+@pytest.mark.asyncio
+async def test_synthesize_writes_entity_links_from_the_cluster_chunks_before_building():
+    """Without these edges every persona is an isolated node and round 1 pairs 0."""
+    entity = _cluster_entity("Lead", 0.9, ["test"], "lead summary")
+    entity.properties = {"name": "Lead", "triplet_source_id": "node-7"}
+    synth, repo, order = _linkable_synth([entity])
+
+    profiles = await synth.synthesize(query="q", dataset_id="ds1", max_agents=1)
+
+    repo.write_persona_entity_links.assert_awaited_once_with(
+        persona_name="Lead", dataset_id="ds1", chunk_node_ids=["node-7"],
+    )
+    assert order == ["provenance", "entities", "build"]
+    assert [p.identity.name for p in profiles] == ["Lead"]

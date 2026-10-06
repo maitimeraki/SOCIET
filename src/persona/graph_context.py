@@ -13,6 +13,7 @@ from pydantic import BaseModel, Field
 from uuid import UUID, uuid4
 
 from src.graph.config_graph import GraphConfig
+from src.graph.neo4j_bootstrap import ENTITY_EMBEDDINGS_INDEX
 from src.llm.config_llm import LLMConfig
 from src.persona.models_persona import ProvenanceLink
 
@@ -114,8 +115,8 @@ class GraphContext:
         """
         query_vector = await self._get_embedding(query)
 
-        cypher = """
-        CALL db.index.vector.queryNodes('entity_embeddings', $limit, $vector)
+        cypher = f"""
+        CALL db.index.vector.queryNodes('{ENTITY_EMBEDDINGS_INDEX}', $limit, $vector)
         YIELD node, score AS vector_score
         RETURN node, vector_score
         ORDER BY vector_score DESC
@@ -247,10 +248,11 @@ class GraphContext:
     async def get_provenance(self, entity_id: str) -> List[ProvenanceLink]:
         """Return source chunks that contributed to the entity.
 
-        Traces back through MENTIONS relationships to Chunk nodes.
+        Chunks point at the entities they mention (the llama-index store's
+        direction), so an entity's provenance is its inbound MENTIONS.
         """
         cypher = """
-        MATCH (n)-[:MENTIONS]->(chunk:Chunk)
+        MATCH (n)<-[:MENTIONS]-(chunk:Chunk)
         WHERE n.id = $entity_id OR n.name = $entity_id
         AND chunk.doc_id IS NOT NULL
         RETURN DISTINCT
@@ -301,7 +303,7 @@ class GraphContext:
             return by_key
 
         cypher = """
-        MATCH (n)-[:MENTIONS]->(chunk:Chunk)
+        MATCH (n)<-[:MENTIONS]-(chunk:Chunk)
         WHERE (n.id IN $entity_ids OR n.name IN $entity_ids)
         AND chunk.doc_id IS NOT NULL
         RETURN DISTINCT

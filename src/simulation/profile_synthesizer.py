@@ -270,6 +270,25 @@ class ProfileSynthesizer:
                                 f"provenance write failed for persona {agent_name!r}: {exc}"
                             )
 
+                    # Topology prerequisite: without persona→entity links the
+                    # round-1 pair scorer has no shared middle nodes to count.
+                    try:
+                        pending = self._repo.write_persona_entity_links(
+                            persona_name=agent_name,
+                            dataset_id=dataset_id,
+                            chunk_node_ids=chunk_ids,
+                        )
+                        if inspect.iscoroutine(pending):
+                            await pending
+                    except Exception as exc:
+                        logger.warning(
+                            "entity-link write failed for persona %r: %s", agent_name, exc,
+                        )
+                        if warnings is not None:
+                            warnings.append(
+                                f"entity-link write failed for persona {agent_name!r}: {exc}"
+                            )
+
                 # Build profile
                 return await self._repo.build_single_agent_profile_from_node(
                     agent_name=agent_name,
@@ -373,6 +392,21 @@ class ProfileSynthesizer:
                     except Exception as exc:
                         logger.warning(
                             "provenance write failed for joiner %r: %s", name, exc,
+                        )
+
+                    # Same topology prerequisite as the initial roster: joiners
+                    # need entity links or they can never pair either.
+                    try:
+                        pending = self._repo.write_persona_entity_links(
+                            persona_name=name,
+                            dataset_id=dataset_id,
+                            chunk_node_ids=[chunk_id.strip()],
+                        )
+                        if inspect.iscoroutine(pending):
+                            await pending
+                    except Exception as exc:
+                        logger.warning(
+                            "entity-link write failed for joiner %r: %s", name, exc,
                         )
 
                 return await self._repo.build_single_agent_profile_from_node(

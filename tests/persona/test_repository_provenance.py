@@ -98,3 +98,56 @@ async def test_get_provenance_returns_the_real_chunk_ids_the_writer_links():
     assert [link.chunk_id for link in links] == [UUID(CHUNK_UUID)]
     assert links[0].doc_id == "doc:report"
     assert links[0].title == "Report"
+
+
+# ---- Entity links: the `(Persona)-[:MENTIONS]->(__Entity__)` edges topology counts ----
+
+
+@pytest.mark.asyncio
+async def test_entity_writer_emits_one_idempotent_mentions_statement():
+    """Topology pair scoring counts shared non-Chunk middles; this write creates them."""
+    repo, session = _repo_capturing(rows=[{"linked": 3}])
+
+    linked = await repo.write_persona_entity_links("Alice", "ds1", ["node-7", "node-9"])
+
+    session.run.assert_awaited_once()
+    cypher = session.run.await_args.args[0]
+    assert "UNWIND $chunk_ids AS cid" in cypher
+    assert "MATCH (c:__Node__ {id: cid})-[:MENTIONS]->(e:__Entity__)" in cypher
+    # The Persona MERGE keys must match SocietyMemory.commit_round exactly.
+    assert "MERGE (p:Persona {name: $name, dataset_id: $dataset_id})" in cypher
+    assert "MERGE (p)-[:MENTIONS]->(e)" in cypher  # idempotent: MERGE, not CREATE
+    assert "SET p.domain_tags = names, p.entity_affinity = names" in cypher
+    assert session.run.await_args.kwargs == {
+        "chunk_ids": ["node-7", "node-9"], "name": "Alice", "dataset_id": "ds1",
+    }
+    assert linked == 3
+
+
+@pytest.mark.asyncio
+async def test_entity_writer_strips_dedupes_and_caps_the_batch():
+    repo, session = _repo_capturing(rows=[{"linked": 1}])
+
+    ids = ["node-7", " node-7 ", "", "   ", "node-9"] + [f"node-{i}" for i in range(10, 40)]
+    await repo.write_persona_entity_links("Alice", "ds1", ids)
+
+    sent = session.run.await_args.kwargs["chunk_ids"]
+    assert sent[:2] == ["node-7", "node-9"]  # stripped, deduped, input order kept
+    assert len(sent) == PersonaRepository._PROVENANCE_CHUNK_CAP  # capped
+
+
+@pytest.mark.asyncio
+async def test_entity_writer_empty_input_makes_no_query():
+    repo, session = _repo_capturing()
+
+    assert await repo.write_persona_entity_links("Alice", "ds1", []) == 0
+    assert await repo.write_persona_entity_links("Alice", "ds1", ["", "   "]) == 0
+
+    session.run.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_entity_writer_returns_zero_when_no_entity_rows_come_back():
+    repo, _ = _repo_capturing(rows=[])
+
+    assert await repo.write_persona_entity_links("Alice", "ds1", ["node-7"]) == 0
