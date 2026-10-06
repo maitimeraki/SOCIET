@@ -56,8 +56,8 @@ class ProfileSynthesizer:
                     result = await result
                 if isinstance(result, dict):
                     return {eid: list(result.get(eid) or []) for eid in entity_ids}
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.warning("provenance batch failed; falling back to per-entity fetch: %s", exc)
         return {eid: await self._safe_provenance(eid) for eid in entity_ids}
 
     async def synthesize(

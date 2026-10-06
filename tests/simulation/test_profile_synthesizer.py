@@ -1041,6 +1041,27 @@ async def test_synthesize_falls_back_to_per_entity_fetch_for_a_batchless_context
     assert [p.identity.name for p in profiles] == ["A", "C"]
 
 
+@pytest.mark.asyncio
+async def test_synthesize_logs_and_falls_back_when_the_batch_raises(caplog):
+    """A raising batch is a logged degradation, never a silent N-round-trip revert."""
+
+    class _RaisingBatchContext(_CountingContext):
+        async def get_provenance_batch(self, entity_ids):
+            raise RuntimeError("neo4j transient")
+
+    doc = _shared_doc()
+    ctx = _RaisingBatchContext(list(_ROSTER), {"A": [doc], "B": [doc]})
+    synth, _ = _synth_over(ctx)
+
+    with caplog.at_level(logging.WARNING, logger="src.simulation.profile_synthesizer"):
+        profiles = await synth.synthesize(query="q", dataset_id="ds", max_agents=3)
+
+    assert "provenance batch failed" in caplog.text
+    assert "neo4j transient" in caplog.text
+    assert ctx.single_calls == 3  # the documented fallback still runs
+    assert [p.identity.name for p in profiles] == ["A", "C"]
+
+
 """Task 10: each site fetches every node in ONE query, never one query per name."""
 
 from src.persona.repository import PersonaRepository
