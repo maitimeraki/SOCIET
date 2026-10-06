@@ -215,3 +215,45 @@ class TestMergeCandidate:
         assert candidate.node_id == 123
         assert candidate.labels == ["Person", "Employee"]
         assert candidate.properties["name"] == "Bob"
+
+
+class _FakeAsyncResult:
+    """Minimal async-iterable stand-in for a Neo4j Result."""
+
+    def __init__(self, records):
+        self._records = records
+
+    async def __aiter__(self):
+        for record in self._records:
+            yield record
+
+
+class TestFindSurfaceDuplicates:
+    """Regression tests for surface-duplicate detection keyed by elementId."""
+
+    @pytest.mark.asyncio
+    async def test_duplicate_group_with_string_element_ids(self):
+        """Neo4j 5 elementId() returns a string ("4:abc:123") — duplicate groups must not int() it."""
+        config = MagicMock()
+        config.neo4j_uri = "bolt://localhost:7687"
+        config.neo4j_username = "neo4j"
+        config.neo4j_password = "password"
+        config.neo4j_database = "neo4j"
+
+        with patch('src.graph.normalization.AsyncGraphDatabase'):
+            stage = GraphNormalizationStage(config)
+
+        records = [{
+            "key": "alice",
+            "nodes": [
+                {"id": "4:abc:123", "labels": ["Person"], "props": {"name": "Alice", "source": "doc-a"}},
+                {"id": "4:abc:456", "labels": ["Person"], "props": {"name": "Alice", "source": "doc-b"}},
+            ],
+        }]
+        stage._run = AsyncMock(return_value=_FakeAsyncResult(records))
+
+        groups = await stage.find_surface_duplicates("ds-1")
+
+        assert len(groups) == 1
+        assert [c.node_id for c in groups[0]] == ["4:abc:123", "4:abc:456"]
+        assert all(isinstance(c.node_id, str) for c in groups[0])

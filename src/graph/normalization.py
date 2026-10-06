@@ -36,7 +36,7 @@ class RelationEdge:
 
 @dataclass
 class MergeCandidate:
-    node_id: int
+    node_id: str
     labels: List[str]
     properties: Dict[str, Any]
 
@@ -88,7 +88,7 @@ class GraphNormalizationStage:
         result = await self._run(q, {"dataset_id": dataset_id})
         groups = []
         async for record in result:
-            nodes = [MergeCandidate(node_id=int(n["id"]), labels=n["labels"], properties=n["props"]) for n in record["nodes"]]
+            nodes = [MergeCandidate(node_id=n["id"], labels=n["labels"], properties=n["props"]) for n in record["nodes"]]
             groups.append(nodes)
         return groups
 
@@ -200,7 +200,7 @@ class GraphNormalizationStage:
         originals_param = [{"id": c.node_id} for c in originals]
         await self._run(create_q, {"originals": originals_param, "canonical_id": canonical_id, "dataset_id": canonical_props.get("dataset_id"), "canon_props": canonical_props, "audit_note": audit_note})
 
-    async def soft_link_same_as(self, a_id: int, b_id: int, confidence: float, reason: Optional[str] = None):
+    async def soft_link_same_as(self, a_id: str, b_id: str, confidence: float, reason: Optional[str] = None):
         q = Query("""
         MATCH (a) WHERE elementId(a) = $a_id
         MATCH (b) WHERE elementId(b) = $b_id
