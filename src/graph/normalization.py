@@ -1,5 +1,6 @@
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
+import asyncio
 import uuid
 import itertools
 from neo4j import AsyncGraphDatabase, Query
@@ -103,22 +104,23 @@ class GraphNormalizationStage:
          - provenance_match (same source system)
          - embedding_similarity (optional external, placeholder here)
         """
-        # fast checks between first two nodes (can be expanded)
         signals = {"pairs": [], "aggregate_confidence": 0.0}
-        # For simplicity compute pairwise for all pairs and average
-        import itertools
-        scores = []
-        for a, b in itertools.combinations(group, 2):
-            type_score = 1.0 if set(a.labels) & set(b.labels) else 0.0
-            provenance_score = 1.0 if a.properties.get("source") and a.properties.get("source") == b.properties.get("source") else 0.0
-            # neighbor overlap: fetch neighboring labels
-            neighbor_score = await self._neighbor_label_jaccard(str(a.node_id), str(b.node_id))
-            # embedding similarity placeholder (0..1) - user must implement actual embed service
-            embed_score = await self._embedding_similarity(a.properties.get("name", ""), b.properties.get("name", ""))
-            # weighted sum
-            weight = 0.25 * type_score + 0.25 * provenance_score + 0.3 * neighbor_score + 0.2 * embed_score
-            scores.append(weight)
-            signals["pairs"].append({
+        # Each pair costs one Neo4j round trip (neighbor Jaccard), so score
+        # pairs concurrently under a fixed in-flight bound instead of
+        # one-at-a-time. gather keeps pair order, so results are unchanged.
+        semaphore = asyncio.Semaphore(max(1, self.config.ontology_max_concurrency))
+
+        async def score_pair(a: MergeCandidate, b: MergeCandidate) -> Dict[str, Any]:
+            async with semaphore:
+                type_score = 1.0 if set(a.labels) & set(b.labels) else 0.0
+                provenance_score = 1.0 if a.properties.get("source") and a.properties.get("source") == b.properties.get("source") else 0.0
+                # neighbor overlap: fetch neighboring labels
+                neighbor_score = await self._neighbor_label_jaccard(str(a.node_id), str(b.node_id))
+                # embedding similarity placeholder (0..1) - user must implement actual embed service
+                embed_score = await self._embedding_similarity(a.properties.get("name", ""), b.properties.get("name", ""))
+                # weighted sum
+                weight = 0.25 * type_score + 0.25 * provenance_score + 0.3 * neighbor_score + 0.2 * embed_score
+            return {
                 "a": a.node_id,
                 "b": b.node_id,
                 "type_score": type_score,
@@ -126,9 +128,16 @@ class GraphNormalizationStage:
                 "neighbor_score": neighbor_score,
                 "embed_score": embed_score,
                 "pair_confidence": weight,
-            })
-        if scores:
-            signals["aggregate_confidence"] = float(sum(scores) / len(scores))
+            }
+
+        pair_results = await asyncio.gather(
+            *(score_pair(a, b) for a, b in itertools.combinations(group, 2))
+        )
+        signals["pairs"] = list(pair_results)
+        if pair_results:
+            signals["aggregate_confidence"] = float(
+                sum(p["pair_confidence"] for p in pair_results) / len(pair_results)
+            )
         return signals
 
     async def _neighbor_label_jaccard(self, id_a: str, id_b: str) -> float:
