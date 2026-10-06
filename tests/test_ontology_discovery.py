@@ -324,3 +324,38 @@ class TestStageConfigWiring:
             discover_ontology_sync(sample_chunks)
 
             assert mock_llm.call_args.kwargs["model"] == LLMConfig.analysis_model
+
+
+def _chunk() -> ProcessedChunk:
+    """Minimal chunk for stage-level tests (same shape as the sample_chunks fixture)."""
+    return ProcessedChunk(
+        chunk_id="chunk-1",
+        parent_doc_id="doc-1",
+        chunk_index=0,
+        content_hash="abc123",
+        content="The software system consists of microservices that communicate via REST APIs.",
+        summary_context="Software architecture overview",
+        breadcrumb="docs/architecture",
+        header_level=1,
+        domain_tags=["software", "architecture"],
+        expertise_level="Technical",
+        metadata={"title": "System Architecture"},
+    )
+
+
+@pytest.mark.asyncio
+async def test_run_raises_instead_of_returning_empty_ontology():
+    stage = OntologyDiscoveryStage()
+    stage.llm = AsyncMock()
+    stage.llm.acomplete.side_effect = RuntimeError("provider down")
+    with pytest.raises(RuntimeError, match="provider down"):
+        await stage.run(documents=[_chunk()], sample_size=1)
+
+
+@pytest.mark.asyncio
+async def test_run_raises_on_unparseable_reply():
+    stage = OntologyDiscoveryStage()
+    stage.llm = AsyncMock()
+    stage.llm.acomplete.return_value = "sorry, no json here"
+    with pytest.raises(RuntimeError, match="unparseable"):
+        await stage.run(documents=[_chunk()], sample_size=1)

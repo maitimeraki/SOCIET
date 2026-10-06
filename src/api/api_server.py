@@ -293,7 +293,11 @@ async def _execute_unified_job(
         logger.warning(f"ontology job {ontology_job_id} has no completed ontology — falling back to per-chunk discovery")
 
     discovery_stage = (
-        OntologyDiscoveryStage(model=cfg.discovery_model, temperature=cfg.temperature)
+        OntologyDiscoveryStage(
+            model=cfg.discovery_model,
+            temperature=cfg.temperature,
+            timeout=min(60.0, cfg.discovery_timeout_seconds),
+        )
         if provided_ontology is None
         else None
     )
