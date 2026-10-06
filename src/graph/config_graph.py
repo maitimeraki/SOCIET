@@ -9,6 +9,9 @@ class GraphConfig:
     # LLMConfig (env: ANALYSIS_LLM_MODEL); .env is loaded there too.
     discovery_model: str = LLMConfig.analysis_model
     extraction_model: str = LLMConfig.analysis_model
+    # Explicit per-attempt bound for the extraction LLM call: a hung request
+    # must fail inside the caller's window instead of riding the library default.
+    extraction_timeout_seconds: int = int(os.getenv("GRAPH_EXTRACTION_TIMEOUT_SECONDS", "300"))
     temperature: float = float(os.getenv("GRAPH_TEMPERATURE", "0.0"))
     discovery_sample_size: int = int(os.getenv("GRAPH_DISCOVERY_SAMPLE_SIZE", "12"))
     discovery_timeout_seconds: int = int(os.getenv("GRAPH_DISCOVERY_TIMEOUT_SECONDS", "90"))

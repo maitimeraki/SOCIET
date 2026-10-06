@@ -230,3 +230,57 @@ class TestStageConfigWiring:
         from src.llm.config_llm import LLMConfig
 
         assert GraphConfig().extraction_model == LLMConfig.analysis_model
+
+
+class TestNetworkBounds:
+    """Every network client the stage builds carries an explicit bound."""
+
+    def test_extraction_timeout_defaults_to_300(self):
+        """GraphConfig carries the extraction timeout knob, default 300 s."""
+        from src.graph.config_graph import GraphConfig
+
+        assert GraphConfig().extraction_timeout_seconds == 300
+
+    def test_extraction_llm_timeout_comes_from_config(self):
+        """OpenAILike receives the configured timeout, not a library default."""
+        from src.graph.config_graph import GraphConfig
+        from src.graph.graph_build import GraphExtractionStage
+
+        with patch('src.graph.graph_build.OpenAILike') as mock_llm, \
+             patch('src.graph.graph_build.OllamaEmbedding'), \
+             patch('src.graph.graph_build.Neo4jPropertyGraphStore'), \
+             patch('src.graph.graph_build.SentenceSplitter'):
+            GraphExtractionStage(GraphConfig(extraction_timeout_seconds=123))
+
+            assert mock_llm.call_args.kwargs["timeout"] == 123
+
+    def test_extraction_llm_caps_retries(self):
+        """max_retries=1 — a hung attempt must not stack retries on top of the timeout."""
+        from src.graph.config_graph import GraphConfig
+        from src.graph.graph_build import GraphExtractionStage
+
+        with patch('src.graph.graph_build.OpenAILike') as mock_llm, \
+             patch('src.graph.graph_build.OllamaEmbedding'), \
+             patch('src.graph.graph_build.Neo4jPropertyGraphStore'), \
+             patch('src.graph.graph_build.SentenceSplitter'):
+            GraphExtractionStage(GraphConfig())
+
+            assert mock_llm.call_args.kwargs["max_retries"] == 1
+
+    def test_embed_model_is_bounded_and_env_addressed(self, monkeypatch):
+        """OllamaEmbedding gets LLMConfig's Ollama base URL plus a request timeout."""
+        from src.graph.config_graph import GraphConfig
+        from src.graph.graph_build import GraphExtractionStage
+        from src.llm.config_llm import LLMConfig
+
+        monkeypatch.setattr(LLMConfig, "ollama_base_url", "http://sentinel-ollama:1234")
+
+        with patch('src.graph.graph_build.OpenAILike'), \
+             patch('src.graph.graph_build.OllamaEmbedding') as mock_embed, \
+             patch('src.graph.graph_build.Neo4jPropertyGraphStore'), \
+             patch('src.graph.graph_build.SentenceSplitter'):
+            GraphExtractionStage(GraphConfig())
+
+            kwargs = mock_embed.call_args.kwargs
+            assert kwargs["base_url"] == "http://sentinel-ollama:1234"
+            assert kwargs["client_kwargs"]["timeout"] == 60

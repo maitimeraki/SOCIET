@@ -28,6 +28,10 @@ logging.basicConfig(level=logging.ERROR, format="%(asctime)s - %(levelname)s - %
 # logger = logging.getLogger(__name__)
 logger = setup_logging()  # Ensure logging is configured with handler clearing to prevent duplication
 
+# The ollama clients default to httpx `timeout=None` (unbounded) — a stuck
+# localhost embed call would wait forever. 60 s is a generous bound for it.
+_EMBED_TIMEOUT_SECONDS = 60
+
 # Document-first node model (P4-T1): a Document node per source document, created
 # before extraction, and a DERIVED_FROM edge from every extracted concept to it.
 # `domain_tags` accumulates and dedupes instead of overwriting: the live path
@@ -91,11 +95,14 @@ class GraphExtractionStage:
                 api_base=LLMConfig.nvidia_nim_base_url or "https://integrate.api.nvidia.com/v1",
                 api_key=LLMConfig.nvidia_nim_api_key,
                 temperature=0.7,
-                is_chat_model=True
+                is_chat_model=True,
+                timeout=self.config.extraction_timeout_seconds,
+                max_retries=1  # a hung attempt must not stack retries on top of the timeout
             )
         self.embed_model = OllamaEmbedding(
             model_name="nomic-embed-text:v1.5",
-            base_url="http://localhost:11434",
+            base_url=LLMConfig.ollama_base_url,
+            client_kwargs={"timeout": _EMBED_TIMEOUT_SECONDS},
             ollama_additional_kwargs={"mirostat": 0},
         )
         self.graph_store = Neo4jPropertyGraphStore(
