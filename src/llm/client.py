@@ -6,6 +6,7 @@ Public surface unchanged for all callers:
     llm.get_available_providers() -> dict
 Fallback chain: requested provider first, then ollama -> openai -> anthropic -> huggingface.
 """
+import asyncio
 import logging
 import os
 from typing import AsyncGenerator, Optional
@@ -15,6 +16,11 @@ import litellm
 from src.llm.config_llm import LLMConfig
 
 logger = logging.getLogger(__name__)
+
+# Every LLM attempt is explicitly bounded (litellm's default attempt timeout is 6000 s).
+LLM_ATTEMPT_TIMEOUT_SECONDS = 90  # per HTTP attempt
+LLM_NUM_RETRIES = 1  # litellm-level retries per fallback leg
+LLM_TOTAL_DEADLINE_SECONDS = 300  # the whole fallback chain, all legs together
 
 
 class LLMClient:
@@ -70,26 +76,37 @@ class LLMClient:
 
         chain = [provider] + [p for p in self.FALLBACK_ORDER if p != provider]
         errors: list[str] = []
-        for p in chain:
-            try:
-                # The caller's model id is only meaningful for the provider they
-                # named; a fallback leg must use its own configured model.
-                leg_model = model if p == provider else None
-                response = await litellm.acompletion(
-                    model=self._model_str(p, leg_model),
-                    messages=[
-                        {"role": "system", "content": system_prompt},
-                        {"role": "user", "content": user_prompt},
-                    ],
-                    temperature=0.7 if temperature is None else temperature,
-                    num_retries=2,
-                    **self._call_kwargs(p),
-                )
-                return response.choices[0].message.content or ""
-            except Exception as exc:
-                errors.append(f"{p}: {exc}")
-                logger.warning("LLM provider %s failed: %s", p, exc)
-        raise RuntimeError("All LLM providers failed: " + "; ".join(errors))
+
+        async def _run_chain() -> str:
+            for p in chain:
+                try:
+                    # The caller's model id is only meaningful for the provider they
+                    # named; a fallback leg must use its own configured model.
+                    leg_model = model if p == provider else None
+                    response = await litellm.acompletion(
+                        model=self._model_str(p, leg_model),
+                        messages=[
+                            {"role": "system", "content": system_prompt},
+                            {"role": "user", "content": user_prompt},
+                        ],
+                        temperature=0.7 if temperature is None else temperature,
+                        timeout=LLM_ATTEMPT_TIMEOUT_SECONDS,
+                        num_retries=LLM_NUM_RETRIES,
+                        **self._call_kwargs(p),
+                    )
+                    return response.choices[0].message.content or ""
+                except Exception as exc:
+                    errors.append(f"{p}: {exc}")
+                    logger.warning("LLM provider %s failed: %s", p, exc)
+            raise RuntimeError("All LLM providers failed: " + "; ".join(errors))
+
+        try:
+            return await asyncio.wait_for(_run_chain(), timeout=LLM_TOTAL_DEADLINE_SECONDS)
+        except asyncio.TimeoutError:
+            detail = f"LLM call exceeded total deadline of {LLM_TOTAL_DEADLINE_SECONDS}s"
+            if errors:
+                detail += " after: " + "; ".join(errors)
+            raise RuntimeError(detail)
 
     async def stream_generate(
         self,
@@ -112,6 +129,7 @@ class LLMClient:
                 ],
                 temperature=0.7,
                 stream=True,
+                timeout=LLM_ATTEMPT_TIMEOUT_SECONDS,
                 **self._call_kwargs(provider),
             )
             async for chunk in response:
