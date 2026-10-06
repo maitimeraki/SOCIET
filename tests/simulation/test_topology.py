@@ -271,6 +271,22 @@ class TestCypherGeneration:
         assert "MATCH (a:Persona)-[r1]-(e)-[r2]-(b:Persona)" in round1
         assert "MATCH (p:Persona)-[r1]-(e)-[r2]-(part:Persona)" in topology._ACTIVATION_ADJACENCY_CYPHER
 
+    def test_pair_cyphers_match_each_unordered_pair_once(self, sample_profiles, debate_config):
+        """Both pair Cyphers guard orientation: one record per unordered pair.
+
+        Un-guarded, `(a)-..-(b)` matches both orientations -- (a,b) and (b,a) --
+        so every pair is scored twice; RoundRunner then legitimately emits both
+        directions per record and the same debate runs four times instead of two.
+        """
+        topology = CommunicationTopology(MagicMock(), "test_db")
+        round1, _ = topology._round1_cypher(["Alice", "Bob"], "ds_001", debate_config)
+        round_n, _ = topology._round_n_cypher(["Alice", "Bob"], "ds_001", debate_config, 2)
+
+        for cypher in (round1, round_n):
+            assert "a.name < b.name" in cypher
+            # the guard filters the MATCH itself, before any aggregation
+            assert cypher.index("a.name < b.name") < cypher.index("WITH a, b, count")
+
     def test_round_n_cypher_with_custom_radius(self, sample_profiles):
         """Verify round N Cypher uses configurable comm_radius."""
         config = DebateConfig(comm_radius=3)

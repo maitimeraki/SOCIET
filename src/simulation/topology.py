@@ -75,6 +75,7 @@ class CommunicationTopology:
         MATCH (a:Persona)-[r1]-(e)-[r2]-(b:Persona)
         WHERE a.name IN $agent_names AND b.name IN $agent_names
           AND a <> b
+          AND a.name < b.name
           AND NOT e:Chunk
           AND coalesce(a.dataset_id, '') = $dataset_id
         WITH a, b, count(DISTINCT e) AS shared_count,
@@ -130,6 +131,7 @@ class CommunicationTopology:
         MATCH (a:Persona)-[r1*1..{radius}]-(e)-[r2*1..{radius}]-(b:Persona)
         WHERE a.name IN $agent_names AND b.name IN $agent_names
           AND a <> b
+          AND a.name < b.name
           AND NOT e:Chunk
           AND coalesce(a.dataset_id, '') = $dataset_id
         WITH a, b, count(DISTINCT e) AS shared_count,
