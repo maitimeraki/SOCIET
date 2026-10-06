@@ -62,6 +62,25 @@ def _document_rows(dataset_id: str, documents: List[ProcessedChunk]) -> List[dic
     return list(rows.values())
 
 
+def _refresh_schema_once(store: Neo4jPropertyGraphStore) -> None:
+    """Quiet llama-index's post-insert schema refreshes: the first refresh through
+    this guard is real, every later one is a no-op. llama-index calls
+    get_schema(refresh=True) after every insert, which runs apoc.meta.subGraph({})
+    + apoc.schema.nodes() over the whole graph; the extraction path never reads
+    the refreshed schema, so all but the first pass is waste."""
+    original_refresh = store.refresh_schema
+    refreshed = False
+
+    def refresh_schema_once(**kwargs):
+        nonlocal refreshed
+        if refreshed:
+            return None
+        refreshed = True
+        return original_refresh(**kwargs)
+
+    store.refresh_schema = refresh_schema_once
+
+
 class GraphExtractionStage:
     """Extracts entities and relationships from documents using LLMs and stores them in a Neo4j graph database.
     This stage is responsible for taking raw text documents, applying the defined ontology schema to extract structured information."""
@@ -85,6 +104,7 @@ class GraphExtractionStage:
             url=self.config.neo4j_uri,
             database=self.config.neo4j_database,
         )
+        _refresh_schema_once(self.graph_store)
         self.splitter = SentenceSplitter(chunk_size=2048, chunk_overlap=400)
         
     async def run(

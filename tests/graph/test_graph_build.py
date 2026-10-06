@@ -144,6 +144,27 @@ class TestGraphExtractionStage:
             assert stage.graph_store is not None
             assert stage.splitter is not None
 
+    def test_schema_refresh_runs_once_per_store(self, monkeypatch):
+        """The stage's store refreshes its schema at most once per instance."""
+        import src.graph.graph_build as gb
+        from src.graph.config_graph import GraphConfig
+
+        class _Probe:
+            def __init__(self, **kwargs):
+                self.refreshes = 0
+
+            def refresh_schema(self, **kwargs):
+                self.refreshes += 1
+
+        monkeypatch.setattr(gb, "Neo4jPropertyGraphStore", _Probe)
+        stage = gb.GraphExtractionStage(GraphConfig())
+        store = stage.graph_store
+        assert isinstance(store, _Probe)
+        store.refresh_schema()
+        store.refresh_schema()
+        store.refresh_schema()
+        assert store.refreshes == 1
+
     @pytest.mark.asyncio
     async def test_run_returns_document_count(self, sample_chunks, sample_ontology):
         """Verify run method returns document count."""
