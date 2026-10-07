@@ -827,7 +827,7 @@ def _anchored_entity(name: str, anchor, score: float = 0.9) -> MagicMock:
     return node
 
 
-def _provenance_synth(entities, ctx_provenance=None):
+def _provenance_synth(entities):
     """A synthesizer whose repo records the write/build call order."""
     order: list[str] = []
 
@@ -849,29 +849,25 @@ def _provenance_synth(entities, ctx_provenance=None):
 
     ctx = MagicMock()
     ctx.find_relevant_entities = AsyncMock(return_value=entities)
-    if ctx_provenance is not None:
-        ctx.get_provenance = AsyncMock(return_value=ctx_provenance)
     return ProfileSynthesizer(persona_repo=repo, graph_context=ctx), repo, order
 
 
 @pytest.mark.asyncio
-async def test_synthesize_writes_each_cluster_entity_anchor_before_building():
-    """Two entities sharing a doc cluster; the writer gets their real chunk node ids."""
-    from types import SimpleNamespace
-
+async def test_synthesize_writes_each_nodes_anchor_before_its_build():
+    """Two required nodes; each writer gets that node's own chunk ref."""
     lead = _anchored_entity("Lead", "node-7", 0.9)
     second = _anchored_entity("Second", " node-9 ", 0.5)
-    synth, repo, order = _provenance_synth(
-        [lead, second], ctx_provenance=[SimpleNamespace(doc_id="doc:1")],
-    )
+    synth, repo, order = _provenance_synth([lead, second])
 
     profiles = await synth.synthesize(query="q", dataset_id="ds", max_agents=2)
 
-    repo.write_persona_provenance.assert_awaited_once_with(
-        persona_name="Lead", dataset_id="ds", chunk_node_ids=["node-7", "node-9"],
-    )
-    assert order == ["write:Lead", "build:Lead"]  # written BEFORE the build reads it
-    assert [p.identity.name for p in profiles] == ["Lead"]
+    written = [call.kwargs for call in repo.write_persona_provenance.await_args_list]
+    assert {w["persona_name"]: w["chunk_node_ids"] for w in written} == {
+        "Lead": ["node-7"], "Second": ["node-9"],
+    }
+    assert order.index("write:Lead") < order.index("build:Lead")
+    assert order.index("write:Second") < order.index("build:Second")
+    assert sorted(p.identity.name for p in profiles) == ["Lead", "Second"]
 
 
 @pytest.mark.asyncio
@@ -884,13 +880,13 @@ async def test_synthesize_skips_the_write_when_no_entity_carries_an_anchor():
     assert [p.identity.name for p in profiles] == ["Bare"]
 
 
-def test_cluster_chunk_ids_tolerates_non_mapping_properties():
+def test_evidence_chunk_ids_tolerates_non_mapping_properties():
     """A non-mapping `properties` contributes nothing — never invented."""
     from src.simulation.profile_synthesizer import ProfileSynthesizer
 
     odd = MagicMock()
     odd.properties = ["not", "a", "mapping"]
-    assert ProfileSynthesizer._cluster_chunk_ids([odd]) == []
+    assert ProfileSynthesizer._evidence_chunk_ids([odd]) == []
 
 
 @pytest.mark.asyncio
@@ -944,7 +940,7 @@ async def test_synthesize_survives_a_raising_profile_emitter():
     assert len(profiles) == 2  # the same count the arrange block produces without emitters
 
 
-"""Task 9: the roster's provenance is ONE batched query, never one per entity."""
+"""Test rig: a GraphContext stand-in that records every provenance read."""
 
 
 class _CountingContext:
@@ -993,75 +989,6 @@ def _shared_doc():
     return ProvenanceLink(doc_id="doc:1", title="T", breadcrumb="", chunk_id=uuid4())
 
 
-@pytest.mark.asyncio
-async def test_synthesize_fetches_the_roster_provenance_in_one_batch_call():
-    doc = _shared_doc()
-    synth, repo = _synth_over(_CountingContext(list(_ROSTER), {"A": [doc], "B": [doc]}))
-    ctx = synth._ctx
-
-    profiles = await synth.synthesize(query="q", dataset_id="ds", max_agents=3)
-
-    assert ctx.batch_calls == [["A", "B", "C"]]  # ONE call for the whole roster
-    assert ctx.single_calls == 0  # never one fetch per entity
-    # ...and the per-entity mapping drove the clustering: A+B share doc:1, C
-    # has none → solo. Two agents, each built from its own cluster.
-    assert [p.identity.name for p in profiles] == ["A", "C"]
-    totals = {
-        call.kwargs["agent_name"]: call.kwargs["sector_results"][0]["total_relevance"]
-        for call in repo.build_single_agent_profile_from_node.await_args_list
-    }
-    assert totals["A"] == pytest.approx(1.7)
-    assert totals["C"] == pytest.approx(0.7)
-
-
-@pytest.mark.asyncio
-async def test_synthesize_falls_back_to_per_entity_fetch_for_a_batchless_context():
-    """A context that predates the batch method still clusters (mock tolerance)."""
-
-    class _LegacyContext:
-        def __init__(self, entities, provenance_by_id):
-            self._entities = entities
-            self._provenance_by_id = provenance_by_id
-            self.single_calls = 0
-
-        async def find_relevant_entities(self, query, limit=10):
-            return self._entities
-
-        async def get_provenance(self, entity_id):
-            self.single_calls += 1
-            return list(self._provenance_by_id.get(entity_id, []))
-
-    doc = _shared_doc()
-    ctx = _LegacyContext(list(_ROSTER), {"A": [doc], "B": [doc]})
-    synth, _ = _synth_over(ctx)
-
-    profiles = await synth.synthesize(query="q", dataset_id="ds", max_agents=3)
-
-    assert ctx.single_calls == 3  # the documented fallback, not the roster path
-    assert [p.identity.name for p in profiles] == ["A", "C"]
-
-
-@pytest.mark.asyncio
-async def test_synthesize_logs_and_falls_back_when_the_batch_raises(caplog):
-    """A raising batch is a logged degradation, never a silent N-round-trip revert."""
-
-    class _RaisingBatchContext(_CountingContext):
-        async def get_provenance_batch(self, entity_ids):
-            raise RuntimeError("neo4j transient")
-
-    doc = _shared_doc()
-    ctx = _RaisingBatchContext(list(_ROSTER), {"A": [doc], "B": [doc]})
-    synth, _ = _synth_over(ctx)
-
-    with caplog.at_level(logging.WARNING, logger="src.simulation.profile_synthesizer"):
-        profiles = await synth.synthesize(query="q", dataset_id="ds", max_agents=3)
-
-    assert "provenance batch failed" in caplog.text
-    assert "neo4j transient" in caplog.text
-    assert ctx.single_calls == 3  # the documented fallback still runs
-    assert [p.identity.name for p in profiles] == ["A", "C"]
-
-
 """Task 10: each site fetches every node in ONE query, never one query per name."""
 
 from src.persona.repository import PersonaRepository
@@ -1108,8 +1035,8 @@ def _nodes_by_agent(repo) -> dict:
 
 
 @pytest.mark.asyncio
-async def test_synthesize_fetches_all_cluster_nodes_in_one_query():
-    """Two clusters → ONE node-fetch query whose rows map per name (Task 10)."""
+async def test_synthesize_fetches_all_required_nodes_in_one_query():
+    """Three required nodes → ONE node-fetch query whose rows map per name (Task 10)."""
     doc = _shared_doc()
     repo, session = _repo_with_counted_queries([
         _node_row("A", domain_tags=["alpha"]),
@@ -1121,31 +1048,34 @@ async def test_synthesize_fetches_all_cluster_nodes_in_one_query():
 
     profiles = await synth.synthesize(query="q", dataset_id="ds", max_agents=3)
 
-    # A+B cluster under representative A; C solo → two profiles, ONE query.
+    # One node per agent, ONE query.
     assert session.run.await_count == 1
-    assert sorted(session.run.await_args.kwargs["names"]) == ["A", "C"]
+    assert sorted(session.run.await_args.kwargs["names"]) == ["A", "B", "C"]
+    assert [p.identity.name for p in profiles] == ["A", "B", "C"]
     assert _nodes_by_agent(repo) == {
         "A": {"name": "A", "domain_tags": ["alpha"]},
+        "B": {"name": "B"},  # no row in this test → the node's own properties
         "C": {"name": "C", "domain_tags": ["gamma"]},
     }
-    assert [p.identity.name for p in profiles] == ["A", "C"]
 
 
 @pytest.mark.asyncio
 async def test_synthesize_falls_back_per_name_when_the_batch_misses_one():
-    """A cluster name absent from the batch keeps the old per-name fallback (Task 10)."""
+    """A node name absent from the batch keeps the node-properties fallback (Task 10)."""
     doc = _shared_doc()
     repo, session = _repo_with_counted_queries([_node_row("A", domain_tags=["alpha"])])
     repo.calculate_agent_metrics_and_context_for_llm = AsyncMock(return_value={})
     repo.build_single_agent_profile_from_node = AsyncMock(side_effect=_named_profile)
     synth = ProfileSynthesizer(repo, _CountingContext(list(_ROSTER), {"A": [doc], "B": [doc]}))
 
-    await synth.synthesize(query="q", dataset_id="ds", max_agents=3)
+    profiles = await synth.synthesize(query="q", dataset_id="ds", max_agents=3)
 
     assert session.run.await_count == 1
+    assert [p.identity.name for p in profiles] == ["A", "B", "C"]
     assert _nodes_by_agent(repo) == {
         "A": {"name": "A", "domain_tags": ["alpha"]},
-        "C": {"name": "C"},  # no row → the representative's cluster properties
+        "B": {"name": "B"},
+        "C": {"name": "C"},
     }
 
 
@@ -1203,3 +1133,47 @@ async def test_synthesize_writes_entity_links_from_the_cluster_chunks_before_bui
     )
     assert order == ["provenance", "entities", "build"]
     assert [p.identity.name for p in profiles] == ["Lead"]
+
+
+"""Required-node roster: one agent per node — never one document-collapsed cell."""
+
+
+@pytest.mark.asyncio
+async def test_synthesize_single_cell_graph_builds_one_agent_per_required_node():
+    """THE regression: 11 nodes from one document → 11 agents, not 1.
+
+    The old roster grouped entities by shared document provenance, so a
+    single-document graph collapsed to one un-pairable agent. The graph is
+    seeded through `_CountingContext` so every node reports one shared doc.
+    """
+    entities = [
+        _cluster_entity(f"Node {i}", 0.9 - i * 0.01, ["test"], f"summary {i}")
+        for i in range(11)
+    ]
+    doc = _shared_doc()
+    synth, _ = _synth_over(
+        _CountingContext(entities, {f"Node {i}": [doc] for i in range(11)})
+    )
+
+    profiles = await synth.synthesize(query="q", dataset_id="ds", max_agents=50)
+
+    assert len(profiles) == 11  # the old path returned 1: every node shared one doc
+    assert [p.identity.name for p in profiles] == [f"Node {i}" for i in range(11)]
+
+
+@pytest.mark.asyncio
+async def test_synthesize_reads_no_provenance_the_roster_is_node_level():
+    """The roster derivation touches no provenance: the nodes are the agents."""
+    doc = _shared_doc()
+    synth, repo = _synth_over(_CountingContext(list(_ROSTER), {"A": [doc], "B": [doc]}))
+    ctx = synth._ctx
+
+    profiles = await synth.synthesize(query="q", dataset_id="ds", max_agents=3)
+
+    assert ctx.batch_calls == [] and ctx.single_calls == 0
+    assert [p.identity.name for p in profiles] == ["A", "B", "C"]
+    totals = {
+        call.kwargs["agent_name"]: call.kwargs["sector_results"][0]["total_relevance"]
+        for call in repo.build_single_agent_profile_from_node.await_args_list
+    }
+    assert totals == {"A": 0.9, "B": 0.8, "C": 0.7}  # each build saw its own node
