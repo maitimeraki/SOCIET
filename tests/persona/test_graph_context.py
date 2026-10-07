@@ -348,3 +348,42 @@ def test_embed_model_is_bounded_and_env_addressed(monkeypatch):
     kwargs = mock_embed.call_args.kwargs
     assert kwargs["base_url"] == "http://sentinel-ollama:1234"
     assert kwargs["client_kwargs"]["timeout"] == 60
+
+
+# ---- Required-node traversal: one-hop entity neighbours ----
+
+def _traversal_row(node_id, node_name, seed_degree=1):
+    return {
+        "n": {"id": node_id, "name": node_name,
+              "domain_tags": ["x"], "summary_context": f"{node_name} summary"},
+        "seed_degree": seed_degree,
+    }
+
+
+@pytest.mark.asyncio
+async def test_find_connected_nodes_walks_one_hop_and_parses_entities():
+    rows = [_traversal_row("n1", "Neighbour One", seed_degree=2)]
+    ctx, driver = _batch_ctx(lambda cypher, params: rows)
+
+    nodes = await ctx.find_connected_nodes(["seed-1", "seed-2"], limit=10)
+
+    assert len(driver.queries) == 1
+    cypher, params = driver.queries[0]
+    assert "__Entity__" in cypher and "NOT n:Chunk" in cypher
+    assert params["node_ids"] == ["seed-1", "seed-2"]
+    assert params["limit"] == 10
+    assert len(nodes) == 1
+    node = nodes[0]
+    assert isinstance(node, EntityNode)
+    assert node.id == "n1" and node.name == "Neighbour One"
+    assert node.relevance_score == 0.0  # walked nodes carry no vector score
+    assert node.domain_tags == ["x"]
+    assert node.summary == "Neighbour One summary"
+
+
+@pytest.mark.asyncio
+async def test_find_connected_nodes_empty_seeds_run_no_query():
+    ctx, driver = _batch_ctx(lambda cypher, params: pytest.fail("query executed for empty seeds"))
+
+    assert await ctx.find_connected_nodes([]) == []
+    assert driver.queries == []

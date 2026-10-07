@@ -130,25 +130,64 @@ class GraphContext:
             )
             rows = await result.data()
 
-        entities: List[EntityNode] = []
-        for row in rows:
-            node = row.get("node")
-            if node is None:
-                continue
-            props = self._node_props(node)
-            labels = list(node.keys()) if hasattr(node, "keys") else props.get("labels", ["Entity"])
+        return [
+            self._entity_from_node(row.get("node"), float(row.get("vector_score", 0.0)))
+            for row in rows
+            if row.get("node") is not None
+        ]
 
-            entities.append(EntityNode(
-                id=str(props.get("id", props.get("name", uuid4()))),
-                name=str(props.get("name", "Unknown")),
-                label=labels[0] if labels else "Entity",
-                properties=props,
-                relevance_score=float(row.get("vector_score", 0.0)),
-                summary=props.get("summary_context") or props.get("summary") or props.get("description"),
-                domain_tags=self._parse_tags(props.get("domain_tags")),
-            ))
+    def _entity_from_node(self, node: Any, relevance_score: float) -> EntityNode:
+        """One EntityNode from a Neo4j node — the single node-reading body the
+        vector search and the neighbour walk both construct through."""
+        props = self._node_props(node)
+        labels = list(node.keys()) if hasattr(node, "keys") else props.get("labels", ["Entity"])
+        return EntityNode(
+            id=str(props.get("id", props.get("name", uuid4()))),
+            name=str(props.get("name", "Unknown")),
+            label=labels[0] if labels else "Entity",
+            properties=props,
+            relevance_score=relevance_score,
+            summary=props.get("summary_context") or props.get("summary") or props.get("description"),
+            domain_tags=self._parse_tags(props.get("domain_tags")),
+        )
 
-        return entities
+    async def find_connected_nodes(self, node_ids: List[str], limit: int = 25) -> List[EntityNode]:
+        """Entity nodes one relationship hop from the seed nodes.
+
+        The roster-expansion walk for required-node derivation: seeds match by
+        id or name (the same tolerance as `get_provenance`), the walk stays on
+        entity-to-entity edges (`__Entity__`, never `Chunk`), and neighbours
+        carry no vector score — relevance is 0.0, so selection ranks them on
+        intent fit alone. Ordered by how many seeds reach a node; capped.
+        """
+        seed_ids = [str(node_id) for node_id in node_ids if str(node_id or "").strip()]
+        if not seed_ids:
+            return []
+
+        cypher = """
+        MATCH (seed:__Entity__)
+        WHERE seed.id IN $node_ids OR seed.name IN $node_ids
+        MATCH (seed)-[r]-(n:__Entity__)
+        WHERE NOT n:Chunk
+          AND NOT (n.id IN $node_ids OR n.name IN $node_ids)
+        WITH n, count(DISTINCT seed) AS seed_degree
+        RETURN n, seed_degree
+        ORDER BY seed_degree DESC
+        LIMIT $limit
+        """
+        async with self._driver.session(database=self._db) as session:
+            result = await session.run(
+                cast(LiteralString, cypher),
+                node_ids=seed_ids,
+                limit=limit,
+            )
+            rows = await result.data()
+
+        return [
+            self._entity_from_node(row.get("n"), 0.0)
+            for row in rows
+            if row.get("n") is not None
+        ]
 
     def _parse_tags(self, tags: Any) -> List[str]:
         """Parse domain_tags from various formats."""
