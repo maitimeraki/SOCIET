@@ -579,6 +579,44 @@ async def test_activation_disabled_by_config():
 
 
 @pytest.mark.asyncio
+async def test_no_pair_round_attempts_activation_bootstrap():
+    """A round with no pairs still tries to grow the roster — the bootstrap path."""
+    synth = AsyncMock(spec=ProfileSynthesizer)
+    topo = AsyncMock(spec=CommunicationTopology)
+    society_memory = AsyncMock(spec=SocietyMemory)
+    society_memory.commit_round.return_value = _ok_receipt()
+    synth.synthesize.return_value = [_make_profile(1, "Alice"), _make_profile(2, "Bob")]
+    synth.synthesize_from_names = AsyncMock(return_value=[_make_profile(3, "Carl")])
+    topo.find_activation_candidates = AsyncMock(side_effect=[
+        [ActivationCandidate(agent_name="Carl", shared_entities=["carbon"], reason="shares entities")],
+        [],  # round 2: Carl is a participant now — no more joiners
+    ])
+    topo.compute_round_pairs = AsyncMock(side_effect=lambda profiles, **kw: (
+        # Real pairing depends on who is in the roster: round 2 can only pair
+        # with Carl if round 1 grew it. A roster that never grows pairs nothing.
+        [CommPair(agent_a="Alice", agent_b="Carl", shared_entities=["carbon"], score=0.5)]
+        if any(p.identity.name == "Carl" for p in profiles) else []
+    ))
+    llm_runner = MagicMock(spec=BatchedLLMRunner)
+    llm_runner.gather = MagicMock(side_effect=lambda *a, **kw: _AsyncEmptyIter())
+    verdict_synth = MagicMock(spec=VerdictSynthesizer)
+    verdict_synth.asynthesize.return_value = _make_verdict()
+    ws_calls = []
+
+    async def ws(msg):
+        ws_calls.append(msg)
+
+    orch = _orch(synth, topo, society_memory, verdict_synth, llm_runner)
+    result = await orch.run("q", "ds1", DebateConfig(max_agents=5, max_rounds=2), ws)
+
+    synth.synthesize_from_names.assert_awaited_once()
+    assert synth.synthesize_from_names.await_args.kwargs["names"] == ["Carl"]
+    assert topo.compute_round_pairs.await_count == 2  # round 2 ran after growth
+    assert result.rounds_executed == 1
+    assert any(m.get("type") == "activation" for m in ws_calls)
+
+
+@pytest.mark.asyncio
 async def test_run_threads_intent_to_round_runner_and_result():
     """S3: the run's intent reaches the prompt builder and is exposed on the result."""
     synth = AsyncMock(spec=ProfileSynthesizer)

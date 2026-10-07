@@ -205,6 +205,13 @@ class DebateOrchestrator:
                 )
                 if not pairs:
                     warnings.append(f"Round {round_num}: No pairs computed")
+                    # Bootstrap: a roster too small to pair must still be able
+                    # to grow, or the society deadlocks before its first round.
+                    await self._maybe_activate(
+                        profiles=profiles, dataset_id=dataset_id, query=query,
+                        query_hash=query_hash, round_num=round_num, config=config,
+                        warnings=warnings, ws_broadcast=ws_broadcast,
+                    )
                     continue
 
                 if snapshot is not None:
@@ -281,43 +288,11 @@ class DebateOrchestrator:
                 except Exception as exc:
                     warnings.append(f"Round {round_num}: commit failed: {exc}")
 
-                # Activation: pull related non-participants in (they debate from next round)
-                if config.max_new_agents_per_round > 0 and len(profiles) < config.max_agents:
-                    try:
-                        candidates = await self._topology.find_activation_candidates(
-                            participants=[p.identity.name for p in profiles],
-                            dataset_id=dataset_id,
-                            query_hash=query_hash,
-                            last_round=round_num,
-                            max_new=min(config.max_new_agents_per_round, config.max_agents - len(profiles)),
-                        )
-                        if candidates:
-                            new_profiles = await self._profile_synthesizer.synthesize_from_names(
-                                names=[c.agent_name for c in candidates],
-                                query=query,
-                                dataset_id=dataset_id,
-                                relevance_by_name={
-                                    c.agent_name: min(1.0, len(c.shared_entities) / 3.0)
-                                    for c in candidates
-                                },
-                            )
-                            # Every candidate may be unresolvable (synthesize_from_names
-                            # returns []): then the roster did not grow, so no activation
-                            # event and no warning — nothing was activated.
-                            if new_profiles:
-                                profiles.extend(new_profiles)
-                                await ws_broadcast({
-                                    "type": "activation",
-                                    "round": round_num,
-                                    "agents": [p.identity.name for p in new_profiles],
-                                    "reasons": {c.agent_name: c.reason for c in candidates},
-                                })
-                                warnings.append(
-                                    f"Round {round_num}: activated {len(new_profiles)} agents: "
-                                    + ", ".join(p.identity.name for p in new_profiles)
-                                )
-                    except Exception as exc:
-                        warnings.append(f"Round {round_num}: activation failed: {exc}")
+                await self._maybe_activate(
+                    profiles=profiles, dataset_id=dataset_id, query=query,
+                    query_hash=query_hash, round_num=round_num, config=config,
+                    warnings=warnings, ws_broadcast=ws_broadcast,
+                )
 
                 if self._check_convergence(rounds, profiles, config=config):
                     break
@@ -381,6 +356,64 @@ class DebateOrchestrator:
             supporting_entities=list(verdict.supporting_entities) if verdict else [],
             opposing_entities=list(verdict.opposing_entities) if verdict else [],
         )
+
+    async def _maybe_activate(
+        self,
+        *,
+        profiles: List[Agent],
+        dataset_id: str,
+        query: str,
+        query_hash: str,
+        round_num: int,
+        config: DebateConfig,
+        warnings: list[str],
+        ws_broadcast: Callable[[dict[str, Any]], Awaitable[None]],
+    ) -> None:
+        """Pull related non-participants in (they debate from next round).
+
+        Called after every round that produced pairs (normal growth) and after
+        a round that produced none — the bootstrap path: a society too small to
+        pair must still be able to grow, or it deadlocks. The mentions source
+        simply yields nothing before a round has committed. No-ops when
+        activation is disabled or the roster is already at `max_agents`.
+        """
+        if config.max_new_agents_per_round <= 0 or len(profiles) >= config.max_agents:
+            return
+        try:
+            candidates = await self._topology.find_activation_candidates(
+                participants=[p.identity.name for p in profiles],
+                dataset_id=dataset_id,
+                query_hash=query_hash,
+                last_round=round_num,
+                max_new=min(config.max_new_agents_per_round, config.max_agents - len(profiles)),
+            )
+            if candidates:
+                new_profiles = await self._profile_synthesizer.synthesize_from_names(
+                    names=[c.agent_name for c in candidates],
+                    query=query,
+                    dataset_id=dataset_id,
+                    relevance_by_name={
+                        c.agent_name: min(1.0, len(c.shared_entities) / 3.0)
+                        for c in candidates
+                    },
+                )
+                # Every candidate may be unresolvable (synthesize_from_names
+                # returns []): then the roster did not grow, so no activation
+                # event and no warning — nothing was activated.
+                if new_profiles:
+                    profiles.extend(new_profiles)
+                    await ws_broadcast({
+                        "type": "activation",
+                        "round": round_num,
+                        "agents": [p.identity.name for p in new_profiles],
+                        "reasons": {c.agent_name: c.reason for c in candidates},
+                    })
+                    warnings.append(
+                        f"Round {round_num}: activated {len(new_profiles)} agents: "
+                        + ", ".join(p.identity.name for p in new_profiles)
+                    )
+        except Exception as exc:
+            warnings.append(f"Round {round_num}: activation failed: {exc}")
 
     async def _emit_stage(
         self,
