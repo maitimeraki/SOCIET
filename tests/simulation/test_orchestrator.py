@@ -309,6 +309,48 @@ async def test_convergence_check_breaks_loop():
 
 
 @pytest.mark.asyncio
+async def test_non_debatable_raise_carries_the_accumulated_warnings():
+    """A failed run must not lose its diagnostics: the warnings ride the exception."""
+    synth = AsyncMock(spec=ProfileSynthesizer)
+    topo = AsyncMock(spec=CommunicationTopology)
+    society_memory = AsyncMock(spec=SocietyMemory)
+
+    async def synthesize(**kwargs):
+        kwargs["warnings"].append("S4 selection degraded to density-only")
+        return [_make_profile(1, "Alice")]
+
+    synth.synthesize.side_effect = synthesize
+    orch = _orch(synth, topo, society_memory)
+
+    with pytest.raises(SocietyNotDebatableError, match="at least 2") as excinfo:
+        await orch.run("q", "ds1", DebateConfig(max_agents=5, max_rounds=1), AsyncMock())
+
+    assert excinfo.value.warnings == ["S4 selection degraded to density-only"]
+
+
+@pytest.mark.asyncio
+async def test_failed_round_raises_cause_aware_message_with_warnings():
+    """Rounds that raise are 'rounds raised', not 'no pair shared context' — and the
+    accumulated failure diagnostics survive on the exception."""
+    synth = AsyncMock(spec=ProfileSynthesizer)
+    topo = AsyncMock(spec=CommunicationTopology)
+    society_memory = AsyncMock(spec=SocietyMemory)
+    synth.synthesize.return_value = [_make_profile(1, "Alice"), _make_profile(2, "Bob")]
+    topo.compute_round_pairs.side_effect = RuntimeError("cypher down")
+    orch = _orch(synth, topo, society_memory)
+    config = DebateConfig(max_agents=5, max_rounds=2, max_new_agents_per_round=0)
+
+    with pytest.raises(SocietyNotDebatableError) as excinfo:
+        await orch.run("q", "ds1", config, AsyncMock())
+
+    message = str(excinfo.value)
+    assert "raised" in message
+    assert "no pair" not in message  # the genuine-no-pair wording is a different cause
+    assert any("Round 1 failed" in w for w in excinfo.value.warnings)
+    assert any("Round 2 failed" in w for w in excinfo.value.warnings)
+
+
+@pytest.mark.asyncio
 async def test_never_paired_run_raises():
     """A roster that never pairs across every round is a failed debate, not a silent one."""
     synth = AsyncMock(spec=ProfileSynthesizer)

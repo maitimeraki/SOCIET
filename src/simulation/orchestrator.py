@@ -65,7 +65,15 @@ class SocietyNotDebatableError(RuntimeError):
     Raised when fewer than two agents derive from the graph for the query, or
     when no round ever produced a pair. A failed job — not an empty debate
     reported as complete.
+
+    The run's accumulated `warnings` ride along on the instance so the job
+    boundary can surface the diagnostics explaining the failure instead of
+    dropping them at the raise.
     """
+
+    def __init__(self, message: str, warnings: Optional[list[str]] = None):
+        super().__init__(message)
+        self.warnings: list[str] = list(warnings) if warnings else []
 
 
 @dataclass
@@ -175,11 +183,13 @@ class DebateOrchestrator:
             raise SocietyNotDebatableError(
                 f"society not debatable: the graph yields {len(profiles)} agent(s) for "
                 f"this query; a debate needs at least 2 — ingest more documents or "
-                f"broaden the query."
+                f"broaden the query.",
+                warnings=warnings,
             )
 
         # Step 2: Run debate rounds
         rounds: list[RoundResult] = []
+        rounds_failed = 0  # rounds whose execution raised (vs. ran and produced no pairs)
         round_runner = RoundRunner(_llm=self._llm_runner, ws_broadcast=ws_broadcast, intent=intent)
         debate_history: list[dict[str, Any]] = []
         snapshot = None  # graph-side society state, read at the start of rounds >= 2
@@ -298,6 +308,7 @@ class DebateOrchestrator:
                     break
 
             except Exception as exc:
+                rounds_failed += 1
                 warnings.append(f"Round {round_num} failed: {exc}")
                 continue
 
@@ -305,9 +316,19 @@ class DebateOrchestrator:
         # pure function of the final rounds, so it is evaluated once here and
         # reused for the event and the result.
         if not rounds:
+            # Word the failure by its actual cause: rounds that raised are not
+            # the same as rounds that ran but never paired.
+            if rounds_failed:
+                raise SocietyNotDebatableError(
+                    f"society not debatable: the debate could not execute — "
+                    f"{rounds_failed} of {config.max_rounds} rounds raised an error "
+                    f"before any pair debated.",
+                    warnings=warnings,
+                )
             raise SocietyNotDebatableError(
                 f"society not debatable: no pair of agents shared enough context to "
-                f"debate across {config.max_rounds} rounds."
+                f"debate across {config.max_rounds} rounds.",
+                warnings=warnings,
             )
         converged = self._check_convergence(rounds, profiles, config=config)
         share = self._weighted_share(rounds[-2:], profiles)

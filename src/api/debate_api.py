@@ -217,6 +217,10 @@ async def _run_debate_async(
         })
 
     except Exception as exc:
+        # A raise on the orchestrator's not-debatable paths carries the run's
+        # accumulated warnings; surface them with the error (broadcast → buffered
+        # → persisted) so a failed run does not lose its diagnostics.
+        warnings = list(getattr(exc, "warnings", []) or [])
         async with _DEBATE_JOBS_LOCK:
             _DEBATE_JOBS[job_id]["status"] = "failed"
             _DEBATE_JOBS[job_id]["error"] = str(exc)
@@ -224,6 +228,7 @@ async def _run_debate_async(
         await ws_manager.broadcast({
             "type": "error",
             "error": str(exc),
+            "warnings": warnings,
         })
 
 

@@ -586,6 +586,62 @@ class TestDebateJobIntent:
         assert messages[0]["intent"]["core_question"] == query
 
 
+class TestDebateJobFailure:
+    """A run that cannot debate fails the job AND delivers the diagnostics it accumulated."""
+
+    @pytest.mark.asyncio
+    async def test_failed_job_surfaces_the_orchestrator_warnings(self):
+        job_id = f"failed-{uuid.uuid4()}"
+        config = DebateConfig(max_agents=5, max_rounds=1, max_new_agents_per_round=0)
+
+        llm = MagicMock()
+        llm.generate = AsyncMock(return_value=_INTENT_REPLY)
+        ctx = MagicMock()
+        ctx.__aenter__ = AsyncMock(return_value=ctx)
+        ctx.__aexit__ = AsyncMock(return_value=False)
+
+        profiler = MagicMock()
+
+        async def synthesize(**kwargs):
+            kwargs["warnings"].append("Round 1: No pairs computed")
+            return [_stub_profile("Alice")]  # one agent -> not debatable
+
+        profiler.synthesize = AsyncMock(side_effect=synthesize)
+
+        messages: list = []
+        ws_manager = MagicMock()
+
+        async def capture(msg):
+            messages.append(msg)
+
+        ws_manager.broadcast = capture
+
+        _DEBATE_JOBS[job_id] = {
+            "job_id": job_id, "status": "queued", "query": "q",
+            "graph_id": "ds1", "config": asdict(config), "result": None, "error": None,
+        }
+        try:
+            with patch("src.llm.client.LLMClient", return_value=llm), \
+                 patch("src.persona.graph_context.GraphContext", return_value=ctx), \
+                 patch("src.persona.repository.PersonaRepository"), \
+                 patch("src.simulation.profile_synthesizer.ProfileSynthesizer", return_value=profiler), \
+                 patch("src.simulation.topology.CommunicationTopology"), \
+                 patch("src.simulation.verdict.VerdictSynthesizer"), \
+                 patch("src.simulation.society_memory.SocietyMemory"), \
+                 patch("src.api.debate_api._DebateWSManager", return_value=ws_manager):
+                await _run_debate_async(
+                    job_id=job_id, query="q", graph_id="ds1", config=config,
+                    selected_domains=None,
+                )
+        finally:
+            job = _DEBATE_JOBS.pop(job_id, None)
+
+        assert job["status"] == "failed"
+        assert "at least 2" in job["error"]
+        error_event = next(m for m in messages if m.get("type") == "error")
+        assert error_event["warnings"] == ["Round 1: No pairs computed"]
+
+
 class TestSimulationDepth:
     """D3: the request carries the depth gate, defaulting to standard."""
 
