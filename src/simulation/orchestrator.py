@@ -24,8 +24,9 @@ boundary can hand in `ws_manager.broadcast` unchanged:
                            "share": float | None, "threshold": float}
               verdict     {"converged": bool, "rounds_executed": int}
 
-A run that stops early (nothing synthesized) emits intake, selection, synthesis,
-verdict — no round or convergence event, because neither happened.
+A run whose roster cannot debate (fewer than two agents) — or that never
+produces a pair — raises `SocietyNotDebatableError` after the stage events
+already emitted; the job boundary marks the run failed.
 
 Degradation: no emitter (`None`) → no events; an emitter that raises is logged
 and the run continues. Job state is authoritative; WS delivery is best-effort.
@@ -56,6 +57,15 @@ logger = logging.getLogger(__name__)
 
 #: Async callable that delivers one stage event; see the module docstring.
 StageEmitter = Callable[[dict[str, Any]], Awaitable[None]]
+
+
+class SocietyNotDebatableError(RuntimeError):
+    """The synthesized society cannot debate, so the job must fail.
+
+    Raised when fewer than two agents derive from the graph for the query, or
+    when no round ever produced a pair. A failed job — not an empty debate
+    reported as complete.
+    """
 
 
 @dataclass
@@ -161,16 +171,11 @@ class DebateOrchestrator:
         )
         stage_index = await self._emit_stage(on_stage, stage_index, "synthesis", agents=len(profiles))
 
-        if not profiles:
-            await self._emit_stage(on_stage, stage_index, "verdict", converged=False, rounds_executed=0)
-            return OrchestratedDebateResult(
-                converged=False,
-                verdict="No agents could be synthesized for this query.",
-                final_stances={},
-                warnings=warnings + ["No relevant entities found for query"],
-                rounds_executed=0,
-                intent=intent,
-                selection_rows=selection_rows,
+        if len(profiles) < 2:
+            raise SocietyNotDebatableError(
+                f"society not debatable: the graph yields {len(profiles)} agent(s) for "
+                f"this query; a debate needs at least 2 — ingest more documents or "
+                f"broaden the query."
             )
 
         # Step 2: Run debate rounds
@@ -321,9 +326,14 @@ class DebateOrchestrator:
                 warnings.append(f"Round {round_num} failed: {exc}")
                 continue
 
-        # The loop is over (converged, exhausted, or no pairs ever): the
-        # convergence check is a pure function of the final rounds, so it is
-        # evaluated once here and reused for the event and the result.
+        # The loop is over (converged or exhausted): the convergence check is a
+        # pure function of the final rounds, so it is evaluated once here and
+        # reused for the event and the result.
+        if not rounds:
+            raise SocietyNotDebatableError(
+                f"society not debatable: no pair of agents shared enough context to "
+                f"debate across {config.max_rounds} rounds."
+            )
         converged = self._check_convergence(rounds, profiles, config=config)
         share = self._weighted_share(rounds[-2:], profiles)
         stage_index = await self._emit_stage(
