@@ -45,7 +45,7 @@ class ProfileSynthesizer:
         """Synthesize agent profiles from relevant graph entities.
 
         1. Vector-search entities by query
-        2. The required node set (the seeds; the traversal walk widens it in Task 3)
+        2. The required node set (the seeds plus their one-hop entity neighbours)
         3. Rank nodes by the S4 score (intent-semantic + density blend); with no
            intent this is exactly the previous density-only ordering
         4. Take top nodes (adaptive count)
@@ -81,7 +81,7 @@ class ProfileSynthesizer:
         # Required nodes are the roster's candidates: one agent per node. The
         # old path grouped by shared document provenance, so a single-document
         # graph collapsed to one cluster — and one un-pairable agent.
-        required = list(seeds)
+        required = await self._required_nodes(seeds, limit=search_limit)
         target = min(max_agents, int(math.sqrt(len(required)) * 4))
 
         candidates = [
@@ -336,6 +336,31 @@ class ProfileSynthesizer:
 
         results = await asyncio.gather(*(_build(n) for n in names))
         return [p for p in results if p is not None]
+
+    async def _required_nodes(self, seeds: list[EntityNode], limit: int) -> list[EntityNode]:
+        """The roster's candidate nodes: the seeds plus their one-hop entity
+        neighbours, deduped by (id, name). A missing method, a raising walk or
+        a non-list answer degrade to the seeds alone — logged, never raised.
+        """
+        required = list(seeds)
+        try:
+            walk = getattr(self._ctx, "find_connected_nodes", None)
+            neighbours = walk([seed.id for seed in seeds], limit) if callable(walk) else []
+            if inspect.iscoroutine(neighbours):
+                neighbours = await neighbours
+            if not isinstance(neighbours, (list, tuple)):
+                neighbours = []
+        except Exception as exc:
+            logger.warning("node traversal failed; continuing with the seed nodes only: %s", exc)
+            neighbours = []
+
+        seen = {(seed.id, seed.name) for seed in required}
+        for node in neighbours:
+            key = (node.id, node.name)
+            if key not in seen:
+                seen.add(key)
+                required.append(node)
+        return required
 
     def _distillation_entry(self, row: SelectionRow, evidence: list[EntityNode]) -> dict:
         """One persona's S5 distillation input: identity, the grounding synthesis

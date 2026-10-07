@@ -1177,3 +1177,57 @@ async def test_synthesize_reads_no_provenance_the_roster_is_node_level():
         for call in repo.build_single_agent_profile_from_node.await_args_list
     }
     assert totals == {"A": 0.9, "B": 0.8, "C": 0.7}  # each build saw its own node
+
+
+"""Traversal expansion: the roster's candidates are the seeds plus their one-hop neighbours."""
+
+
+@pytest.mark.asyncio
+async def test_synthesize_expands_the_roster_with_walked_neighbours():
+    """find_connected_nodes results join the roster as candidates."""
+    walked = _cluster_entity("Neighbour", 0.0, ["x"], "linked context")
+
+    class _WalkingContext:
+        async def find_relevant_entities(self, query, limit=10):
+            return [_cluster_entity("Seed", 0.9, ["x"], "seed text")]
+
+        async def find_connected_nodes(self, node_ids, limit=10):
+            return [walked]
+
+    synth, _ = _synth_over(_WalkingContext())
+
+    profiles = await synth.synthesize(query="q", dataset_id="ds", max_agents=5)
+
+    assert sorted(p.identity.name for p in profiles) == ["Neighbour", "Seed"]
+
+
+@pytest.mark.asyncio
+async def test_synthesize_survives_a_failing_traversal(caplog):
+    """A raising walk logs and degrades to the seed nodes — never breaks synthesis."""
+
+    class _RaisingWalkContext(_CountingContext):
+        async def find_connected_nodes(self, node_ids, limit=10):
+            raise RuntimeError("neo4j transient")
+
+    synth, _ = _synth_over(_RaisingWalkContext(list(_ROSTER), {}))
+
+    with caplog.at_level(logging.WARNING, logger="src.simulation.profile_synthesizer"):
+        profiles = await synth.synthesize(query="q", dataset_id="ds", max_agents=3)
+
+    assert "node traversal failed" in caplog.text
+    assert [p.identity.name for p in profiles] == ["A", "B", "C"]
+
+
+@pytest.mark.asyncio
+async def test_synthesize_rosters_seeds_when_the_context_has_no_traversal():
+    """A context predating the walk still rosters its seeds (mock tolerance)."""
+
+    class _SeedOnlyContext:
+        async def find_relevant_entities(self, query, limit=10):
+            return list(_ROSTER)
+
+    synth, _ = _synth_over(_SeedOnlyContext())
+
+    profiles = await synth.synthesize(query="q", dataset_id="ds", max_agents=3)
+
+    assert [p.identity.name for p in profiles] == ["A", "B", "C"]
