@@ -4,6 +4,11 @@ import type { GraphEdge, GraphLabel, GraphNode } from '../../graph/graphStore'
 import {
   MAX_ANIMATED_NODES,
   MAX_LABELLED_NODES,
+  TEXT_FALLBACK_LIMIT,
+  graphAriaLabel,
+  graphStatusMessage,
+  graphStreamPhase,
+  graphTextFallback,
   showEdgeLabels,
   showNodeLabels,
   shouldAnimateLayout,
@@ -119,5 +124,77 @@ describe('large-graph guard', () => {
 
     expect(graph.getNodeAttribute('a', 'label')).toBe('Glucose')
     expect(graph.getEdgeAttribute('a|b|POWERS', 'label')).toBe('POWERS')
+  })
+})
+
+describe('graphAriaLabel', () => {
+  it('counts the nodes, edges and entity types', () => {
+    expect(graphAriaLabel(12, 8, 3)).toBe('Knowledge graph: 12 nodes, 8 edges, 3 entity types')
+  })
+
+  it('pluralises a lone node, edge and entity type', () => {
+    expect(graphAriaLabel(1, 1, 1)).toBe('Knowledge graph: 1 node, 1 edge, 1 entity type')
+  })
+
+  it('reads as an empty graph before anything arrives', () => {
+    expect(graphAriaLabel(0, 0, 0)).toBe('Knowledge graph: 0 nodes, 0 edges, 0 entity types')
+  })
+})
+
+describe('graphStreamPhase / graphStatusMessage', () => {
+  it('waits for the first chunk while the graph is empty', () => {
+    expect(graphStreamPhase(0, 'connecting', false)).toBe('waiting')
+    expect(graphStreamPhase(0, 'open', false)).toBe('waiting')
+    expect(graphStatusMessage(0, 'open', false)).toBe('Waiting for the first chunk…')
+  })
+
+  it('streams silently once a node has arrived', () => {
+    expect(graphStreamPhase(3, 'open', false)).toBe('streaming')
+    expect(graphStatusMessage(3, 'open', false)).toBeNull()
+  })
+
+  it('reports failure when the socket closes before done', () => {
+    expect(graphStreamPhase(5, 'closed', false)).toBe('failed')
+    expect(graphStatusMessage(5, 'closed', false)).toBe('The live graph stream failed — the graph stays as the last snapshot.')
+  })
+
+  it('reports the ended state on a done frame, even with zero nodes', () => {
+    expect(graphStreamPhase(0, 'closed', true)).toBe('ended')
+    expect(graphStatusMessage(0, 'closed', true)).toBe('The live graph stream has ended.')
+  })
+})
+
+describe('graphTextFallback', () => {
+  const nodes: GraphNode[] = [
+    { id: 'a', label: 'Glucose', type: 'Molecule' },
+    { id: 'b', label: 'Respiration', type: 'Process' },
+    { id: 'c', label: 'ATP', type: 'Molecule' },
+  ]
+
+  it('renders relations and standalone entities as text lines', () => {
+    const edges: GraphEdge[] = [{ source: 'a', target: 'b', label: 'POWERS' }]
+
+    const { lines, omitted } = graphTextFallback(nodes, edges, TEXT_FALLBACK_LIMIT)
+
+    expect(lines).toEqual(['Glucose —POWERS→ Respiration', 'ATP (Molecule)'])
+    expect(omitted).toBe(0)
+  })
+
+  it('caps the list at the limit and counts what it left out', () => {
+    const edges: GraphEdge[] = [{ source: 'a', target: 'b', label: 'POWERS' }]
+
+    const { lines, omitted } = graphTextFallback(nodes, edges, 1)
+
+    expect(lines).toEqual(['Glucose —POWERS→ Respiration'])
+    expect(omitted).toBe(1)
+  })
+
+  it('skips an edge whose endpoint is not in the store', () => {
+    const edges: GraphEdge[] = [{ source: 'a', target: 'missing', label: 'POWERS' }]
+
+    const { lines, omitted } = graphTextFallback(nodes, edges, TEXT_FALLBACK_LIMIT)
+
+    expect(lines).toEqual(['Glucose (Molecule)', 'Respiration (Process)', 'ATP (Molecule)'])
+    expect(omitted).toBe(0)
   })
 })
