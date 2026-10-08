@@ -223,6 +223,70 @@ async def test_build_job_without_ontology_discovers_once_per_dataset(monkeypatch
     assert len(extraction.calls) == 2                         # one run per document, not per chunk
 
 
+class _ExplodingDiscovery:
+    """Stand-in for OntologyDiscoveryStage whose call always raises."""
+
+    def __init__(self, *args, **kwargs):
+        pass
+
+    async def run(self, documents, sample_size=1):
+        raise RuntimeError("provider down")
+
+
+@pytest.mark.asyncio
+async def test_build_job_discovery_failure_marks_job_failed(monkeypatch):
+    discovery = _ExplodingDiscovery()
+    _patch_build_pipeline(monkeypatch, discovery, _FakeExtraction())
+    # One attempt, no backoff: keep the failure path fast.
+    monkeypatch.setattr(
+        api_server,
+        "GraphConfig",
+        lambda: GraphConfig(discovery_retry_attempts=1, discovery_retry_backoff_seconds=0.0),
+    )
+    job_id = "test-build-discovery-fail"
+    api_server.RUNS[job_id] = {"job_id": job_id, "status": "queued", "result": None}
+
+    await api_server._execute_unified_job(job_id, "build_graph", "ds1", _docs())
+
+    # A terminal discovery failure must persist, not leave the job stuck.
+    assert api_server.RUNS[job_id]["status"] == "failed"
+    assert api_server.RUNS[job_id]["stage"] == "failed"
+    assert "dataset vocabulary discovery failed" in api_server.RUNS[job_id]["error"]
+
+
+class _FlakyDiscovery:
+    """Stand-in that fails the first call, then succeeds."""
+
+    def __init__(self, *args, **kwargs):
+        self.calls = 0
+
+    async def run(self, documents, sample_size=1):
+        self.calls += 1
+        if self.calls == 1:
+            raise RuntimeError("transient provider error")
+        return _ontology("TYPE_OK")
+
+
+@pytest.mark.asyncio
+async def test_build_job_retries_transient_discovery_failure(monkeypatch):
+    discovery = _FlakyDiscovery()
+    extraction = _FakeExtraction()
+    _patch_build_pipeline(monkeypatch, discovery, extraction)
+    monkeypatch.setattr(
+        api_server,
+        "GraphConfig",
+        lambda: GraphConfig(discovery_retry_attempts=2, discovery_retry_backoff_seconds=0.0),
+    )
+    job_id = "test-build-retry"
+    api_server.RUNS[job_id] = {"job_id": job_id, "status": "queued", "result": None}
+
+    await api_server._execute_unified_job(job_id, "build_graph", "ds1", _docs())
+
+    assert discovery.calls == 2                               # one retry absorbed the blip
+    assert api_server.RUNS[job_id]["status"] == "completed"
+    assert len(extraction.calls) == 2
+
+
 class TestOntologyFromRun:
     """The persisted-run read must never raise: a bad read falls back to discovery."""
 

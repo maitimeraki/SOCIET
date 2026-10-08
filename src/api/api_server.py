@@ -241,6 +241,42 @@ async def _discover_for_chunk(
     raise RuntimeError(f"ontology discovery failed for {chunk_doc.chunk_id}: {last_exc}")
 
 
+async def _discover_dataset_vocabulary(
+    chunks: List[ProcessedChunk],
+    discovery_stage: OntologyDiscoveryStage,
+    timeout_seconds: int,
+    retry_attempts: int,
+    retry_backoff_seconds: float,
+    sample_size: int,
+    max_labels: int,
+) -> LocalOntology:
+    """One bounded dataset-wide vocabulary call, retried on failure.
+
+    Same bound/backoff shape as `_discover_for_chunk`: a hung or transiently
+    failing call must fail inside the caller's window rather than escape it."""
+    last_exc: Optional[Exception] = None
+    for attempt in range(max(1, retry_attempts)):
+        try:
+            return await asyncio.wait_for(
+                discover_vocabulary(
+                    chunks,
+                    sample_size=sample_size,
+                    max_labels=max_labels,
+                    stage=discovery_stage,
+                ),
+                timeout=timeout_seconds,
+            )
+        except asyncio.TimeoutError:
+            logger.warning(f"Dataset vocabulary discovery timeout on attempt {attempt + 1}")
+            last_exc = RuntimeError(f"dataset vocabulary discovery timed out after {timeout_seconds} seconds")
+        except Exception as exc:
+            last_exc = exc
+            if attempt < retry_attempts - 1:
+                await asyncio.sleep(retry_backoff_seconds * (2 ** attempt))
+            logger.warning(f"Dataset vocabulary discovery attempt {attempt + 1} failed: {exc}. Retrying...")
+    raise RuntimeError(f"dataset vocabulary discovery failed: {last_exc}")
+
+
 async def _process_chunk(
     chunk_doc: ProcessedChunk,
     discovery_stage: OntologyDiscoveryStage,
@@ -351,16 +387,6 @@ async def _execute_unified_job(
             await _persist_run(job_id, RUNS[job_id])
         return
 
-    if mode == "build_graph" and provided_ontology is None:
-        # One vocabulary per dataset: a single discovery call over a spread
-        # sample, replacing per-chunk discovery + union.
-        provided_ontology = await discover_vocabulary(
-            chunks,
-            sample_size=cfg.vocabulary_sample_size,
-            max_labels=cfg.vocabulary_max_labels,
-            stage=discovery_stage,
-        )
-
     semaphore = asyncio.Semaphore(max(1, cfg.ontology_max_concurrency))
     entity_accumulator: List[str] = []
     relation_accumulator: List[str] = []
@@ -394,6 +420,20 @@ async def _execute_unified_job(
             )
 
     try:
+        if mode == "build_graph" and provided_ontology is None:
+            # One vocabulary per dataset: a single bounded discovery call over a
+            # spread sample, replacing per-chunk discovery + union. Inside the
+            # try so a terminal failure persists the job as "failed".
+            provided_ontology = await _discover_dataset_vocabulary(
+                chunks,
+                discovery_stage,
+                cfg.discovery_timeout_seconds,
+                cfg.discovery_retry_attempts,
+                cfg.discovery_retry_backoff_seconds,
+                cfg.vocabulary_sample_size,
+                cfg.vocabulary_max_labels,
+            )
+
         tasks: List[asyncio.Task] = []
         counts: Dict[asyncio.Task, int] = {}
         for doc_id, doc_chunks in units:
