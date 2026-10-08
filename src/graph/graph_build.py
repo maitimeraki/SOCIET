@@ -90,6 +90,7 @@ class GraphExtractionStage:
     This stage is responsible for taking raw text documents, applying the defined ontology schema to extract structured information."""
     def __init__(self, config: GraphConfig):
         self.config = config
+        conversation_session_id = str(uuid.uuid4())
         self.llm = OpenAILike(
                 model=self.config.extraction_model,
                 api_base=LLMConfig.nvidia_nim_base_url or "https://integrate.api.nvidia.com/v1",
@@ -97,7 +98,13 @@ class GraphExtractionStage:
                 temperature=0.7,
                 is_chat_model=True,
                 timeout=self.config.extraction_timeout_seconds,
-                max_retries=1  # a hung attempt must not stack retries on top of the timeout
+                max_retries=1 , # a hung attempt must not stack retries on top of the timeout
+                additional_kwargs={
+                                "seed": 42, # Fixed seed for reproducibility
+                                "extra_headers":{
+                               "x-opencode-session": conversation_session_id
+                                }
+                            }
             )
         self.embed_model = OllamaEmbedding(
             model_name="nomic-embed-text:v1.5",

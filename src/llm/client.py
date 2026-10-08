@@ -9,6 +9,7 @@ Fallback chain: requested provider first, then ollama -> openai -> anthropic -> 
 import asyncio
 import logging
 import os
+import uuid
 from typing import AsyncGenerator, Optional
 
 import litellm
@@ -26,7 +27,7 @@ LLM_TOTAL_DEADLINE_SECONDS = 300  # the whole fallback chain, all legs together
 class LLMClient:
     """Multi-provider LLM client over the LiteLLM gateway."""
 
-    PROVIDERS = ["openai", "anthropic", "huggingface", "ollama","nvidia_nim"]
+    PROVIDERS = ["openai", "anthropic", "huggingface", "ollama","openrouter","deepseek","meta","sarvam"]
     FALLBACK_ORDER = ["ollama", "openai", "anthropic", "huggingface"]
 
     @staticmethod
@@ -54,9 +55,17 @@ class LLMClient:
             kwargs["api_key"] = LLMConfig.anthropic_api_key
         elif provider == "huggingface" and LLMConfig.huggingface_api_key:
             os.environ.setdefault("HF_TOKEN", LLMConfig.huggingface_api_key)
-        elif provider == "nvidia_nim" and LLMConfig.nvidia_nim_api_key:
+        elif provider == "openrouter" and LLMConfig.nvidia_nim_api_key:
             kwargs["api_key"] = LLMConfig.nvidia_nim_api_key
             kwargs["api_base"] = LLMConfig.nvidia_nim_base_url
+        elif provider == "sarvam" and LLMConfig.nvidia_nim_api_key:
+            # conversation_session_id = str(uuid.uuid4())
+            kwargs["api_key"] = LLMConfig.nvidia_nim_api_key
+            kwargs["api_base"] = LLMConfig.nvidia_nim_base_url
+            # kwargs["extra_headers"] = {
+            #         "x-opencode-session": conversation_session_id
+            # }
+            # kwargs["drop_params"] = True
         return kwargs
 
     async def generate(

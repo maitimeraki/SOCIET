@@ -1,4 +1,6 @@
 import sys
+import os
+import uuid
 import json
 import logging
 from typing import List, Dict, Any
@@ -92,6 +94,7 @@ def discover_ontology_sync(
 class OntologyDiscoveryStage:
     """Discovers a local ontology schema from a sample of input documents using LLMs. The discovered ontology defines the entity types, relation types, and their properties that will be used for structured extraction in the next stage. This stage is crucial for enabling domain-agnostic graph construction without requiring manual schema definition upfront."""
     def __init__(self, model: str = LLMConfig.analysis_model, temperature: float = 0.7, timeout: float = 60.0):
+        conversation_session_id = str(uuid.uuid4())
         self.llm = OpenAILike(
             model=model,
             api_base=LLMConfig.nvidia_nim_base_url or "https://integrate.api.nvidia.com/v1",
@@ -103,6 +106,9 @@ class OntologyDiscoveryStage:
             temperature=temperature, # Deterministic output for ontology discovery
             additional_kwargs={
                 "seed": 42, # Fixed seed for reproducibility
+                "extra_headers":{
+               "x-opencode-session": conversation_session_id
+                }
             }
         )
 
