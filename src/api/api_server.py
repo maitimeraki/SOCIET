@@ -145,6 +145,10 @@ app.include_router(debate_router)
 from src.api.ingest_api import router as ingest_router
 app.include_router(ingest_router)
 
+# Graph streaming API (live build progress over WebSocket)
+from src.api.graph_stream_api import router as graph_stream_router
+app.include_router(graph_stream_router)
+
 
 RUNS: Dict[str, Dict[str, Any]] = {}
 _RUNS_LOCK = asyncio.Lock()
