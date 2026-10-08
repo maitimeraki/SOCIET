@@ -10,7 +10,7 @@ import re
 from typing import List, Optional
 
 from src.graph.config_graph import GraphConfig
-from src.graph.models_graph import LocalOntology, ProcessedChunk
+from src.graph.models_graph import EntityTypeDefinition, LocalOntology, ProcessedChunk
 from src.graph.ontology import OntologyDiscoveryStage
 
 logger = logging.getLogger(__name__)
@@ -113,6 +113,40 @@ def select_slice(vocabulary: LocalOntology, chunk_text: str, k: int) -> LocalOnt
         relation_types=[
             r for index, r in enumerate(vocabulary.relation_types) if ("relation", index) in keep
         ],
+    )
+
+
+def promote(vocabulary: LocalOntology, proposed: List[str]) -> tuple[LocalOntology, List[str]]:
+    """Add every proposed label the vocabulary does not already carry.
+
+    Exact-string match only: a proposal equal to an existing entity OR relation
+    label is a no-op, and fuzzy merging stays `GraphNormalizationStage`'s job.
+    Returns the updated vocabulary — the SAME object when nothing is new — plus
+    the newly-added labels, in proposal order and de-duplicated.
+
+    A promoted label is represented as an ENTITY type with no properties. The
+    fixed interface carries bare strings, so the proposal's kind is lost before
+    it arrives; entity is the default home because `entity_labels` feeds the
+    dynamic extractor's `allowed_entity_types` and `entity_props` reads the
+    entity side. Empty properties mean a promotion adds no property rows, so the
+    slice keeps ranking it on its name alone.
+    """
+    known = set(vocabulary.entity_labels) | set(vocabulary.relation_labels)
+    newly_added = [
+        label
+        for label in dict.fromkeys(proposed)
+        if label.strip() and label not in known
+    ]
+    if not newly_added:
+        return vocabulary, []
+    return (
+        LocalOntology(
+            metadata=vocabulary.metadata,
+            entity_types=vocabulary.entity_types
+            + [EntityTypeDefinition(type_name=label) for label in newly_added],
+            relation_types=vocabulary.relation_types,
+        ),
+        newly_added,
     )
 
 

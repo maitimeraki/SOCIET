@@ -22,6 +22,11 @@ class GraphConfig:
     # discovery ceiling (above) bounds the whole dataset, this bounds per chunk,
     # so prompt size stops tracking vocabulary growth.
     chunk_slice_size: int = int(os.getenv("GRAPH_CHUNK_SLICE_SIZE", "8"))
+    # Promote a proposed label into the vocabulary on its FIRST sighting: at the
+    # mandated default of 1 this is the any-occurrence policy. A larger value
+    # would need per-label occurrence counting, which the extraction loop does
+    # not keep — the field documents the policy, it does not gate `promote`.
+    promotion_min_chunks: int = int(os.getenv("GRAPH_PROMOTION_MIN_CHUNKS", "1"))
     discovery_timeout_seconds: int = int(os.getenv("GRAPH_DISCOVERY_TIMEOUT_SECONDS", "90"))
     discovery_retry_attempts: int = int(os.getenv("GRAPH_DISCOVERY_RETRY_ATTEMPTS", "3"))
     discovery_retry_backoff_seconds: float = float(

@@ -8,7 +8,12 @@ from src.graph.models_graph import (
     ProcessedChunk,
     RelationTypeDefinition,
 )
-from src.graph.vocabulary import discover_vocabulary, select_slice, spread_indexes
+from src.graph.vocabulary import (
+    discover_vocabulary,
+    promote,
+    select_slice,
+    spread_indexes,
+)
 
 
 def _chunk(i: int) -> ProcessedChunk:
@@ -141,3 +146,37 @@ class TestSelectSlice:
         vocab = _ontology_with_named_labels(["Microservice", "Kafka"])
 
         assert select_slice(vocab, "Microservice writes to Kafka", k=8) is vocab
+
+
+class TestPromote:
+    def test_promote_adds_only_labels_not_yet_present(self):
+        vocab = _ontology_with_named_labels(["Person"])
+
+        updated, newly_added = promote(vocab, ["Molecule", "Person"])
+
+        assert sorted(updated.entity_labels) == ["Molecule", "Person"]
+        assert newly_added == ["Molecule"]
+
+    def test_promote_known_label_is_a_noop(self):
+        vocab = _ontology_with_named_labels(["Person"])
+
+        updated, newly_added = promote(vocab, ["Person"])
+
+        assert updated.entity_labels == ["Person"]
+        assert newly_added == []
+
+    def test_promote_label_already_present_as_relation_is_a_noop(self):
+        vocab = _ontology_with_named_labels(["Person"], ["Works_At"])
+
+        updated, newly_added = promote(vocab, ["Works_At"])
+
+        assert newly_added == []
+        assert updated.relation_labels == ["Works_At"]
+
+    def test_promote_skips_blank_labels(self):
+        vocab = _ontology_with_named_labels(["Person"])
+
+        updated, newly_added = promote(vocab, ["", "   "])
+
+        assert newly_added == []
+        assert updated.entity_labels == ["Person"]
