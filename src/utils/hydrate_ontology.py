@@ -44,8 +44,8 @@ def hydrate_ontology(tiny_json: Dict[str, Any]) -> Dict[str, Any]:
     for rel in tiny_json.get("relation_types", []):
         full_rel = { # return type -> Dict[str, Any]
             "type_name": rel["type_name"],
-            "source_entity_types": [rel["source_entity_types"][0]] if rel.get("source_entity_types") else [],
-            "target_entity_types": [rel["target_entity_types"][0]] if rel.get("target_entity_types") else [],
+            "source_entity_types": list(rel.get("source_entity_types") or []),
+            "target_entity_types": list(rel.get("target_entity_types") or []),
             "properties":[
                {
                     "name": prop["name"],

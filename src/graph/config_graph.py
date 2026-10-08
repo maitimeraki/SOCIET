@@ -22,6 +22,11 @@ class GraphConfig:
     # discovery ceiling (above) bounds the whole dataset, this bounds per chunk,
     # so prompt size stops tracking vocabulary growth.
     chunk_slice_size: int = int(os.getenv("GRAPH_CHUNK_SLICE_SIZE", "8"))
+    # Cap on triples any one extractor may pull from a single chunk. Applied to
+    # BOTH extractors so neither silently truncates the other's recall.
+    extraction_max_triplets_per_chunk: int = int(
+        os.getenv("GRAPH_EXTRACTION_MAX_TRIPLETS", "30")
+    )
     # Promote a proposed label into the vocabulary on its FIRST sighting: at the
     # mandated default of 1 this is the any-occurrence policy. A larger value
     # would need per-label occurrence counting, which the extraction loop does

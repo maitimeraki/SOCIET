@@ -291,7 +291,7 @@ class GraphExtractionStage:
         # Simple extractor - basic triple extraction without schema constraints(Simple extractor captures additional relationships the dynamic one might miss)
         simple_extractor = SimpleLLMPathExtractor(
             llm=self.llm,
-            max_paths_per_chunk=10,
+            max_paths_per_chunk=self.config.extraction_max_triplets_per_chunk,
             num_workers=1,
         )
         # Dynamic extractor - schema-guided but flexible(Dynamic extractor captures labeled entities/relations following your schema)
@@ -301,6 +301,7 @@ class GraphExtractionStage:
             allowed_relation_types=ontology.relation_labels,
             allowed_entity_props=ontology.entity_props,
             allowed_relation_props=ontology.relation_props,
+            max_triplets_per_chunk=self.config.extraction_max_triplets_per_chunk,
             num_workers=1,
         )
         # Implicit extractor - from node relationships(Implicit extractor adds structural relationships between nodes that LLMs don't generate)

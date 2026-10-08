@@ -44,6 +44,12 @@ def _structured_properties(llm_data: Dict[str, Any]) -> Dict[str, Any]:
                     "name": name.strip(),
                     "description": desc.strip()
                 })
+            else:
+                # Bare name, no description — keep it rather than dropping it.
+                parsed_props.append({
+                    "name": prop_str,
+                    "description": ""
+                })
         ent["properties"] = parsed_props # Now matches your class schema
         
     for rel in llm_data.get("relation_types", []):
@@ -54,6 +60,12 @@ def _structured_properties(llm_data: Dict[str, Any]) -> Dict[str, Any]:
                 parsed_props.append({
                     "name": name.strip(),
                     "description": desc.strip()
+                })
+            else:
+                # Bare name, no description — keep it rather than dropping it.
+                parsed_props.append({
+                    "name": prop_str,
+                    "description": ""
                 })
         rel["properties"] = parsed_props # Now matches your class schema
     
