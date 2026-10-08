@@ -312,3 +312,74 @@ class TestNetworkBounds:
             property_graph.DynamicLLMPathExtractor,
         ):
             assert extractor.call_args.kwargs["num_workers"] == 1
+
+
+class TestSingleChunkingOwner:
+    """`split_text_sentences` already split the input — extraction must not split again."""
+
+    @pytest.mark.asyncio
+    async def test_no_resplit_documents_reach_extraction_unchunked(self, sample_ontology):
+        """The transformation chain that actually runs must not re-split documents.
+
+        Asserts the *effective* behaviour, not the literal argument: the stub
+        applies the same falsy fallback `BaseIndex.from_documents` does
+        (`transformations or Settings.transformations`), so an empty list would
+        resolve to the stage's splitter and be caught here.
+        """
+        import sys
+
+        from src.graph.config_graph import GraphConfig
+        from src.graph.graph_build import GraphExtractionStage
+
+        chunks = [
+            ProcessedChunk(
+                chunk_id=f"chunk-{i}",
+                parent_doc_id="doc-1",
+                chunk_index=i,
+                content_hash=f"hash{i}",
+                content=f"Pre-split chunk body number {i}.",
+                summary_context="Software architecture overview",
+                breadcrumb="docs/architecture",
+                header_level=1,
+                domain_tags=["software"],
+                expertise_level="Technical",
+                metadata={"title": "System Architecture"},
+            )
+            for i in range(3)
+        ]
+
+        captured = {}
+
+        def _fake_from_documents(documents, **kwargs):
+            # Mirror llama-index: BaseIndex.from_documents resolves
+            # `transformations = transformations or Settings.transformations`.
+            resolved = kwargs["transformations"] or core.Settings.transformations
+            captured["transformations"] = resolved
+            nodes = list(documents)
+            for transform in resolved:
+                nodes = list(transform(nodes))
+            index = MagicMock()
+            # Derive the store from what actually survived transformation, so the
+            # count reflects behaviour rather than a fabricated size.
+            index.docstore.docs = {f"node-{i}": n for i, n in enumerate(nodes)}
+            return index
+
+        with patch('src.graph.graph_build.OpenAILike'), \
+             patch('src.graph.graph_build.OllamaEmbedding'), \
+             patch('src.graph.graph_build.Neo4jPropertyGraphStore'), \
+             patch('src.graph.graph_build.SentenceSplitter'):
+            stage = GraphExtractionStage(GraphConfig())
+
+        core = sys.modules['llama_index.core']
+        # Production pins Settings.node_parser = self.splitter; the real
+        # Settings.transformations returns [Settings.node_parser]. Model it so
+        # the fallback resolves to the splitter exactly as it does live.
+        core.Settings.transformations = [stage.splitter]
+        core.PropertyGraphIndex.from_documents.side_effect = _fake_from_documents
+
+        count = await stage.run("test-dataset", chunks, sample_ontology)
+
+        resolved = captured["transformations"]
+        assert resolved is not core.Settings.transformations  # fallback not taken
+        assert stage.splitter not in resolved  # no SentenceSplitter in the chain
+        assert count == len(chunks)

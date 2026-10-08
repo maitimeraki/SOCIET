@@ -66,6 +66,22 @@ def _document_rows(dataset_id: str, documents: List[ProcessedChunk]) -> List[dic
     return list(rows.values())
 
 
+class _NoOpSplit:
+    """Truthy pass-through transform: returns its input nodes unchanged.
+
+    Needed because `BaseIndex.from_documents` resolves
+    `transformations = transformations or Settings.transformations`. An empty
+    list is falsy, so it would be replaced by `Settings.transformations`, which
+    is `[Settings.node_parser]` and is pinned to `self.splitter` below — the
+    exact re-split this stage must not perform. A truthy no-op keeps the
+    fallback from firing and preserves the input nodes 1:1, so index node count
+    equals chunk count.
+    """
+
+    def __call__(self, nodes, **kwargs):
+        return list(nodes)
+
+
 def _refresh_schema_once(store: Neo4jPropertyGraphStore) -> None:
     """Quiet llama-index's post-insert schema refreshes: the first refresh through
     this guard is real, every later one is a no-op. llama-index calls
@@ -231,7 +247,14 @@ class GraphExtractionStage:
                     embed_model=self.embed_model,
                     property_graph_store=self.graph_store,
                     kg_extractors=[simple_extractor, dynamic_extractor, implicit_extractor],
-                    transformations=[self.splitter],
+                    # Documents arrive already split by split_text_sentences
+                    # (src/utils/chunkProcessor.py), the single chunking owner.
+                    # A truthy no-op is passed on purpose: `from_documents` does
+                    # `transformations or Settings.transformations`, so an empty
+                    # list would fall back to Settings.transformations ==
+                    # [Settings.node_parser], pinned to self.splitter below — and
+                    # re-chunk. The no-op keeps node count == chunk count.
+                    transformations=[_NoOpSplit()],
                     use_async=False,  # ← FORCE SYNC MODE if available
                     show_progress=True,
                 )
