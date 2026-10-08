@@ -477,6 +477,15 @@ async def _execute_unified_job(
                     }
                     await _persist_run(job_id, RUNS[job_id])
 
+        # Job-scoped failure verdict (R17): a document whose chunks all failed
+        # contributes nothing (graph_build._run_async skips it without raising),
+        # so the run is fatal ONLY when the DATASET-WIDE total is zero. A build
+        # in which some documents landed is still a success.
+        if mode == "build_graph" and total_chunks > 0 and docs_built == 0:
+            raise RuntimeError(
+                f"all {total_chunks} chunks failed across every document for dataset {dataset_id}"
+            )
+
         if mode == "build_graph" and normalization_stage is not None:
             # normalization_stage is our embedded class instance
             await normalization_stage.run(dataset_id=dataset_id)

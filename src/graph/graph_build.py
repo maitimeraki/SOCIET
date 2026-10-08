@@ -364,7 +364,10 @@ class GraphExtractionStage:
                 if job_id is not None:
                     publish(job_id, GraphDelta(
                         chunk_id=chunk.chunk_id,
-                        error=str(last_exc),
+                        # A non-empty message is load-bearing: `if delta.error:` in
+                        # the WS route treats "" as an ordinary delta. A bare
+                        # `RuntimeError()` would otherwise be emitted as a `delta`.
+                        error=f"{type(last_exc).__name__}: {last_exc}",
                     ))
                 return False
 
@@ -403,11 +406,16 @@ class GraphExtractionStage:
                 if pending:
                     await asyncio.gather(*pending, return_exceptions=True)
 
-            # One bad chunk is a skip, not a catastrophe: only a run where EVERY
-            # chunk failed is fatal. An empty corpus (total == 0) is not a failure.
+            # One bad chunk is a skip, not a catastrophe. A document whose chunks
+            # ALL failed contributed nothing, but it does NOT sink the run: the
+            # job-scoped "every chunk failed" verdict is `_execute_unified_job`'s
+            # (R17) — one bad document must not discard every other document's
+            # work. Real extraction/store errors, timeouts and cancellation still
+            # propagate from the loop above; only per-chunk skips land here.
             if total and not successes:
-                raise RuntimeError(
-                    f"all {total} chunks failed during graph extraction for dataset {dataset_id}"
+                logger.error(
+                    f"All {total} chunks failed for dataset {dataset_id} — "
+                    f"this document contributed no nodes"
                 )
 
             await asyncio.to_thread(self._link_concepts_to_documents, index, dataset_id)
