@@ -71,6 +71,15 @@ async def _wait_disconnect(websocket: WebSocket) -> None:
 
 
 async def _send_delta(websocket: WebSocket, delta) -> None:
+    if delta.error:
+        # A terminal chunk failure (Task 16): an error is not a delta, so it
+        # replaces the delta frame rather than decorating one.
+        await websocket.send_json({
+            "type": "error",
+            "chunk_id": delta.chunk_id,
+            "message": delta.error,
+        })
+        return
     await websocket.send_json({
         "type": "delta",
         "nodes": delta.nodes,

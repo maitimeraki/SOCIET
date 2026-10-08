@@ -10,16 +10,24 @@ re-subscribed.
 """
 import asyncio
 from dataclasses import dataclass, field
-from typing import AsyncIterator
+from typing import AsyncIterator, Optional
 
 
 @dataclass
 class GraphDelta:
+    """One chunk's incremental contribution to the live graph.
+
+    `error` is a TRAILING optional field (R16): a chunk that fails terminally
+    publishes a delta carrying only `chunk_id` and `error`, which the WS route
+    turns into an `{"type": "error", ...}` frame instead of a `delta` frame.
+    It defaults to `None`, so error-free constructions are unchanged.
+    """
     nodes: list[dict] = field(default_factory=list)   # each {id, label, type}
     edges: list[dict] = field(default_factory=list)   # each {source, target, label}
     new_labels: list[str] = field(default_factory=list)
     chunk_id: str = ""
     progress: float = 0.0
+    error: Optional[str] = None
 
 
 _CLOSED = object()  # sentinel: distinct from any GraphDelta payload

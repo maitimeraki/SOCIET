@@ -311,30 +311,62 @@ class GraphExtractionStage:
             total = len(pairs)
             state = {"done": 0}
 
-            async def process(chunk: ProcessedChunk, doc) -> None:
+            async def process(chunk: ProcessedChunk, doc) -> bool:
+                """Extract + insert ONE chunk, retrying on failure; return success.
+
+                A chunk that fails `extraction_chunk_retries` retries (exponential
+                backoff, mirroring `_discover_for_chunk`) is SKIPPED: logged,
+                published as an error delta, and the window refills. Never raises
+                on a chunk error, so one bad chunk cannot sink the loop.
+                """
                 nonlocal vocabulary
-                slice_ = select_slice(vocabulary, chunk.content, self.config.chunk_slice_size)
-                extractors = self._build_extractors(slice_)
-                nodes, entity_labels, relation_labels, delta_nodes, delta_edges = await asyncio.to_thread(
-                    self._extract_chunk, doc, extractors
+                last_exc: Optional[Exception] = None
+                attempts = max(1, self.config.extraction_chunk_retries + 1)
+                for attempt in range(attempts):
+                    try:
+                        slice_ = select_slice(vocabulary, chunk.content, self.config.chunk_slice_size)
+                        extractors = self._build_extractors(slice_)
+                        nodes, entity_labels, relation_labels, delta_nodes, delta_edges = await asyncio.to_thread(
+                            self._extract_chunk, doc, extractors
+                        )
+                        # Serialise the store write: extraction is concurrent, but
+                        # only one chunk writes the shared index at a time. The
+                        # `to_thread` keeps the loop free while the lock waits.
+                        async with self._insert_lock:
+                            await asyncio.to_thread(index.insert_nodes, nodes)
+                    except Exception as exc:
+                        last_exc = exc
+                        if attempt < attempts - 1:
+                            logger.warning(
+                                f"Chunk {chunk.chunk_id} extraction attempt {attempt + 1} "
+                                f"failed: {exc}. Retrying..."
+                            )
+                            await asyncio.sleep(
+                                self.config.extraction_chunk_retry_backoff_seconds * (2 ** attempt)
+                            )
+                        continue
+                    # Synchronous read-modify-write: never split by an await.
+                    vocabulary, new_entities = promote(vocabulary, entity_labels, kind="entity")
+                    vocabulary, new_relations = promote(vocabulary, relation_labels, kind="relation")
+                    state["done"] += 1
+                    if job_id is not None:
+                        publish(job_id, GraphDelta(
+                            nodes=delta_nodes,
+                            edges=delta_edges,
+                            new_labels=new_entities + new_relations,
+                            chunk_id=chunk.chunk_id,
+                            progress=state["done"] / total if total else 0.0,
+                        ))
+                    return True
+                logger.error(
+                    f"Chunk {chunk.chunk_id} failed terminally after {attempts} attempts: {last_exc}"
                 )
-                # Serialise the store write: extraction is concurrent, but only
-                # one chunk writes the shared index at a time. The `to_thread`
-                # keeps the loop free while the lock waits.
-                async with self._insert_lock:
-                    await asyncio.to_thread(index.insert_nodes, nodes)
-                # Synchronous read-modify-write: never split by an await.
-                vocabulary, new_entities = promote(vocabulary, entity_labels, kind="entity")
-                vocabulary, new_relations = promote(vocabulary, relation_labels, kind="relation")
-                state["done"] += 1
                 if job_id is not None:
                     publish(job_id, GraphDelta(
-                        nodes=delta_nodes,
-                        edges=delta_edges,
-                        new_labels=new_entities + new_relations,
                         chunk_id=chunk.chunk_id,
-                        progress=state["done"] / total if total else 0.0,
+                        error=str(last_exc),
                     ))
+                return False
 
             # Sliding window: `chunk_parallelism` chunk-tasks in flight at all
             # times. Seed the first window, then start exactly one replacement
@@ -343,22 +375,40 @@ class GraphExtractionStage:
             # order, never buffered by `chunk_index`.
             remaining = iter(pairs)
             pending: set = set()
-            for _ in range(max(1, self.config.chunk_parallelism)):
-                nxt = next(remaining, None)
-                if nxt is None:
-                    break
-                pending.add(asyncio.create_task(process(*nxt)))
-            while pending:
-                finished, pending = await asyncio.wait(
-                    pending, return_when=asyncio.FIRST_COMPLETED
-                )
-                for fut in finished:
-                    fut.result()  # surface extraction errors (retry/skip is Task 16)
-                for _ in range(len(finished)):
+            successes = 0
+            try:
+                for _ in range(max(1, self.config.chunk_parallelism)):
                     nxt = next(remaining, None)
                     if nxt is None:
                         break
                     pending.add(asyncio.create_task(process(*nxt)))
+                while pending:
+                    finished, pending = await asyncio.wait(
+                        pending, return_when=asyncio.FIRST_COMPLETED
+                    )
+                    for fut in finished:
+                        successes += int(fut.result())
+                    for _ in range(len(finished)):
+                        nxt = next(remaining, None)
+                        if nxt is None:
+                            break
+                        pending.add(asyncio.create_task(process(*nxt)))
+            finally:
+                # An unexpected raise must not strand the other in-flight chunks:
+                # without this they would keep extracting and writing to the store
+                # after the job was marked failed ("Task exception was never
+                # retrieved"). Cancel and await them before propagating.
+                for task in pending:
+                    task.cancel()
+                if pending:
+                    await asyncio.gather(*pending, return_exceptions=True)
+
+            # One bad chunk is a skip, not a catastrophe: only a run where EVERY
+            # chunk failed is fatal. An empty corpus (total == 0) is not a failure.
+            if total and not successes:
+                raise RuntimeError(
+                    f"all {total} chunks failed during graph extraction for dataset {dataset_id}"
+                )
 
             await asyncio.to_thread(self._link_concepts_to_documents, index, dataset_id)
             return len(index.docstore.docs)

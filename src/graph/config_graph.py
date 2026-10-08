@@ -27,6 +27,14 @@ class GraphConfig:
     # one finishes. Bounds concurrent extraction calls alongside the extractor's
     # pinned num_workers (1).
     chunk_parallelism: int = int(os.getenv("GRAPH_CHUNK_PARALLELISM", "5"))
+    # Task 16: a chunk whose extract+insert keeps failing is retried this many
+    # times (total attempts = extraction_chunk_retries + 1, exponential backoff
+    # between them) before it is SKIPPED — logged, published as an error frame,
+    # and the window refilled. A run is fatal only when EVERY chunk failed.
+    extraction_chunk_retries: int = int(os.getenv("GRAPH_EXTRACTION_CHUNK_RETRIES", "2"))
+    extraction_chunk_retry_backoff_seconds: float = float(
+        os.getenv("GRAPH_EXTRACTION_CHUNK_RETRY_BACKOFF_SECONDS", "1.0")
+    )
     # Cap on triples any one extractor may pull from a single chunk. Applied to
     # BOTH extractors so neither silently truncates the other's recall.
     extraction_max_triplets_per_chunk: int = int(
