@@ -5,10 +5,12 @@ import {
   MAX_ANIMATED_NODES,
   MAX_LABELLED_NODES,
   TEXT_FALLBACK_LIMIT,
+  drawNodeLabel,
   graphAriaLabel,
   graphStatusMessage,
   graphStreamPhase,
   graphTextFallback,
+  seedPosition,
   showEdgeLabels,
   showNodeLabels,
   shouldAnimateLayout,
@@ -18,7 +20,7 @@ import {
 
 // No jsdom / no testing-library in this repo: the canvas is exercised through its
 // pure sync function. React/Sigma never mount, so mock the one DOM-bound import.
-vi.mock('@react-sigma/core', () => ({ SigmaContainer: () => null }))
+vi.mock('@react-sigma/core', () => ({ SigmaContainer: () => null, useSigma: () => null }))
 
 const byId = (...nodes: GraphNode[]): Record<string, GraphNode> =>
   Object.fromEntries(nodes.map((node) => [node.id, node]))
@@ -59,6 +61,32 @@ describe('syncGraph', () => {
 
     expect(graph.order).toBe(1)
     expect(graph.getNodeAttribute('a', 'label')).toBe('Glucose (revised)')
+  })
+
+  it('seeds every added node with a finite position so Sigma never sees a positionless node', () => {
+    const graph = new Graph()
+    const nodes = byId(
+      { id: 'a', label: 'Glucose', type: 'Molecule' },
+      { id: 'b', label: 'Respiration', type: 'Process' },
+      { id: 'c', label: 'ATP', type: 'Molecule' },
+    )
+
+    syncGraph(graph, nodes, {}, [])
+
+    for (const id of ['a', 'b', 'c']) {
+      expect(Number.isFinite(graph.getNodeAttribute(id, 'x'))).toBe(true)
+      expect(Number.isFinite(graph.getNodeAttribute(id, 'y'))).toBe(true)
+    }
+  })
+
+  it('keeps a node position once it has settled (a re-sync does not re-seed it)', () => {
+    const graph = new Graph()
+    syncGraph(graph, byId({ id: 'a', label: 'A', type: 'X' }), {}, [])
+    graph.setNodeAttribute('a', 'x', 42)
+
+    syncGraph(graph, byId({ id: 'a', label: 'A', type: 'X' }), {}, [])
+
+    expect(graph.getNodeAttribute('a', 'x')).toBe(42)
   })
 
   it('drops nodes and edges the store no longer holds (snapshot reset)', () => {
@@ -124,6 +152,51 @@ describe('large-graph guard', () => {
 
     expect(graph.getNodeAttribute('a', 'label')).toBe('Glucose')
     expect(graph.getEdgeAttribute('a|b|POWERS', 'label')).toBe('POWERS')
+  })
+})
+
+describe('drawNodeLabel', () => {
+  const data = { x: 10, y: 20, size: 7, label: 'Glucose', color: '#000' }
+
+  it('strokes a halo before filling, so an edge cannot cut through the label text', () => {
+    const calls: string[] = []
+    const context = {
+      font: '',
+      lineJoin: '',
+      lineWidth: 0,
+      strokeStyle: '',
+      fillStyle: '',
+      strokeText: () => calls.push('stroke'),
+      fillText: () => calls.push('fill'),
+    }
+    const settings = { labelSize: 12, labelFont: 'X', labelWeight: '500', labelColor: { color: '#c9bfa9' } }
+
+    drawNodeLabel(context as unknown as CanvasRenderingContext2D, data as never, settings as never)
+
+    expect(calls).toEqual(['stroke', 'fill'])
+    expect(context.fillStyle).toBe('#c9bfa9')
+  })
+
+  it('draws nothing for a node without a label', () => {
+    const calls: string[] = []
+    const context = { strokeText: () => calls.push('stroke'), fillText: () => calls.push('fill') }
+    const settings = { labelSize: 12, labelFont: 'X', labelWeight: '500', labelColor: { color: '#c9bfa9' } }
+
+    drawNodeLabel(context as unknown as CanvasRenderingContext2D, { ...data, label: undefined } as never, settings as never)
+
+    expect(calls).toEqual([])
+  })
+})
+
+describe('seedPosition', () => {
+  it('spreads successive nodes apart rather than stacking them at the origin', () => {
+    const a = seedPosition(0)
+    const b = seedPosition(1)
+    expect(Math.hypot(a.x - b.x, a.y - b.y)).toBeGreaterThan(0)
+  })
+
+  it('is deterministic for a given index', () => {
+    expect(seedPosition(5)).toEqual(seedPosition(5))
   })
 })
 

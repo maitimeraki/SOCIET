@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest'
-import { useGraphStore } from './graphStore'
+import { LABEL_PALETTE, labelColor, useGraphStore } from './graphStore'
 
 // The store is a module singleton — reset it between cases so counts are absolute.
 beforeEach(() => useGraphStore.setState({ nodes: {}, edges: {}, labels: [] }))
@@ -52,5 +52,36 @@ describe('useGraphStore', () => {
     expect(Object.keys(state.nodes)).toEqual(['new'])
     expect(Object.values(state.edges)).toHaveLength(1)
     expect(state.labels.map((l) => l.label)).toEqual(['Y'])
+  })
+})
+
+describe('label palette', () => {
+  it('emits hex colours Sigma can parse (never hsl)', () => {
+    for (const color of LABEL_PALETTE) expect(color).toMatch(/^#[0-9a-f]{6}$/i)
+  })
+
+  it('assigns a distinct colour to each of the first seven labels', () => {
+    const colors = LABEL_PALETTE.map((_, index) => labelColor(index))
+    expect(new Set(colors).size).toBe(LABEL_PALETTE.length)
+  })
+
+  it('keeps a label on its colour when a later label is promoted', () => {
+    const { mergeVocabulary } = useGraphStore.getState()
+    mergeVocabulary(['Company', 'Market', 'Regulation'])
+    const before = useGraphStore.getState().labels.map((l) => l.color)
+
+    mergeVocabulary(['Person'])
+
+    expect(useGraphStore.getState().labels.slice(0, 3).map((l) => l.color)).toEqual(before)
+  })
+
+  it('gives a promoted seventh label a colour unlike the existing six', () => {
+    const { mergeVocabulary } = useGraphStore.getState()
+    mergeVocabulary(['Company', 'Market', 'Regulation', 'Person', 'Product', 'Location'])
+    mergeVocabulary(['RelationType'])
+
+    const colors = useGraphStore.getState().labels.map((l) => l.color)
+    expect(colors).toHaveLength(7)
+    expect(new Set(colors).size).toBe(7)
   })
 })
