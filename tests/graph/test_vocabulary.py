@@ -180,3 +180,59 @@ class TestPromote:
 
         assert newly_added == []
         assert updated.entity_labels == ["Person"]
+
+    def test_promote_relation_kind_lands_in_relation_types(self):
+        vocab = _ontology_with_named_labels(["Person"])
+
+        updated, newly_added = promote(vocab, ["ACQUIRED"], kind="relation")
+
+        assert newly_added == ["ACQUIRED"]
+        assert updated.relation_labels == ["ACQUIRED"]
+        assert "ACQUIRED" not in updated.entity_labels
+
+    def test_promote_entity_then_relation_does_not_duplicate(self):
+        vocab = _ontology_with_named_labels([])
+
+        once, _ = promote(vocab, ["Widget"], kind="entity")
+        twice, newly_added = promote(once, ["Widget"], kind="relation")
+
+        assert newly_added == []
+        assert twice.entity_labels == ["Widget"]
+        assert twice.relation_labels == []
+
+    def test_promote_unknown_kind_is_rejected(self):
+        vocab = _ontology_with_named_labels(["Person"])
+
+        with pytest.raises(ValueError):
+            promote(vocab, ["Widget"], kind="banana")
+
+
+class TestProposedLabels:
+    def test_collector_splits_kinds_and_drops_default_entity_label(self):
+        from llama_index.core.graph_stores.types import (
+            EntityNode,
+            KG_NODES_KEY,
+            KG_RELATIONS_KEY,
+            Relation,
+        )
+        from llama_index.core.schema import TextNode
+
+        from src.graph.graph_build import _proposed_labels
+
+        chunk = TextNode(
+            text="ACME acquired Beta.",
+            metadata={
+                KG_NODES_KEY: [
+                    EntityNode(name="ACME", label="Organization"),
+                    EntityNode(name="Beta"),  # simple extractor: label defaults to "entity"
+                ],
+                KG_RELATIONS_KEY: [
+                    Relation(label="ACQUIRED", source_id="a", target_id="b"),
+                ],
+            },
+        )
+
+        entity_labels, relation_labels = _proposed_labels([chunk])
+
+        assert entity_labels == ["Organization"]
+        assert relation_labels == ["ACQUIRED"]

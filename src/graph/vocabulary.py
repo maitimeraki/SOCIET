@@ -10,7 +10,12 @@ import re
 from typing import List, Optional
 
 from src.graph.config_graph import GraphConfig
-from src.graph.models_graph import EntityTypeDefinition, LocalOntology, ProcessedChunk
+from src.graph.models_graph import (
+    EntityTypeDefinition,
+    LocalOntology,
+    ProcessedChunk,
+    RelationTypeDefinition,
+)
 from src.graph.ontology import OntologyDiscoveryStage
 
 logger = logging.getLogger(__name__)
@@ -116,7 +121,11 @@ def select_slice(vocabulary: LocalOntology, chunk_text: str, k: int) -> LocalOnt
     )
 
 
-def promote(vocabulary: LocalOntology, proposed: List[str]) -> tuple[LocalOntology, List[str]]:
+def promote(
+    vocabulary: LocalOntology,
+    proposed: List[str],
+    kind: str = "entity",
+) -> tuple[LocalOntology, List[str]]:
     """Add every proposed label the vocabulary does not already carry.
 
     Exact-string match only: a proposal equal to an existing entity OR relation
@@ -124,13 +133,15 @@ def promote(vocabulary: LocalOntology, proposed: List[str]) -> tuple[LocalOntolo
     Returns the updated vocabulary — the SAME object when nothing is new — plus
     the newly-added labels, in proposal order and de-duplicated.
 
-    A promoted label is represented as an ENTITY type with no properties. The
-    fixed interface carries bare strings, so the proposal's kind is lost before
-    it arrives; entity is the default home because `entity_labels` feeds the
-    dynamic extractor's `allowed_entity_types` and `entity_props` reads the
-    entity side. Empty properties mean a promotion adds no property rows, so the
-    slice keeps ranking it on its name alone.
+    `kind` ("entity" or "relation") picks which side the new labels join, each as
+    a property-less type definition, so a relation label never becomes an entity
+    type and vice versa. It defaults to "entity", keeping the original
+    two-argument contract. An unknown kind raises `ValueError` rather than
+    silently filing the label under the wrong side.
     """
+    if kind not in ("entity", "relation"):
+        raise ValueError(f"promote: kind must be 'entity' or 'relation', got {kind!r}")
+
     known = set(vocabulary.entity_labels) | set(vocabulary.relation_labels)
     newly_added = [
         label
@@ -139,12 +150,21 @@ def promote(vocabulary: LocalOntology, proposed: List[str]) -> tuple[LocalOntolo
     ]
     if not newly_added:
         return vocabulary, []
+
+    entity_types, relation_types = vocabulary.entity_types, vocabulary.relation_types
+    if kind == "relation":
+        relation_types = relation_types + [
+            RelationTypeDefinition(type_name=label) for label in newly_added
+        ]
+    else:
+        entity_types = entity_types + [
+            EntityTypeDefinition(type_name=label) for label in newly_added
+        ]
     return (
         LocalOntology(
             metadata=vocabulary.metadata,
-            entity_types=vocabulary.entity_types
-            + [EntityTypeDefinition(type_name=label) for label in newly_added],
-            relation_types=vocabulary.relation_types,
+            entity_types=entity_types,
+            relation_types=relation_types,
         ),
         newly_added,
     )

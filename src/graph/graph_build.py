@@ -66,25 +66,33 @@ def _document_rows(dataset_id: str, documents: List[ProcessedChunk]) -> List[dic
     return list(rows.values())
 
 
-def _proposed_labels(extracted) -> List[str]:
-    """Every entity/relation label a chunk's extraction result introduced.
+def _proposed_labels(extracted) -> tuple[List[str], List[str]]:
+    """The `(entity_labels, relation_labels)` a chunk's extraction result proposed.
 
     llama-index extractors return the input nodes with their extracted
     `EntityNode`s stashed under `metadata["nodes"]` and `Relation`s under
     `metadata["relations"]` (see `DynamicLLMPathExtractor._aextract`), so each
-    label sits one level down. Both kinds are collected — `promote` decides
-    what to keep. Order-stable and de-duplicated.
+    label sits one level down. The two kinds come back separately so the caller
+    can `promote` each under its own side. llama-index's generic default entity
+    label — the literal `"entity"`, which the simple extractor stamps on every
+    `EntityNode` it builds unlabelled — and blank labels are dropped; the caller
+    wants real types, not the sentinel. Order-stable and de-duplicated per kind.
     """
     from llama_index.core.graph_stores.types import KG_NODES_KEY, KG_RELATIONS_KEY
 
-    labels: List[str] = []
+    entity_labels: List[str] = []
+    relation_labels: List[str] = []
     for node in extracted or []:
         metadata = getattr(node, "metadata", None) or {}
-        for item in [*metadata.get(KG_NODES_KEY, []), *metadata.get(KG_RELATIONS_KEY, [])]:
+        for item in metadata.get(KG_NODES_KEY, []):
             label = getattr(item, "label", None)
-            if label and label not in labels:
-                labels.append(label)
-    return labels
+            if label and label.strip() and label != "entity" and label not in entity_labels:
+                entity_labels.append(label)
+        for item in metadata.get(KG_RELATIONS_KEY, []):
+            label = getattr(item, "label", None)
+            if label and label.strip() and label not in relation_labels:
+                relation_labels.append(label)
+    return entity_labels, relation_labels
 
 
 class _NoOpSplit:
