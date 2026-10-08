@@ -123,6 +123,7 @@ def split_text_sentences(text: str, chunk_size: int, chunk_overlap: int) -> List
     Both ingestion paths (process_documents, api_server._chunk_documents) route
     through here. chunk_size / chunk_overlap go straight to SentenceSplitter,
     whose native budget is tokens (llama-index default tokenizer), not characters.
+    Callers that think in characters (GraphConfig) convert to tokens before calling.
     """
     cleaned = (text or "").strip()
     if not cleaned:
