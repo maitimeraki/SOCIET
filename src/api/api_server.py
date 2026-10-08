@@ -26,6 +26,7 @@ from src.api.config_api import (
 from src.graph.config_graph import GraphConfig
 from src.graph.models_graph import GlobalInputDocument, ProcessedChunk, LocalOntology
 from src.graph.ontology import OntologyDiscoveryStage
+from src.graph.vocabulary import discover_vocabulary
 from src.graph.normalization import GraphNormalizationStage
 from src.llm.client import global_llm_client
 from src.llm.config_llm import get_llm_config
@@ -262,22 +263,11 @@ async def _process_chunk(
 async def _process_document(
     dataset_id: str,
     doc_chunks: List[ProcessedChunk],
-    ontology: Optional[LocalOntology],
-    discovery_stage: Optional[OntologyDiscoveryStage],
+    ontology: LocalOntology,
     extraction_stage: "GraphExtractionStage",
-    timeout_seconds: int,
-    retry_attempts: int,
-    retry_backoff_seconds: float,
 ) -> ChunkProgress:
-    """Build-mode worker: ONE graph build per source document. Discovery stays per
-    chunk and only runs on the standalone fallback (no ontology provided)."""
-    if ontology is None:
-        discovered = await asyncio.gather(*(
-            _discover_for_chunk(discovery_stage, c, timeout_seconds, retry_attempts, retry_backoff_seconds)
-            for c in doc_chunks
-        ))
-        ontology = LocalOntology.merge(list(discovered))
-
+    """Build-mode worker: ONE graph build per source document, using the
+    dataset-wide vocabulary the caller resolved (one call per dataset)."""
     try:
         docs_built = await extraction_stage.run(
             dataset_id=dataset_id,
@@ -314,7 +304,7 @@ async def _execute_unified_job(
 
     provided_ontology = await _ontology_from_run(ontology_job_id) if mode == "build_graph" else None
     if mode == "build_graph" and ontology_job_id and provided_ontology is None:
-        logger.warning(f"ontology job {ontology_job_id} has no completed ontology — falling back to per-chunk discovery")
+        logger.warning(f"ontology job {ontology_job_id} has no completed ontology — falling back to a dataset-wide spread-sample vocabulary")
 
     discovery_stage = (
         OntologyDiscoveryStage(
@@ -361,6 +351,16 @@ async def _execute_unified_job(
             await _persist_run(job_id, RUNS[job_id])
         return
 
+    if mode == "build_graph" and provided_ontology is None:
+        # One vocabulary per dataset: a single discovery call over a spread
+        # sample, replacing per-chunk discovery + union.
+        provided_ontology = await discover_vocabulary(
+            chunks,
+            sample_size=cfg.vocabulary_sample_size,
+            max_labels=cfg.vocabulary_max_labels,
+            stage=discovery_stage,
+        )
+
     semaphore = asyncio.Semaphore(max(1, cfg.ontology_max_concurrency))
     entity_accumulator: List[str] = []
     relation_accumulator: List[str] = []
@@ -390,11 +390,7 @@ async def _execute_unified_job(
                 dataset_id=dataset_id,
                 doc_chunks=doc_chunks,
                 ontology=provided_ontology,
-                discovery_stage=discovery_stage,
                 extraction_stage=extraction_stage,
-                timeout_seconds=cfg.discovery_timeout_seconds,
-                retry_attempts=cfg.discovery_retry_attempts,
-                retry_backoff_seconds=cfg.discovery_retry_backoff_seconds,
             )
 
     try:

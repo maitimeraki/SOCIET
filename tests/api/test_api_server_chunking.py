@@ -11,7 +11,9 @@ import pytest
 
 import src.api.api_server as api_server
 from src.api.api_server import _chunk_documents
+from src.graph.config_graph import GraphConfig
 from src.graph.models_graph import GlobalInputDocument, LocalOntology
+from src.graph.vocabulary import spread_indexes
 
 
 SENTENCES = [
@@ -99,9 +101,11 @@ def _ontology(type_name: str) -> LocalOntology:
 class _CountingDiscovery:
     def __init__(self, *args, **kwargs):
         self.calls = []
+        self.frames = []  # (parent_doc_id, chunk_index) passed to each call
 
     async def run(self, documents, sample_size=1):
         self.calls.append((documents[0].chunk_id, len(documents), sample_size))
+        self.frames.append([(d.parent_doc_id, d.chunk_index) for d in documents])
         return _ontology(f"TYPE_{len(self.calls)}")
 
 
@@ -189,17 +193,33 @@ async def test_build_extraction_runs_once_per_document(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_build_job_without_ontology_keeps_per_chunk_discovery(monkeypatch):
+async def test_build_job_without_ontology_discovers_once_per_dataset(monkeypatch):
     discovery = _CountingDiscovery()
     extraction = _FakeExtraction()
     _patch_build_pipeline(monkeypatch, discovery, extraction)
+    # Force a sample smaller than the corpus so the spread must pick endpoints.
+    monkeypatch.setattr(
+        api_server,
+        "GraphConfig",
+        lambda: GraphConfig(vocabulary_sample_size=2, vocabulary_max_labels=200),
+    )
     job_id = "test-build-fallback"
     api_server.RUNS[job_id] = {"job_id": job_id, "result": None}
+    documents = _docs()
 
-    await api_server._execute_unified_job(job_id, "build_graph", "ds1", _docs())
+    await api_server._execute_unified_job(job_id, "build_graph", "ds1", documents)
 
-    result = api_server.RUNS[job_id]["result"]
-    assert len(discovery.calls) == result["chunks_total"]     # standalone path unchanged
+    # ONE discovery call for the whole dataset — not one per chunk.
+    assert len(discovery.calls) == 1
+    # ...over a spread sample that spans the dataset: first and last chunk present.
+    full = await _chunk_documents(
+        documents, GraphConfig().chunk_size_tokens, GraphConfig().chunk_overlap_tokens
+    )
+    coord = lambda c: (c.parent_doc_id, c.chunk_index)
+    expected = [coord(full[i]) for i in spread_indexes(len(full), 2)]
+    assert discovery.frames[0] == expected
+    assert expected[0] == coord(full[0])
+    assert expected[-1] == coord(full[-1])
     assert len(extraction.calls) == 2                         # one run per document, not per chunk
 
 

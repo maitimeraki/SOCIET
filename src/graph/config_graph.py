@@ -14,6 +14,10 @@ class GraphConfig:
     extraction_timeout_seconds: int = int(os.getenv("GRAPH_EXTRACTION_TIMEOUT_SECONDS", "300"))
     temperature: float = float(os.getenv("GRAPH_TEMPERATURE", "0.0"))
     discovery_sample_size: int = int(os.getenv("GRAPH_DISCOVERY_SAMPLE_SIZE", "12"))
+    # One vocabulary per dataset: a single discovery call over a spread sample,
+    # bounded so the label list stops growing with document size.
+    vocabulary_sample_size: int = int(os.getenv("GRAPH_VOCABULARY_SAMPLE_SIZE", "12"))
+    vocabulary_max_labels: int = int(os.getenv("GRAPH_VOCABULARY_MAX_LABELS", "200"))
     discovery_timeout_seconds: int = int(os.getenv("GRAPH_DISCOVERY_TIMEOUT_SECONDS", "90"))
     discovery_retry_attempts: int = int(os.getenv("GRAPH_DISCOVERY_RETRY_ATTEMPTS", "3"))
     discovery_retry_backoff_seconds: float = float(
