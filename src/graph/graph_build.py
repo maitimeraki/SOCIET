@@ -201,6 +201,14 @@ class GraphExtractionStage:
         )
         _refresh_schema_once(self.graph_store)
         self.splitter = SentenceSplitter(chunk_size=2048, chunk_overlap=400)
+        # ONE lock for the whole extraction path, never per chunk: the sliding
+        # window keeps several extractions in flight, but only one of them may
+        # write the shared store/index at a time, so "an entity in two chunks
+        # yields ONE node" cannot depend on the store converging under a race.
+        # Extraction stays fully concurrent; only the write is serialised.
+        # Instance-level (not module-level) so it binds to the loop that runs
+        # THIS stage, and is shared across concurrent `run` calls for a stage.
+        self._insert_lock = asyncio.Lock()
         
     async def run(
         self,
@@ -307,9 +315,14 @@ class GraphExtractionStage:
                 nonlocal vocabulary
                 slice_ = select_slice(vocabulary, chunk.content, self.config.chunk_slice_size)
                 extractors = self._build_extractors(slice_)
-                _, entity_labels, relation_labels, delta_nodes, delta_edges = await asyncio.to_thread(
-                    self._extract_chunk, doc, extractors, index
+                nodes, entity_labels, relation_labels, delta_nodes, delta_edges = await asyncio.to_thread(
+                    self._extract_chunk, doc, extractors
                 )
+                # Serialise the store write: extraction is concurrent, but only
+                # one chunk writes the shared index at a time. The `to_thread`
+                # keeps the loop free while the lock waits.
+                async with self._insert_lock:
+                    await asyncio.to_thread(index.insert_nodes, nodes)
                 # Synchronous read-modify-write: never split by an await.
                 vocabulary, new_entities = promote(vocabulary, entity_labels, kind="entity")
                 vocabulary, new_relations = promote(vocabulary, relation_labels, kind="relation")
@@ -354,14 +367,16 @@ class GraphExtractionStage:
             logger.error(f"Error during graph extraction for dataset {dataset_id}: {e}")
             raise
 
-    def _extract_chunk(self, doc, extractors, index):
-        """Extract ONE chunk exactly once, harvest its delta, then insert it.
+    def _extract_chunk(self, doc, extractors):
+        """Extract ONE chunk exactly once and harvest its delta + proposed labels.
 
         Runs off the event loop (the path extractors call `asyncio.run`
         internally, which a running loop would reject). The extractors populate
         `metadata["nodes"]` / `metadata["relations"]` in place; those are read
-        HERE, before `index.insert_nodes` pops them (llama-index's `_insert_nodes`
-        removes both keys), so the delta and the proposed labels survive.
+        HERE, before the caller's `index.insert_nodes` pops them (llama-index's
+        `_insert_nodes` removes both keys), so the delta and the proposed labels
+        survive. The insert itself is NOT done here — the caller serialises it
+        under `_insert_lock`.
 
         `run_transformations([doc], extractors)` from `llama_index.core.ingestion`
         is exactly `for transform in extractors: nodes = transform(nodes)` — no
@@ -373,7 +388,6 @@ class GraphExtractionStage:
             nodes = list(extractor(nodes))
         entity_labels, relation_labels = _proposed_labels(nodes)
         delta_nodes, delta_edges = _delta_payload(nodes)
-        index.insert_nodes(nodes)
         return nodes, entity_labels, relation_labels, delta_nodes, delta_edges
 
     def _build_extractors(self, ontology: LocalOntology) -> tuple:
@@ -381,8 +395,8 @@ class GraphExtractionStage:
 
         The dynamic extractor's `allowed_*` schemas come from whatever
         `ontology` is handed in, so a per-chunk slice (Task 7's sliding window)
-        can build its own extractors from a smaller vocabulary. Today
-        `_run_async` calls this once with the document's full ontology.
+        builds its own extractors from a smaller vocabulary: `_run_async` calls
+        this once PER CHUNK with that chunk's slice.
         """
         from llama_index.core.indices.property_graph import (
             SimpleLLMPathExtractor,

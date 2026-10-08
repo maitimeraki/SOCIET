@@ -121,6 +121,11 @@ def _fake_extractor():
     return _extract
 
 
+def _identity_extractor(nodes):
+    """Pass-through extractor: extraction completes, harvest finds no triples."""
+    return nodes
+
+
 class TestIncrementalInsertDeltas:
     @pytest.mark.asyncio
     async def test_one_insert_and_one_publish_per_chunk_new_label_once(self):
@@ -190,7 +195,7 @@ class TestSlidingWindow:
         barrier = threading.Barrier(2, timeout=10)
         state = {"active": 0, "peak": 0, "starts": 0}
 
-        def _gated_extract(self, doc, extractors, index):
+        def _gated_extract(self, doc, extractors):
             with lock:
                 state["active"] += 1
                 state["peak"] = max(state["peak"], state["active"])
@@ -212,4 +217,54 @@ class TestSlidingWindow:
         assert state["starts"] == len(chunks)      # every chunk ran
         assert state["peak"] == 2                  # window filled to the limit
         assert state["peak"] <= 2                  # and never exceeded it
+        assert mock_publish.call_count == len(chunks)
+
+
+class TestSerialisedInserts:
+    @pytest.mark.asyncio
+    async def test_concurrent_chunks_never_overlap_a_store_write(self):
+        """Extraction runs concurrently, but the store write never overlaps.
+
+        `_insert_lock` serialises `index.insert_nodes`; without it two of the
+        window's chunks could write the shared index at once, so "an entity in
+        two chunks yields ONE node" would rest on the store converging under a
+        race. The 20 ms sleep widens the window a concurrent write would need.
+        """
+        import sys
+        import time
+        import types
+
+        chunks = [_chunk(i) for i in range(4)]
+        stage = _stage()
+
+        lock = threading.Lock()
+        state = {"active": 0, "peak": 0, "calls": 0, "overlap": False}
+
+        class _RecorderIndex:
+            def __init__(self):
+                self.docstore = types.SimpleNamespace(
+                    docs={f"node-{i}": object() for i in range(len(chunks))}
+                )
+
+            def insert_nodes(self, nodes):
+                with lock:
+                    state["active"] += 1
+                    state["calls"] += 1
+                    state["peak"] = max(state["peak"], state["active"])
+                    if state["active"] > 1:
+                        state["overlap"] = True
+                time.sleep(0.02)
+                with lock:
+                    state["active"] -= 1
+
+        core = sys.modules["llama_index.core"]
+        core.PropertyGraphIndex.return_value = _RecorderIndex()
+
+        with patch.object(stage, "_build_extractors", return_value=[_identity_extractor]), \
+             patch('src.graph.graph_build.publish') as mock_publish:
+            await stage.run("ds", chunks, _ontology(), job_id="job-1")
+
+        assert state["calls"] == len(chunks)
+        assert state["overlap"] is False   # two writes were never concurrent
+        assert state["peak"] == 1          # strictly serialised
         assert mock_publish.call_count == len(chunks)
