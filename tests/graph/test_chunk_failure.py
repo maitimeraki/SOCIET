@@ -296,7 +296,9 @@ class TestJobScopedFailureVerdict:
         assert {d.chunk_id for d in recorded if d.error} == {"doc-a-0", "doc-a-1"}
 
         frames = await _frames_for(recorded)
-        assert [f["chunk_id"] for f in frames if f["type"] == "error"] == ["doc-a-0", "doc-a-1"]
+        # Sibling chunks fail in the same sliding window, so their publication
+        # order is scheduler-dependent — assert membership, not order.
+        assert {f["chunk_id"] for f in frames if f["type"] == "error"} == {"doc-a-0", "doc-a-1"}
         assert len([f for f in frames if f["type"] == "delta"]) == 2
 
     @pytest.mark.asyncio

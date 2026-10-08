@@ -74,3 +74,25 @@ async def test_chunk_id_and_progress_use_the_dataclass_defaults(store):
 
     assert delta.chunk_id == ""
     assert delta.progress == 0.0
+
+
+@pytest.mark.asyncio
+async def test_store_is_built_off_the_event_loop(monkeypatch):
+    """`_get_store` issues blocking Neo4j schema round-trips on construction
+    (refresh_schema defaults on), so building it must NOT happen on the event
+    loop — otherwise the first read stalls every other FastAPI request."""
+    import threading
+
+    built_on: dict = {}
+
+    def _factory(**kwargs):
+        built_on["thread"] = threading.current_thread()
+        return _FakeStore()
+
+    monkeypatch.setattr(graph_snapshot, "Neo4jPropertyGraphStore", _factory)
+    monkeypatch.setattr(graph_snapshot, "_STORE", None)
+
+    await graph_snapshot.read_snapshot("ds-1")
+
+    assert "thread" in built_on, "the store factory was never invoked"
+    assert built_on["thread"] is not threading.main_thread()

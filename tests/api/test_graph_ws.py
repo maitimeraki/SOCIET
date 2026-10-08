@@ -22,7 +22,7 @@ from fastapi.testclient import TestClient
 import src.api.graph_snapshot as graph_snapshot
 from src.api import api_server, graph_stream
 from src.api.graph_stream import GraphDelta
-from src.api.graph_stream_api import router
+from src.api.graph_stream_api import _drain_queued, router
 
 
 def _app() -> FastAPI:
@@ -124,3 +124,38 @@ def test_late_client_after_completion_gets_snapshot_then_done(monkeypatch):
     assert frames[0]["type"] == "snapshot"
     assert frames[0]["labels"] == ["PERSON"]
     assert frames[1] == {"type": "done"}
+
+
+@pytest.mark.asyncio
+async def test_drain_queued_delivers_a_delta_ready_on_the_terminal_tick():
+    """The terminal poll can win the race just before `__anext__` yields a delta
+    published on the same tick; the drain must still forward it before `done`."""
+
+    class _WS:
+        def __init__(self) -> None:
+            self.frames: list[dict] = []
+
+        async def send_json(self, payload: dict) -> None:
+            self.frames.append(payload)
+
+    class _Sub:
+        """Yields one delta, then behaves like an exhausted subscription."""
+
+        def __init__(self) -> None:
+            self._items = [GraphDelta(nodes=[{"id": "P", "label": "P", "type": "T"}], chunk_id="c-term")]
+
+        async def __anext__(self) -> GraphDelta:
+            if self._items:
+                return self._items.pop(0)
+            raise StopAsyncIteration
+
+    sub = _Sub()
+    ws = _WS()
+    # The in-flight `__anext__` that is already resolved when the poll fires.
+    pending = asyncio.create_task(sub.__anext__())
+
+    pending = await _drain_queued(ws, sub, pending)
+
+    assert [f["type"] for f in ws.frames] == ["delta"]
+    assert ws.frames[0]["chunk_id"] == "c-term"
+    await asyncio.gather(pending, return_exceptions=True)  # exhausted successor, retrieve it

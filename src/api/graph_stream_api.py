@@ -25,6 +25,8 @@ router = APIRouter(tags=["graph"])
 
 _TERMINAL = {"completed", "failed"}
 _POLL_INTERVAL_S = 0.25
+# Total grace window to flush deltas already queued when the terminal poll wins.
+_DRAIN_GRACE_S = 0.1
 
 
 async def _job_state(job_id: str) -> tuple[str, Optional[str]]:
@@ -95,6 +97,34 @@ async def _send_delta(websocket: WebSocket, delta) -> None:
         })
 
 
+async def _drain_queued(websocket: WebSocket, subscription, next_delta):
+    """Deliver deltas already queued when the terminator fires (bounded).
+
+    The terminal poll can win the race a hair before the in-flight `__anext__`
+    yields a chunk published on the same tick. Give it a short grace window and
+    keep draining while items keep arriving, so that delta is not dropped before
+    `done`. Reuses the SAME in-flight task throughout: a fresh one per iteration
+    would cancel the generator mid-await and tear it down.
+    """
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + _DRAIN_GRACE_S
+    while True:
+        remaining = deadline - loop.time()
+        if remaining <= 0:
+            return next_delta
+        done, _ = await asyncio.wait({next_delta}, timeout=remaining)
+        if next_delta not in done:
+            return next_delta  # nothing ready; leave the pending task for finally
+        try:
+            delta = next_delta.result()
+        except StopAsyncIteration:
+            return next_delta  # stream exhausted; nothing left to drain
+        if delta is None:
+            return next_delta
+        await _send_delta(websocket, delta)
+        next_delta = asyncio.create_task(subscription.__anext__())
+
+
 async def _stream(websocket: WebSocket, job_id: str) -> None:
     subscription = graph_stream.subscribe(job_id)
     # One in-flight `__anext__` at a time, kept across iterations: racing it with
@@ -120,7 +150,10 @@ async def _stream(websocket: WebSocket, job_id: str) -> None:
                 await _send_delta(websocket, delta)
                 next_delta = asyncio.create_task(subscription.__anext__())
                 continue
-            break  # terminator: the job reached completed/failed
+            # terminator: the job reached completed/failed. Drain deltas already
+            # queued so one published on the terminal tick is still delivered.
+            next_delta = await _drain_queued(websocket, subscription, next_delta)
+            break
     finally:
         # An abandoned `async for` over the generator is only finalised at GC;
         # cancel the in-flight `__anext__` and close the generator explicitly so

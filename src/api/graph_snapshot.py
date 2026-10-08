@@ -74,7 +74,11 @@ def _read(store: Neo4jPropertyGraphStore, dataset_id: str) -> tuple[list[dict], 
 
 async def read_snapshot(dataset_id: str) -> GraphDelta:
     """Every stored entity + relation for `dataset_id`, plus its full label set."""
-    nodes, edges = await asyncio.to_thread(_read, _get_store(), dataset_id)
+    # Build the store INSIDE the worker: construction issues blocking Neo4j
+    # schema round-trips (refresh_schema defaults on), so doing it here — rather
+    # than as a to_thread argument evaluated on the loop — keeps the read from
+    # stalling every other FastAPI request.
+    nodes, edges = await asyncio.to_thread(lambda: _read(_get_store(), dataset_id))
     # The vocabulary: order-stable, de-duplicated distinct types, so the
     # reconnecting client rebuilds its legend from the snapshot alone.
     new_labels = list(dict.fromkeys(n["type"] for n in nodes if n["type"]))
