@@ -159,3 +159,49 @@ async def test_drain_queued_delivers_a_delta_ready_on_the_terminal_tick():
     assert [f["type"] for f in ws.frames] == ["delta"]
     assert ws.frames[0]["chunk_id"] == "c-term"
     await asyncio.gather(pending, return_exceptions=True)  # exhausted successor, retrieve it
+
+
+def test_delta_published_during_the_snapshot_window_is_delivered_once(monkeypatch):
+    """I3: the subscription is registered (its first `__anext__` primed) BEFORE the
+    snapshot is read, so a delta published while the snapshot is built is queued —
+    not lost in the read→subscribe gap — and de-duplicated against the snapshot so a
+    node carried by both is delivered exactly once."""
+    job_id = f"ws-{uuid.uuid4()}"
+    api_server.RUNS[job_id] = {"status": "running", "result": {"dataset_id": "ds-gap"}}
+
+    async def fake_snapshot(dataset_id: str) -> GraphDelta:
+        assert dataset_id == "ds-gap"
+        # Stands in for the real read's thread hop: yield once so the route's primed
+        # `__anext__` registers the queue before this publish lands on it.
+        await asyncio.sleep(0)
+        graph_stream.publish(job_id, GraphDelta(
+            nodes=[
+                {"id": "Person:Seed", "label": "Seed", "type": "PERSON"},  # snapshot already carries it
+                {"id": "Org:New", "label": "New", "type": "ORG"},          # written after the read began
+            ],
+            edges=[{"source": "Person:Seed", "target": "Org:New", "label": "WORKS_AT"}],
+            new_labels=["ORG"], chunk_id="c-gap", progress=0.4,
+        ))
+        api_server.RUNS[job_id]["status"] = "completed"  # let the stream terminate
+        return GraphDelta(
+            nodes=[{"id": "Person:Seed", "label": "Seed", "type": "PERSON"}],
+            edges=[], new_labels=["PERSON"],
+        )
+
+    monkeypatch.setattr(graph_snapshot, "read_snapshot", fake_snapshot)
+
+    frames = _collect(TestClient(_app()), f"/simulate/{job_id}/graph_stream", count=4)
+
+    assert [f["type"] for f in frames] == ["snapshot", "delta", "vocabulary", "done"]
+    # The snapshot is still the FIRST frame, and unchanged.
+    assert frames[0]["nodes"] == [{"id": "Person:Seed", "label": "Seed", "type": "PERSON"}]
+    # The gap delta arrives after it; the node the snapshot already had is dropped,
+    # the node written after the read began is kept.
+    assert frames[1]["nodes"] == [{"id": "Org:New", "label": "New", "type": "ORG"}]
+    assert frames[1]["edges"] == [{"source": "Person:Seed", "target": "Org:New", "label": "WORKS_AT"}]
+    assert frames[1]["progress"] == 0.4
+    assert frames[2] == {"type": "vocabulary", "labels": ["ORG"], "chunk_id": "c-gap"}
+    # Exactly once: Person:Seed is delivered by the snapshot alone, never twice.
+    delivered = [n["id"] for f in frames for n in f.get("nodes", [])]
+    assert delivered.count("Person:Seed") == 1
+    assert delivered.count("Org:New") == 1

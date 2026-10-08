@@ -338,95 +338,108 @@ async def _execute_unified_job(
     documents: List[GlobalInputDocument],
     ontology_job_id: Optional[str] = None,
 ) -> None:
-    cfg = GraphConfig()
-    # Lazy: graph_build pulls in llama_index graph stores at import time, and
-    # tests/graph/test_graph_build.py mocks llama_index at its own import — a
-    # module-scope import here would bypass that mock and hit a live Neo4j.
-    from src.graph.graph_build import GraphExtractionStage
+    # Launched fire-and-forget (asyncio.create_task at both call sites), so from
+    # `GraphConfig()` through the final persist EVERY path must end terminal.
+    # Anything raised outside the old inner `try` — the config, the lazy import,
+    # stage construction, chunking, or the first RUNS write — would otherwise die
+    # silently and strand the job non-terminal, hanging the WS route's terminal
+    # wait and reporting "queued" forever.
+    extraction_stage = None
+    normalization_stage = None
+    pending: Set[asyncio.Task] = set()
+    try:
+        cfg = GraphConfig()
+        # Lazy: graph_build pulls in llama_index graph stores at import time, and
+        # tests/graph/test_graph_build.py mocks llama_index at its own import — a
+        # module-scope import here would bypass that mock and hit a live Neo4j.
+        from src.graph.graph_build import GraphExtractionStage
 
-    provided_ontology = await _ontology_from_run(ontology_job_id) if mode == "build_graph" else None
-    if mode == "build_graph" and ontology_job_id and provided_ontology is None:
-        logger.warning(f"ontology job {ontology_job_id} has no completed ontology — falling back to a dataset-wide spread-sample vocabulary")
+        provided_ontology = await _ontology_from_run(ontology_job_id) if mode == "build_graph" else None
+        if mode == "build_graph" and ontology_job_id and provided_ontology is None:
+            logger.warning(f"ontology job {ontology_job_id} has no completed ontology — falling back to a dataset-wide spread-sample vocabulary")
 
-    discovery_stage = (
-        OntologyDiscoveryStage(
-            model=cfg.discovery_model,
-            temperature=cfg.temperature,
-            timeout=min(60.0, cfg.discovery_timeout_seconds),
+        discovery_stage = (
+            OntologyDiscoveryStage(
+                model=cfg.discovery_model,
+                temperature=cfg.temperature,
+                timeout=min(60.0, cfg.discovery_timeout_seconds),
+            )
+            if provided_ontology is None
+            else None
         )
-        if provided_ontology is None
-        else None
-    )
-    extraction_stage = GraphExtractionStage(cfg) if mode == "build_graph" else None
-    normalization_stage = GraphNormalizationStage(cfg) if mode == "build_graph" else None
+        # Off the loop: the store constructor runs blocking Neo4j round-trips
+        # (refresh_schema + CREATE CONSTRAINT on the sync driver), which would
+        # otherwise stall every other request on the event loop.
+        if mode == "build_graph":
+            extraction_stage = await asyncio.to_thread(lambda: GraphExtractionStage(cfg))
+            normalization_stage = await asyncio.to_thread(lambda: GraphNormalizationStage(cfg))
 
-    chunks = await _chunk_documents(documents, cfg.chunk_size_tokens, cfg.chunk_overlap_tokens)
-    total_chunks = len(chunks)
+        chunks = await _chunk_documents(documents, cfg.chunk_size_tokens, cfg.chunk_overlap_tokens)
+        total_chunks = len(chunks)
 
-    async with _RUNS_LOCK:
-        RUNS[job_id]["status"] = "running"
-        RUNS[job_id]["stage"] = f"{mode}_running"
-        RUNS[job_id]["progress"] = 0.05
-        RUNS[job_id]["result"] = {
-            "dataset_id": dataset_id,
-            "chunks_total": total_chunks,
-            "chunks_completed": 0,
-            "docs_built": 0,
-            "entity_types": [],
-            "relation_types": [],
-        }
-        await _persist_run(job_id, RUNS[job_id])
-
-    if total_chunks == 0:
         async with _RUNS_LOCK:
-            RUNS[job_id]["status"] = "completed"
-            RUNS[job_id]["stage"] = "completed"
-            RUNS[job_id]["progress"] = 1.0
+            RUNS[job_id]["status"] = "running"
+            RUNS[job_id]["stage"] = f"{mode}_running"
+            RUNS[job_id]["progress"] = 0.05
             RUNS[job_id]["result"] = {
                 "dataset_id": dataset_id,
-                "chunks_total": 0,
+                "chunks_total": total_chunks,
                 "chunks_completed": 0,
                 "docs_built": 0,
-                "entity_types": ["ENTITY"],
-                "relation_types": ["RELATED_TO"],
+                "entity_types": [],
+                "relation_types": [],
             }
             await _persist_run(job_id, RUNS[job_id])
-        return
 
-    semaphore = asyncio.Semaphore(max(1, cfg.ontology_max_concurrency))
-    entity_accumulator: List[str] = []
-    relation_accumulator: List[str] = []
-    chunk_ontologies: List[dict] = []
-    docs_built = 0
-    completed = 0
+        if total_chunks == 0:
+            async with _RUNS_LOCK:
+                RUNS[job_id]["status"] = "completed"
+                RUNS[job_id]["stage"] = "completed"
+                RUNS[job_id]["progress"] = 1.0
+                RUNS[job_id]["result"] = {
+                    "dataset_id": dataset_id,
+                    "chunks_total": 0,
+                    "chunks_completed": 0,
+                    "docs_built": 0,
+                    "entity_types": ["ENTITY"],
+                    "relation_types": ["RELATED_TO"],
+                }
+                await _persist_run(job_id, RUNS[job_id])
+            return
 
-    if mode == "ontology":
-        units = [(c.parent_doc_id, [c]) for c in chunks]
-    else:
-        by_doc: Dict[str, List[ProcessedChunk]] = {}
-        for c in chunks:
-            by_doc.setdefault(c.parent_doc_id, []).append(c)
-        units = list(by_doc.items())
+        semaphore = asyncio.Semaphore(max(1, cfg.ontology_max_concurrency))
+        entity_accumulator: List[str] = []
+        relation_accumulator: List[str] = []
+        chunk_ontologies: List[dict] = []
+        docs_built = 0
+        completed = 0
 
-    async def _worker(doc_id: str, doc_chunks: List[ProcessedChunk]) -> ChunkProgress:
-        async with semaphore:
-            if mode == "ontology":
-                return await _process_chunk(
-                    doc_chunks[0],
-                    discovery_stage,
-                    cfg.discovery_timeout_seconds,
-                    cfg.discovery_retry_attempts,
-                    cfg.discovery_retry_backoff_seconds,
+        if mode == "ontology":
+            units = [(c.parent_doc_id, [c]) for c in chunks]
+        else:
+            by_doc: Dict[str, List[ProcessedChunk]] = {}
+            for c in chunks:
+                by_doc.setdefault(c.parent_doc_id, []).append(c)
+            units = list(by_doc.items())
+
+        async def _worker(doc_id: str, doc_chunks: List[ProcessedChunk]) -> ChunkProgress:
+            async with semaphore:
+                if mode == "ontology":
+                    return await _process_chunk(
+                        doc_chunks[0],
+                        discovery_stage,
+                        cfg.discovery_timeout_seconds,
+                        cfg.discovery_retry_attempts,
+                        cfg.discovery_retry_backoff_seconds,
+                    )
+                return await _process_document(
+                    dataset_id=dataset_id,
+                    doc_chunks=doc_chunks,
+                    ontology=provided_ontology,
+                    extraction_stage=extraction_stage,
+                    job_id=job_id,
                 )
-            return await _process_document(
-                dataset_id=dataset_id,
-                doc_chunks=doc_chunks,
-                ontology=provided_ontology,
-                extraction_stage=extraction_stage,
-                job_id=job_id,
-            )
 
-    try:
         if mode == "build_graph" and provided_ontology is None:
             # One vocabulary per dataset: a single bounded discovery call over a
             # spread sample, replacing per-chunk discovery + union. Inside the
@@ -452,7 +465,7 @@ async def _execute_unified_job(
         # `asyncio.as_completed` yields coroutines on Python 3.11 (not the tasks),
         # so the yielded item can't be keyed back to its chunk count. `asyncio.wait`
         # yields the finished tasks themselves, keeping the counts map exact.
-        pending: Set[asyncio.Task] = set(tasks)
+        pending = set(tasks)
         while pending:
             done, pending = await asyncio.wait(pending, return_when=asyncio.FIRST_COMPLETED)
             for fut in done:
@@ -508,7 +521,22 @@ async def _execute_unified_job(
             RUNS[job_id]["stage"] = "failed"
             RUNS[job_id]["error"] = str(exc)
             await _persist_run(job_id, RUNS[job_id])
-            
+    finally:
+        # A job marked failed must stop writing: cancel and await any worker
+        # still extracting / embedding / publishing, so it cannot outlive the
+        # terminal write (mirrors graph_build._run_async's chunk-level cancel).
+        for task in pending:
+            task.cancel()
+        if pending:
+            await asyncio.gather(*pending, return_exceptions=True)
+        # Close the stage drivers in a finally (idempotent) so a build never
+        # leaks a Neo4j connection pool — including the raise-before-close path.
+        if extraction_stage is not None:
+            closer = getattr(extraction_stage, "close", None)
+            if closer is not None:
+                await asyncio.to_thread(closer)
+        if normalization_stage is not None:
+            await normalization_stage.close()
 
 @app.post("/simulate/ontology", status_code=status.HTTP_202_ACCEPTED)
 async def discover_ontology_async(dataset_id: str, documents: List[GlobalInputDocument]):

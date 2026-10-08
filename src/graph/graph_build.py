@@ -210,6 +210,14 @@ class GraphExtractionStage:
         # THIS stage, and is shared across concurrent `run` calls for a stage.
         self._insert_lock = asyncio.Lock()
         
+    def close(self) -> None:
+        """Close the graph store's driver. Idempotent — a second call is a no-op."""
+        store = getattr(self, "graph_store", None)
+        if store is None:
+            return
+        self.graph_store = None
+        store.close()
+
     async def run(
         self,
         dataset_id: str,

@@ -3,6 +3,7 @@
 Chunking is sentence-aware (shared owner: chunkProcessor.split_text_sentences);
 these assertions fail under the retired fixed character windows.
 """
+import asyncio
 import json
 import logging
 from unittest.mock import AsyncMock
@@ -320,3 +321,71 @@ class TestOntologyFromRun:
 
         assert ontology is None
         assert "onto-corrupt" in caplog.text
+
+
+class _ExplodingExtractionInit:
+    """Neo4j-unreachable stand-in: constructing the extraction stage raises."""
+
+    def __init__(self, *args, **kwargs):
+        raise RuntimeError("Neo4j unreachable")
+
+
+@pytest.mark.asyncio
+async def test_stage_construction_failure_marks_job_failed_not_queued(monkeypatch):
+    """C1: a raise anywhere in the prologue (here: extraction-stage construction)
+    must leave the job terminal. `_execute_unified_job` is fire-and-forget, so the
+    old out-of-try prologue would die silently and strand the job "queued" forever,
+    hanging the WS route's wait for a terminal status."""
+    monkeypatch.setattr(api_server, "OntologyDiscoveryStage", _CountingDiscovery)
+    monkeypatch.setattr(api_server, "GraphNormalizationStage", lambda cfg: AsyncMock())
+    monkeypatch.setattr(api_server, "_persist_run", AsyncMock())
+    monkeypatch.setattr("src.graph.graph_build.GraphExtractionStage", _ExplodingExtractionInit)
+
+    job_id = "test-construction-fail"
+    api_server.RUNS[job_id] = {"job_id": job_id, "status": "queued", "result": None}
+
+    await api_server._execute_unified_job(job_id, "build_graph", "ds1", _docs())
+
+    assert api_server.RUNS[job_id]["status"] == "failed"
+    assert api_server.RUNS[job_id]["stage"] == "failed"
+    assert "Neo4j unreachable" in api_server.RUNS[job_id]["error"]
+
+
+class _FailThenBlockExtraction:
+    """`d0`'s extraction raises; every other document blocks until cancelled — so
+    the test can tell whether the canceller freed it or left it running."""
+
+    def __init__(self, *args, **kwargs):
+        self.cancelled: list[str] = []
+
+    async def run(self, dataset_id, documents, ontology, job_id=None):
+        doc_id = documents[0].parent_doc_id
+        if doc_id == "d0":
+            raise RuntimeError("extraction boom on d0")
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            self.cancelled.append(doc_id)
+            raise
+
+
+@pytest.mark.asyncio
+async def test_raising_worker_cancels_its_siblings(monkeypatch):
+    """I2: when one worker raises, the job goes terminal AND the other in-flight
+    workers are cancelled — not left extracting / writing / publishing for a job
+    already marked failed."""
+    extraction = _FailThenBlockExtraction()
+    monkeypatch.setattr(api_server, "OntologyDiscoveryStage", _CountingDiscovery)
+    monkeypatch.setattr(api_server, "GraphNormalizationStage", lambda cfg: AsyncMock())
+    monkeypatch.setattr(api_server, "_persist_run", AsyncMock())
+    monkeypatch.setattr("src.graph.graph_build.GraphExtractionStage", lambda cfg: extraction)
+    # Keep both document workers in flight together so the sibling is startable.
+    monkeypatch.setattr(api_server, "GraphConfig", lambda: GraphConfig(ontology_max_concurrency=8))
+
+    job_id = "test-worker-cancel"
+    api_server.RUNS[job_id] = {"job_id": job_id, "status": "queued", "result": None}
+
+    await api_server._execute_unified_job(job_id, "build_graph", "ds1", _docs())
+
+    assert api_server.RUNS[job_id]["status"] == "failed"
+    assert extraction.cancelled == ["d1"]  # the sibling was cancelled, not left writing
