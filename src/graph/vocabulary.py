@@ -6,6 +6,7 @@ sample spread evenly across the corpus — endpoints inclusive — and the entit
 types are trimmed to a fixed ceiling.
 """
 import logging
+import re
 from typing import List, Optional
 
 from src.graph.config_graph import GraphConfig
@@ -64,3 +65,60 @@ async def discover_vocabulary(
         ontology.entity_types = ontology.entity_types[:max_labels]
 
     return ontology
+
+
+def select_slice(vocabulary: LocalOntology, chunk_text: str, k: int) -> LocalOntology:
+    """The `k` labels most relevant to `chunk_text`, as a `LocalOntology`.
+
+    Keyword / exact-mention overlap between the chunk and each label (name plus
+    description) is the whole score — deterministic and offline. A label whose
+    name occurs in the chunk (case-insensitive) always outranks one that does
+    not, so it is included whenever `k` allows.
+
+    ponytail: no embedding cosine — the chunk-slice decision is a lexical one
+    and the embed model is a live network hop. Add cosine blending when the
+    lexical ranking measurably picks the wrong labels.
+    """
+    labeled = [
+        (index, "entity", name, definition)
+        for index, name, definition in _labels(vocabulary.entity_types)
+    ] + [
+        (index, "relation", name, definition)
+        for index, name, definition in _labels(vocabulary.relation_types)
+    ]
+    if len(labeled) <= k:
+        return vocabulary
+
+    haystack = chunk_text.lower()
+    chunk_words = set(re.findall(r"\w+", haystack))
+
+    def relevance(name: str, description: str) -> float:
+        lowered = name.lower()
+        score = 100.0 if lowered and lowered in haystack else 0.0
+        score += len(set(re.findall(r"\w+", lowered)) & chunk_words)
+        score += 0.5 * len(set(re.findall(r"\w+", description.lower())) & chunk_words)
+        return score
+
+    ranked = sorted(
+        labeled,
+        key=lambda row: (-relevance(row[2], row[3].description), row[0]),
+    )
+
+    keep = {(kind, index) for index, kind, _, _ in ranked[:k]}
+    return LocalOntology(
+        metadata=vocabulary.metadata,
+        entity_types=[
+            e for index, e in enumerate(vocabulary.entity_types) if ("entity", index) in keep
+        ],
+        relation_types=[
+            r for index, r in enumerate(vocabulary.relation_types) if ("relation", index) in keep
+        ],
+    )
+
+
+def _labels(definitions):
+    """(position, name, definition) for the non-blank-named types, in order."""
+    for index, definition in enumerate(definitions):
+        name = definition.type_name
+        if name and name.strip():
+            yield index, name, definition

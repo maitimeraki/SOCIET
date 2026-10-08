@@ -6,8 +6,9 @@ from src.graph.models_graph import (
     OntologyMetadata,
     LocalOntology,
     ProcessedChunk,
+    RelationTypeDefinition,
 )
-from src.graph.vocabulary import discover_vocabulary, spread_indexes
+from src.graph.vocabulary import discover_vocabulary, select_slice, spread_indexes
 
 
 def _chunk(i: int) -> ProcessedChunk:
@@ -99,3 +100,44 @@ class TestDiscoverVocabularySpread:
         result = await discover_vocabulary(docs, sample_size=4, max_labels=200, stage=stage)
 
         assert len(result.entity_types) == 3
+
+
+def _ontology_with_named_labels(entity_labels, relation_labels=()) -> LocalOntology:
+    return LocalOntology(
+        metadata=OntologyMetadata(),
+        entity_types=[EntityTypeDefinition(type_name=n) for n in entity_labels],
+        relation_types=[RelationTypeDefinition(type_name=n) for n in relation_labels],
+    )
+
+
+class TestSelectSlice:
+    def test_slice_keeps_mentioned_labels_within_k(self):
+        vocab = _ontology_with_named_labels(
+            ["Microservice", "Database", "Kafka", "Kubernetes", "Redis", "Postgres"]
+        )
+        chunk = "The Microservice publishes events to Kafka on every write."
+
+        result = select_slice(vocab, chunk, k=3)
+
+        labels = result.entity_labels + result.relation_labels
+        assert len(labels) <= 3
+        assert "Microservice" in labels
+        assert "Kafka" in labels
+
+    def test_slice_ranks_entity_and_relation_labels_together(self):
+        vocab = _ontology_with_named_labels(
+            ["Microservice", "Database"],
+            ["Kafka", "Owns"],
+        )
+        chunk = "Each Database row is read by Kafka consumers."
+
+        result = select_slice(vocab, chunk, k=2)
+
+        assert len(result.entity_labels) + len(result.relation_labels) <= 2
+        assert "Database" in result.entity_labels
+        assert "Kafka" in result.relation_labels
+
+    def test_slice_returns_vocabulary_unchanged_when_not_larger_than_k(self):
+        vocab = _ontology_with_named_labels(["Microservice", "Kafka"])
+
+        assert select_slice(vocab, "Microservice writes to Kafka", k=8) is vocab

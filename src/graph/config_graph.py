@@ -18,6 +18,10 @@ class GraphConfig:
     # bounded so the label list stops growing with document size.
     vocabulary_sample_size: int = int(os.getenv("GRAPH_VOCABULARY_SAMPLE_SIZE", "12"))
     vocabulary_max_labels: int = int(os.getenv("GRAPH_VOCABULARY_MAX_LABELS", "200"))
+    # Bound on the labels any single chunk's extraction prompt may carry: the
+    # discovery ceiling (above) bounds the whole dataset, this bounds per chunk,
+    # so prompt size stops tracking vocabulary growth.
+    chunk_slice_size: int = int(os.getenv("GRAPH_CHUNK_SLICE_SIZE", "8"))
     discovery_timeout_seconds: int = int(os.getenv("GRAPH_DISCOVERY_TIMEOUT_SECONDS", "90"))
     discovery_retry_attempts: int = int(os.getenv("GRAPH_DISCOVERY_RETRY_ATTEMPTS", "3"))
     discovery_retry_backoff_seconds: float = float(

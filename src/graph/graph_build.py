@@ -167,45 +167,13 @@ class GraphExtractionStage:
 
         logger.info(f"Transforming ontology schema for dataset {dataset_id} into property-aware format.")
         try:
-            entity_schemas = ontology.entity_labels
-            relation_schemas = ontology.relation_labels
-            possible_ent_props = ontology.entity_props
-            possible_rel_props = ontology.relation_props
-
             logger.info(
-                f"Initializing SchemaLLMPathExtractor for dataset {dataset_id} with "
-                f"{entity_schemas} entity schemas and {relation_schemas} relation schemas."
+                f"Initializing extractors for dataset {dataset_id} with "
+                f"{ontology.entity_labels} entity schemas and "
+                f"{ontology.relation_labels} relation schemas."
             )
 
-            from llama_index.core.indices.property_graph import (
-                SimpleLLMPathExtractor,
-                DynamicLLMPathExtractor,
-                ImplicitPathExtractor,
-            )
-            # num_workers=1: llama-index runs a call's chunks through
-            # run_jobs(jobs, workers=num_workers), so sync mode fans out for
-            # real. The outer semaphore (GraphConfig.ontology_max_concurrency,
-            # one slot per document) is the single concurrency lever: aggregate
-            # in-flight extraction calls = GRAPH_ONTOLOGY_MAX_CONCURRENCY ×
-            # num_workers. Raise num_workers only alongside cutting the semaphore.
-            # Simple extractor - basic triple extraction without schema constraints(Simple extractor captures additional relationships the dynamic one might miss)
-            simple_extractor = SimpleLLMPathExtractor(
-                llm=self.llm,
-                max_paths_per_chunk=10,
-                num_workers=1,
-            )
-            # Dynamic extractor - schema-guided but flexible(Dynamic extractor captures labeled entities/relations following your schema)
-            dynamic_extractor = DynamicLLMPathExtractor(
-                llm=self.llm,
-                allowed_entity_types=entity_schemas,
-                allowed_relation_types=relation_schemas,
-                allowed_entity_props=possible_ent_props,
-                allowed_relation_props=possible_rel_props,
-                num_workers=1,
-            )
-            # Implicit extractor - from node relationships(Implicit extractor adds structural relationships between nodes that LLMs don't generate)
-            implicit_extractor = ImplicitPathExtractor()
-            
+            simple_extractor, dynamic_extractor, implicit_extractor = self._build_extractors(ontology)
 
             llama_docs = []
             for d in documents:
@@ -271,6 +239,44 @@ class GraphExtractionStage:
         except Exception as e:
             logger.error(f"Error during graph extraction for dataset {dataset_id}: {e}")
             raise
+
+    def _build_extractors(self, ontology: LocalOntology) -> tuple:
+        """The extractor set for one ontology (or vocabulary slice).
+
+        The dynamic extractor's `allowed_*` schemas come from whatever
+        `ontology` is handed in, so a per-chunk slice (Task 7's sliding window)
+        can build its own extractors from a smaller vocabulary. Today
+        `_run_async` calls this once with the document's full ontology.
+        """
+        from llama_index.core.indices.property_graph import (
+            SimpleLLMPathExtractor,
+            DynamicLLMPathExtractor,
+            ImplicitPathExtractor,
+        )
+        # num_workers=1: llama-index runs a call's chunks through
+        # run_jobs(jobs, workers=num_workers), so sync mode fans out for
+        # real. The outer semaphore (GraphConfig.ontology_max_concurrency,
+        # one slot per document) is the single concurrency lever: aggregate
+        # in-flight extraction calls = GRAPH_ONTOLOGY_MAX_CONCURRENCY ×
+        # num_workers. Raise num_workers only alongside cutting the semaphore.
+        # Simple extractor - basic triple extraction without schema constraints(Simple extractor captures additional relationships the dynamic one might miss)
+        simple_extractor = SimpleLLMPathExtractor(
+            llm=self.llm,
+            max_paths_per_chunk=10,
+            num_workers=1,
+        )
+        # Dynamic extractor - schema-guided but flexible(Dynamic extractor captures labeled entities/relations following your schema)
+        dynamic_extractor = DynamicLLMPathExtractor(
+            llm=self.llm,
+            allowed_entity_types=ontology.entity_labels,
+            allowed_relation_types=ontology.relation_labels,
+            allowed_entity_props=ontology.entity_props,
+            allowed_relation_props=ontology.relation_props,
+            num_workers=1,
+        )
+        # Implicit extractor - from node relationships(Implicit extractor adds structural relationships between nodes that LLMs don't generate)
+        implicit_extractor = ImplicitPathExtractor()
+        return (simple_extractor, dynamic_extractor, implicit_extractor)
 
     def _write_documents(self, dataset_id: str, documents: List[ProcessedChunk]) -> None:
         """MERGE one Document node per unique source document. Sync — called off the loop."""
