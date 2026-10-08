@@ -6,6 +6,7 @@ import { pollJob } from '../api/poll'
 import type { GraphJobResult, JobStatus } from '../api/types'
 import { useDraftStore } from '../wizard/draftStore'
 import StageRail from '../components/common/StageRail'
+import GraphCanvas from '../components/graph/GraphCanvas'
 import StageLine from '../components/graph/StageLine'
 import ProgressBar from '../components/graph/ProgressBar'
 import SchemaCard from '../components/graph/SchemaCard'
@@ -20,6 +21,7 @@ type Phase = 'ontology' | 'build' | 'done' | 'failed'
 export default function GraphPage() {
   const navigate = useNavigate()
   const datasetId = useDraftStore((s) => s.datasetId)
+  const graphJobId = useDraftStore((s) => s.graphJobId)
   const setJobs = useDraftStore((s) => s.setJobs)
   const setGraphSummary = useDraftStore((s) => s.setGraphSummary)
   const [phase, setPhase] = useState<Phase>('ontology')
@@ -139,12 +141,13 @@ export default function GraphPage() {
           />
           <StageLine label="Extracting entities and relations" state={phase === 'build' ? 'active' : 'pending'} />
           {phase === 'build' && (
-            <div className="space-y-2">
+            <div className="space-y-4">
               <ProgressBar value={progress} label={`${fmtInt(completed)} / ${fmtInt(total)} chunks`} />
               <p className="tnum font-mono text-mono text-paper-dim">
                 graph so far · {fmtInt(result?.entity_types.length ?? 0)} entity types · {fmtInt(result?.relation_types.length ?? 0)} relation types
               </p>
               <p className="text-micro text-paper-mute">Each chunk is written as it finishes — the graph grows while the build runs.</p>
+              {datasetId && graphJobId && <GraphCanvas datasetId={datasetId} jobId={graphJobId} />}
             </div>
           )}
         </div>
