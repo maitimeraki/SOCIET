@@ -45,8 +45,9 @@ interface GraphStoreState {
  * Sigma's WebGL colour path parses (hex; it draws black on `hsl()`). Every entry clears the spec's
  * ≥3:1 mark floor against the canvas surface (`#100e09`); validated min pairwise ΔE 29.7 (normal) /
  * 9.8 (deuteranopia), min contrast 7.14:1 — comfortably better than the stance palette's own residual.
- * Colours are assigned in first-seen order, so a promoted label always lands on a fresh hue and a
- * label's colour never shifts when later labels arrive.
+ * Colours are keyed off the label SET (labels taken in sorted order), so a given set maps to the same
+ * colours whatever order it arrives in — a reconnect or reload that replays the labels differently
+ * cannot recolour the graph.
  */
 export const LABEL_PALETTE = [
   '#45C2BE', // teal
@@ -59,7 +60,7 @@ export const LABEL_PALETTE = [
 ] as const
 
 // ponytail: a 7-colour palette wraps past the 7th label (two types can share a hue); extend the array if a corpus ever promotes more.
-/** The palette colour for a label at `index` (its first-seen position). */
+/** The palette colour for a label at `index` (its slot in the sorted label set). */
 export const labelColor = (index: number): string => LABEL_PALETTE[index % LABEL_PALETTE.length]
 
 const edgeKey = (edge: GraphEdge): string => `${edge.source}|${edge.target}|${edge.label}`
@@ -76,13 +77,17 @@ const upsertEdges = (existing: Record<string, GraphEdge>, incoming: GraphEdge[])
   return next
 }
 
-/** Add unseen labels (keeping any existing entry's colour), preserving first-seen order. */
+/**
+ * Add unseen labels (the array keeps first-seen order, so the legend stays append-only), but derive
+ * every colour from the SET: labels taken in sorted order take palette slots 0..n-1. The mapping is
+ * therefore a pure function of the set — the same labels in any arrival order, across an
+ * `applySnapshot` reset or a reload, land on the same colours.
+ */
 const mergeLabels = (incoming: string[], existing: GraphLabel[]): GraphLabel[] => {
   const byLabel = new Map(existing.map((entry) => [entry.label, entry]))
   for (const label of incoming) if (!byLabel.has(label)) byLabel.set(label, { label, color: '' })
-  // Colour is the label's position in the (stable, append-only) order — so a given label keeps its
-  // colour across resets/reloads and never changes when another label is promoted later.
-  return [...byLabel.values()].map((entry, index) => ({ ...entry, color: labelColor(index) }))
+  const colorByName = new Map([...byLabel.keys()].sort().map((label, index) => [label, labelColor(index)]))
+  return [...byLabel.values()].map((entry) => ({ label: entry.label, color: colorByName.get(entry.label) ?? entry.color }))
 }
 
 export const useGraphStore = create<GraphStoreState>((set) => ({

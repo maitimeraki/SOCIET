@@ -65,14 +65,27 @@ describe('label palette', () => {
     expect(new Set(colors).size).toBe(LABEL_PALETTE.length)
   })
 
-  it('keeps a label on its colour when a later label is promoted', () => {
+  it('gives the same set the same colours whatever the arrival order', () => {
     const { mergeVocabulary } = useGraphStore.getState()
     mergeVocabulary(['Company', 'Market', 'Regulation'])
-    const before = useGraphStore.getState().labels.map((l) => l.color)
+    const first = Object.fromEntries(useGraphStore.getState().labels.map((l) => [l.label, l.color]))
 
-    mergeVocabulary(['Person'])
+    useGraphStore.setState({ labels: [] })
+    mergeVocabulary(['Regulation', 'Company', 'Market'])
+    const second = Object.fromEntries(useGraphStore.getState().labels.map((l) => [l.label, l.color]))
 
-    expect(useGraphStore.getState().labels.slice(0, 3).map((l) => l.color)).toEqual(before)
+    expect(second).toEqual(first)
+  })
+
+  it('preserves each label colour across an applySnapshot that reorders the same labels', () => {
+    const { applySnapshot } = useGraphStore.getState()
+    applySnapshot({ nodes: [], edges: [], labels: ['Company', 'Market', 'Regulation'] })
+    const first = Object.fromEntries(useGraphStore.getState().labels.map((l) => [l.label, l.color]))
+
+    applySnapshot({ nodes: [], edges: [], labels: ['Regulation', 'Company', 'Market'] })
+    const second = Object.fromEntries(useGraphStore.getState().labels.map((l) => [l.label, l.color]))
+
+    expect(second).toEqual(first)
   })
 
   it('gives a promoted seventh label a colour unlike the existing six', () => {

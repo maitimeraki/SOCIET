@@ -25,8 +25,10 @@ const STAGE_SURFACE = '#100e09'
 /** How often the layout is allowed to run, ms — coalesces a burst of deltas into one settle. */
 const LAYOUT_THROTTLE_MS = 180
 const LAYOUT_ITERATIONS = 5
-/** Growth (in nodes) past which the camera re-fits — large structural change, not every delta. */
-const LARGE_STRUCTURAL_STEP = 250
+/** Growth (in nodes) past which the camera re-fits mid-stream — a modest structural step, not every delta. */
+const FIT_STRUCTURAL_STEP = 25
+/** Quiet period after the last delta before the camera re-fits, so a settling stream converges on a fitted view. */
+const FIT_DEBOUNCE_MS = 350
 
 // Ceilings past which the renderer sheds work rather than freezes the browser.
 export const MAX_ANIMATED_NODES = 1500
@@ -158,7 +160,6 @@ export function syncGraph(
   const colorByLabel = new Map(labels.map((entry) => [entry.label, entry.color]))
   const nodeCount = Object.keys(nodes).length
   const withNodeLabels = showNodeLabels(nodeCount)
-  const withEdgeLabels = showEdgeLabels(nodeCount)
 
   for (const id of graph.nodes()) if (!(id in nodes)) graph.dropNode(id)
 
@@ -178,8 +179,6 @@ export function syncGraph(
     // An edge can land before both endpoints; skip it — the next delta syncs it in.
     if (!graph.hasNode(edge.source) || !graph.hasNode(edge.target)) continue
     if (!graph.hasEdge(key)) graph.addEdgeWithKey(key, edge.source, edge.target)
-    if (withEdgeLabels) graph.mergeEdgeAttributes(key, { label: edge.label })
-    else graph.removeEdgeAttribute(key, 'label')
   }
 }
 
@@ -217,21 +216,42 @@ function LiveGraph({ graph }: { graph: Graph }) {
 }
 
 /**
- * Re-centre the camera on the fitted view at meaningful moments only — the first data, a snapshot
- * reset (the only path that shrinks the graph), or a large structural change. Never on every delta,
- * so the user's framing is not yanked around while the build streams.
+ * Re-centre the camera on the fitted view at meaningful moments — the first data, a snapshot reset
+ * (the only path that shrinks the graph), a modest structural growth step, and once growth pauses.
+ * Never on every delta, so the framing is not yanked around while the build streams; the debounced
+ * fit lets a steady stream settle into a fitted view instead of freezing on the first frame's bounds.
  */
 function FitCamera({ nodeCount }: { nodeCount: number }) {
   const sigma = useSigma()
   const previous = useRef(-1)
+  const fitted = useRef(0)
+  const timer = useRef<number | undefined>(undefined)
+
+  useEffect(() => () => window.clearTimeout(timer.current), [])
+
   useEffect(() => {
+    const fit = () => {
+      fitted.current = nodeCount
+      void sigma.getCamera().animatedReset()
+    }
     const before = previous.current
     previous.current = nodeCount
     const firstData = before <= 0 && nodeCount > 0
     const snapshotReset = before > nodeCount
-    const largeChange = nodeCount - before >= LARGE_STRUCTURAL_STEP
-    if (firstData || snapshotReset || largeChange) void sigma.getCamera().animatedReset()
+    const grewPastStep = nodeCount - fitted.current >= FIT_STRUCTURAL_STEP
+
+    window.clearTimeout(timer.current)
+    timer.current = undefined
+    if (firstData || snapshotReset || grewPastStep) {
+      fit()
+      return
+    }
+    if (nodeCount > fitted.current) {
+      // Small incremental growth: re-fit once it pauses, so a steady stream converges on a fitted view.
+      timer.current = window.setTimeout(fit, FIT_DEBOUNCE_MS)
+    }
   }, [sigma, nodeCount])
+
   return null
 }
 
@@ -239,7 +259,7 @@ const LABEL_HALO_WIDTH = 3
 
 /**
  * Draw a node label with a halo struck in the stage colour first, so an edge cannot cut the text.
- * The geometry mirrors Sigma's default (`x + size + 3`, `y + size / 3`); only the halo is added.
+ * The geometry mirrors Sigma's default (`x + size + 3`, `y + labelSize / 3`); only the halo is added.
  */
 export const drawNodeLabel: NodeLabelDrawingFunction = (context, data, settings) => {
   if (!data.label) return

@@ -128,30 +128,39 @@ describe('large-graph guard', () => {
     expect(simplifiedViewNotice(1600)).toBe('showing simplified view (1600 nodes)')
   })
 
-  it('drops node and edge labels from the graph attributes above the ceiling', () => {
+  it('drops node labels from the graph attributes above the ceiling', () => {
     const graph = new Graph()
     const nodes: Record<string, GraphNode> = {}
     for (let i = 0; i < 1600; i++) nodes[`n${i}`] = { id: `n${i}`, label: `Node ${i}`, type: 'Thing' }
-    const edges: Record<string, GraphEdge> = { 'n0|n1|REL': { source: 'n0', target: 'n1', label: 'REL' } }
 
-    syncGraph(graph, nodes, edges, [])
+    syncGraph(graph, nodes, {}, [])
 
     expect(graph.getNodeAttribute('n0', 'label')).toBeUndefined()
-    expect(graph.getEdgeAttribute('n0|n1|REL', 'label')).toBeUndefined()
   })
 
-  it('keeps node and edge labels for a graph under the ceilings', () => {
+  it('keeps node labels for a graph under the ceiling', () => {
     const graph = new Graph()
     const nodes = byId(
       { id: 'a', label: 'Glucose', type: 'Molecule' },
       { id: 'b', label: 'Respiration', type: 'Process' },
     )
+
+    syncGraph(graph, nodes, {}, [])
+
+    expect(graph.getNodeAttribute('a', 'label')).toBe('Glucose')
+  })
+
+  it('never sets an edge label attribute — edge labels stay off', () => {
+    const graph = new Graph()
+    const nodes = byId(
+      { id: 'a', label: 'Glucose', type: 'Molecule' },
+      { id: 'b', label: 'ATP', type: 'Molecule' },
+    )
     const edges: Record<string, GraphEdge> = { 'a|b|POWERS': { source: 'a', target: 'b', label: 'POWERS' } }
 
     syncGraph(graph, nodes, edges, [])
 
-    expect(graph.getNodeAttribute('a', 'label')).toBe('Glucose')
-    expect(graph.getEdgeAttribute('a|b|POWERS', 'label')).toBe('POWERS')
+    expect(graph.getEdgeAttribute('a|b|POWERS', 'label')).toBeUndefined()
   })
 })
 
