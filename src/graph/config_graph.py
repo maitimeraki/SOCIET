@@ -22,6 +22,11 @@ class GraphConfig:
     # discovery ceiling (above) bounds the whole dataset, this bounds per chunk,
     # so prompt size stops tracking vocabulary growth.
     chunk_slice_size: int = int(os.getenv("GRAPH_CHUNK_SLICE_SIZE", "8"))
+    # Size of the incremental-insert sliding window: this many chunk
+    # extractions in flight at all times, one new chunk started the instant any
+    # one finishes. Bounds concurrent extraction calls alongside the extractor's
+    # pinned num_workers (1).
+    chunk_parallelism: int = int(os.getenv("GRAPH_CHUNK_PARALLELISM", "5"))
     # Cap on triples any one extractor may pull from a single chunk. Applied to
     # BOTH extractors so neither silently truncates the other's recall.
     extraction_max_triplets_per_chunk: int = int(

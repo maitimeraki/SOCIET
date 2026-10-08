@@ -301,6 +301,7 @@ async def _process_document(
     doc_chunks: List[ProcessedChunk],
     ontology: LocalOntology,
     extraction_stage: "GraphExtractionStage",
+    job_id: Optional[str] = None,
 ) -> ChunkProgress:
     """Build-mode worker: ONE graph build per source document, using the
     dataset-wide vocabulary the caller resolved (one call per dataset)."""
@@ -309,6 +310,7 @@ async def _process_document(
             dataset_id=dataset_id,
             documents=doc_chunks,
             ontology=ontology,
+            job_id=job_id,
         )
     except asyncio.TimeoutError:
         logger.error(f"Graph extraction timeout for document {doc_chunks[0].parent_doc_id}")
@@ -417,6 +419,7 @@ async def _execute_unified_job(
                 doc_chunks=doc_chunks,
                 ontology=provided_ontology,
                 extraction_stage=extraction_stage,
+                job_id=job_id,
             )
 
     try:

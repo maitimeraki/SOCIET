@@ -113,7 +113,7 @@ class _FakeExtraction:
     def __init__(self, *args, **kwargs):
         self.calls = []  # list of chunk counts per run
 
-    async def run(self, dataset_id, documents, ontology):
+    async def run(self, dataset_id, documents, ontology, job_id=None):
         self.calls.append(len(documents))
         return len(documents)  # simulate one docstore node per chunk
 

@@ -21,6 +21,9 @@ def mock_llama_index():
         'llama_index.core.indices': MagicMock(),
         'llama_index.core.indices.property_graph': MagicMock(),
         'llama_index.core.settings': MagicMock(),
+        # Task 7: `_proposed_labels` / `_delta_payload` read these keys lazily.
+        'llama_index.core.graph_stores': MagicMock(),
+        'llama_index.core.graph_stores.types': MagicMock(),
     }):
         yield
 
@@ -318,13 +321,15 @@ class TestSingleChunkingOwner:
     """`split_text_sentences` already split the input — extraction must not split again."""
 
     @pytest.mark.asyncio
-    async def test_no_resplit_documents_reach_extraction_unchunked(self, sample_ontology):
-        """The transformation chain that actually runs must not re-split documents.
+    async def test_documents_reach_extraction_unchunked_once(self, sample_ontology):
+        """Each pre-split chunk becomes exactly one extracted node — no re-split.
 
-        Asserts the *effective* behaviour, not the literal argument: the stub
-        applies the same falsy fallback `BaseIndex.from_documents` does
-        (`transformations or Settings.transformations`), so an empty list would
-        resolve to the stage's splitter and be caught here.
+        Task 7 replaced the single `from_documents` build with a per-chunk
+        sliding window. The single-chunking-owner invariant now means: the
+        stage wraps each ProcessedChunk in one Document and hands exactly one
+        node to the extractors per chunk (1:1), never re-splitting — and the
+        empty index it builds carries a truthy no-op `kg_extractor`, so the
+        index's own insert path cannot re-run the default extractors either.
         """
         import sys
 
@@ -348,21 +353,11 @@ class TestSingleChunkingOwner:
             for i in range(3)
         ]
 
-        captured = {}
+        seen = []
 
-        def _fake_from_documents(documents, **kwargs):
-            # Mirror llama-index: BaseIndex.from_documents resolves
-            # `transformations = transformations or Settings.transformations`.
-            resolved = kwargs["transformations"] or core.Settings.transformations
-            captured["transformations"] = resolved
-            nodes = list(documents)
-            for transform in resolved:
-                nodes = list(transform(nodes))
-            index = MagicMock()
-            # Derive the store from what actually survived transformation, so the
-            # count reflects behaviour rather than a fabricated size.
-            index.docstore.docs = {f"node-{i}": n for i, n in enumerate(nodes)}
-            return index
+        def _recording_extractor(nodes):
+            seen.extend(nodes)
+            return nodes
 
         with patch('src.graph.graph_build.OpenAILike'), \
              patch('src.graph.graph_build.OllamaEmbedding'), \
@@ -371,15 +366,19 @@ class TestSingleChunkingOwner:
             stage = GraphExtractionStage(GraphConfig())
 
         core = sys.modules['llama_index.core']
-        # Production pins Settings.node_parser = self.splitter; the real
-        # Settings.transformations returns [Settings.node_parser]. Model it so
-        # the fallback resolves to the splitter exactly as it does live.
+        # Production pins Settings.node_parser = self.splitter; the splitter must
+        # never be reached by the per-chunk path.
         core.Settings.transformations = [stage.splitter]
-        core.PropertyGraphIndex.from_documents.side_effect = _fake_from_documents
+        index = core.PropertyGraphIndex.return_value
+        index.docstore.docs = {f"node-{i}": MagicMock() for i in range(len(chunks))}
 
-        count = await stage.run("test-dataset", chunks, sample_ontology)
+        with patch.object(GraphExtractionStage, "_build_extractors", return_value=[_recording_extractor]):
+            count = await stage.run("test-dataset", chunks, sample_ontology)
 
-        resolved = captured["transformations"]
-        assert resolved is not core.Settings.transformations  # fallback not taken
-        assert stage.splitter not in resolved  # no SentenceSplitter in the chain
-        assert count == len(chunks)
+        assert count == len(chunks)          # one docstore node per chunk
+        assert len(seen) == len(chunks)      # one extraction pass, 1:1 — no re-split
+
+        # the empty index is built with a truthy no-op extractor, so its own
+        # `_insert_nodes` only performs the store writes (never re-extracts)
+        built = core.PropertyGraphIndex.call_args.kwargs
+        assert type(built["kg_extractors"][0]).__name__ == "_NoOpSplit"
