@@ -151,6 +151,7 @@ def _build_user_prompt(
     history: list[dict],
     society: Optional[SocietySnapshot] = None,
     intent: Optional[QueryIntent] = None,
+    max_opinions: int = 6,
 ) -> str:
     history_str = ""
     if history:
@@ -175,7 +176,10 @@ def _build_user_prompt(
     society_str = ""
     self_str = ""
     if society is not None:
-        block = society.to_prompt(speaker=agent.identity.name, opponent=opponent.identity.name)
+        block = society.to_prompt(
+            speaker=agent.identity.name, opponent=opponent.identity.name,
+            max_opinions=max_opinions,
+        )
         if block:
             society_str = f"{block}\n\n"
         own = society.self_prompt(speaker=agent.identity.name)
@@ -217,6 +221,7 @@ class RoundRunner:
         query: str,
         history: list[dict],
         society: Optional[SocietySnapshot] = None,
+        max_opinions: int = 6,
     ) -> RoundResult:
         prompts: list[PairPrompt] = []
         profile_map = {p.identity.name: p for p in profiles}
@@ -238,7 +243,7 @@ class RoundRunner:
             meta_a = {"pair": pair, "speaker": agent_a, "opponent": agent_b}
             prompt_a = PairPrompt(
                 system_prompt=_build_system_prompt(agent_a, agent_b, shared),
-                user_prompt=_build_user_prompt(agent_a, agent_b, query, history, society=society, intent=self.intent),
+                user_prompt=_build_user_prompt(agent_a, agent_b, query, history, society=society, intent=self.intent, max_opinions=max_opinions),
                 pair_id=f"{dataset_id}:{pair.agent_a}:{pair.agent_b}",
             )
             prompts.append(prompt_a)
@@ -247,7 +252,7 @@ class RoundRunner:
             meta_b = {"pair": pair, "speaker": agent_b, "opponent": agent_a}
             prompt_b = PairPrompt(
                 system_prompt=_build_system_prompt(agent_b, agent_a, shared),
-                user_prompt=_build_user_prompt(agent_b, agent_a, query, history, society=society, intent=self.intent),
+                user_prompt=_build_user_prompt(agent_b, agent_a, query, history, society=society, intent=self.intent, max_opinions=max_opinions),
                 pair_id=f"{dataset_id}:{pair.agent_b}:{pair.agent_a}",
             )
             prompts.append(prompt_b)

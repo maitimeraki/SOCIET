@@ -198,17 +198,6 @@ class DebateOrchestrator:
         for round_num in range(1, config.max_rounds + 1):
             try:
                 warnings_before = len(warnings)
-                if round_num > 1:
-                    try:
-                        snapshot = await self._society_memory.read_snapshot(
-                            dataset_id=dataset_id,
-                            query_hash=query_hash,
-                            through_round=round_num - 1,
-                            top_k=config.snapshot_top_k,
-                        )
-                    except Exception as exc:
-                        warnings.append(f"Round {round_num}: society snapshot read failed: {exc}")
-                        snapshot = None
 
                 pairs = await self._topology.compute_round_pairs(
                     profiles=profiles, dataset_id=dataset_id, round_num=round_num, config=config,
@@ -224,6 +213,20 @@ class DebateOrchestrator:
                     )
                     continue
 
+                if round_num > 1:
+                    speaking = sorted({name for p in pairs for name in (p.agent_a, p.agent_b)})
+                    try:
+                        snapshot = await self._society_memory.read_snapshot(
+                            dataset_id=dataset_id,
+                            query_hash=query_hash,
+                            through_round=round_num - 1,
+                            top_k=config.snapshot_top_k,
+                            speakers=speaking,
+                        )
+                    except Exception as exc:
+                        warnings.append(f"Round {round_num}: society snapshot read failed: {exc}")
+                        snapshot = None
+
                 if snapshot is not None:
                     share = self._weighted_share(rounds, profiles)
                     if share:
@@ -238,6 +241,7 @@ class DebateOrchestrator:
                 round_result = await round_runner.execute_round(
                     profiles=profiles, pairs=pairs, round_num=round_num,
                     query=query, history=debate_history, society=snapshot,
+                    max_opinions=config.snapshot_top_k,
                 )
                 rounds.append(round_result)
                 stage_index = await self._emit_stage(

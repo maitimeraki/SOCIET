@@ -74,6 +74,39 @@ MATCH (e) WHERE e.name = ref AND NOT e:Persona AND NOT e:Chunk
 MERGE (o)-[:MENTIONS]->(e)
 """
 
+_OPINION_READ_CYPHER = """
+MATCH (o:Opinion {dataset_id: $dataset_id, query_hash: $query_hash})
+WHERE o.round_no <= $through_round
+WITH o ORDER BY o.weight DESC
+LIMIT $cap
+RETURN o.agent_name AS agent, o.round_no AS round_no, o.stance AS stance,
+       o.confidence AS confidence, o.weight AS weight,
+       left(o.text, 150) AS summary, o.entities AS entities
+"""
+
+#: Per-speaker variant: the reader's own lines never enter the pool, so its high
+#: weight cannot consume the cap slots meant for others' opinions.
+_OPINION_READ_EXCLUDING_SPEAKER_CYPHER = """
+MATCH (o:Opinion {dataset_id: $dataset_id, query_hash: $query_hash})
+WHERE o.round_no <= $through_round AND o.agent_name <> $speaker
+WITH o ORDER BY o.weight DESC
+LIMIT $cap
+RETURN o.agent_name AS agent, o.round_no AS round_no, o.stance AS stance,
+       o.confidence AS confidence, o.weight AS weight,
+       left(o.text, 150) AS summary, o.entities AS entities
+"""
+
+
+def _opinion_entry(r: dict) -> dict:
+    """Map one opinion row to the snapshot entry shape `to_prompt` renders."""
+    return {
+        "agent": r["agent"], "round": r.get("round_no") or 0,
+        "stance": r.get("stance") or "NEUTRAL",
+        "confidence": float(r.get("confidence") or 0.0),
+        "weight": float(r.get("weight") or 0.0),
+        "summary": r.get("summary") or "",
+    }
+
 
 @dataclass
 class SocietySnapshot:
@@ -81,6 +114,9 @@ class SocietySnapshot:
 
     round: int
     entries: List[dict] = field(default_factory=list)
+    #: Per-speaker opinion pools keyed by speaking agent: each was read with that
+    #: speaker excluded, so its own high-weight lines cannot crowd the block.
+    entries_by_speaker: Dict[str, List[dict]] = field(default_factory=dict)
     #: The speaker's OWN prior opinions ({agent, round, stance, summary}), keyed
     #: by agent so `self_prompt` can select per speaker. Empty in round 1.
     self_entries: List[dict] = field(default_factory=list)
@@ -92,7 +128,8 @@ class SocietySnapshot:
     def to_prompt(self, speaker: str, opponent: str,
                   max_opinions: int = 6, max_chars: int = 1300) -> str:
         """Rendered SOCIETY STATE block; never includes the speaker's own lines."""
-        if not self.entries:
+        entries = self.entries_by_speaker.get(speaker, self.entries)
+        if not entries:
             return ""
         lines = [f"SOCIETY STATE (through round {self.round}):"]
         if self.consensus:
@@ -101,7 +138,7 @@ class SocietySnapshot:
             )
         neighbors = set(self.neighbor_map.get(speaker, []))
         picked = 0
-        for e in sorted(self.entries, key=lambda x: x.get("weight", 0.0), reverse=True):
+        for e in sorted(entries, key=lambda x: x.get("weight", 0.0), reverse=True):
             if picked >= max_opinions:
                 break
             if e["agent"] == speaker:
@@ -238,33 +275,64 @@ class SocietyMemory:
     async def read_snapshot(
         self, dataset_id: str, query_hash: str,
         through_round: int, top_k: int = 8,
+        speakers: Optional[List[str]] = None,
     ) -> SocietySnapshot:
-        """Read committed society state through a round. One bounded opinion query + one neighbor query."""
-        cap = max(top_k * 4, 40)
-        opinion_q = """
-        MATCH (o:Opinion {dataset_id: $dataset_id, query_hash: $query_hash})
-        WHERE o.round_no <= $through_round
-        WITH o ORDER BY o.weight DESC
-        LIMIT $cap
-        RETURN o.agent_name AS agent, o.round_no AS round_no, o.stance AS stance,
-               o.confidence AS confidence, o.weight AS weight,
-               left(o.text, 150) AS summary, o.entities AS entities
+        """Read committed society state through a round. One bounded opinion query per
+        speaking agent + one neighbor query.
+
+        When `speakers` is given, the opinions are read once per speaker with that
+        speaker excluded, so a dominant speaker's own high-weight lines cannot crowd
+        the pool; the per-speaker rows land in `entries_by_speaker`. Without it the
+        read is a single pool (older callers).
         """
-        # OPPOSES/SUPPORTS are static graph edges (not round- or query-keyed), so only
-        # the REACTED_TO arm is narrowed to this debate; otherwise a [directly
-        # connected to you] marker could come from an unrelated debate on the dataset.
+        cap = max(top_k * 4, 40)
+        # OPPOSES/SUPPORTS are static graph edges (no query_hash), so alone they would
+        # let a [directly connected to you] marker leak from an unrelated debate on
+        # the dataset. They only count as "directly connected" when the pair also
+        # shares a graph entity (the same static relation topology pairs on) or has a
+        # REACTED_TO edge in this run. The REACTED_TO arm stays narrowed to this debate.
         neighbor_q = """
         MATCH (p:Persona)-[r:OPPOSES|SUPPORTS|REACTED_TO]-(q:Persona)
         WHERE coalesce(p.dataset_id, '') = $dataset_id
           AND coalesce(q.dataset_id, '') = $dataset_id
-          AND (type(r) <> 'REACTED_TO' OR r.query_hash = $query_hash)
+          AND (
+            (type(r) = 'REACTED_TO' AND r.query_hash = $query_hash)
+            OR (
+              type(r) <> 'REACTED_TO'
+              AND (
+                EXISTS {
+                  MATCH (p)-[r1]-(e)-[r2]-(q)
+                  WHERE NOT e:Chunk AND NOT e:Persona
+                }
+                OR EXISTS {
+                  MATCH (p)-[x:REACTED_TO]-(q) WHERE x.query_hash = $query_hash
+                }
+              )
+            )
+          )
         RETURN p.name AS src, collect(DISTINCT q.name) AS neighbors
         """
+        entries_by_speaker: Dict[str, List[dict]] = {}
         async with self._driver.session(database=self._db) as session:
-            rows = await (await session.run(
-                opinion_q, dataset_id=dataset_id, query_hash=query_hash,
-                through_round=through_round, cap=cap,
-            )).data()
+            if speakers:
+                all_rows: List[dict] = []
+                for speaker in speakers:
+                    s_rows = await (await session.run(
+                        _OPINION_READ_EXCLUDING_SPEAKER_CYPHER,
+                        dataset_id=dataset_id, query_hash=query_hash,
+                        through_round=through_round, cap=cap, speaker=speaker,
+                    )).data()
+                    entries_by_speaker[speaker] = [_opinion_entry(r) for r in s_rows]
+                    all_rows.extend(s_rows)
+                seen: Dict[tuple, dict] = {}
+                for r in all_rows:
+                    seen[(r["agent"], r.get("round_no") or 0)] = r
+                rows = list(seen.values())
+            else:
+                rows = await (await session.run(
+                    _OPINION_READ_CYPHER, dataset_id=dataset_id, query_hash=query_hash,
+                    through_round=through_round, cap=cap,
+                )).data()
             n_rows = await (await session.run(
                 neighbor_q, dataset_id=dataset_id, query_hash=query_hash,
             )).data()
@@ -274,19 +342,14 @@ class SocietyMemory:
             for ent in (r.get("entities") or []):
                 counts[str(ent)] += 1
 
-        entries = [{
-            "agent": r["agent"], "round": r.get("round_no") or 0,
-            "stance": r.get("stance") or "NEUTRAL",
-            "confidence": float(r.get("confidence") or 0.0),
-            "weight": float(r.get("weight") or 0.0),
-            "summary": r.get("summary") or "",
-        } for r in rows]
+        entries = [_opinion_entry(r) for r in rows]
         neighbor_map = {r["src"]: list(r.get("neighbors") or []) for r in n_rows}
         buzz = [{"entity": ent, "mentions": n}
                 for ent, n in counts.most_common(5)]
         return SocietySnapshot(
             round=through_round,
             entries=entries,
+            entries_by_speaker=entries_by_speaker,
             neighbor_map=neighbor_map,
             buzz=buzz,
             version=f"r{through_round}:{len(entries)}",
