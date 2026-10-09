@@ -1,4 +1,5 @@
 """RoundRunner: dispatches pair prompts via BatchedLLMRunner and assembles RoundResult."""
+import re
 from dataclasses import dataclass
 from typing import Optional, Callable
 
@@ -13,6 +14,27 @@ from src.simulation.society_memory import SocietySnapshot
 from src.utils.queryIntend import QueryIntent
 
 OPPONENT_STATEMENT_CHARS = 600
+
+
+def _split_reasoning_answer(response: str) -> tuple[str, str]:
+    """Split a deliberation response into (reasoning, answer).
+
+    The turn prompt asks for a REASONING: section then an ANSWER: section. Only
+    the answer is the agent's stated position, so stance parses from it — never
+    from the private reasoning. A response without the delimiter degrades to the
+    whole text as the answer (empty reasoning), so a malformed turn is never lost.
+    """
+    match = re.search(r"^\s*ANSWER:\s*", response, flags=re.IGNORECASE | re.MULTILINE)
+    if not match:
+        return "", response.strip()
+    answer = response[match.end():].strip()
+    if not answer:
+        return "", response.strip()
+    reasoning = re.sub(
+        r"^\s*REASONING:\s*", "", response[:match.start()].strip(),
+        count=1, flags=re.IGNORECASE,
+    ).strip()
+    return reasoning, answer
 
 
 def _parse_response_stance(
@@ -172,7 +194,10 @@ def _build_user_prompt(
         f"{society_str}"
         f"{self_str}"
         f"CONVERSATION HISTORY:\n{history_str or '(No previous turns)'}\n\n"
-        f"Respond to {opponent.identity.name}'s perspective, engaging with specific arguments."
+        f"Think it through before you answer:\n"
+        f"REASONING: (briefly: your position, {opponent.identity.name}'s point, "
+        f"where you clash — your private thinking)\n"
+        f"ANSWER: (your reply to {opponent.identity.name}, engaging with specific arguments)"
     )
 
 
@@ -246,19 +271,21 @@ class RoundRunner:
             if meta is None or result.error:
                 continue
 
+            _, answer = _split_reasoning_answer(result.response)
+
             stance, confidence = _parse_response_stance(
-                result.response,
+                answer,
                 default_stance="NEUTRAL",
                 default_confidence=meta["speaker"].confidence,
             )
             turn = AgentTurn(
                 agent_id=str(meta["speaker"].agent_id),
                 agent_name=meta["speaker"].identity.name,
-                content=result.response,
+                content=answer,
                 stance=stance,
                 confidence=confidence,
                 references=_extract_references(
-                    result.response,
+                    answer,
                     list(dict.fromkeys(
                         (meta["pair"].shared_entities or [])
                         + [meta["opponent"].identity.name]
