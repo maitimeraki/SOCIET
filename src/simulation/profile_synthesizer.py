@@ -168,26 +168,15 @@ class ProfileSynthesizer:
                     max_relevance=max_relevance,
                 )
 
-                # Task 1: the effective stance (distilled → graph derivation →
-                # node property) is persisted with the entity links, because
-                # Task 6's round-1 pairing reads `Persona.stance` before any
-                # opinion exists. The build independently recomputes the same
-                # value; the derivation is the repo's pure helper.
+                # Task 1: the same `_effective_stance` precedence the build uses
+                # (distilled → graph derivation → safe default) decides the value
+                # persisted with the entity links, because Task 6's round-1
+                # pairing reads `Persona.stance` before any opinion exists — the
+                # persisted stance must equal the built Agent's.
                 distilled_for_row = distilled.get(row_name) if distilled else None
-                stance_value = getattr(distilled_for_row, "stance", None)
-                if stance_value is None:
-                    stance_value = node.get("stance")
-                if stance_value is None:
-                    derived = PersonaRepository._derive_stance(
-                        PersonaRepository._relation_evidence(node, metrics)
-                    )
-                    if derived is not None:
-                        stance_value = derived[0]
-                stance_to_persist = (
-                    str(getattr(stance_value, "value", stance_value))
-                    if stance_value is not None
-                    else None
-                )
+                stance_to_persist = PersonaRepository._effective_stance(
+                    node, metrics, distilled_for_row
+                )[0].value
 
                 # D2: write this persona's real provenance edges BEFORE the build,
                 # so the `get_provenance` inside it finds them instead of falling

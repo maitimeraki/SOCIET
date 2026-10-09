@@ -434,32 +434,12 @@ class PersonaRepository:
                 provenance.append(ProvenanceLink(doc_id=doc_id, title=str(d.get('domain_tag') or 'sector'), breadcrumb='', chunk_id=chunk_id))
 
         # Behavioral core — every field read by verdict / round / topology.
-        # Precedence: the distilled stance (the LLM path already saw the query
-        # and the stance axis) → the deterministic graph derivation → the
-        # existing safe default. A real signal always beats the NEUTRAL collapse.
-        derived = self._derive_stance(self._relation_evidence(node, agent_metrics))
-        distilled_stance = getattr(distilled, "stance", None)
-        if distilled_stance is not None:
-            stance = self._safe_stance(distilled_stance)
-        elif derived is not None:
-            stance = derived[0]
-        else:
-            stance = self._safe_stance(node.get("stance"))
+        # `_effective_stance` is the ONE precedence (distilled → deterministic
+        # graph derivation → the existing safe default); the synthesizer's
+        # persistence reads the same helper, so the built Agent's stance and the
+        # persisted `Persona.stance` cannot disagree.
+        stance, conviction, cior = self._effective_stance(node, agent_metrics, distilled)
         intensity = self._safe_float(node.get("intensity"), 0.5, 0.0, 1.0)
-        distilled_conviction = getattr(distilled, "conviction", None)
-        if distilled_conviction is not None:
-            conviction = self._safe_float(distilled_conviction, 0.5, 0.0, 1.0)
-        elif derived is not None:
-            conviction = derived[1]
-        else:
-            conviction = self._safe_float(node.get("conviction"), 0.5, 0.0, 1.0)
-        distilled_cior = getattr(distilled, "cior", None)
-        if distilled_cior is not None:
-            cior = self._safe_float(distilled_cior, 0.0, -1.0, 1.0)
-        elif derived is not None:
-            cior = derived[2]
-        else:
-            cior = self._safe_float(node.get("cior"), 0.0, -1.0, 1.0)
         belief = str(node.get("belief") or node.get("world_model") or "")
         opinion = str(node.get("opinion") or node.get("current_take") or perspective[:500])
         communication_radius = self._safe_int(node.get("communication_radius"), 1, 1, 5)
@@ -605,6 +585,50 @@ class PersonaRepository:
         if not memories:
             return node
         return {**node, "recent_memories": memories}
+
+    @classmethod
+    def _effective_stance(
+        cls,
+        node: Dict[str, Any],
+        agent_metrics: Optional[Dict[str, Any]] = None,
+        distilled: Any = None,
+        stance_axis: str = "",
+    ) -> Tuple[Stance, float, float]:
+        """The ONE precedence for `(stance, conviction, cior)`, applied per field.
+
+        Distilled value (when present) → deterministic graph derivation →
+        existing safe default. Both `build_single_agent_profile_from_node` and
+        the synthesizer's `Persona.stance` persistence call this, so the Agent's
+        stance and the persisted node stance cannot drift apart.
+        """
+        derived = cls._derive_stance(
+            cls._relation_evidence(node, agent_metrics or {}), stance_axis
+        )
+        distilled_stance = getattr(distilled, "stance", None)
+        if distilled_stance is not None:
+            stance = cls._safe_stance(distilled_stance)
+        elif derived is not None:
+            stance = derived[0]
+        else:
+            stance = cls._safe_stance(node.get("stance"))
+
+        distilled_conviction = getattr(distilled, "conviction", None)
+        if distilled_conviction is not None:
+            conviction = cls._safe_float(distilled_conviction, 0.5, 0.0, 1.0)
+        elif derived is not None:
+            conviction = derived[1]
+        else:
+            conviction = cls._safe_float(node.get("conviction"), 0.5, 0.0, 1.0)
+
+        distilled_cior = getattr(distilled, "cior", None)
+        if distilled_cior is not None:
+            cior = cls._safe_float(distilled_cior, 0.0, -1.0, 1.0)
+        elif derived is not None:
+            cior = derived[2]
+        else:
+            cior = cls._safe_float(node.get("cior"), 0.0, -1.0, 1.0)
+
+        return stance, conviction, cior
 
     @classmethod
     def _derive_stance(

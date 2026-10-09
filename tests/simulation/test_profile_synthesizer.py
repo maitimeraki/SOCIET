@@ -1129,7 +1129,7 @@ async def test_synthesize_writes_entity_links_from_the_cluster_chunks_before_bui
     profiles = await synth.synthesize(query="q", dataset_id="ds1", max_agents=1)
 
     repo.write_persona_entity_links.assert_awaited_once_with(
-        persona_name="Lead", dataset_id="ds1", chunk_node_ids=["node-7"], stance=None,
+        persona_name="Lead", dataset_id="ds1", chunk_node_ids=["node-7"], stance="NEUTRAL",
     )
     assert order == ["provenance", "entities", "build"]
     assert [p.identity.name for p in profiles] == ["Lead"]
@@ -1253,6 +1253,30 @@ async def test_synthesize_persists_the_derived_stance_without_distillation():
     repo.fetch_nodes_by_names = AsyncMock(
         return_value={"Critic": {"name": "Critic", "relations": ["OPPOSES"]}}
     )
+    repo.calculate_agent_metrics_and_context_for_llm = AsyncMock(return_value={})
+    repo.write_persona_provenance = AsyncMock(return_value=1)
+    repo.write_persona_entity_links = AsyncMock(return_value=1)
+    repo.build_single_agent_profile_from_node = AsyncMock(return_value=MagicMock())
+    synth = ProfileSynthesizer(repo, _CountingContext([entity], {}))
+
+    await synth.synthesize(query="q", dataset_id="ds", max_agents=1)
+
+    assert repo.write_persona_entity_links.await_args.kwargs["stance"] == "NEGATIVE"
+
+
+@pytest.mark.asyncio
+async def test_synthesize_persists_the_same_stance_the_build_derives():
+    """The persisted stance follows the build's precedence, not a node property.
+
+    A node with both a `stance` property and OPPOSES evidence derives NEGATIVE
+    (distilled → derivation → node property), so `Persona.stance` must be
+    NEGATIVE — the value the built Agent also gets — not the node's POSITIVE.
+    """
+    entity = _anchored_entity("Torn", "node-5", 0.9)
+    repo = MagicMock()
+    repo.fetch_nodes_by_names = AsyncMock(return_value={
+        "Torn": {"name": "Torn", "stance": "POSITIVE", "relations": ["OPPOSES"]},
+    })
     repo.calculate_agent_metrics_and_context_for_llm = AsyncMock(return_value={})
     repo.write_persona_provenance = AsyncMock(return_value=1)
     repo.write_persona_entity_links = AsyncMock(return_value=1)

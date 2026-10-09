@@ -80,6 +80,18 @@ def test_no_relation_evidence_derives_nothing():
     assert _repo()._derive_stance({"name": "Bare"}) is None
 
 
+def test_effective_stance_prefers_the_derivation_over_a_node_property():
+    """The shared precedence: distilled → derivation → node property.
+
+    A node carrying both a `stance` property and OPPOSES evidence derives
+    NEGATIVE — the same value the build and the synthesizer's persistence use,
+    so `Agent.stance` and `Persona.stance` cannot disagree.
+    """
+    node = {"name": "Torn", "stance": "POSITIVE", "relations": ["OPPOSES"]}
+
+    assert _repo()._effective_stance(node, {})[0] is Stance.NEGATIVE
+
+
 @pytest.mark.asyncio
 async def test_build_uses_the_graph_derivation_when_not_distilled():
     """Step 5: with no distilled stance, the node's OPPOSES evidence decides."""
