@@ -230,6 +230,7 @@ class ProfileSynthesizer:
                     sector_results=sector_results,
                     llm_output=None,
                     distilled=distilled_for_row,
+                    chunk_node_ids=chunk_ids,
                 )
 
         # S9 visibility: one `agent` event per completed profile, in completion
@@ -311,12 +312,13 @@ class ProfileSynthesizer:
                     node.get("triplet_source_id") if isinstance(node, dict)
                     else getattr(node, "triplet_source_id", None)
                 )
-                if isinstance(chunk_id, str) and chunk_id.strip():
+                chunk_ids = [chunk_id.strip()] if isinstance(chunk_id, str) and chunk_id.strip() else []
+                if chunk_ids:
                     try:
                         pending = self._repo.write_persona_provenance(
                             persona_name=name,
                             dataset_id=dataset_id,
-                            chunk_node_ids=[chunk_id.strip()],
+                            chunk_node_ids=chunk_ids,
                         )
                         if inspect.iscoroutine(pending):
                             await pending
@@ -331,7 +333,7 @@ class ProfileSynthesizer:
                         pending = self._repo.write_persona_entity_links(
                             persona_name=name,
                             dataset_id=dataset_id,
-                            chunk_node_ids=[chunk_id.strip()],
+                            chunk_node_ids=chunk_ids,
                         )
                         if inspect.iscoroutine(pending):
                             await pending
@@ -343,6 +345,7 @@ class ProfileSynthesizer:
                 return await self._repo.build_single_agent_profile_from_node(
                     agent_name=name, node=node, user_query=query, dataset_id=dataset_id,
                     agent_metrics=metrics, sector_results=sector_results, llm_output=None,
+                    chunk_node_ids=chunk_ids,
                 )
 
         results = await asyncio.gather(*(_build(n) for n in names))

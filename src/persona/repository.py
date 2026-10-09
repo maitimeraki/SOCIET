@@ -7,6 +7,7 @@ import inspect
 import hashlib
 from datetime import datetime
 from src.persona.agent import (
+    SOURCE_EVIDENCE_MAX_SNIPPETS,
     Agent,
     ConfidenceBreakdown,
     DiscoveryType,
@@ -334,6 +335,7 @@ class PersonaRepository:
             async with semaphore:
                 node = nodes_map.get(agent_name) or await self.fetch_agent_node_props(agent_name) or {"name": agent_name} # return Type: Dict[str, Any] where we fetch the node properties for the agent name, if not found we create a minimal dict with just the name to avoid None issues
                 metrics = await self.calculate_agent_metrics_and_context_for_llm(agent_name, node, sector_results or [], max_relevance=max_relevance)
+                src_chunk = node.get("triplet_source_id")
                 return await self.build_single_agent_profile_from_node(
                     agent_name=agent_name,
                     node=node,
@@ -342,6 +344,7 @@ class PersonaRepository:
                     agent_metrics=metrics,
                     sector_results=sector_results or [],
                     llm_output=llm_output,
+                    chunk_node_ids=[src_chunk] if src_chunk else None,
                 )
 
         tasks = [asyncio.create_task(_build_task(n)) for n in agent_names]
@@ -358,6 +361,7 @@ class PersonaRepository:
         sector_results: List[Dict[str, Any]],
         llm_output: Optional[Dict[str, List[str]]],
         distilled: Optional[DistilledProfile] = None,
+        chunk_node_ids: Optional[Sequence[str]] = None,
     ) -> Agent:
         """Build the canonical Agent from an already-fetched node (avoids extra DB calls).
 
@@ -371,7 +375,10 @@ class PersonaRepository:
         supplied its `description`/`perspective` are the sole source of
         `bio`/`detailed_perspective` and its `stance`/`conviction`/`cior` (when
         present) take precedence over the deterministic derivation. `None`
-        keeps the metrics-derived text and the derived stance.
+        keeps the metrics-derived text and the derived stance. `chunk_node_ids`
+        are the persona's source chunk node ids; their text is fetched in one
+        batched query and carried as `source_evidence` (never written to the
+        graph). `None`/empty yields no evidence and issues no query.
         """
         # Identity
         identity = PersonaIdentity(
@@ -433,6 +440,10 @@ class PersonaRepository:
                 chunk_id = _uuid.uuid5(_uuid.NAMESPACE_URL, doc_id)
                 provenance.append(ProvenanceLink(doc_id=doc_id, title=str(d.get('domain_tag') or 'sector'), breadcrumb='', chunk_id=chunk_id))
 
+        # Source evidence: this persona's own chunk texts, one batched query,
+        # rendered in its debate prompt. Synthesis-time only — never persisted.
+        source_evidence = await self.fetch_source_evidence(chunk_node_ids)
+
         # Behavioral core — every field read by verdict / round / topology.
         # `_effective_stance` is the ONE precedence (distilled → deterministic
         # graph derivation → the existing safe default); the synthesizer's
@@ -493,6 +504,7 @@ class PersonaRepository:
             summary_provenance=provenance,
             confidence_breakdown=confidence_breakdown,
             graph_snapshot=graph_snapshot,
+            source_evidence=source_evidence,
         )
 
     @staticmethod
@@ -1173,6 +1185,44 @@ class PersonaRepository:
             rows = await result.data()
 
         return int(rows[0]["linked"]) if rows else 0
+
+    async def fetch_source_evidence(
+        self,
+        chunk_node_ids: Optional[Sequence[str]],
+        limit: int = SOURCE_EVIDENCE_MAX_SNIPPETS,
+    ) -> List[str]:
+        """The text of up to `limit` of the persona's source chunks, in ONE query.
+
+        `chunk_node_ids` are graph chunk node ids (each entity's
+        `triplet_source_id`; the same list `_evidence_chunk_ids` collects).
+        Tolerant by construction: blank/non-string ids contribute nothing, an
+        empty input issues no query, a chunk node missing `text` yields no
+        snippet, and any driver error is logged and swallowed — evidence is an
+        enrichment, never a reason to fail synthesis.
+        """
+        ids = list(
+            dict.fromkeys(str(cid).strip() for cid in (chunk_node_ids or []) if str(cid or "").strip())
+        )
+        if not ids:
+            return []
+
+        cypher = """
+        UNWIND $chunk_ids AS cid
+        MATCH (c:Chunk {id: cid})
+        WHERE c.text IS NOT NULL AND trim(c.text) <> ''
+        RETURN c.text AS text
+        LIMIT $limit
+        """
+
+        try:
+            async with self._driver.session(database=self._db) as session:
+                result = await session.run(cypher, chunk_ids=ids, limit=limit)
+                rows = await result.data()
+        except Exception as exc:  # evidence is additive; never fail the build
+            logger.warning("source-evidence fetch failed: %s", exc)
+            return []
+
+        return [str(row["text"]) for row in rows if row.get("text")][:limit]
 
     async def get_provenance(self, agent_name: str, limit: int = 5) -> List[ProvenanceLink]:
         """Single, efficient provenance fetch."""

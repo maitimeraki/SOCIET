@@ -2,7 +2,11 @@
 from dataclasses import dataclass
 from typing import Optional, Callable
 
-from src.persona.agent import Agent
+from src.persona.agent import (
+    SOURCE_EVIDENCE_MAX_SNIPPETS,
+    SOURCE_EVIDENCE_SNIPPET_CHARS,
+    Agent,
+)
 from src.simulation.llm_batch import BatchedLLMRunner, PairPrompt
 from src.simulation.pair_turn import AgentTurn, RoundResult, CommPair
 from src.simulation.society_memory import SocietySnapshot
@@ -51,6 +55,32 @@ def _extract_references(content: str, candidates: list[str]) -> list[str]:
     return refs[:5]
 
 
+def _truncate_snippet(text: str, budget: int = SOURCE_EVIDENCE_SNIPPET_CHARS) -> str:
+    """Whitespace-normalised snippet, cut to `budget` at a word boundary."""
+    text = " ".join(str(text).split())
+    if len(text) <= budget:
+        return text
+    cut = text[:budget]
+    return cut.rsplit(" ", 1)[0] if " " in cut else cut
+
+
+def _evidence_block(agent: Agent) -> str:
+    """Labelled source-evidence block, or "" when the agent carries none.
+
+    At most SOURCE_EVIDENCE_MAX_SNIPPETS render, each truncated by
+    `_truncate_snippet`. Empty evidence returns "" so the prompt is unchanged
+    (no stray header).
+    """
+    snippets = [
+        _truncate_snippet(s) for s in agent.source_evidence[:SOURCE_EVIDENCE_MAX_SNIPPETS]
+    ]
+    snippets = [s for s in snippets if s]
+    if not snippets:
+        return ""
+    body = "\n".join(f"- {s}" for s in snippets)
+    return f"YOUR SOURCE EVIDENCE (from the documents you were built from):\n{body}\n"
+
+
 def _build_system_prompt(agent: Agent, opponent: Agent, shared_entities: list[str]) -> str:
     domains = ", ".join(agent.domain_tags[:3])
     shared = ", ".join(shared_entities[:3]) if shared_entities else "none"
@@ -68,6 +98,7 @@ def _build_system_prompt(agent: Agent, opponent: Agent, shared_entities: list[st
         f"Stance on this topic: {agent.stance.value} (intensity {agent.intensity:.2f}).\n"
         f"Confidence breakdown: sources={cb.source_breadth}, nodes={cb.node_density}, connectivity={cb.relationship_connectivity:.2f}\n"
         f"Provenance: {provenance_summary}\n"
+        f"{_evidence_block(agent)}"
         f"You share these entities with your opponent: {shared}\n"
         f"Engage genuinely with opposing viewpoints while staying true to your expertise."
     )

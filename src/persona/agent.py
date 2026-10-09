@@ -28,6 +28,16 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 # ---------------------------------------------------------------------------
+# Source evidence bounds
+# ---------------------------------------------------------------------------
+# How many of an agent's own source snippets are carried to its debate prompt,
+# and how long each may be. One value to change, shared by the repository fetch
+# (snippet cap) and the round-runner prompt (render cap + per-snippet budget).
+SOURCE_EVIDENCE_MAX_SNIPPETS = 3
+SOURCE_EVIDENCE_SNIPPET_CHARS = 300
+
+
+# ---------------------------------------------------------------------------
 # Enums
 # ---------------------------------------------------------------------------
 
@@ -179,6 +189,12 @@ class Agent(BaseModel):
     # --- 6. Graph snapshot (auditability) ---
     graph_snapshot: GraphSnapshot = Field(
         default_factory=lambda: GraphSnapshot(dataset_id="unknown")
+    )
+
+    # --- 7. Source evidence (synthesis-time only; never written to the graph) ---
+    source_evidence: List[str] = Field(
+        default_factory=list,
+        description="This agent's own source chunk snippets, rendered in its debate prompt",
     )
 
     # --- validators ---
