@@ -13,6 +13,14 @@ if TYPE_CHECKING:
     from src.simulation.debate_config import DebateConfig
 
 
+#: Bonus added to a pair's score when the two agents hold *different* stances
+#: (POSITIVE vs NEGATIVE, etc.), so genuinely opposed agents meet instead of a
+#: comfortable echo chamber. Same order as the OPPOSES (0.3) / SUPPORTS (0.2)
+#: edge bonuses below: it biases pairing toward disagreement without dominating
+#: the entity-overlap Jaccard term. Applied identically in round 1 and round 2+.
+_STANCE_DIVERGENCE_BONUS = 0.25
+
+
 class CommunicationTopology:
     """Computes agent communication pairs via Cypher queries against Neo4j.
 
@@ -70,8 +78,13 @@ class CommunicationTopology:
         dataset_id: str,
         config: "DebateConfig",
     ) -> tuple[str, dict]:
-        """Cypher for round 1: single-hop entity sharing (Jaccard + OPPOSES/SUPPORTS)."""
-        cypher = """
+        """Cypher for round 1: single-hop entity sharing.
+
+        Score = Jaccard + OPPOSES/SUPPORTS bonus + stance divergence. Round 1 has
+        no opinions yet, so divergence reads the `Persona.stance` persisted by
+        synthesis (absent on legacy nodes -> the term is 0).
+        """
+        cypher = f"""
         MATCH (a:Persona)-[r1]-(e)-[r2]-(b:Persona)
         WHERE a.name IN $agent_names AND b.name IN $agent_names
           AND a <> b
@@ -87,11 +100,17 @@ class CommunicationTopology:
         WITH a, b, shared_count, shared_entities,
              toFloat(shared_count) / toFloat(tags_a + tags_b - shared_count) AS jaccard,
              exists((a)-[:OPPOSES]-(b)) AS has_opposes,
-             exists((a)-[:SUPPORTS]-(b)) AS has_supports
+             exists((a)-[:SUPPORTS]-(b)) AS has_supports,
+             a.stance AS stance_a, b.stance AS stance_b
         WITH a, b, shared_count, shared_entities,
              jaccard + CASE
                WHEN has_opposes THEN 0.3
                WHEN has_supports THEN 0.2
+               ELSE 0.0
+             END + CASE
+               WHEN stance_a IS NOT NULL AND stance_b IS NOT NULL
+                    AND stance_a <> stance_b
+               THEN {_STANCE_DIVERGENCE_BONUS}
                ELSE 0.0
              END AS score
         WHERE score >= $threshold
@@ -124,6 +143,9 @@ class CommunicationTopology:
         `effective_radius` is a Python int already clamped by the caller. We
         interpolate it via Cypher's `*1..N` syntax, which only accepts integers
         -- the caller-side clamp is what makes this safe.
+
+        Score carries the same stance-divergence term as round 1, but reads
+        `Persona.current_stance` (updated on every `commit_round`) instead.
         """
         radius = effective_radius
 
@@ -143,11 +165,17 @@ class CommunicationTopology:
         WITH a, b, shared_count, shared_entities,
              toFloat(shared_count) / toFloat(tags_a + tags_b - shared_count) AS jaccard,
              exists((a)-[:OPPOSES]-(b)) AS has_opposes,
-             exists((a)-[:SUPPORTS]-(b)) AS has_supports
+             exists((a)-[:SUPPORTS]-(b)) AS has_supports,
+             a.current_stance AS stance_a, b.current_stance AS stance_b
         WITH a, b, shared_count, shared_entities,
              jaccard + CASE
                WHEN has_opposes THEN 0.3
                WHEN has_supports THEN 0.2
+               ELSE 0.0
+             END + CASE
+               WHEN stance_a IS NOT NULL AND stance_b IS NOT NULL
+                    AND stance_a <> stance_b
+               THEN {_STANCE_DIVERGENCE_BONUS}
                ELSE 0.0
              END AS score
         WHERE score >= $threshold
