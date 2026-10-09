@@ -5,9 +5,12 @@ many society opinions render, a dominant speaker's own lines must not crowd othe
 out of the pool, and a `[directly connected to you]` marker must only reflect a
 connection valid for this debate (this dataset + this query_hash).
 """
+import os
 import uuid
 
 import pytest
+import pytest_asyncio
+from dotenv import load_dotenv
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from src.persona.agent import (
@@ -28,6 +31,9 @@ from src.simulation.round_runner import RoundRunner, _build_user_prompt
 from src.simulation.society_memory import SocietyMemory, SocietySnapshot
 from src.simulation.topology import CommunicationTopology
 from src.simulation.verdict import VerdictSynthesizer
+from src.persona.repository import PersonaRepository
+
+load_dotenv()
 
 
 class FakeResult:
@@ -251,3 +257,87 @@ def test_connected_neighbour_renders_marker():
         neighbor_map={"Alice": ["Bob"]},
     )
     assert "[directly connected to you]" in snap.to_prompt(speaker="Alice", opponent="Bob")
+
+
+# ------------------------------------------------------------------
+# Step 5/6 — live behavioural proof against the real graph
+# ------------------------------------------------------------------
+
+@pytest_asyncio.fixture
+async def live_memory():
+    uri = os.getenv("NEO4J_URI", "bolt://localhost:7687")
+    user = os.getenv("NEO4J_USER", "neo4j")
+    pwd = os.getenv("NEO4J_PASSWORD", "password")
+    db = os.getenv("NEO4J_DATABASE", "neo4j")
+
+    repo = PersonaRepository(
+        neo4j_uri=uri, neo4j_user=user, neo4j_password=pwd, neo4j_database=db,
+    )
+    try:
+        async with repo._driver.session(database=db) as session:
+            await session.run("RETURN 1")
+    except Exception as exc:
+        await repo.close()
+        pytest.skip(f"Neo4j not available at {uri}: {exc}")
+
+    yield SocietyMemory(repo._driver, db), repo._driver, db
+    await repo.close()
+
+
+@pytest.mark.asyncio
+async def test_marker_is_scoped_to_the_current_run_on_the_live_graph(live_memory):
+    """The central Step 5 claim, decided by the real query rather than a substring.
+
+    A static OPPOSES edge plus a REACTED_TO under a *different* query_hash must NOT
+    mark the current run; the same-run REACTED_TO arm must still mark it.
+    """
+    memory, driver, db = live_memory
+    ds = f"itest-snapshot-{uuid.uuid4().hex[:10]}"
+    q_new, q_old = "qh-new", "qh-old"
+
+    try:
+        async with driver.session(database=db) as session:
+            await session.run(
+                """
+                MERGE (a:Persona {name: 'itest-A', dataset_id: $ds})
+                MERGE (b:Persona {name: 'itest-B', dataset_id: $ds})
+                MERGE (c:Persona {name: 'itest-C', dataset_id: $ds})
+                MERGE (d:Persona {name: 'itest-D', dataset_id: $ds})
+                // A-B: a static OPPOSES edge whose only debate edge is in another run.
+                MERGE (a)-[:OPPOSES]->(b)
+                MERGE (a)-[:REACTED_TO {dataset_id: $ds, query_hash: $q_old, round_no: 1}]->(b)
+                // C-D: a same-run REACTED_TO edge and nothing else.
+                MERGE (c)-[:REACTED_TO {dataset_id: $ds, query_hash: $q_new, round_no: 1}]->(d)
+                WITH b, d
+                MERGE (ob:Opinion {dataset_id: $ds, query_hash: $q_new, round_no: 1, agent_name: 'itest-B'})
+                SET ob.text = 'bob opinion', ob.stance = 'NEGATIVE', ob.confidence = 0.8,
+                    ob.weight = 0.5, ob.entities = []
+                MERGE (b)-[:STATED]->(ob)
+                MERGE (od:Opinion {dataset_id: $ds, query_hash: $q_new, round_no: 1, agent_name: 'itest-D'})
+                SET od.text = 'dee opinion', od.stance = 'POSITIVE', od.confidence = 0.8,
+                    od.weight = 0.5, od.entities = []
+                MERGE (d)-[:STATED]->(od)
+                """,
+                ds=ds, q_new=q_new, q_old=q_old,
+            )
+
+        # Current run: the OPPOSES edge is not corroborated (its REACTED_TO is q_old),
+        # so A-B is not a neighbour; C-D's same-run REACTED_TO still marks it.
+        snap = await memory.read_snapshot(ds, q_new, through_round=1)
+        assert "itest-B" not in snap.neighbor_map.get("itest-A", [])
+        assert "itest-D" in snap.neighbor_map.get("itest-C", [])
+
+        a_prompt = snap.to_prompt(speaker="itest-A", opponent="itest-B")
+        assert "itest-B" in a_prompt
+        assert "[directly connected to you]" not in a_prompt  # no cross-run leak
+
+        c_prompt = snap.to_prompt(speaker="itest-C", opponent="itest-D")
+        assert "[directly connected to you]" in c_prompt       # same-run REACTED_TO arm
+
+        # The other run sees its own edge and not the current run's.
+        snap_old = await memory.read_snapshot(ds, q_old, through_round=1)
+        assert "itest-B" in snap_old.neighbor_map.get("itest-A", [])
+        assert "itest-D" not in snap_old.neighbor_map.get("itest-C", [])
+    finally:
+        async with driver.session(database=db) as session:
+            await session.run("MATCH (n) WHERE n.dataset_id = $ds DETACH DELETE n", ds=ds)
