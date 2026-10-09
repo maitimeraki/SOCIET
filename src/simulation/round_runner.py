@@ -12,6 +12,8 @@ from src.simulation.pair_turn import AgentTurn, RoundResult, CommPair
 from src.simulation.society_memory import SocietySnapshot
 from src.utils.queryIntend import QueryIntent
 
+OPPONENT_STATEMENT_CHARS = 600
+
 
 def _parse_response_stance(
     response: str, default_stance: str, default_confidence: float
@@ -142,6 +144,12 @@ def _build_user_prompt(
     if hasattr(their_stance, "value"):
         their_stance = their_stance.value
 
+    opponent_str = ""
+    if opp_last and opp_last.get("content"):
+        said = _truncate_snippet(opp_last["content"], OPPONENT_STATEMENT_CHARS)
+        if said:
+            opponent_str = f"WHAT {opponent.identity.name} JUST ARGUED:\n{said}\n\n"
+
     society_str = ""
     self_str = ""
     if society is not None:
@@ -160,6 +168,7 @@ def _build_user_prompt(
         f"{intent_str}"
         f"You are responding to: {opponent.identity.name}\n"
         f"Their stance: {their_stance or 'NEUTRAL'} (latest on record)\n\n"
+        f"{opponent_str}"
         f"{society_str}"
         f"{self_str}"
         f"CONVERSATION HISTORY:\n{history_str or '(No previous turns)'}\n\n"
