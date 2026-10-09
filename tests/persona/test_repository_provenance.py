@@ -118,8 +118,10 @@ async def test_entity_writer_emits_one_idempotent_mentions_statement():
     assert "MERGE (p:Persona {name: $name, dataset_id: $dataset_id})" in cypher
     assert "MERGE (p)-[:MENTIONS]->(e)" in cypher  # idempotent: MERGE, not CREATE
     assert "SET p.domain_tags = names, p.entity_affinity = names" in cypher
+    assert "p.stance = coalesce($stance, p.stance)" in cypher
     assert session.run.await_args.kwargs == {
         "chunk_ids": ["node-7", "node-9"], "name": "Alice", "dataset_id": "ds1",
+        "stance": None,
     }
     assert linked == 3
 

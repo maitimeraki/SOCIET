@@ -1129,7 +1129,7 @@ async def test_synthesize_writes_entity_links_from_the_cluster_chunks_before_bui
     profiles = await synth.synthesize(query="q", dataset_id="ds1", max_agents=1)
 
     repo.write_persona_entity_links.assert_awaited_once_with(
-        persona_name="Lead", dataset_id="ds1", chunk_node_ids=["node-7"],
+        persona_name="Lead", dataset_id="ds1", chunk_node_ids=["node-7"], stance=None,
     )
     assert order == ["provenance", "entities", "build"]
     assert [p.identity.name for p in profiles] == ["Lead"]
@@ -1216,6 +1216,52 @@ async def test_synthesize_survives_a_failing_traversal(caplog):
 
     assert "node traversal failed" in caplog.text
     assert [p.identity.name for p in profiles] == ["A", "B", "C"]
+
+
+"""Task 1: the synthesized stance is persisted on the Persona node with the
+entity links, where Task 6's round-1 pairing reads it."""
+
+
+@pytest.mark.asyncio
+async def test_synthesize_persists_the_distilled_stance_with_the_entity_links():
+    from src.persona.agent import Stance
+    from src.persona.repository import DistilledProfile
+
+    entity = _anchored_entity("Lead", "node-7", 0.9)
+    repo = MagicMock()
+    repo.fetch_nodes_by_names = AsyncMock(return_value={})
+    repo.calculate_agent_metrics_and_context_for_llm = AsyncMock(return_value={})
+    repo.distill_profiles = AsyncMock(return_value={
+        "Lead": DistilledProfile("d", "p", Stance.POSITIVE, 0.8, 0.6),
+    })
+    repo.write_persona_provenance = AsyncMock(return_value=1)
+    repo.write_persona_entity_links = AsyncMock(return_value=1)
+    repo.build_single_agent_profile_from_node = AsyncMock(return_value=MagicMock())
+    synth = ProfileSynthesizer(repo, _CountingContext([entity], {}))
+
+    await synth.synthesize(query="q", dataset_id="ds", max_agents=1, distill=True)
+
+    assert repo.write_persona_entity_links.await_args.kwargs["stance"] == "POSITIVE"
+
+
+@pytest.mark.asyncio
+async def test_synthesize_persists_the_derived_stance_without_distillation():
+    """The shallow path: the graph derivation is persisted too, not just the LLM's."""
+    entity = _anchored_entity("Critic", "node-9", 0.9)
+    entity.properties = {"name": "Critic", "triplet_source_id": "node-9"}
+    repo = MagicMock()
+    repo.fetch_nodes_by_names = AsyncMock(
+        return_value={"Critic": {"name": "Critic", "relations": ["OPPOSES"]}}
+    )
+    repo.calculate_agent_metrics_and_context_for_llm = AsyncMock(return_value={})
+    repo.write_persona_provenance = AsyncMock(return_value=1)
+    repo.write_persona_entity_links = AsyncMock(return_value=1)
+    repo.build_single_agent_profile_from_node = AsyncMock(return_value=MagicMock())
+    synth = ProfileSynthesizer(repo, _CountingContext([entity], {}))
+
+    await synth.synthesize(query="q", dataset_id="ds", max_agents=1)
+
+    assert repo.write_persona_entity_links.await_args.kwargs["stance"] == "NEGATIVE"
 
 
 @pytest.mark.asyncio

@@ -168,6 +168,27 @@ class ProfileSynthesizer:
                     max_relevance=max_relevance,
                 )
 
+                # Task 1: the effective stance (distilled → graph derivation →
+                # node property) is persisted with the entity links, because
+                # Task 6's round-1 pairing reads `Persona.stance` before any
+                # opinion exists. The build independently recomputes the same
+                # value; the derivation is the repo's pure helper.
+                distilled_for_row = distilled.get(row_name) if distilled else None
+                stance_value = getattr(distilled_for_row, "stance", None)
+                if stance_value is None:
+                    stance_value = node.get("stance")
+                if stance_value is None:
+                    derived = PersonaRepository._derive_stance(
+                        PersonaRepository._relation_evidence(node, metrics)
+                    )
+                    if derived is not None:
+                        stance_value = derived[0]
+                stance_to_persist = (
+                    str(getattr(stance_value, "value", stance_value))
+                    if stance_value is not None
+                    else None
+                )
+
                 # D2: write this persona's real provenance edges BEFORE the build,
                 # so the `get_provenance` inside it finds them instead of falling
                 # back to the uuid5 sector fabrication. Never raises into synthesis.
@@ -197,6 +218,7 @@ class ProfileSynthesizer:
                             persona_name=agent_name,
                             dataset_id=dataset_id,
                             chunk_node_ids=chunk_ids,
+                            stance=stance_to_persist,
                         )
                         if inspect.iscoroutine(pending):
                             await pending
@@ -218,7 +240,7 @@ class ProfileSynthesizer:
                     agent_metrics=metrics,
                     sector_results=sector_results,
                     llm_output=None,
-                    distilled=distilled.get(row_name) if distilled else None,
+                    distilled=distilled_for_row,
                 )
 
         # S9 visibility: one `agent` event per completed profile, in completion

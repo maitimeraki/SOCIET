@@ -1,5 +1,5 @@
 from dataclasses import asdict
-from typing import TYPE_CHECKING, List, Dict, Any, cast, LiteralString, Callable, Sequence, Tuple, Optional
+from typing import TYPE_CHECKING, List, Dict, Any, cast, LiteralString, Callable, NamedTuple, Sequence, Tuple, Optional
 from uuid import uuid4
 import uuid as _uuid
 import asyncio
@@ -33,6 +33,21 @@ logger = setup_logging()
 # localhost embed call would wait forever. 60 s is a generous bound for it.
 _EMBED_TIMEOUT_SECONDS = 60
 
+
+class DistilledProfile(NamedTuple):
+    """One persona's S5 distillation result.
+
+    Carries the question-aware voice (`description`, `perspective`) plus the
+    stance the distillation inferred (`stance`, `conviction`, `cior`) — the
+    last three are `None` when the reply supplied no `STANCE:` line, so the
+    deterministic graph derivation fills them.
+    """
+
+    description: str
+    perspective: str
+    stance: Optional[Stance] = None
+    conviction: Optional[float] = None
+    cior: Optional[float] = None
 
 
 class PersonaRepository:
@@ -342,7 +357,7 @@ class PersonaRepository:
         agent_metrics: Dict[str, Any],
         sector_results: List[Dict[str, Any]],
         llm_output: Optional[Dict[str, List[str]]],
-        distilled: Optional[Tuple[str, str]] = None,
+        distilled: Optional[DistilledProfile] = None,
     ) -> Agent:
         """Build the canonical Agent from an already-fetched node (avoids extra DB calls).
 
@@ -352,9 +367,11 @@ class PersonaRepository:
         round-runner prompt construction, topology pair scoring — never
         silently fall back to a default.
 
-        `distilled` is the S5 batch-distillation result for this persona
-        (`(description, perspective)`); when supplied it is the sole source of
-        `bio`/`detailed_perspective`. `None` keeps the metrics-derived text.
+        `distilled` is the S5 batch-distillation result for this persona; when
+        supplied its `description`/`perspective` are the sole source of
+        `bio`/`detailed_perspective` and its `stance`/`conviction`/`cior` (when
+        present) take precedence over the deterministic derivation. `None`
+        keeps the metrics-derived text and the derived stance.
         """
         # Identity
         identity = PersonaIdentity(
@@ -416,11 +433,33 @@ class PersonaRepository:
                 chunk_id = _uuid.uuid5(_uuid.NAMESPACE_URL, doc_id)
                 provenance.append(ProvenanceLink(doc_id=doc_id, title=str(d.get('domain_tag') or 'sector'), breadcrumb='', chunk_id=chunk_id))
 
-        # Behavioral core — every field read by verdict / round / topology
-        stance = self._safe_stance(node.get("stance"))
+        # Behavioral core — every field read by verdict / round / topology.
+        # Precedence: the distilled stance (the LLM path already saw the query
+        # and the stance axis) → the deterministic graph derivation → the
+        # existing safe default. A real signal always beats the NEUTRAL collapse.
+        derived = self._derive_stance(self._relation_evidence(node, agent_metrics))
+        distilled_stance = getattr(distilled, "stance", None)
+        if distilled_stance is not None:
+            stance = self._safe_stance(distilled_stance)
+        elif derived is not None:
+            stance = derived[0]
+        else:
+            stance = self._safe_stance(node.get("stance"))
         intensity = self._safe_float(node.get("intensity"), 0.5, 0.0, 1.0)
-        conviction = self._safe_float(node.get("conviction"), 0.5, 0.0, 1.0)
-        cior = self._safe_float(node.get("cior"), 0.0, -1.0, 1.0)
+        distilled_conviction = getattr(distilled, "conviction", None)
+        if distilled_conviction is not None:
+            conviction = self._safe_float(distilled_conviction, 0.5, 0.0, 1.0)
+        elif derived is not None:
+            conviction = derived[1]
+        else:
+            conviction = self._safe_float(node.get("conviction"), 0.5, 0.0, 1.0)
+        distilled_cior = getattr(distilled, "cior", None)
+        if distilled_cior is not None:
+            cior = self._safe_float(distilled_cior, 0.0, -1.0, 1.0)
+        elif derived is not None:
+            cior = derived[2]
+        else:
+            cior = self._safe_float(node.get("cior"), 0.0, -1.0, 1.0)
         belief = str(node.get("belief") or node.get("world_model") or "")
         opinion = str(node.get("opinion") or node.get("current_take") or perspective[:500])
         communication_radius = self._safe_int(node.get("communication_radius"), 1, 1, 5)
@@ -512,6 +551,128 @@ class PersonaRepository:
         if isinstance(v, str):
             return [t.strip() for t in v.split(",") if t.strip()]
         return []
+
+    #: Node keys that may carry the relation evidence a deterministic stance
+    #: derivation reads. Both a list of relation-type names and a list of
+    #: relation mappings (as `fetch_recent_memories` rows) are accepted.
+    _RELATION_EVIDENCE_KEYS = ("relations", "relation_types", "recent_memories")
+
+    @classmethod
+    def _relation_type_tokens(cls, node: Any) -> List[str]:
+        """The uppercase relation-type names carried by a node mapping.
+
+        Tolerant: a string, or a list of strings / mappings exposing
+        `type` / `relation_type` / `label`. Never invents evidence.
+        """
+        if not isinstance(node, dict):
+            return []
+        tokens: List[str] = []
+        for key in cls._RELATION_EVIDENCE_KEYS:
+            raw = node.get(key)
+            if not raw:
+                continue
+            if isinstance(raw, str):
+                raw = [raw]
+            elif not isinstance(raw, (list, tuple)):
+                raw = [raw]
+            for item in raw:
+                if isinstance(item, str):
+                    tokens.append(item.strip().upper())
+                elif isinstance(item, dict):
+                    value = (
+                        item.get("type")
+                        or item.get("relation_type")
+                        or item.get("label")
+                    )
+                    if isinstance(value, str) and value.strip():
+                        tokens.append(value.strip().upper())
+        return tokens
+
+    @classmethod
+    def _relation_evidence(
+        cls, node: Dict[str, Any], agent_metrics: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """`node` enriched with the relation evidence the metrics already hold.
+
+        A node's own properties never carry edges, so on the live path the only
+        relation evidence at build time is the metrics' `recent_memories` (their
+        `relation_type` is the edge label). Returns `node` unchanged when it
+        already carries evidence or the metrics hold none.
+        """
+        if any(node.get(key) for key in cls._RELATION_EVIDENCE_KEYS):
+            return node
+        memories = (agent_metrics or {}).get("recent_memories") or []
+        if not memories:
+            return node
+        return {**node, "recent_memories": memories}
+
+    @classmethod
+    def _derive_stance(
+        cls,
+        node: Any,
+        stance_axis: str = "",
+    ) -> Optional[Tuple[Stance, float, float]]:
+        """Derive `(stance, conviction, cior)` from a node's relation evidence.
+
+        The deterministic fallback for when distillation is off (shallow depth)
+        or its `STANCE:` line is missing/unparseable. `OPPOSES`/`SUPPORTS`
+        relation evidence sets the polarity; conviction scales with how much
+        evidence there is, and a stated `stance_axis` (the query has a defined
+        support/oppose direction) sharpens it. Returns `None` when the node
+        carries no relation evidence, so the caller keeps its safe default.
+        """
+        tokens = cls._relation_type_tokens(node)
+        opposes = sum(1 for token in tokens if "OPPOSES" in token)
+        supports = sum(1 for token in tokens if "SUPPORTS" in token)
+        total = opposes + supports
+        if total == 0:
+            return None
+
+        if supports > opposes:
+            stance = Stance.POSITIVE
+        elif opposes > supports:
+            stance = Stance.NEGATIVE
+        else:
+            stance = Stance.AMBIVALENT
+
+        conviction = cls._safe_float(total / 4.0, 0.5, 0.0, 1.0)
+        if stance_axis.strip():
+            conviction = cls._safe_float(conviction + 0.1, 0.5, 0.0, 1.0)
+        cior = cls._safe_float((supports - opposes) / total, 0.0, -1.0, 1.0)
+        return stance, conviction, cior
+
+    @staticmethod
+    def _split_stance(text: str) -> Tuple[str, str]:
+        """Split a distilled block's tail into `(perspective, stance_line)`.
+
+        `STANCE:` is the block's last line, so everything before it is the
+        perspective and everything after is the stance payload. No line → the
+        whole text is the perspective and the stance payload is empty.
+        """
+        head, sep, stance = str(text).partition("STANCE:")
+        if not sep:
+            return str(text).strip(), ""
+        return head.strip(), stance.strip()
+
+    @classmethod
+    def _parse_stance_line(cls, text: str) -> Optional[Tuple[Stance, float, float]]:
+        """Parse `POSITIVE | 0.7 | 0.4` into `(stance, conviction, cior)`.
+
+        Tolerant: separators are any whitespace/`|`/`,`; a missing or invalid
+        conviction/cior falls to its safe default. Returns `None` when the
+        stance word itself is not one of the four stances (unparseable), so the
+        caller falls to the deterministic derivation.
+        """
+        parts = str(text).replace("|", " ").replace(",", " ").split()
+        if not parts:
+            return None
+        try:
+            stance = Stance(parts[0].upper())
+        except ValueError:
+            return None
+        conviction = cls._safe_float(parts[1], 0.5, 0.0, 1.0) if len(parts) > 1 else 0.5
+        cior = cls._safe_float(parts[2], 0.0, -1.0, 1.0) if len(parts) > 2 else 0.0
+        return stance, conviction, cior
 
     async def calculate_agent_metrics_and_context_for_llm(
         self,
@@ -701,7 +862,7 @@ class PersonaRepository:
         core_question: str = "",
         stance_axis: str = "",
         warnings: Optional[List[str]] = None,
-    ) -> Dict[str, Tuple[str, str]]:
+    ) -> Dict[str, DistilledProfile]:
         """S5: ONE batched LLM call that gives every selected persona its question-aware voice.
 
         `personas` is the ordered selection set — each entry a mapping with:
@@ -713,17 +874,22 @@ class PersonaRepository:
         The run-level question context (`query`, `core_question`, `stance_axis`)
         frames the whole prompt. No per-persona graph reads happen here.
 
-        Returns `{name: (description, perspective)}` for EVERY persona. Fallback
-        matrix: no client / no callable client method / the call raising → every
-        persona gets the deterministic template plus ONE warning; a persona whose
-        block is missing or unparseable gets the template plus a warning naming
-        it. `warnings` is the caller-owned sink. Never raises.
+        Returns `{name: DistilledProfile}` for EVERY persona — the voice
+        (`description`, `perspective`) plus the stance the reply declared
+        (`stance`, `conviction`, `cior`). Fallback matrix: no client / no
+        callable client method / the call raising → every persona gets the
+        deterministic template (which itself derives a stance) plus ONE
+        warning; a persona whose block is missing or unparseable gets the
+        template plus a warning naming it; a persona whose `STANCE:` line is
+        missing/unparseable keeps its voice and falls back to the deterministic
+        derivation plus a warning. `warnings` is the caller-owned sink. Never
+        raises.
 
         The prompt is bounded: at most `_DISTILL_EVIDENCE_CAP` snippets
         (`_DISTILL_SNIPPET_CHARS` chars each) and `_DISTILL_ANCHOR_CAP` anchors
         are shown per persona.
         """
-        results: Dict[str, Tuple[str, str]] = {}
+        results: Dict[str, DistilledProfile] = {}
         if not personas:
             return results
 
@@ -731,7 +897,7 @@ class PersonaRepository:
             node = entry.get("node")
             return node if isinstance(node, dict) else {}
 
-        def _template(entry: Dict[str, Any]) -> Tuple[str, str]:
+        def _template(entry: Dict[str, Any]) -> DistilledProfile:
             node = _entry_node(entry)
             sectors = [
                 str(row.get("domain_tag"))
@@ -742,7 +908,13 @@ class PersonaRepository:
                 str(tag) for tag in (node.get("domain_tags") or []) if str(tag).strip()
             )
             evidence = [str(e) for e in (entry.get("evidence") or []) if str(e).strip()]
-            return self._template_profile_text(str(entry.get("name") or ""), evidence, matched_text, [])
+            desc, pers = self._template_profile_text(
+                str(entry.get("name") or ""), evidence, matched_text, []
+            )
+            derived = self._derive_stance(node, stance_axis)
+            if derived is None:
+                return DistilledProfile(desc, pers)
+            return DistilledProfile(desc, pers, derived[0], derived[1], derived[2])
 
         def _block(entry: Dict[str, Any]) -> str:
             node = _entry_node(entry)
@@ -776,12 +948,16 @@ class PersonaRepository:
             "for a multi-agent debate on the given question. Ground every statement in "
             "the participant's own evidence; make clear what the question means from "
             "that participant's perspective.\n"
+            "For STANCE, state the participant's own stance on the question under "
+            "the STANCE AXIS, plus its conviction (0-1) and its cior (-1 hostile to "
+            "+1 receptive toward the proposal).\n"
             "Reply with one block per participant, in the given order, exactly in this "
             "form and nothing else:\n"
             "PERSONA: <name>\n"
             "DESCRIPTION: <one concise UI-friendly sentence, 10-25 words>\n"
             "PERSPECTIVE: <a 5-8 sentence first-person worldview grounded in the "
-            "evidence and the question>"
+            "evidence and the question>\n"
+            "STANCE: <POSITIVE|NEGATIVE|NEUTRAL|AMBIVALENT> | <conviction 0-1> | <cior -1 to 1>"
         )
         header = [f"QUERY: {query}", f"CORE QUESTION: {core_question or query}"]
         if stance_axis:
@@ -847,19 +1023,34 @@ class PersonaRepository:
         for entry in personas:
             name = str(entry.get("name") or "")
             block = blocks_by_key.get(" ".join(name.split()).casefold(), "")
-            desc = pers = ""
+            desc = pers = stance_line = ""
             if block:
                 parts = block.split("DESCRIPTION:")
                 if len(parts) > 1:
                     dparts = parts[1].split("PERSPECTIVE:")
                     desc = dparts[0].strip()
-                    pers = dparts[1].strip() if len(dparts) > 1 else ""
+                    pers, stance_line = self._split_stance(
+                        dparts[1] if len(dparts) > 1 else ""
+                    )
                 else:
                     sents = block.strip().split(". ")
                     desc = sents[0].strip() + ("." if not sents[0].endswith(".") else "")
-                    pers = " ".join(sents[1:]).strip()
+                    pers, stance_line = self._split_stance(" ".join(sents[1:]).strip())
             if desc:
-                results[name] = (desc, pers or desc)
+                parsed = self._parse_stance_line(stance_line) if stance_line else None
+                if parsed is None:
+                    if warnings is not None:
+                        warnings.append(
+                            f"S5 distillation: no parseable STANCE line for persona {name!r}; "
+                            "the deterministic derivation was used."
+                        )
+                    parsed = self._derive_stance(_entry_node(entry), stance_axis)
+                if parsed is None:
+                    results[name] = DistilledProfile(desc, pers or desc)
+                else:
+                    results[name] = DistilledProfile(
+                        desc, pers or desc, parsed[0], parsed[1], parsed[2]
+                    )
             else:
                 if warnings is not None:
                     warnings.append(
@@ -915,6 +1106,7 @@ class PersonaRepository:
         persona_name: str,
         dataset_id: str,
         chunk_node_ids: Sequence[str],
+        stance: Optional[str] = None,
     ) -> int:
         """Write the `(Persona)-[:MENTIONS]->(__Entity__)` edges the topology counts.
 
@@ -924,8 +1116,11 @@ class PersonaRepository:
         by the persona's source chunks — the content the persona was synthesized
         from. The same statement (re)writes `domain_tags`/`entity_affinity` to
         the linked entity names: the vocabulary both the pair scorer's Jaccard
-        denominator and the activation reader consume. Idempotent, bounded, and
-        tolerant exactly like `write_persona_provenance`.
+        denominator and the activation reader consume. When `stance` is supplied
+        it is also written to the node — Task 6's round-1 pairing reads
+        `Persona.stance` before any opinion exists; `None` leaves the stored
+        value untouched. Idempotent, bounded, and tolerant exactly like
+        `write_persona_provenance`.
         """
         chunk_ids = list(
             dict.fromkeys(str(cid).strip() for cid in chunk_node_ids if str(cid or "").strip())
@@ -941,13 +1136,15 @@ class PersonaRepository:
         MERGE (p)-[:MENTIONS]->(e)
         WITH p, collect(DISTINCT e.name) AS names
         WHERE size(names) > 0
-        SET p.domain_tags = names, p.entity_affinity = names
+        SET p.domain_tags = names, p.entity_affinity = names,
+            p.stance = coalesce($stance, p.stance)
         RETURN size(names) AS linked
         """
 
         async with self._driver.session(database=self._db) as session:
             result = await session.run(
                 cypher, chunk_ids=chunk_ids, name=persona_name, dataset_id=dataset_id,
+                stance=stance,
             )
             rows = await result.data()
 
