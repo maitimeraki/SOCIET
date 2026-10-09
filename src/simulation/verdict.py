@@ -19,6 +19,13 @@ logger = logging.getLogger(__name__)
 
 SUMMARY_MAX_CHARS = 600
 
+# Step 9: bound what the summary prompt may carry from the transcript.
+SUMMARY_TRANSCRIPT_MAX_TURNS = 20
+SUMMARY_TRANSCRIPT_MAX_CHARS = 8000
+
+# Step 7: a dominant share below this is a near-tie, not a mandate.
+CONTESTED_THRESHOLD = 0.6
+
 
 class VerdictSynthesizer:
     """Cluster-weighted CIOR synthesizer.
@@ -36,7 +43,7 @@ class VerdictSynthesizer:
         """Async synthesis -- safe to call from any running event loop."""
         verdict = self.synthesize(rounds=rounds, profiles=profiles, llm_client=None)
         if llm_client is not None:
-            llm_summary = await self._allm_summary(llm_client, verdict)
+            llm_summary = await self._allm_summary(llm_client, verdict, rounds)
             if llm_summary:
                 verdict.summary = llm_summary
         return verdict
@@ -45,17 +52,27 @@ class VerdictSynthesizer:
         self,
         llm_client: "LLMClient",
         verdict: DebateVerdict,
+        rounds: list[RoundResult],
     ) -> str | None:
-        """Async LLM summary -- no asyncio.run, no loop collision."""
+        """Async LLM summary -- no asyncio.run, no loop collision.
+
+        The prompt carries the bounded debate transcript, not just the
+        aggregates, so the summary is a synthesis of the argument rather than
+        a restatement of the turn count.
+        """
+        transcript, turns_used = self._render_transcript(rounds)
+        contested_note = " (contested near-tie)" if verdict.contested else ""
         system_prompt = (
-            "You are a neutral debate summarizer. Produce a concise verdict "
-            "summary from the aggregate statistics below. Keep it under 600 chars."
+            "You are a neutral debate summarizer. Write a concise verdict "
+            "summary grounded ONLY in the debate transcript below. Reference "
+            "the actual arguments, not the turn counts. Keep it under 600 chars."
         )
         user_prompt = (
             f"Overall stance: {verdict.overall_stance.value}\n"
-            f"Confidence score: {verdict.confidence_score:.2f}\n"
+            f"Dominant share of weight: {verdict.weight_share:.2f}{contested_note}\n"
             f"Top supporting entities: {verdict.supporting_entities[:5]}\n"
-            f"Top opposing entities: {verdict.opposing_entities[:5]}"
+            f"Top opposing entities: {verdict.opposing_entities[:5]}\n\n"
+            f"Debate transcript (last {turns_used} turns):\n{transcript}"
         )
         try:
             raw = await llm_client.generate(
@@ -69,6 +86,23 @@ class VerdictSynthesizer:
         if not raw:
             return None
         return raw.strip()[:SUMMARY_MAX_CHARS]
+
+    @staticmethod
+    def _render_transcript(rounds: list[RoundResult]) -> tuple[str, int]:
+        """Bounded transcript for the summary prompt: the last-N turns within a
+        total char cap, newest-first so the most recent argument is never the
+        one dropped. Returns (text, turns_included)."""
+        turns = [turn for round_result in rounds for turn in round_result.turns]
+        lines: list[str] = []
+        budget = SUMMARY_TRANSCRIPT_MAX_CHARS
+        for turn in reversed(turns[-SUMMARY_TRANSCRIPT_MAX_TURNS:]):
+            line = f"[{turn.stance}] {turn.agent_name}: {turn.content}"
+            if len(line) > budget:
+                break
+            lines.append(line)
+            budget -= len(line)
+        lines.reverse()
+        return "\n".join(lines), len(lines)
 
     def synthesize(
         self,
@@ -89,6 +123,8 @@ class VerdictSynthesizer:
                 summary="No debate occurred.",
                 cluster_details={},
                 rounds_executed=len(rounds),
+                weight_share=0.0,
+                contested=False,
             )
 
         clusters = self._cluster_opinions(all_turns)
@@ -129,10 +165,16 @@ class VerdictSynthesizer:
                 overall_stance = stance
 
         total_weight_sum = sum(weights.values())
-        confidence_score = max_weight / total_weight_sum if total_weight_sum > 0 else 0.0
+        weight_share = max_weight / total_weight_sum if total_weight_sum > 0 else 0.0
+        # `confidence_score` keeps its long-standing number; `weight_share` is
+        # the same value under its honest name. `contested` stops a near-tie
+        # from reading as a mandate.
+        confidence_score = weight_share
+        contested = weight_share < CONTESTED_THRESHOLD
 
         supporting: list[str] = []
         opposing: list[str] = []
+        provenance_by_claim: dict[str, list] = {}
         for turn in all_turns:
             try:
                 turn_stance = Stance(turn.stance) if isinstance(turn.stance, str) else turn.stance
@@ -142,6 +184,15 @@ class VerdictSynthesizer:
                 supporting.extend(turn.references)
             else:
                 opposing.extend(turn.references)
+            # Trace each claim back to provenance reachable from its speaker;
+            # never fabricate — a turn with no references contributes nothing.
+            profile = profile_map.get(turn.agent_name)
+            if profile is not None:
+                for ref in turn.references:
+                    links = provenance_by_claim.setdefault(ref, [])
+                    for link in profile.summary_provenance:
+                        if link not in links:
+                            links.append(link)
 
         dominant_count = cluster_details.get(
             overall_stance,
@@ -164,7 +215,10 @@ class VerdictSynthesizer:
             opposing_entities=list(set(opposing))[:10],
             summary=summary,
             cluster_details=cluster_details,
+            provenance_by_claim=provenance_by_claim,
             rounds_executed=len(rounds),
+            weight_share=weight_share,
+            contested=contested,
         )
 
     def _cluster_opinions(self, turns: list[AgentTurn]) -> dict[Stance, list[AgentTurn]]:
@@ -200,7 +254,13 @@ class VerdictSynthesizer:
         profile_map: dict[str, Agent],
         warned: set[str] | None = None,
     ) -> dict[Stance, float]:
-        """weight = confidence * conviction * (1 + cior) / 2."""
+        """weight = confidence * conviction * cior_factor.
+
+        cior_factor maps cior in [-1, 1] into [0.5, 1.0]:
+            cior_factor = 0.5 + (cior + 1) / 4
+        Receptivity scales a voice's emphasis; it never erases one. A hostile
+        dissenter (cior = -1) keeps half weight instead of dropping to zero.
+        """
         warned = set() if warned is None else warned
         weights: dict[Stance, float] = {s: 0.0 for s in Stance}
         for stance, turns in clusters.items():
@@ -208,7 +268,7 @@ class VerdictSynthesizer:
             for turn in turns:
                 profile = profile_map.get(turn.agent_name)
                 if profile is not None:
-                    cior_factor = (1.0 + profile.cior) / 2.0
+                    cior_factor = 0.5 + (profile.cior + 1.0) / 4.0
                     cluster_weight += turn.confidence * profile.conviction * cior_factor
                 else:
                     self._warn_missing_profile(turn.agent_name, warned)

@@ -93,6 +93,10 @@ class OrchestratedDebateResult:
     cluster_details: Optional[dict[str, dict]] = None
     supporting_entities: list[str] = field(default_factory=list)
     opposing_entities: list[str] = field(default_factory=list)
+    #: Honest name for the dominant stance's share (== confidence_score), and
+    #: whether that share is a near-tie. Additive — no existing key changes.
+    weight_share: Optional[float] = None
+    contested: Optional[bool] = None
 
 
 class DebateOrchestrator:
@@ -386,6 +390,8 @@ class DebateOrchestrator:
             cluster_details=cluster_details,
             supporting_entities=list(verdict.supporting_entities) if verdict else [],
             opposing_entities=list(verdict.opposing_entities) if verdict else [],
+            weight_share=verdict.weight_share if verdict else None,
+            contested=verdict.contested if verdict else None,
         )
 
     async def _maybe_activate(
