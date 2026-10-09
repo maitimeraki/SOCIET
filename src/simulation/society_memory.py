@@ -20,6 +20,9 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+#: Fixed budget for each self-history summary rendered into the prompt.
+SELF_HISTORY_SUMMARY_CHARS = 200
+
 
 def _profile_float(profile, attr: str, default: float) -> float:
     """Read a float off a profile, falling back only when it is absent or None.
@@ -54,6 +57,14 @@ MERGE (a)-[x:REACTED_TO {dataset_id: $dataset_id, query_hash: $query_hash,
 SET x.summary = left(r.summary, 300), x.stance = r.stance, x.confidence = r.confidence
 """
 
+_SELF_HISTORY_CYPHER = """
+MATCH (p:Persona {name: $agent_name, dataset_id: $dataset_id})-[:STATED]->(o:Opinion)
+WHERE o.query_hash = $query_hash AND o.round_no < $through_round
+RETURN o.round_no AS round_no, o.stance AS stance,
+       left(o.text, $summary_chars) AS summary
+ORDER BY o.round_no ASC
+"""
+
 _MENTIONS_CYPHER = """
 UNWIND $rows AS row
 MATCH (o:Opinion {dataset_id: $dataset_id, query_hash: $query_hash,
@@ -70,6 +81,9 @@ class SocietySnapshot:
 
     round: int
     entries: List[dict] = field(default_factory=list)
+    #: The speaker's OWN prior opinions ({agent, round, stance, summary}), keyed
+    #: by agent so `self_prompt` can select per speaker. Empty in round 1.
+    self_entries: List[dict] = field(default_factory=list)
     neighbor_map: Dict[str, List[str]] = field(default_factory=dict)
     buzz: List[dict] = field(default_factory=list)
     consensus: Optional[dict] = None
@@ -101,6 +115,23 @@ class SocietySnapshot:
         if self.buzz:
             buzz_str = ", ".join(f"{b['entity']} ({b['mentions']})" for b in self.buzz[:3])
             lines.append(f"Widely discussed entities: {buzz_str}")
+        text = "\n".join(lines)
+        if len(text) > max_chars:
+            text = text[:max_chars].rsplit("\n", 1)[0]
+        return text
+
+    def self_prompt(self, speaker: str, max_chars: int = 1200) -> str:
+        """Rendered YOUR PRIOR POSITIONS block for `speaker`; "" when it has none.
+
+        Distinct from `to_prompt`: that block is what *others* said, this one is
+        the speaker's own committed positions, ordered by round.
+        """
+        mine = [e for e in self.self_entries if e.get("agent") == speaker]
+        if not mine:
+            return ""
+        lines = [f"YOUR PRIOR POSITIONS (through round {self.round}):"]
+        for e in sorted(mine, key=lambda x: x.get("round", 0)):
+            lines.append(f"- R{e.get('round', 0)} ({e.get('stance') or 'NEUTRAL'}): {e.get('summary') or ''}")
         text = "\n".join(lines)
         if len(text) > max_chars:
             text = text[:max_chars].rsplit("\n", 1)[0]
@@ -259,4 +290,29 @@ class SocietyMemory:
             neighbor_map=neighbor_map,
             buzz=buzz,
             version=f"r{through_round}:{len(entries)}",
+        )
+
+    async def read_self_history(
+        self, dataset_id: str, query_hash: str, agent_name: str,
+        through_round: int,
+    ) -> List[dict]:
+        """The speaker's own committed opinions from strictly-prior rounds.
+
+        Run-scoped by `dataset_id` + `query_hash`; bounded by `round_no <
+        through_round`. Returns `{round, stance, summary}` rows ordered by round
+        (empty when the speaker has not spoken yet).
+        """
+        async with self._driver.session(database=self._db) as session:
+            rows = await (await session.run(
+                _SELF_HISTORY_CYPHER, dataset_id=dataset_id, query_hash=query_hash,
+                agent_name=agent_name, through_round=through_round,
+                summary_chars=SELF_HISTORY_SUMMARY_CHARS,
+            )).data()
+        return sorted(
+            ({
+                "round": r.get("round_no") or 0,
+                "stance": r.get("stance") or "NEUTRAL",
+                "summary": (r.get("summary") or "")[:SELF_HISTORY_SUMMARY_CHARS],
+            } for r in rows),
+            key=lambda e: e["round"],
         )

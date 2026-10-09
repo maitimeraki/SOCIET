@@ -143,10 +143,14 @@ def _build_user_prompt(
         their_stance = their_stance.value
 
     society_str = ""
+    self_str = ""
     if society is not None:
         block = society.to_prompt(speaker=agent.identity.name, opponent=opponent.identity.name)
         if block:
             society_str = f"{block}\n\n"
+        own = society.self_prompt(speaker=agent.identity.name)
+        if own:
+            self_str = f"{own}\n\n"
 
     intent_block = _intent_context_block(intent)
     intent_str = f"{intent_block}\n\n" if intent_block else ""
@@ -157,6 +161,7 @@ def _build_user_prompt(
         f"You are responding to: {opponent.identity.name}\n"
         f"Their stance: {their_stance or 'NEUTRAL'} (latest on record)\n\n"
         f"{society_str}"
+        f"{self_str}"
         f"CONVERSATION HISTORY:\n{history_str or '(No previous turns)'}\n\n"
         f"Respond to {opponent.identity.name}'s perspective, engaging with specific arguments."
     )

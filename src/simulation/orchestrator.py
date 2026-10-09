@@ -48,9 +48,9 @@ from src.simulation.topology import CommunicationTopology
 from src.simulation.llm_batch import BatchedLLMRunner
 from src.simulation.round_runner import RoundRunner
 from src.simulation.verdict import VerdictSynthesizer
-from src.simulation.society_memory import SocietyMemory
+from src.simulation.society_memory import SocietyMemory, SocietySnapshot
 from src.simulation.debate_config import DebateConfig
-from src.simulation.pair_turn import RoundResult
+from src.simulation.pair_turn import CommPair, RoundResult
 from src.utils.queryIntend import QueryIntent
 
 logger = logging.getLogger(__name__)
@@ -228,6 +228,12 @@ class DebateOrchestrator:
                     share = self._weighted_share(rounds, profiles)
                     if share:
                         snapshot.consensus = {"stance": share[0], "weight_share": share[1]}
+
+                if round_num > 1:
+                    snapshot = await self._with_self_history(
+                        snapshot, pairs=pairs, dataset_id=dataset_id,
+                        query_hash=query_hash, round_num=round_num, warnings=warnings,
+                    )
 
                 round_result = await round_runner.execute_round(
                     profiles=profiles, pairs=pairs, round_num=round_num,
@@ -435,6 +441,41 @@ class DebateOrchestrator:
                     )
         except Exception as exc:
             warnings.append(f"Round {round_num}: activation failed: {exc}")
+
+    async def _with_self_history(
+        self,
+        snapshot: Optional[SocietySnapshot],
+        *,
+        pairs: list[CommPair],
+        dataset_id: str,
+        query_hash: str,
+        round_num: int,
+        warnings: list[str],
+    ) -> Optional[SocietySnapshot]:
+        """Attach each speaker's own prior positions to the round's snapshot.
+
+        Per-speaker read: one bounded query per speaking agent per round, matching
+        how the runner renders a block per turn. Optional enrichment — a failed
+        read degrades to a warning and the round proceeds without the block.
+        """
+        try:
+            speaking = sorted({name for p in pairs for name in (p.agent_a, p.agent_b)})
+            self_entries: list[dict] = []
+            for name in speaking:
+                rows = await self._society_memory.read_self_history(
+                    dataset_id=dataset_id, query_hash=query_hash,
+                    agent_name=name, through_round=round_num,
+                )
+                self_entries.extend({"agent": name, **row} for row in rows)
+        except Exception as exc:
+            warnings.append(f"Round {round_num}: self history read failed: {exc}")
+            return snapshot
+        if snapshot is None and not self_entries:
+            return None
+        if snapshot is None:
+            snapshot = SocietySnapshot(round=round_num - 1)
+        snapshot.self_entries = self_entries
+        return snapshot
 
     async def _emit_stage(
         self,
