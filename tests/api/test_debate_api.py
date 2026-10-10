@@ -673,6 +673,11 @@ async def _run_with_depth(job_id: str, depth: str):
     repo = MagicMock()
     result = OrchestratedDebateResult(
         converged=False, verdict="stub", final_stances={}, warnings=[], rounds_executed=0,
+        provenance_by_claim={
+            "Steel tariffs": [
+                {"doc_id": "d1", "title": "Trade Report", "breadcrumb": "", "chunk_id": "c1"}
+            ]
+        },
     )
     orch = MagicMock()
     orch.run = AsyncMock(return_value=result)
@@ -728,6 +733,9 @@ class TestSimulationDepthGate:
         assert "confidence_score" in job["result"]
         assert "weight_share" in job["result"]
         assert "contested" in job["result"]
+        # Step 8: per-claim provenance must reach the delivered payload, not
+        # just the verdict object.
+        assert job["result"]["provenance_by_claim"]["Steel tariffs"][0]["title"] == "Trade Report"
 
     @pytest.mark.asyncio
     async def test_create_debate_threads_the_requested_depth_to_the_job(self):

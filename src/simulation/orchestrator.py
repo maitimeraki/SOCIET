@@ -97,6 +97,9 @@ class OrchestratedDebateResult:
     #: whether that share is a near-tie. Additive — no existing key changes.
     weight_share: Optional[float] = None
     contested: Optional[bool] = None
+    #: Per-claim traceability (claim → provenance links), JSON-safe. Additive;
+    #: None when no claim carried reachable provenance.
+    provenance_by_claim: Optional[dict[str, list]] = None
 
 
 class DebateOrchestrator:
@@ -363,6 +366,12 @@ class DebateOrchestrator:
                 stance.value: {**asdict(summary), "stance": stance.value}
                 for stance, summary in verdict.cluster_details.items()
             }
+        provenance_by_claim = None
+        if verdict is not None and verdict.provenance_by_claim:
+            provenance_by_claim = {
+                claim: [link.model_dump(mode="json") for link in links]
+                for claim, links in verdict.provenance_by_claim.items()
+            }
         await self._emit_stage(
             on_stage, stage_index, "verdict",
             converged=converged, rounds_executed=len(rounds),
@@ -392,6 +401,7 @@ class DebateOrchestrator:
             opposing_entities=list(verdict.opposing_entities) if verdict else [],
             weight_share=verdict.weight_share if verdict else None,
             contested=verdict.contested if verdict else None,
+            provenance_by_claim=provenance_by_claim,
         )
 
     async def _maybe_activate(

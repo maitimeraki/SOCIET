@@ -24,6 +24,7 @@ from src.persona.agent import (
     ExpertiseLevel,
     GraphSnapshot,
     PersonaIdentity,
+    ProvenanceLink,
 )
 from src.utils.queryIntend import QueryIntent
 
@@ -1036,6 +1037,11 @@ async def test_result_carries_the_verdict_payload_for_the_ui():
     }
     verdict.supporting_entities = ["Steel tariffs"]
     verdict.opposing_entities = ["Entry cost"]
+    verdict.provenance_by_claim = {
+        "Steel tariffs": [
+            ProvenanceLink(doc_id="d1", title="Trade Report", breadcrumb="p3", chunk_id=uuid.uuid4())
+        ]
+    }
     verdict_synth.asynthesize.return_value = verdict
 
     orchestrator = _orchestrator_with(synth, topo, llm_runner, verdict_synth, society_memory)
@@ -1056,3 +1062,6 @@ async def test_result_carries_the_verdict_payload_for_the_ui():
     assert result.cluster_details["POSITIVE"]["stance"] == "POSITIVE"
     assert result.supporting_entities == ["Steel tariffs"]
     assert result.opposing_entities == ["Entry cost"]
+    # Step 8 output must reach the delivered result, JSON-safe.
+    assert result.provenance_by_claim["Steel tariffs"][0]["title"] == "Trade Report"
+    assert isinstance(result.provenance_by_claim["Steel tariffs"][0]["chunk_id"], str)
