@@ -482,6 +482,15 @@ class PersonaRepository:
             version_hash=version_hash,
         )
 
+        # `summary_provenance` carries REAL source chunks only. The sector
+        # fallback above exists solely to keep the graph snapshot's version/chunk
+        # count stable; a synthetic `sector:` id must never render as a source in
+        # the turn prompt, the verdict, or the frontend lists.
+        real_provenance = [
+            p for p in provenance
+            if not p.doc_id.startswith(SYNTHETIC_PROVENANCE_PREFIX)
+        ]
+
         return Agent(
             identity=identity,
             discovery_type=discovery_type,
@@ -502,7 +511,7 @@ class PersonaRepository:
             entity_affinity=entity_affinity,
             expertise_areas=expertise_areas,
             communication_radius=communication_radius,
-            summary_provenance=provenance,
+            summary_provenance=real_provenance,
             confidence_breakdown=confidence_breakdown,
             graph_snapshot=graph_snapshot,
             source_evidence=source_evidence,

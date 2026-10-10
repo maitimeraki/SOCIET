@@ -288,14 +288,17 @@ class GraphContext:
         """Return source chunks that contributed to the entity.
 
         Chunks point at the entities they mention (the llama-index store's
-        direction), so an entity's provenance is its inbound MENTIONS.
+        direction), so an entity's provenance is its inbound MENTIONS. The
+        source-document id lives on `document_anchor` — llama-index clobbers the
+        generic `document_id`/`doc_id` properties to the sentinel `"None"`, so
+        reading `doc_id` would return a fabricated id.
         """
         cypher = """
         MATCH (n)<-[:MENTIONS]-(chunk:Chunk)
         WHERE n.id = $entity_id OR n.name = $entity_id
-        AND chunk.doc_id IS NOT NULL
+        AND chunk.document_anchor IS NOT NULL
         RETURN DISTINCT
-            chunk.doc_id AS doc_id,
+            chunk.document_anchor AS doc_id,
             chunk.title AS title,
             chunk.breadcrumb AS breadcrumb,
             chunk.chunk_id AS chunk_id
@@ -344,11 +347,11 @@ class GraphContext:
         cypher = """
         MATCH (n)<-[:MENTIONS]-(chunk:Chunk)
         WHERE (n.id IN $entity_ids OR n.name IN $entity_ids)
-        AND chunk.doc_id IS NOT NULL
+        AND chunk.document_anchor IS NOT NULL
         RETURN DISTINCT
             n.id AS node_id,
             n.name AS node_name,
-            chunk.doc_id AS doc_id,
+            chunk.document_anchor AS doc_id,
             chunk.title AS title,
             chunk.breadcrumb AS breadcrumb,
             chunk.chunk_id AS chunk_id

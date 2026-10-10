@@ -76,11 +76,13 @@ async def seeded_node(graph_ctx):
             neighbor_name="test_neighbor",
         )
         # Provenance via MENTIONS — the chunk mentions the entity, matching the
-        # real graph shape the llama-index store writes (chunk → entity).
+        # real graph shape the llama-index store writes (chunk → entity). The
+        # source-document id lives on `document_anchor`; `doc_id` carries the
+        # sentinel "None" llama-index writes, so the reader must use the anchor.
         await session.run(
             """
             MATCH (n:Persona {name: $name})
-            CREATE (chunk:Chunk {doc_id: $doc_id, title: $title, breadcrumb: $breadcrumb, chunk_id: $chunk_id})
+            CREATE (chunk:__Node__:Chunk {doc_id: 'None', document_anchor: $doc_id, title: $title, breadcrumb: $breadcrumb, chunk_id: $chunk_id})
             CREATE (chunk)-[:MENTIONS]->(n)
             """,
             name=node_id,
@@ -98,7 +100,7 @@ async def seeded_node(graph_ctx):
             "MATCH (n) WHERE n._test = true OR n.name = 'test_entity_graph_context' DETACH DELETE n"
         )
         await session.run(
-            "MATCH (c:Chunk) WHERE c.doc_id = 'doc:test_doc' DELETE c"
+            "MATCH (c:Chunk) WHERE c.document_anchor = 'doc:test_doc' DELETE c"
         )
 
 
@@ -265,6 +267,36 @@ def _chunk_row(node_id, node_name, doc_id, chunk_id, title="T", breadcrumb="b"):
         "node_id": node_id, "node_name": node_name, "doc_id": doc_id,
         "title": title, "breadcrumb": breadcrumb, "chunk_id": chunk_id,
     }
+
+
+@pytest.mark.asyncio
+async def test_get_provenance_reads_the_writer_shape():
+    """The entity reader keys on the property the writer actually sets.
+
+    The llama-index store carries the source-document id on `document_anchor`
+    and clobbers `doc_id` to the sentinel `"None"`, so the reader must read
+    `document_anchor` — reading `doc_id` would return a fabricated id.
+    """
+    ctx, driver = _batch_ctx(lambda cypher, params: [])
+
+    await ctx.get_provenance("e1")
+
+    cypher = driver.queries[0][0]
+    assert "chunk.document_anchor AS doc_id" in cypher
+    assert "chunk.doc_id" not in cypher           # never the sentinel property
+    assert "chunk.document_anchor IS NOT NULL" in cypher  # real chunks only
+
+
+@pytest.mark.asyncio
+async def test_get_provenance_batch_reads_the_writer_shape():
+    ctx, driver = _batch_ctx(lambda cypher, params: [])
+
+    await ctx.get_provenance_batch(["e1"])
+
+    cypher = driver.queries[0][0]
+    assert "chunk.document_anchor AS doc_id" in cypher
+    assert "chunk.doc_id" not in cypher
+    assert "chunk.document_anchor IS NOT NULL" in cypher
 
 
 @pytest.mark.asyncio

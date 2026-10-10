@@ -13,6 +13,7 @@ import pytest_asyncio
 from unittest.mock import AsyncMock, MagicMock
 
 from src.persona.repository import PersonaRepository
+from src.persona.agent import ProvenanceLink
 
 CHUNK_UUID = "3f1d2c9a-0000-4000-8000-000000000001"
 
@@ -184,6 +185,61 @@ async def test_entity_writer_returns_zero_when_no_entity_rows_come_back():
     repo, _ = _repo_capturing(rows=[])
 
     assert await repo.write_persona_entity_links("Alice", "ds1", ["node-7"]) == 0
+
+
+# ---- The sector fallback must never reach `summary_provenance` ----
+#
+# The fallback exists only to give the graph snapshot a stable version/chunk
+# count; a persona with no real chunks must expose NO source links, so the turn
+# prompt, the verdict, and the frontend never render a fabricated `sector:` id.
+
+
+def _build_repo(provenance):
+    repo = PersonaRepository.__new__(PersonaRepository)
+    repo.get_provenance = AsyncMock(return_value=provenance)
+    return repo
+
+
+def _sector_results():
+    return [{
+        "domain_tag": "education", "total_relevance": 1.0,
+        "evidence_nodes": ["Lead"], "density": 1,
+    }]
+
+
+async def _build(repo, sector_results):
+    return await repo.build_single_agent_profile_from_node(
+        agent_name="Lead",
+        node={"name": "Lead", "domain_tags": ["resume"]},
+        user_query="how is my resume?",
+        dataset_id="ds",
+        agent_metrics={"matched_sectors": ["education"]},
+        sector_results=sector_results,
+        llm_output=None,
+    )
+
+
+@pytest.mark.asyncio
+async def test_build_keeps_synthetic_links_out_of_summary_provenance():
+    repo = _build_repo([])
+
+    agent = await _build(repo, _sector_results())
+
+    assert agent.summary_provenance == []                      # honest: no sources
+    # …but the fallback still feeds the graph snapshot (behaviour preserved).
+    assert agent.graph_snapshot.chunk_count == 1
+
+
+@pytest.mark.asyncio
+async def test_build_keeps_real_provenance_in_summary_provenance():
+    real = ProvenanceLink(
+        doc_id="DOC-1", title="Report", breadcrumb="a > b", chunk_id=UUID(CHUNK_UUID),
+    )
+    repo = _build_repo([real])
+
+    agent = await _build(repo, _sector_results())
+
+    assert [p.doc_id for p in agent.summary_provenance] == ["DOC-1"]
 
 
 # ---- Live: the reader recovers REAL provenance from a writer-shaped chunk ----
