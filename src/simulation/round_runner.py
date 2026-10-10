@@ -21,10 +21,12 @@ def _split_reasoning_answer(response: str) -> tuple[str, str]:
 
     The turn prompt asks for a REASONING: section then an ANSWER: section. Only
     the answer is the agent's stated position, so stance parses from it — never
-    from the private reasoning. A response without the delimiter degrades to the
+    from the private reasoning. The delimiter is matched case-sensitively: the
+    prompt asks for uppercase, so a lowercase prose line starting `answer:` is
+    content, not a delimiter. A response without the delimiter degrades to the
     whole text as the answer (empty reasoning), so a malformed turn is never lost.
     """
-    match = re.search(r"^\s*ANSWER:\s*", response, flags=re.IGNORECASE | re.MULTILINE)
+    match = re.search(r"^\s*ANSWER:\s*", response, flags=re.MULTILINE)
     if not match:
         return "", response.strip()
     answer = response[match.end():].strip()

@@ -265,3 +265,27 @@ async def test_self_history_read_failure_degrades_to_warning():
     assert snap is None  # nothing to render, no crash
     assert any("self history read failed" in w for w in warnings)
 
+
+@pytest.mark.asyncio
+async def test_one_speaker_read_failure_keeps_the_other_speakers_block():
+    """A single speaker's failed read must not discard the others' successful ones."""
+    sm = AsyncMock(spec=SocietyMemory)
+
+    async def _read(*, dataset_id, query_hash, agent_name, through_round):
+        if agent_name == "Alice":
+            raise RuntimeError("cypher down")
+        return [{"round": 1, "stance": "NEGATIVE", "summary": "bob prior"}]
+
+    sm.read_self_history.side_effect = _read
+    orch = _orchestrator(sm)
+    warnings: list[str] = []
+
+    snap = await orch._with_self_history(
+        None, pairs=[CommPair(agent_a="Alice", agent_b="Bob")],
+        dataset_id="ds1", query_hash="qh", round_num=2, warnings=warnings,
+    )
+
+    assert snap is not None
+    assert [e["agent"] for e in snap.self_entries] == ["Bob"]
+    assert any("self history read failed for Alice" in w for w in warnings)
+

@@ -84,6 +84,13 @@ class ProvenanceLink(BaseModel):
     chunk_id: UUID
 
 
+#: The `doc_id` prefix that marks a synthesized (non-source) provenance link —
+#: `PersonaRepository`'s sector fallback. A real link carries a real document id
+#: and never this prefix, so a consumer that must not fabricate (the verdict's
+#: `provenance_by_claim`) filters on it.
+SYNTHETIC_PROVENANCE_PREFIX = "sector:"
+
+
 class ConfidenceBreakdown(BaseModel):
     """Mathematical proof of the agent's groundedness."""
 

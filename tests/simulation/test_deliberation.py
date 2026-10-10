@@ -74,6 +74,31 @@ def test_splitter_with_empty_answer_degrades_to_whole_text():
     assert answer == raw
 
 
+def test_splitter_ignores_a_lowercase_answer_line():
+    """The delimiter is uppercase (as prompted); prose 'answer:' is content, not a split.
+
+    Case-insensitive matching truncated the answer at a lowercase prose line and
+    could flip stance; the split must happen only at the real `ANSWER:` marker.
+    """
+    raw = (
+        "REASONING: weighing the margin risk.\n"
+        "The real answer: scale wins only if volumes hold.\n"
+        "ANSWER: I support the proposal."
+    )
+    reasoning, answer = _split_reasoning_answer(raw)
+
+    assert answer == "I support the proposal."
+    # the lowercase prose line stayed in the reasoning, uncut
+    assert "The real answer: scale wins only if volumes hold." in reasoning
+
+
+def test_splitter_with_only_lowercase_answer_degrades_to_whole_text():
+    raw = "reasoning first\nanswer: this is not the delimiter"
+    reasoning, answer = _split_reasoning_answer(raw)
+    assert reasoning == ""
+    assert answer == raw
+
+
 # ------------------------------------------------------------------
 # Stance from answer, not reasoning (Steps 2, 5)
 # ------------------------------------------------------------------

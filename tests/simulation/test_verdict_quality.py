@@ -17,6 +17,7 @@ from src.persona.agent import (
     ExpertiseLevel,
     PersonaIdentity,
     ProvenanceLink,
+    SYNTHETIC_PROVENANCE_PREFIX,
     Stance,
 )
 from src.simulation.pair_turn import AgentTurn, RoundResult
@@ -314,4 +315,35 @@ class TestProvenanceByClaim:
         ]
         profiles = [make_agent("Alice", provenance=[])]
         verdict = VerdictSynthesizer().synthesize(rounds, profiles)
+        assert verdict.provenance_by_claim.get("entity_alpha", []) == []
+
+    @staticmethod
+    def _synthetic(domain: str = "finance") -> ProvenanceLink:
+        return ProvenanceLink(
+            doc_id=f"{SYNTHETIC_PROVENANCE_PREFIX}{domain}@ds1",
+            title=domain, breadcrumb="", chunk_id=uuid4(),
+        )
+
+    def test_synthetic_sector_links_are_never_attributed(self):
+        """The sector fallback is not provenance — it must not reach the claim map."""
+        real = provenance_of("Real Report")
+        rounds = [
+            make_round(1, [make_turn("Alice", "POSITIVE", 0.8, refs=["entity_alpha"])])
+        ]
+        profiles = [make_agent("Alice", provenance=[self._synthetic(), real])]
+
+        verdict = VerdictSynthesizer().synthesize(rounds, profiles)
+
+        assert [l.title for l in verdict.provenance_by_claim["entity_alpha"]] == [
+            "Real Report"
+        ]
+
+    def test_synthetic_only_provenance_yields_no_link(self):
+        rounds = [
+            make_round(1, [make_turn("Alice", "POSITIVE", 0.8, refs=["entity_alpha"])])
+        ]
+        profiles = [make_agent("Alice", provenance=[self._synthetic()])]
+
+        verdict = VerdictSynthesizer().synthesize(rounds, profiles)
+
         assert verdict.provenance_by_claim.get("entity_alpha", []) == []

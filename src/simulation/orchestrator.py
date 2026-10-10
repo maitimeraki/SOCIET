@@ -476,20 +476,23 @@ class DebateOrchestrator:
 
         Per-speaker read: one bounded query per speaking agent per round, matching
         how the runner renders a block per turn. Optional enrichment — a failed
-        read degrades to a warning and the round proceeds without the block.
+        read degrades to a warning for THAT speaker only; the others' successful
+        reads still render, so one bad query never discards the whole block.
         """
-        try:
-            speaking = sorted({name for p in pairs for name in (p.agent_a, p.agent_b)})
-            self_entries: list[dict] = []
-            for name in speaking:
+        speaking = sorted({name for p in pairs for name in (p.agent_a, p.agent_b)})
+        self_entries: list[dict] = []
+        for name in speaking:
+            try:
                 rows = await self._society_memory.read_self_history(
                     dataset_id=dataset_id, query_hash=query_hash,
                     agent_name=name, through_round=round_num,
                 )
-                self_entries.extend({"agent": name, **row} for row in rows)
-        except Exception as exc:
-            warnings.append(f"Round {round_num}: self history read failed: {exc}")
-            return snapshot
+            except Exception as exc:
+                warnings.append(
+                    f"Round {round_num}: self history read failed for {name}: {exc}"
+                )
+                continue
+            self_entries.extend({"agent": name, **row} for row in rows)
         if snapshot is None and not self_entries:
             return None
         if snapshot is None:

@@ -4,7 +4,7 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, List
 
-from src.persona.agent import Agent, Stance
+from src.persona.agent import Agent, SYNTHETIC_PROVENANCE_PREFIX, Stance
 from src.simulation.pair_turn import (
     AgentTurn,
     ClusterSummary,
@@ -185,12 +185,16 @@ class VerdictSynthesizer:
             else:
                 opposing.extend(turn.references)
             # Trace each claim back to provenance reachable from its speaker;
-            # never fabricate — a turn with no references contributes nothing.
+            # never fabricate — a turn with no references contributes nothing, and
+            # a synthesized (sector-fallback) link is not real provenance, so it
+            # is dropped rather than attributed to the claim.
             profile = profile_map.get(turn.agent_name)
             if profile is not None:
                 for ref in turn.references:
                     links = provenance_by_claim.setdefault(ref, [])
                     for link in profile.summary_provenance:
+                        if link.doc_id.startswith(SYNTHETIC_PROVENANCE_PREFIX):
+                            continue
                         if link not in links:
                             links.append(link)
 

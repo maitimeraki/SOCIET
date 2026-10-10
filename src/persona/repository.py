@@ -16,6 +16,7 @@ from src.persona.agent import (
     PersonaIdentity,
     ProvenanceLink,
     Stance,
+    SYNTHETIC_PROVENANCE_PREFIX,
     agent_profile_to_agent,
 )
 from neo4j import AsyncGraphDatabase
@@ -428,7 +429,7 @@ class PersonaRepository:
         )
 
         # Provenance
-        provenance = await self.get_provenance(agent_name,limit=5)
+        provenance = await self.get_provenance(agent_name, dataset_id=dataset_id, limit=5)
         # If node doesn't include provenance, attempt to synthesize from sector evidence
         if not provenance:
             docs = []
@@ -436,7 +437,7 @@ class PersonaRepository:
                 if agent_name in (res.get("evidence_nodes") or []):
                     docs.append(res)
             for d in docs[:3]:
-                doc_id = f"sector:{d.get('domain_tag')}@{dataset_id}"
+                doc_id = f"{SYNTHETIC_PROVENANCE_PREFIX}{d.get('domain_tag')}@{dataset_id}"
                 chunk_id = _uuid.uuid5(_uuid.NAMESPACE_URL, doc_id)
                 provenance.append(ProvenanceLink(doc_id=doc_id, title=str(d.get('domain_tag') or 'sector'), breadcrumb='', chunk_id=chunk_id))
 
@@ -1224,27 +1225,41 @@ class PersonaRepository:
 
         return [str(row["text"]) for row in rows if row.get("text")][:limit]
 
-    async def get_provenance(self, agent_name: str, limit: int = 5) -> List[ProvenanceLink]:
-        """Single, efficient provenance fetch."""
+    async def get_provenance(
+        self, agent_name: str, dataset_id: Optional[str] = None, limit: int = 5
+    ) -> List[ProvenanceLink]:
+        """The real source chunks a persona's `MENTIONS` edges point at.
+
+        Reads the SAME node the writer (`write_persona_provenance`) links: a
+        `:__Node__:Chunk` whose source-document id lives on `document_anchor`
+        (`graph_build` writes it there; llama-index clobbers the generic
+        `document_id`/`doc_id` properties to the sentinel `"None"`). Guarding on
+        `document_anchor` returns only REAL chunks, so a persona with no wired
+        chunks yields `[]` — the caller's sector fallback, never a read of a
+        fabricated id. `dataset_id`, when given, scopes to the writer's Persona
+        MERGE key (`name` + `dataset_id`).
+        """
         from uuid import UUID
-        
+
         # Optimized query: fixed path, indexed lookup
         cypher = """
-        MATCH (a:Persona {name: $name})
-        MATCH (a)-[:MENTIONS]->(chunk:Chunk)
-        WHERE chunk.doc_id IS NOT NULL
+        MATCH (a:Persona {name: $name})-[:MENTIONS]->(chunk:Chunk)
+        WHERE chunk.document_anchor IS NOT NULL
+          AND ($dataset_id IS NULL OR a.dataset_id = $dataset_id)
         RETURN DISTINCT
-            chunk.doc_id AS doc_id,
+            chunk.document_anchor AS doc_id,
             chunk.title AS title,
             chunk.breadcrumb AS breadcrumb,
             chunk.chunk_id AS chunk_id
         LIMIT $limit
         """
-        
+
         async with self._driver.session(database=self._db) as session:
-            result = await session.run(cypher, name=agent_name, limit=limit)
+            result = await session.run(
+                cypher, name=agent_name, dataset_id=dataset_id, limit=limit
+            )
             rows = await result.data()
-        
+
         return [
             ProvenanceLink(
                 doc_id=row["doc_id"],

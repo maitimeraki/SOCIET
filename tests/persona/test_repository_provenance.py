@@ -5,8 +5,11 @@ statement, its bounds, and the seam where the two meet (chunk node ids in,
 real `chunk.chunk_id`s out). No live Neo4j: the driver is stubbed.
 """
 from uuid import UUID
+import os
+import uuid
 
 import pytest
+import pytest_asyncio
 from unittest.mock import AsyncMock, MagicMock
 
 from src.persona.repository import PersonaRepository
@@ -86,7 +89,7 @@ async def test_writer_returns_the_edges_ensured_and_tolerates_unmatched_ids():
 @pytest.mark.asyncio
 async def test_get_provenance_returns_the_real_chunk_ids_the_writer_links():
     """The seam: the read path resolves the linked chunk node's own `chunk_id`."""
-    repo, _ = _repo_capturing(rows=[{
+    repo, session = _repo_capturing(rows=[{
         "doc_id": "doc:report",
         "title": "Report",
         "breadcrumb": "a > b",
@@ -98,6 +101,34 @@ async def test_get_provenance_returns_the_real_chunk_ids_the_writer_links():
     assert [link.chunk_id for link in links] == [UUID(CHUNK_UUID)]
     assert links[0].doc_id == "doc:report"
     assert links[0].title == "Report"
+
+
+@pytest.mark.asyncio
+async def test_get_provenance_reads_the_writer_shape():
+    """The reader keys on the property the WRITER actually sets.
+
+    `graph_build` carries the source-document id on `document_anchor` (llama-index
+    clobbers `document_id`/`doc_id` to the sentinel `"None"`), so the reader must
+    read `document_anchor` — reading `doc_id` would return a fabricated id.
+    """
+    repo, session = _repo_capturing(rows=[])
+
+    await repo.get_provenance("Alice", dataset_id="ds1")
+
+    cypher = session.run.await_args.args[0]
+    assert "chunk.document_anchor AS doc_id" in cypher
+    assert "chunk.doc_id" not in cypher           # never the sentinel property
+    assert "chunk.document_anchor IS NOT NULL" in cypher  # real chunks only
+    assert "a.dataset_id = $dataset_id" in cypher  # scoped to the writer's key
+    assert session.run.await_args.kwargs["dataset_id"] == "ds1"
+
+
+@pytest.mark.asyncio
+async def test_get_provenance_empty_when_only_unwired_chunks_exist():
+    """No real `document_anchor` → no rows → `[]` (the caller's sector fallback run)."""
+    repo, _ = _repo_capturing(rows=[])
+
+    assert await repo.get_provenance("Alice", dataset_id="ds1") == []
 
 
 # ---- Entity links: the `(Persona)-[:MENTIONS]->(__Entity__)` edges topology counts ----
@@ -153,3 +184,70 @@ async def test_entity_writer_returns_zero_when_no_entity_rows_come_back():
     repo, _ = _repo_capturing(rows=[])
 
     assert await repo.write_persona_entity_links("Alice", "ds1", ["node-7"]) == 0
+
+
+# ---- Live: the reader recovers REAL provenance from a writer-shaped chunk ----
+#
+# The central FIX-1 claim: a persona wired to a real chunk reads that chunk's
+# source document, not the fabricated `sector:` fallback. Decided by the real
+# query against a seeded graph, not a substring — mirrors the live tests in
+# tests/simulation/test_snapshot_fidelity.py.
+
+
+@pytest_asyncio.fixture
+async def live_repo():
+    uri = os.getenv("NEO4J_URI", "bolt://localhost:7687")
+    user = os.getenv("NEO4J_USERNAME", os.getenv("NEO4J_USER", "neo4j"))
+    pwd = os.getenv("NEO4J_PASSWORD", "password")
+    db = os.getenv("NEO4J_DATABASE", "neo4j")
+
+    repo = PersonaRepository(
+        neo4j_uri=uri, neo4j_user=user, neo4j_password=pwd, neo4j_database=db,
+    )
+    try:
+        async with repo._driver.session(database=db) as session:
+            await session.run("RETURN 1")
+    except Exception as exc:
+        await repo.close()
+        pytest.skip(f"Neo4j not available at {uri}: {exc}")
+
+    yield repo, repo._driver, db
+    await repo.close()
+
+
+@pytest.mark.asyncio
+async def test_get_provenance_reads_real_document_id_on_the_live_graph(live_repo):
+    """A chunk carrying `document_anchor` yields the REAL doc id, not `"None"`/sector."""
+    repo, driver, db = live_repo
+    ds = f"itest-prov-{uuid.uuid4().hex[:10]}"
+    cid = f"chunk-{uuid.uuid4().hex[:10]}"
+    doc_anchor = f"DOC-{uuid.uuid4().hex[:8]}"
+
+    try:
+        async with driver.session(database=db) as session:
+            await session.run(
+                """
+                MERGE (p:Persona {name: 'itest-Prov', dataset_id: $ds})
+                MERGE (c:__Node__ {id: $cid})
+                SET c:Chunk, c.text = 'chunk body', c.dataset_id = $ds,
+                    c.document_anchor = $anchor,
+                    c.title = 'EU Market 2027', c.breadcrumb = 'Section 3 > Risks',
+                    c.chunk_id = $chunk_id,
+                    c.doc_id = 'None'  // the sentinel llama-index writes
+                MERGE (p)-[:MENTIONS]->(c)
+                """,
+                ds=ds, cid=cid, anchor=doc_anchor, chunk_id=CHUNK_UUID,
+            )
+
+        links = await repo.get_provenance("itest-Prov", dataset_id=ds)
+
+        assert [link.doc_id for link in links] == [doc_anchor]      # real, not "None"
+        assert links[0].title == "EU Market 2027"
+        assert links[0].breadcrumb == "Section 3 > Risks"
+        assert links[0].chunk_id == UUID(CHUNK_UUID)
+
+        # A persona with no wired chunks reads empty — never a fabricated link.
+        assert await repo.get_provenance("itest-Prov", dataset_id="other-ds") == []
+    finally:
+        async with driver.session(database=db) as session:
+            await session.run("MATCH (n) WHERE n.dataset_id = $ds DETACH DELETE n", ds=ds)
