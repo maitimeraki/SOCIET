@@ -27,7 +27,7 @@ const byId = (...nodes: GraphNode[]): Record<string, GraphNode> =>
 
 describe('syncGraph', () => {
   it('mirrors the store nodes and edges into the graphology instance', () => {
-    const graph = new Graph()
+    const graph = new Graph({ multi: true })
     const nodes = byId(
       { id: 'a', label: 'Glucose', type: 'Molecule' },
       { id: 'b', label: 'Respiration', type: 'Process' },
@@ -43,7 +43,7 @@ describe('syncGraph', () => {
   })
 
   it('colours a node from its promoted label colour', () => {
-    const graph = new Graph()
+    const graph = new Graph({ multi: true })
     const labels: GraphLabel[] = [
       { label: 'Molecule', color: 'hsl(210 70% 55%)' },
       { label: 'Process', color: 'hsl(20 70% 55%)' },
@@ -55,7 +55,7 @@ describe('syncGraph', () => {
   })
 
   it('keeps ONE node when a repeated id arrives', () => {
-    const graph = new Graph()
+    const graph = new Graph({ multi: true })
     syncGraph(graph, byId({ id: 'a', label: 'Glucose', type: 'Molecule' }), {}, [])
     syncGraph(graph, byId({ id: 'a', label: 'Glucose (revised)', type: 'Molecule' }), {}, [])
 
@@ -64,7 +64,7 @@ describe('syncGraph', () => {
   })
 
   it('seeds every added node with a finite position so Sigma never sees a positionless node', () => {
-    const graph = new Graph()
+    const graph = new Graph({ multi: true })
     const nodes = byId(
       { id: 'a', label: 'Glucose', type: 'Molecule' },
       { id: 'b', label: 'Respiration', type: 'Process' },
@@ -80,7 +80,7 @@ describe('syncGraph', () => {
   })
 
   it('keeps a node position once it has settled (a re-sync does not re-seed it)', () => {
-    const graph = new Graph()
+    const graph = new Graph({ multi: true })
     syncGraph(graph, byId({ id: 'a', label: 'A', type: 'X' }), {}, [])
     graph.setNodeAttribute('a', 'x', 42)
 
@@ -90,7 +90,7 @@ describe('syncGraph', () => {
   })
 
   it('drops nodes and edges the store no longer holds (snapshot reset)', () => {
-    const graph = new Graph()
+    const graph = new Graph({ multi: true })
     const nodes = byId(
       { id: 'a', label: 'A', type: 'X' },
       { id: 'b', label: 'B', type: 'Y' },
@@ -102,6 +102,26 @@ describe('syncGraph', () => {
     expect(graph.order).toBe(1)
     expect(graph.hasNode('a')).toBe(false)
     expect(graph.size).toBe(0)
+  })
+
+  it('keeps two edges linking the same nodes with different labels (multi graph)', () => {
+    // Regression: edge identity is `source|target|label`, so two chunks routinely connect the
+    // same pair with different labels. A SIMPLE graphology graph throws UsageGraphError on the
+    // second addEdgeWithKey, which crashed the sync effect and blanked the page.
+    const graph = new Graph({ multi: true })
+    const nodes = byId(
+      { id: 'a', label: 'Eu ai act', type: 'Regulation' },
+      { id: 'b', label: 'Autonomous warehouse robotics', type: 'Technology' },
+    )
+    const edges: Record<string, GraphEdge> = {
+      'a|b|CLASSIFIES_AS': { source: 'a', target: 'b', label: 'CLASSIFIES_AS' },
+      'a|b|MANDATES': { source: 'a', target: 'b', label: 'MANDATES' },
+    }
+
+    expect(() => syncGraph(graph, nodes, edges, [])).not.toThrow()
+    expect(graph.size).toBe(2)
+    expect(graph.hasEdge('a|b|CLASSIFIES_AS')).toBe(true)
+    expect(graph.hasEdge('a|b|MANDATES')).toBe(true)
   })
 })
 
@@ -129,7 +149,7 @@ describe('large-graph guard', () => {
   })
 
   it('drops node labels from the graph attributes above the ceiling', () => {
-    const graph = new Graph()
+    const graph = new Graph({ multi: true })
     const nodes: Record<string, GraphNode> = {}
     for (let i = 0; i < 1600; i++) nodes[`n${i}`] = { id: `n${i}`, label: `Node ${i}`, type: 'Thing' }
 
@@ -139,7 +159,7 @@ describe('large-graph guard', () => {
   })
 
   it('keeps node labels for a graph under the ceiling', () => {
-    const graph = new Graph()
+    const graph = new Graph({ multi: true })
     const nodes = byId(
       { id: 'a', label: 'Glucose', type: 'Molecule' },
       { id: 'b', label: 'Respiration', type: 'Process' },
@@ -151,7 +171,7 @@ describe('large-graph guard', () => {
   })
 
   it('never sets an edge label attribute — edge labels stay off', () => {
-    const graph = new Graph()
+    const graph = new Graph({ multi: true })
     const nodes = byId(
       { id: 'a', label: 'Glucose', type: 'Molecule' },
       { id: 'b', label: 'ATP', type: 'Molecule' },

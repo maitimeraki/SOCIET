@@ -162,6 +162,10 @@ export default function GraphPage() {
 
       {phase === 'done' && (
         <div className="space-y-6">
+          {/* The build is over, so the canvas unmounts from the build block above; re-mount it here
+              so the finished graph stays on screen. The stream reconnects to the completed job and
+              reads one full snapshot, which now carries every DERIVED_FROM-linked entity. */}
+          {datasetId && graphJobId && <GraphCanvas datasetId={datasetId} jobId={graphJobId} />}
           <div>
             <p className="text-heading text-paper">Graph built</p>
             <StatRow
