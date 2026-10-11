@@ -60,7 +60,7 @@ class GraphContext:
         )
         self._db = self.config.neo4j_database
         self._embed_model = OllamaEmbedding(
-            model_name="nomic-embed-text:v1.5",
+            model_name=LLMConfig.embedding_model,
             base_url=LLMConfig.ollama_base_url,
             client_kwargs={"timeout": _EMBED_TIMEOUT_SECONDS},
             ollama_additional_kwargs={"mirostat": 0},

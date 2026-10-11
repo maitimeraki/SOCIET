@@ -30,13 +30,50 @@ def test_every_placeholder_has_a_param_and_every_param_is_used():
 
 
 def test_vector_statements_use_literal_index_config():
+    from src.graph.neo4j_bootstrap import EMBEDDING_DIMENSIONS
+
     vectors = _vectors()
     assert len(vectors) == 2
     for cypher, params in vectors:
         assert "$" not in cypher, cypher
         assert params == {}, cypher
-        assert "768" in cypher
+        assert str(EMBEDDING_DIMENSIONS) in cypher
         assert "'cosine'" in cypher
+
+
+def test_embedding_model_is_single_sourced():
+    """Ingestion, retrieval and persona embedding must use the SAME model, and
+    the schema's dimension must match it. Neo4j returns an EMPTY set (no error)
+    for a query vector whose length differs from the index — a desync surfaces
+    as "no agents derivable from graph" even though the nodes exist.
+    """
+    from src.graph.neo4j_bootstrap import EMBEDDING_DIMENSIONS
+    from src.llm.config_llm import LLMConfig
+    from src.persona.graph_context import GraphContext
+    from src.persona.repository import PersonaRepository
+
+    assert EMBEDDING_DIMENSIONS == LLMConfig.embedding_dimensions
+
+    ctx = GraphContext()
+    try:
+        assert ctx._embed_model.model_name == LLMConfig.embedding_model
+    finally:
+        import asyncio
+
+        asyncio.run(ctx.close())
+
+    repo = PersonaRepository(
+        neo4j_uri="bolt://localhost:7687",
+        neo4j_user="neo4j",
+        neo4j_password="password",
+        neo4j_database="neo4j",
+    )
+    try:
+        assert repo.embed_model.model_name == LLMConfig.embedding_model
+    finally:
+        import asyncio
+
+        asyncio.run(repo.close())
 
 
 def test_document_id_uniqueness_constraint_present():
