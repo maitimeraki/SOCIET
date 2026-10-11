@@ -589,12 +589,16 @@ async def get_job(job_id: str):
         if run:
             return run
 
+    # `_persist_run` writes non-atomically, so a crash mid-write leaves invalid
+    # JSON; degrade to the same not-found shape `_job_state` uses rather than
+    # letting the read raise out of the endpoint.
     path = _RUNS_RUNTIME_DIR / f"{job_id}.json"
-    if path.exists():
+    try:
         payload = await asyncio.to_thread(path.read_text, "utf-8")
         return json.loads(payload)
-
-    return {"job_id": job_id, "status": "failed", "stage": "not_found", "error": "job id not found"}
+    except (OSError, ValueError) as exc:
+        logger.warning(f"Could not read job {job_id} from runtime file ({exc})")
+        return {"job_id": job_id, "status": "failed", "stage": "not_found", "error": "job id not found"}
 
 
 @app.post("/simulate/async", status_code=status.HTTP_202_ACCEPTED)

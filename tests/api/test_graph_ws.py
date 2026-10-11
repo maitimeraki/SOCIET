@@ -16,7 +16,7 @@ import threading
 import uuid
 
 import pytest
-from fastapi import FastAPI
+from fastapi import FastAPI, WebSocketDisconnect
 from fastapi.testclient import TestClient
 
 import src.api.graph_snapshot as graph_snapshot
@@ -205,3 +205,78 @@ def test_delta_published_during_the_snapshot_window_is_delivered_once(monkeypatc
     delivered = [n["id"] for f in frames for n in f.get("nodes", [])]
     assert delivered.count("Person:Seed") == 1
     assert delivered.count("Org:New") == 1
+
+
+class _DisconnectingWS:
+    """A socket whose peer has already gone: every send raises, exactly as it does
+    when a client closes during the snapshot window (reload, StrictMode remount,
+    navigation). No receive side is reached — the route returns before streaming."""
+
+    async def accept(self) -> None:
+        pass
+
+    async def send_json(self, payload: dict) -> None:
+        raise WebSocketDisconnect(code=1006)
+
+
+@pytest.mark.asyncio
+async def test_disconnect_during_snapshot_window_does_not_escape_the_route(monkeypatch):
+    """The reported failure: a client that closed while the snapshot was being read
+    made the snapshot send raise `WebSocketDisconnect` straight out of the ASGI app
+    (uvicorn logged a full `Exception in ASGI application`). The route must absorb it
+    and return cleanly, dropping the subscription."""
+    job_id = f"ws-{uuid.uuid4()}"
+    api_server.RUNS[job_id] = {"status": "running", "result": {"dataset_id": "ds-gone"}}
+
+    async def fake_snapshot(dataset_id: str) -> GraphDelta:
+        return GraphDelta(nodes=[], edges=[], new_labels=[])
+
+    monkeypatch.setattr(graph_snapshot, "read_snapshot", fake_snapshot)
+    from src.api.graph_stream_api import stream_graph
+
+    await stream_graph(_DisconnectingWS(), job_id)  # must return, not raise
+
+
+@pytest.mark.asyncio
+async def test_disconnect_on_unknown_job_done_send_does_not_escape():
+    """Same class of hang-up on the other pre-stream send: the `done` frame for a
+    job with no dataset. That send sits outside the streaming try, so it needs the
+    guard too."""
+    job_id = f"ws-{uuid.uuid4()}"  # never registered: _job_state -> ("failed", None)
+    from src.api.graph_stream_api import stream_graph
+
+    await stream_graph(_DisconnectingWS(), job_id)  # must return, not raise
+
+
+class _RecordingWS:
+    """A live socket: sends are recorded so a test can assert the frames emitted."""
+
+    def __init__(self) -> None:
+        self.sent: list[dict] = []
+
+    async def accept(self) -> None:
+        pass
+
+    async def send_json(self, payload: dict) -> None:
+        self.sent.append(payload)
+
+
+@pytest.mark.asyncio
+async def test_snapshot_read_failure_is_reported_and_does_not_escape(monkeypatch):
+    """A data-retrieval failure AFTER accept — Neo4j unreachable while reading the
+    snapshot — must not escape as an ASGI exception (the HTTP global handler does
+    not cover WebSockets). It is reported as an `error` frame, then `done`."""
+    job_id = f"ws-{uuid.uuid4()}"
+    api_server.RUNS[job_id] = {"status": "running", "result": {"dataset_id": "ds-boom"}}
+
+    async def boom(dataset_id: str) -> GraphDelta:
+        raise RuntimeError("neo4j unreachable")
+
+    monkeypatch.setattr(graph_snapshot, "read_snapshot", boom)
+    from src.api.graph_stream_api import stream_graph
+
+    ws = _RecordingWS()
+    await stream_graph(ws, job_id)  # must return, not raise
+
+    assert [f["type"] for f in ws.sent] == ["error", "done"]
+    assert "neo4j unreachable" in ws.sent[0]["message"]

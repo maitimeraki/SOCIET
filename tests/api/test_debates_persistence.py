@@ -129,6 +129,14 @@ def test_missing_run_doc_is_404(client, store_dir):
     assert client.get("/simulate/debates/nope").status_code == 404
 
 
+def test_corrupt_run_doc_reads_as_missing_not_a_crash(client, store_dir):
+    """A corrupt single run doc degrades to 404, matching `list_run_docs`, which
+    already skips unreadable files — the singular read must not raise instead."""
+    store_dir.mkdir(parents=True, exist_ok=True)
+    (store_dir / "corrupt.json").write_text("{ not json", encoding="utf-8")
+    assert client.get("/simulate/debates/corrupt").status_code == 404
+
+
 @pytest.mark.asyncio
 async def test_persist_debate_run_mirrors_the_live_job(store_dir):
     manager = _DebateWSManager()
