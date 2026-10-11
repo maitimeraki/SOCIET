@@ -27,6 +27,15 @@ class LLMConfig:
     # Ollama settings (local)
     ollama_model: str = os.getenv("OLLAMA_MODEL", "qwen3.5-16k:4b")  # or "mistral", "codellama", etc.
     ollama_base_url: str = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
+
+    # Embedding model — ONE source for graph ingestion (graph_build), retrieval
+    # (graph_context) and persona writes (repository), plus the schema's vector
+    # dimension (neo4j_bootstrap). They MUST agree: Neo4j's vector index returns
+    # an EMPTY set (no error) for a query vector whose length differs from the
+    # index, so a mismatch surfaces as "no agents derivable from graph".
+    # qwen3-embedding:0.6b produces 1024-dim vectors.
+    embedding_model: str = os.getenv("EMBEDDING_MODEL", "qwen3-embedding:0.6b")
+    embedding_dimensions: int = int(os.getenv("EMBEDDING_DIMENSIONS", "1024"))
     
     # Nvidia Nim
     nvidia_nim_api_key: str = os.getenv("NVIDIA_NIM_API_KEY","")

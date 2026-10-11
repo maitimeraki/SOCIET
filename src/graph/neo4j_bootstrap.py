@@ -34,6 +34,8 @@ import logging
 
 from neo4j import AsyncGraphDatabase
 
+from src.llm.config_llm import LLMConfig
+
 logger = logging.getLogger(__name__)
 
 
@@ -41,9 +43,11 @@ logger = logging.getLogger(__name__)
 # Schema statements
 # ---------------------------------------------------------------------------
 
-# Vector index parameters — must match the embed model in production.
-# Default OllamaEmbeddings("nomic-embed-text:v1.5") produces 768-dim vectors.
-EMBEDDING_DIMENSIONS = 768
+# Vector index parameters — the dimension MUST equal the embedding model's
+# output length (LLMConfig.embedding_model). Neo4j returns an empty result set
+# (no error) when a query vector's length differs from the index, so a drift
+# here silently kills retrieval. Single source: LLMConfig.
+EMBEDDING_DIMENSIONS = LLMConfig.embedding_dimensions
 EMBEDDING_SIMILARITY = "cosine"
 
 # `__Entity__.embedding` is owned by llama-index's Neo4jPropertyGraphStore,
