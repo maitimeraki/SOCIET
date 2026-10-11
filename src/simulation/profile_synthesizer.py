@@ -1,4 +1,4 @@
-"""ProfileSynthesizer: Graph-backed agent profile synthesis from entity clusters."""
+"""ProfileSynthesizer: Graph-backed agent profile synthesis from the required nodes."""
 import asyncio
 import inspect
 import logging
@@ -23,23 +23,11 @@ logger = logging.getLogger(__name__)
 
 
 class ProfileSynthesizer:
-    """Synthesizes canonical Agents from graph entity clusters."""
+    """Synthesizes canonical Agents from the graph's required nodes — one agent per node."""
 
     def __init__(self, persona_repo: PersonaRepository, graph_context: GraphContext):
         self._repo = persona_repo
         self._ctx = graph_context
-
-    async def _safe_provenance(self, entity_id: str) -> list:
-        """Fetch entity provenance; tolerate unconfigured/mocked contexts."""
-        try:
-            if hasattr(self._ctx, "get_provenance"):
-                result = self._ctx.get_provenance(entity_id)
-                if inspect.iscoroutine(result):
-                    result = await result
-                return list(result) if isinstance(result, (list, tuple)) else []
-        except Exception:
-            return []
-        return []
 
     async def synthesize(
         self,
@@ -57,11 +45,11 @@ class ProfileSynthesizer:
         """Synthesize agent profiles from relevant graph entities.
 
         1. Vector-search entities by query
-        2. Group entities by shared chunk provenance (co-occurrence clustering)
-        3. Rank clusters by the S4 score (intent-semantic + density blend); with
-           no intent this is exactly the previous density-only ordering
-        4. Take top clusters (adaptive count)
-        5. Build Agent for each cluster representative
+        2. The required node set (the seeds plus their one-hop entity neighbours)
+        3. Rank nodes by the S4 score (intent-semantic + density blend); with no
+           intent this is exactly the previous density-only ordering
+        4. Take top nodes (adaptive count)
+        5. Build one Agent per node
 
         `intent` is the read-only S3 intent (None for older callers); `config`
         carries the S4 blend weights. Raises `NoAgentsDerivableError` when the
@@ -82,70 +70,27 @@ class ProfileSynthesizer:
         """
         # Adaptive target: sqrt(n) * 4, capped at max_agents
         search_limit = max_agents * 3
-        entities = await self._ctx.find_relevant_entities(query, limit=search_limit)
-        relevant_entity_count = len(entities)
-        target = min(max_agents, int(math.sqrt(relevant_entity_count) * 4))
+        seeds = await self._ctx.find_relevant_entities(query, limit=search_limit)
 
-        if not entities:
+        if not seeds:
             raise NoAgentsDerivableError(
                 f"no agents derivable from graph: no candidate entities for query {query!r} "
                 f"in dataset {dataset_id!r}"
             )
 
-        # Co-occurrence clustering: entities sharing source chunks cluster together.
-        # Provenance fetch bounded by search_limit = max_agents * 3.
-        prov_keys: list[tuple] = []
-        for entity in entities:
-            prov = await self._safe_provenance(entity.id)
-            doc_ids = sorted({p.doc_id for p in prov if getattr(p, "doc_id", None)})
-            if doc_ids:
-                prov_keys.append(tuple(doc_ids))
-            else:
-                # Empty provenance → unique key (preserves one-cluster-per-entity path).
-                prov_keys.append(("__solo__", entity.id))
+        # Required nodes are the roster's candidates: one agent per node. The
+        # old path grouped by shared document provenance, so a single-document
+        # graph collapsed to one cluster — and one un-pairable agent.
+        required = await self._required_nodes(seeds, limit=search_limit)
+        target = min(max_agents, int(math.sqrt(len(required)) * 4))
 
-        initial: dict[tuple, list[EntityNode]] = defaultdict(list)
-        for entity, key in zip(entities, prov_keys):
-            initial[key].append(entity)
-
-        # Merge clusters sharing any doc_id.
-        # ponytail: O(n^2) pairwise union-find; n bounded by max_agents * 3 ≤ 50.
-        key_list = list(initial.keys())
-        parent = {i: i for i in range(len(key_list))}
-
-        def _find(i: int) -> int:
-            while parent[i] != i:
-                parent[i] = parent[parent[i]]
-                i = parent[i]
-            return i
-
-        for i in range(len(key_list)):
-            if "__solo__" in key_list[i]:
-                continue
-            set_i = set(key_list[i])
-            for j in range(i + 1, len(key_list)):
-                if "__solo__" in key_list[j]:
-                    continue
-                if set_i & set(key_list[j]):
-                    ri, rj = _find(i), _find(j)
-                    if ri != rj:
-                        parent[ri] = rj
-
-        clusters: dict[int, list[EntityNode]] = defaultdict(list)
-        for i, key in enumerate(key_list):
-            clusters[_find(i)].extend(initial[key])
-
-        # S4: rank clusters by the intent-semantic + density blend. No intent →
-        # no terms → density-only ordering, which reproduces the previous
-        # `sort(key=sum(relevance_score), reverse=True)` exactly (the density
-        # component is a monotonic scaling of that sum and the sort is stable).
         candidates = [
             SelectionCandidate(
-                name=max(ents, key=lambda e: e.relevance_score).name,
-                text=self._candidate_text(ents),
-                evidence=ents,
+                name=node.name,
+                text=self._candidate_text([node]),
+                evidence=[node],
             )
-            for ents in clusters.values()
+            for node in required
         ]
         rows = rank_candidates(candidates, intent, config or DebateConfig(), warnings=warnings)
         if selection_rows is not None:
@@ -158,17 +103,13 @@ class ProfileSynthesizer:
                 await on_selection(list(rows))
             except Exception as exc:
                 logger.warning("on_selection emitter failed: %s", exc)
-        # Pair each ranked row with its own cluster — candidates and clusters are
-        # positionally aligned (built by the same comprehension), so a name-keyed
-        # collapse is never needed: each row consumes its cluster from a per-name
-        # bucket in rank order, and two clusters whose representative entities
-        # share a name both survive (P2-A m1).
-        clusters_by_name: dict[str, list[list[EntityNode]]] = defaultdict(list)
-        for candidate, ents in zip(candidates, clusters.values()):
-            clusters_by_name[candidate.name].append(ents)
-        top_clusters = [
-            (row, clusters_by_name[row.name].pop(0)) for row in rows[:target]
-        ]
+        # Pair each ranked row with its node evidence — positionally aligned with
+        # `required` (same comprehension), so a row consumes its evidence from a
+        # per-name bucket in rank order and two rows sharing a name both survive.
+        evidence_by_name: dict[str, list[list[EntityNode]]] = defaultdict(list)
+        for candidate, node in zip(candidates, required):
+            evidence_by_name[candidate.name].append([node])
+        top_rows = [(row, evidence_by_name[row.name].pop(0)) for row in rows[:target]]
 
         # S5: ONE batched distillation call for the whole selection set — the S3
         # stance axis plus each row's anchors give every persona a question-aware
@@ -178,8 +119,8 @@ class ProfileSynthesizer:
         if distill:
             distilled = await self._repo.distill_profiles(
                 personas=[
-                    self._distillation_entry(row, cluster_entities)
-                    for row, cluster_entities in top_clusters
+                    self._distillation_entry(row, evidence)
+                    for row, evidence in top_rows
                 ],
                 query=query,
                 core_question=intent.core_question if intent is not None else "",
@@ -187,32 +128,38 @@ class ProfileSynthesizer:
                 warnings=warnings,
             )
 
-        # Build profiles for each cluster
+        # Build one profile per required node
+        # ONE batched node fetch serves every profile (was one query per profile).
+        # The name list is the exact expression `_build_profile` resolves below,
+        # so the pre-fetch cannot diverge from the per-profile lookups; a name
+        # with no row keeps the node-properties fallback.
+        nodes_by_name = await self._repo.fetch_nodes_by_names(
+            [row.name for row, _ in top_rows]
+        )
         profiles: list[Agent] = []
         semaphore = asyncio.Semaphore(8)
 
         async def _build_profile(
-            cluster_id: str, cluster_entities: list[EntityNode]
+            row_name: str, evidence: list[EntityNode]
         ) -> Agent | None:
             async with semaphore:
-                # Use the most relevant entity in the cluster as representative
-                representative = max(cluster_entities, key=lambda e: e.relevance_score)
+                # Use the most relevant entity in the evidence as representative
+                representative = max(evidence, key=lambda e: e.relevance_score)
                 agent_name = representative.name
 
-                # Fetch full node properties
-                nodes_map = await self._repo.fetch_nodes_by_names([agent_name])
-                node = nodes_map.get(agent_name) or {
+                # Full node properties, served by the roster's single batch fetch.
+                node = nodes_by_name.get(agent_name) or {
                     "name": agent_name,
                     **representative.properties,
                 }
 
                 # Calculate metrics using repo method
-                # For cluster-based synthesis, we construct synthetic sector_results
-                sector_results = self._build_sector_results_from_cluster(cluster_entities)
+                # For node-level synthesis, we construct synthetic sector_results
+                sector_results = self._build_sector_results(evidence)
 
                 max_relevance = max(
-                    e.relevance_score for e in cluster_entities
-                ) if cluster_entities else 1.0
+                    e.relevance_score for e in evidence
+                ) if evidence else 1.0
 
                 metrics = await self._repo.calculate_agent_metrics_and_context_for_llm(
                     agent_name=agent_name,
@@ -224,7 +171,7 @@ class ProfileSynthesizer:
                 # D2: write this persona's real provenance edges BEFORE the build,
                 # so the `get_provenance` inside it finds them instead of falling
                 # back to the uuid5 sector fabrication. Never raises into synthesis.
-                chunk_ids = self._cluster_chunk_ids(cluster_entities)
+                chunk_ids = self._evidence_chunk_ids(evidence)
                 if chunk_ids:
                     try:
                         pending = self._repo.write_persona_provenance(
@@ -243,6 +190,25 @@ class ProfileSynthesizer:
                                 f"provenance write failed for persona {agent_name!r}: {exc}"
                             )
 
+                    # Topology prerequisite: without persona→entity links the
+                    # round-1 pair scorer has no shared middle nodes to count.
+                    try:
+                        pending = self._repo.write_persona_entity_links(
+                            persona_name=agent_name,
+                            dataset_id=dataset_id,
+                            chunk_node_ids=chunk_ids,
+                        )
+                        if inspect.iscoroutine(pending):
+                            await pending
+                    except Exception as exc:
+                        logger.warning(
+                            "entity-link write failed for persona %r: %s", agent_name, exc,
+                        )
+                        if warnings is not None:
+                            warnings.append(
+                                f"entity-link write failed for persona {agent_name!r}: {exc}"
+                            )
+
                 # Build profile
                 return await self._repo.build_single_agent_profile_from_node(
                     agent_name=agent_name,
@@ -252,7 +218,7 @@ class ProfileSynthesizer:
                     agent_metrics=metrics,
                     sector_results=sector_results,
                     llm_output=None,
-                    distilled=distilled.get(cluster_id) if distilled else None,
+                    distilled=distilled.get(row_name) if distilled else None,
                 )
 
         # S9 visibility: one `agent` event per completed profile, in completion
@@ -260,22 +226,22 @@ class ProfileSynthesizer:
         completed = 0
         completed_lock = asyncio.Lock()
 
-        async def _build_and_notify(row: SelectionRow, cluster_entities: list[EntityNode]) -> Agent | None:
+        async def _build_and_notify(row: SelectionRow, entity_evidence: list[EntityNode]) -> Agent | None:
             nonlocal completed
-            profile = await _build_profile(row.name, cluster_entities)
+            profile = await _build_profile(row.name, entity_evidence)
             if profile is not None and on_profile is not None:
                 async with completed_lock:
                     completed += 1
                     index = completed
                 try:
-                    await on_profile(profile, index, len(top_clusters))
+                    await on_profile(profile, index, len(top_rows))
                 except Exception as exc:
                     logger.warning("on_profile emitter failed for %r: %s", profile.identity.name, exc)
             return profile
 
         tasks = [
-            _build_and_notify(row, cluster_entities)
-            for row, cluster_entities in top_clusters
+            _build_and_notify(row, entity_evidence)
+            for row, entity_evidence in top_rows
         ]
         results = await asyncio.gather(*tasks)
         profiles = [p for p in results if p is not None]
@@ -292,7 +258,7 @@ class ProfileSynthesizer:
         """Build full Agent profiles for explicitly-named graph Personas.
 
         Activation path: candidates surfaced by topology are converted through
-        the same repository pipeline as query-driven synthesis, minus clustering.
+        the same repository pipeline as query-driven synthesis.
         Joiners are deliberately **not** distilled (no mid-loop LLM calls), so
         they keep the template bio/perspective; they do get the same D2
         provenance write as the initial roster when their node carries a
@@ -301,12 +267,14 @@ class ProfileSynthesizer:
         if not names:
             return []
         relevant = {str(k): float(v) for k, v in (relevance_by_name or {}).items()}
+        # ONE batched node fetch for every joiner (was one query per name); the
+        # per-name map keeps the same build-or-skip handling below.
+        nodes_by_name = await self._repo.fetch_nodes_by_names(names)
         semaphore = asyncio.Semaphore(8)
 
         async def _build(name: str) -> Agent | None:
             async with semaphore:
-                nodes_map = await self._repo.fetch_nodes_by_names([name])
-                node = nodes_map.get(name)
+                node = nodes_by_name.get(name)
                 if node is None:
                     # No graph node backs this name. Skipping beats fabricating a
                     # default-archetype/-stance/-cior Agent from the bare string.
@@ -346,6 +314,21 @@ class ProfileSynthesizer:
                             "provenance write failed for joiner %r: %s", name, exc,
                         )
 
+                    # Same topology prerequisite as the initial roster: joiners
+                    # need entity links or they can never pair either.
+                    try:
+                        pending = self._repo.write_persona_entity_links(
+                            persona_name=name,
+                            dataset_id=dataset_id,
+                            chunk_node_ids=[chunk_id.strip()],
+                        )
+                        if inspect.iscoroutine(pending):
+                            await pending
+                    except Exception as exc:
+                        logger.warning(
+                            "entity-link write failed for joiner %r: %s", name, exc,
+                        )
+
                 return await self._repo.build_single_agent_profile_from_node(
                     agent_name=name, node=node, user_query=query, dataset_id=dataset_id,
                     agent_metrics=metrics, sector_results=sector_results, llm_output=None,
@@ -354,48 +337,73 @@ class ProfileSynthesizer:
         results = await asyncio.gather(*(_build(n) for n in names))
         return [p for p in results if p is not None]
 
-    def _distillation_entry(self, row: SelectionRow, cluster_entities: list[EntityNode]) -> dict:
+    async def _required_nodes(self, seeds: list[EntityNode], limit: int) -> list[EntityNode]:
+        """The roster's candidate nodes: the seeds plus their one-hop entity
+        neighbours, deduped by (id, name). A missing method, a raising walk or
+        a non-list answer degrade to the seeds alone — logged, never raised.
+        """
+        required = list(seeds)
+        try:
+            walk = getattr(self._ctx, "find_connected_nodes", None)
+            neighbours = walk([seed.id for seed in seeds], limit) if callable(walk) else []
+            if inspect.iscoroutine(neighbours):
+                neighbours = await neighbours
+            if not isinstance(neighbours, (list, tuple)):
+                neighbours = []
+        except Exception as exc:
+            logger.warning("node traversal failed; continuing with the seed nodes only: %s", exc)
+            neighbours = []
+
+        seen = {(seed.id, seed.name) for seed in required}
+        for node in neighbours:
+            key = (node.id, node.name)
+            if key not in seen:
+                seen.add(key)
+                required.append(node)
+        return required
+
+    def _distillation_entry(self, row: SelectionRow, evidence: list[EntityNode]) -> dict:
         """One persona's S5 distillation input: identity, the grounding synthesis
-        already holds (node properties, matched sectors, cluster summaries) and
+        already holds (node properties, matched sectors, node summaries) and
         the S4 provenance anchors of its selection row. No extra graph reads —
         the entry is name-keyed by `row.name`, the same key profiles build under.
         """
         representative = (
-            max(cluster_entities, key=lambda e: e.relevance_score) if cluster_entities else None
+            max(evidence, key=lambda e: e.relevance_score) if evidence else None
         )
         properties = getattr(representative, "properties", None) if representative is not None else None
         summaries = [
             e.summary.strip()
-            for e in cluster_entities
+            for e in evidence
             if isinstance(getattr(e, "summary", None), str) and e.summary.strip()
         ]
         return {
             "name": row.name,
             "node": dict(properties) if isinstance(properties, dict) else {},
-            "sector_results": self._build_sector_results_from_cluster(cluster_entities),
+            "sector_results": self._build_sector_results(evidence),
             "evidence": summaries,
             "anchors": [dict(anchor) for anchor in row.anchors],
         }
 
     @staticmethod
-    def _candidate_text(cluster_entities: list[EntityNode]) -> str:
-        """The S4 semantic text of a cluster: its entities' names, domain tags and summaries."""
+    def _candidate_text(entities: list[EntityNode]) -> str:
+        """The S4 semantic text of a candidate: its entities' names, domain tags and summaries."""
         parts: list[str] = []
-        for entity in cluster_entities:
+        for entity in entities:
             parts.append(str(getattr(entity, "name", "") or ""))
             parts.extend(str(tag) for tag in (getattr(entity, "domain_tags", None) or []))
             parts.append(str(getattr(entity, "summary", "") or ""))
         return " ".join(part for part in parts if part)
 
     @staticmethod
-    def _cluster_chunk_ids(cluster_entities: list[EntityNode]) -> list[str]:
-        """The cluster's chunk node ids: each entity's `triplet_source_id`.
+    def _evidence_chunk_ids(evidence: list[EntityNode]) -> list[str]:
+        """The evidence's chunk node ids: each entity's `triplet_source_id`.
 
         Tolerant `Mapping` reads — a non-mapping `properties` or a missing/blank
         value contributes nothing; ids are stripped and deduped. Never invents.
         """
         ids: list[str] = []
-        for entity in cluster_entities:
+        for entity in evidence:
             properties = getattr(entity, "properties", None)
             if not isinstance(properties, Mapping):
                 continue
@@ -404,21 +412,19 @@ class ProfileSynthesizer:
                 ids.append(value.strip())
         return list(dict.fromkeys(ids))
 
-    def _build_sector_results_from_cluster(
-        self, cluster_entities: list[EntityNode]
-    ) -> list[dict[str, Any]]:
-        """Build synthetic sector_results from a cluster of entities."""
-        if not cluster_entities:
+    def _build_sector_results(self, evidence: list[EntityNode]) -> list[dict[str, Any]]:
+        """Build synthetic sector_results from one node's evidence."""
+        if not evidence:
             return []
 
         # Use the top entity's domain tags as the sector
-        primary = cluster_entities[0]
+        primary = evidence[0]
         domain_tag = primary.domain_tags[0] if primary.domain_tags else primary.label
 
-        # Collect all unique agent names from cluster
-        evidence_nodes = [e.name for e in cluster_entities if e.name]
-        total_relevance = sum(e.relevance_score for e in cluster_entities)
-        density = len(cluster_entities)
+        # Collect all unique agent names from the evidence
+        evidence_nodes = [e.name for e in evidence if e.name]
+        total_relevance = sum(e.relevance_score for e in evidence)
+        density = len(evidence)
 
         return [
             {

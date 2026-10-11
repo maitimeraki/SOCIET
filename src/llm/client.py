@@ -6,8 +6,10 @@ Public surface unchanged for all callers:
     llm.get_available_providers() -> dict
 Fallback chain: requested provider first, then ollama -> openai -> anthropic -> huggingface.
 """
+import asyncio
 import logging
 import os
+import uuid
 from typing import AsyncGenerator, Optional
 
 import litellm
@@ -16,11 +18,16 @@ from src.llm.config_llm import LLMConfig
 
 logger = logging.getLogger(__name__)
 
+# Every LLM attempt is explicitly bounded (litellm's default attempt timeout is 6000 s).
+LLM_ATTEMPT_TIMEOUT_SECONDS = 90  # per HTTP attempt
+LLM_NUM_RETRIES = 1  # litellm-level retries per fallback leg
+LLM_TOTAL_DEADLINE_SECONDS = 300  # the whole fallback chain, all legs together
+
 
 class LLMClient:
     """Multi-provider LLM client over the LiteLLM gateway."""
 
-    PROVIDERS = ["openai", "anthropic", "huggingface", "ollama"]
+    PROVIDERS = ["openai", "anthropic", "huggingface", "ollama","openrouter","deepseek","meta","sarvam"]
     FALLBACK_ORDER = ["ollama", "openai", "anthropic", "huggingface"]
 
     @staticmethod
@@ -48,6 +55,17 @@ class LLMClient:
             kwargs["api_key"] = LLMConfig.anthropic_api_key
         elif provider == "huggingface" and LLMConfig.huggingface_api_key:
             os.environ.setdefault("HF_TOKEN", LLMConfig.huggingface_api_key)
+        elif provider == "openrouter" and LLMConfig.nvidia_nim_api_key:
+            kwargs["api_key"] = LLMConfig.nvidia_nim_api_key
+            kwargs["api_base"] = LLMConfig.nvidia_nim_base_url
+        elif provider == "sarvam" and LLMConfig.nvidia_nim_api_key:
+            # conversation_session_id = str(uuid.uuid4())
+            kwargs["api_key"] = LLMConfig.nvidia_nim_api_key
+            kwargs["api_base"] = LLMConfig.nvidia_nim_base_url
+            # kwargs["extra_headers"] = {
+            #         "x-opencode-session": conversation_session_id
+            # }
+            # kwargs["drop_params"] = True
         return kwargs
 
     async def generate(
@@ -60,31 +78,44 @@ class LLMClient:
     ) -> str:
         """Generate a completion. Falls back through the provider chain on failure."""
         provider = provider or getattr(LLMConfig, "default_llm_provider", "ollama")
+        # LLMClient is the debate stack: with no model named, use the debate tier.
+        model = model or LLMConfig.debate_model
         if provider not in self.PROVIDERS:
             raise ValueError(f"Unknown provider: {provider}. Available: {self.PROVIDERS}")
 
         chain = [provider] + [p for p in self.FALLBACK_ORDER if p != provider]
         errors: list[str] = []
-        for p in chain:
-            try:
-                # The caller's model id is only meaningful for the provider they
-                # named; a fallback leg must use its own configured model.
-                leg_model = model if p == provider else None
-                response = await litellm.acompletion(
-                    model=self._model_str(p, leg_model),
-                    messages=[
-                        {"role": "system", "content": system_prompt},
-                        {"role": "user", "content": user_prompt},
-                    ],
-                    temperature=0.7 if temperature is None else temperature,
-                    num_retries=2,
-                    **self._call_kwargs(p),
-                )
-                return response.choices[0].message.content or ""
-            except Exception as exc:
-                errors.append(f"{p}: {exc}")
-                logger.warning("LLM provider %s failed: %s", p, exc)
-        raise RuntimeError("All LLM providers failed: " + "; ".join(errors))
+
+        async def _run_chain() -> str:
+            for p in chain:
+                try:
+                    # The caller's model id is only meaningful for the provider they
+                    # named; a fallback leg must use its own configured model.
+                    leg_model = model if p == provider else None
+                    response = await litellm.acompletion(
+                        model=self._model_str(p, leg_model),
+                        messages=[
+                            {"role": "system", "content": system_prompt},
+                            {"role": "user", "content": user_prompt},
+                        ],
+                        temperature=0.7 if temperature is None else temperature,
+                        timeout=LLM_ATTEMPT_TIMEOUT_SECONDS,
+                        num_retries=LLM_NUM_RETRIES,
+                        **self._call_kwargs(p),
+                    )
+                    return response.choices[0].message.content or ""
+                except Exception as exc:
+                    errors.append(f"{p}: {exc}")
+                    logger.warning("LLM provider %s failed: %s", p, exc)
+            raise RuntimeError("All LLM providers failed: " + "; ".join(errors))
+
+        try:
+            return await asyncio.wait_for(_run_chain(), timeout=LLM_TOTAL_DEADLINE_SECONDS)
+        except asyncio.TimeoutError:
+            detail = f"LLM call exceeded total deadline of {LLM_TOTAL_DEADLINE_SECONDS}s"
+            if errors:
+                detail += " after: " + "; ".join(errors)
+            raise RuntimeError(detail)
 
     async def stream_generate(
         self,
@@ -95,6 +126,7 @@ class LLMClient:
     ) -> AsyncGenerator[str, None]:
         """Stream tokens; degrades to a single generate() call on failure."""
         provider = provider or getattr(LLMConfig, "default_llm_provider", "ollama")
+        model = model or LLMConfig.debate_model
         if provider not in self.PROVIDERS:
             raise ValueError(f"Unknown provider: {provider}. Available: {self.PROVIDERS}")
         try:
@@ -106,6 +138,7 @@ class LLMClient:
                 ],
                 temperature=0.7,
                 stream=True,
+                timeout=LLM_ATTEMPT_TIMEOUT_SECONDS,
                 **self._call_kwargs(provider),
             )
             async for chunk in response:

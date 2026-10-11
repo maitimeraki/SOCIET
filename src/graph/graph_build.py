@@ -9,7 +9,10 @@ from llama_index.llms.openai_like import OpenAILike
 from llama_index.embeddings.ollama import OllamaEmbedding
 from llama_index.graph_stores.neo4j import Neo4jPropertyGraphStore
 from src.graph.config_graph import GraphConfig
+from src.llm.config_llm import LLMConfig
 from src.graph.models_graph import ProcessedChunk, LocalOntology
+from src.graph.vocabulary import promote, select_slice
+from src.api.graph_stream import GraphDelta, publish
 
 
 # Configure basic logging
@@ -26,6 +29,10 @@ logging.basicConfig(level=logging.ERROR, format="%(asctime)s - %(levelname)s - %
 # Create logger instance
 # logger = logging.getLogger(__name__)
 logger = setup_logging()  # Ensure logging is configured with handler clearing to prevent duplication
+
+# The ollama clients default to httpx `timeout=None` (unbounded) — a stuck
+# localhost embed call would wait forever. 60 s is a generous bound for it.
+_EMBED_TIMEOUT_SECONDS = 60
 
 # Document-first node model (P4-T1): a Document node per source document, created
 # before extraction, and a DERIVED_FROM edge from every extracted concept to it.
@@ -61,22 +68,129 @@ def _document_rows(dataset_id: str, documents: List[ProcessedChunk]) -> List[dic
     return list(rows.values())
 
 
+def _proposed_labels(extracted) -> tuple[List[str], List[str]]:
+    """The `(entity_labels, relation_labels)` a chunk's extraction result proposed.
+
+    llama-index extractors return the input nodes with their extracted
+    `EntityNode`s stashed under `metadata["nodes"]` and `Relation`s under
+    `metadata["relations"]` (see `DynamicLLMPathExtractor._aextract`), so each
+    label sits one level down. The two kinds come back separately so the caller
+    can `promote` each under its own side. llama-index's generic default entity
+    label — the literal `"entity"`, which the simple extractor stamps on every
+    `EntityNode` it builds unlabelled — and blank labels are dropped; the caller
+    wants real types, not the sentinel. Order-stable and de-duplicated per kind.
+    """
+    from llama_index.core.graph_stores.types import KG_NODES_KEY, KG_RELATIONS_KEY
+
+    entity_labels: List[str] = []
+    relation_labels: List[str] = []
+    for node in extracted or []:
+        metadata = getattr(node, "metadata", None) or {}
+        for item in metadata.get(KG_NODES_KEY, []):
+            label = getattr(item, "label", None)
+            if label and label.strip() and label != "entity" and label not in entity_labels:
+                entity_labels.append(label)
+        for item in metadata.get(KG_RELATIONS_KEY, []):
+            label = getattr(item, "label", None)
+            if label and label.strip() and label not in relation_labels:
+                relation_labels.append(label)
+    return entity_labels, relation_labels
+
+
+def _delta_payload(extracted) -> tuple[List[dict], List[dict]]:
+    """The `(nodes, edges)` a chunk's extraction result contributes to a GraphDelta.
+
+    Reads the SAME metadata bags `_proposed_labels` does — and, critically,
+    BEFORE `index.insert_nodes` pops them (llama-index's `_insert_nodes` removes
+    `KG_NODES_KEY` / `KG_RELATIONS_KEY`). Node entries are `{id, label, type}`
+    (label = the entity's display name, type = its extracted type); edge entries
+    are `{source, target, label}`. Order-stable, de-duplicated by node id.
+    """
+    from llama_index.core.graph_stores.types import KG_NODES_KEY, KG_RELATIONS_KEY
+
+    nodes: List[dict] = []
+    edges: List[dict] = []
+    seen: set = set()
+    for node in extracted or []:
+        metadata = getattr(node, "metadata", None) or {}
+        for item in metadata.get(KG_NODES_KEY, []):
+            item_id = getattr(item, "id", None)
+            if item_id and item_id not in seen:
+                seen.add(item_id)
+                nodes.append({
+                    "id": item_id,
+                    "label": getattr(item, "name", None) or item_id,
+                    "type": getattr(item, "label", None),
+                })
+        for rel in metadata.get(KG_RELATIONS_KEY, []):
+            edges.append({
+                "source": getattr(rel, "source_id", None),
+                "target": getattr(rel, "target_id", None),
+                "label": getattr(rel, "label", None),
+            })
+    return nodes, edges
+
+
+class _NoOpSplit:
+    """Truthy pass-through transform: returns its input nodes unchanged.
+
+    Needed because `BaseIndex.from_documents` resolves
+    `transformations = transformations or Settings.transformations`. An empty
+    list is falsy, so it would be replaced by `Settings.transformations`, which
+    is `[Settings.node_parser]` and is pinned to `self.splitter` below — the
+    exact re-split this stage must not perform. A truthy no-op keeps the
+    fallback from firing and preserves the input nodes 1:1, so index node count
+    equals chunk count.
+    """
+
+    def __call__(self, nodes, **kwargs):
+        return list(nodes)
+
+
+def _refresh_schema_once(store: Neo4jPropertyGraphStore) -> None:
+    """Quiet llama-index's post-insert schema refreshes: the first refresh through
+    this guard is real, every later one is a no-op. llama-index calls
+    get_schema(refresh=True) after every insert, which runs apoc.meta.subGraph({})
+    + apoc.schema.nodes() over the whole graph; the extraction path never reads
+    the refreshed schema, so all but the first pass is waste."""
+    original_refresh = store.refresh_schema
+    refreshed = False
+
+    def refresh_schema_once(**kwargs):
+        nonlocal refreshed
+        if refreshed:
+            return None
+        refreshed = True
+        return original_refresh(**kwargs)
+
+    store.refresh_schema = refresh_schema_once
+
+
 class GraphExtractionStage:
     """Extracts entities and relationships from documents using LLMs and stores them in a Neo4j graph database.
     This stage is responsible for taking raw text documents, applying the defined ontology schema to extract structured information."""
     def __init__(self, config: GraphConfig):
         self.config = config
+        conversation_session_id = str(uuid.uuid4())
         self.llm = OpenAILike(
                 model=self.config.extraction_model,
-                api_base="http://localhost:11434/v1",
-                api_key="ollama",
+                api_base=LLMConfig.nvidia_nim_base_url or "https://integrate.api.nvidia.com/v1",
+                api_key=LLMConfig.nvidia_nim_api_key,
                 temperature=0.7,
-                timeout=900,
-                max_retries=3,
+                is_chat_model=True,
+                timeout=self.config.extraction_timeout_seconds,
+                max_retries=1 , # a hung attempt must not stack retries on top of the timeout
+                additional_kwargs={
+                                "seed": 42, # Fixed seed for reproducibility
+                                "extra_headers":{
+                               "x-opencode-session": conversation_session_id
+                                }
+                            }
             )
         self.embed_model = OllamaEmbedding(
             model_name="nomic-embed-text:v1.5",
-            base_url="http://localhost:11434",
+            base_url=LLMConfig.ollama_base_url,
+            client_kwargs={"timeout": _EMBED_TIMEOUT_SECONDS},
             ollama_additional_kwargs={"mirostat": 0},
         )
         self.graph_store = Neo4jPropertyGraphStore(
@@ -85,30 +199,80 @@ class GraphExtractionStage:
             url=self.config.neo4j_uri,
             database=self.config.neo4j_database,
         )
+        _refresh_schema_once(self.graph_store)
         self.splitter = SentenceSplitter(chunk_size=2048, chunk_overlap=400)
+        # ONE lock for the whole extraction path, never per chunk: the sliding
+        # window keeps several extractions in flight, but only one of them may
+        # write the shared store/index at a time, so "an entity in two chunks
+        # yields ONE node" cannot depend on the store converging under a race.
+        # Extraction stays fully concurrent; only the write is serialised.
+        # Instance-level (not module-level) so it binds to the loop that runs
+        # THIS stage, and is shared across concurrent `run` calls for a stage.
+        self._insert_lock = asyncio.Lock()
         
+    def close(self) -> None:
+        """Close the graph store's driver. Idempotent — a second call is a no-op."""
+        store = getattr(self, "graph_store", None)
+        if store is None:
+            return
+        self.graph_store = None
+        store.close()
+
     async def run(
         self,
         dataset_id: str,
         documents: List[ProcessedChunk],
         ontology: LocalOntology,
+        job_id: Optional[str] = None,
     ) -> int:
         try:
             # Call the async logic directly
-            return await self._run_async(dataset_id, documents, ontology)
+            return await self._run_async(dataset_id, documents, ontology, job_id=job_id)
         except Exception as e:
             logger.error(f"Error in GraphExtractionStage for dataset {dataset_id}: {e}")
             raise
+
+    @staticmethod
+    def _to_llama_document(dataset_id: str, d: ProcessedChunk, ontology: LocalOntology):
+        """One llama-index Document per ProcessedChunk, metadata carried through."""
+        from llama_index.core import Document
+
+        md = dict(d.metadata)
+        md["dataset_id"] = dataset_id
+        # llama-index overwrites the graph `document_id` property with the
+        # split node's ref_doc_id at write time (node_to_metadata_dict) —
+        # `document_anchor` is the graph-level carrier of the source
+        # document id, and `chunk_id` the original chunk id.
+        md["document_id"] = d.parent_doc_id
+        md["chunk_id"] = d.chunk_id
+        md["document_anchor"] = d.parent_doc_id
+        md["chunk_index"] = d.chunk_index
+        md["content_hash"] = d.content_hash
+        md["summary_context"] = d.summary_context
+        md["domain_tags"] = d.domain_tags
+        md["expertise_level"] = d.expertise_level
+        md["breadcrumb"] = d.breadcrumb
+        md["header_level"] = d.header_level
+        md["ontology_id"] = ontology.metadata.ontology_id
+        # `_create_processed_chunk` carries the filename as `source_document`;
+        # without the fallback every provenance link title is "Untitled Document".
+        md["title"] = md.get("title") or md.get("source_document") or "Untitled Document"
+        new_doc = Document(text=d.content, metadata=md)
+
+        new_doc.excluded_llm_metadata_keys = ["dataset_id", "ontology_id", "document_id", "chunk_id", "document_anchor", "content_hash", "chunk_index"]  # Exclude sensitive or non-informative metadata from LLM input
+        new_doc.excluded_embed_metadata_keys = ["dataset_id", "ontology_id", "document_id", "chunk_id", "document_anchor", "content_hash", "chunk_index"]  # Exclude from embedding metadata as well to prevent noise in vector representations
+        return new_doc
 
     async def _run_async(
         self,
         dataset_id: str,
         documents: List[ProcessedChunk],
         ontology: LocalOntology,
+        job_id: Optional[str] = None,
     ) -> int:
         import os
         os.environ["LLAMA_INDEX_DISABLE_ASYNC_EMBEDDINGS"] = "1"
-        from llama_index.core import Document, PropertyGraphIndex, Settings
+        from llama_index.core import PropertyGraphIndex, Settings
 
         Settings.llm = self.llm
         # ✅ FIX: Disable async embeddings to prevent nested loop creation
@@ -117,83 +281,27 @@ class GraphExtractionStage:
 
         logger.info(f"Transforming ontology schema for dataset {dataset_id} into property-aware format.")
         try:
-            entity_schemas = ontology.entity_labels
-            relation_schemas = ontology.relation_labels
-            possible_ent_props = ontology.entity_props
-            possible_rel_props = ontology.relation_props
-
             logger.info(
-                f"Initializing SchemaLLMPathExtractor for dataset {dataset_id} with "
-                f"{entity_schemas} entity schemas and {relation_schemas} relation schemas."
+                f"Initializing extractors for dataset {dataset_id} with "
+                f"{ontology.entity_labels} entity schemas and "
+                f"{ontology.relation_labels} relation schemas."
             )
 
-            from llama_index.core.indices.property_graph import (
-                SimpleLLMPathExtractor,
-                DynamicLLMPathExtractor,
-                ImplicitPathExtractor,
-            )
-            # Simple extractor - basic triple extraction without schema constraints(Simple extractor captures additional relationships the dynamic one might miss)
-            simple_extractor = SimpleLLMPathExtractor(
-                llm=self.llm,
-                max_paths_per_chunk=10,
-                num_workers=self.config.ontology_max_concurrency,
-            )
-            # Dynamic extractor - schema-guided but flexible(Dynamic extractor captures labeled entities/relations following your schema)
-            dynamic_extractor = DynamicLLMPathExtractor(
-                llm=self.llm,
-                allowed_entity_types=entity_schemas,
-                allowed_relation_types=relation_schemas,
-                allowed_entity_props=possible_ent_props,
-                allowed_relation_props=possible_rel_props,
-                num_workers=self.config.ontology_max_concurrency,
-            )
-            # Implicit extractor - from node relationships(Implicit extractor adds structural relationships between nodes that LLMs don't generate)
-            implicit_extractor = ImplicitPathExtractor()
-            
+            pairs = [(d, self._to_llama_document(dataset_id, d, ontology)) for d in documents]
 
-            llama_docs = []
-            for d in documents:
-                md = dict(d.metadata)
-                md["dataset_id"] = dataset_id
-                # llama-index overwrites the graph `document_id` property with the
-                # split node's ref_doc_id at write time (node_to_metadata_dict) —
-                # `document_anchor` is the graph-level carrier of the source
-                # document id, and `chunk_id` the original chunk id.
-                md["document_id"] = d.parent_doc_id
-                md["chunk_id"] = d.chunk_id
-                md["document_anchor"] = d.parent_doc_id
-                md["chunk_index"] = d.chunk_index
-                md["content_hash"] = d.content_hash
-                md["summary_context"] = d.summary_context
-                md["domain_tags"] = d.domain_tags
-                md["expertise_level"] = d.expertise_level
-                md["breadcrumb"] = d.breadcrumb
-                md["header_level"] = d.header_level
-                md["ontology_id"] = ontology.metadata.ontology_id
-                # `_create_processed_chunk` carries the filename as `source_document`;
-                # without the fallback every provenance link title is "Untitled Document".
-                md["title"] = md.get("title") or md.get("source_document") or "Untitled Document"
-                new_doc = Document(text=d.content, metadata=md)
-                
-                
-                new_doc.excluded_llm_metadata_keys = ["dataset_id", "ontology_id", "document_id", "chunk_id", "document_anchor", "content_hash", "chunk_index"]  # Exclude sensitive or non-informative metadata from LLM input
-                new_doc.excluded_embed_metadata_keys = ["dataset_id", "ontology_id", "document_id", "chunk_id", "document_anchor", "content_hash", "chunk_index"]  # Exclude from embedding metadata as well to prevent noise in vector representations
-                llama_docs.append(new_doc)
-
-            logger.info(f"Building property graph for dataset {dataset_id}")
-            
-            # Since PropertyGraphIndex.from_documents can be synchronous and blocking
-            # we execute it securely in a thread utilizing the CURRENT event loop's context
+            # One empty index bound to the shared store. `kg_extractors=[_NoOpSplit()]`
+            # (a TRUTHY no-op) is essential: `PropertyGraphIndex.__init__` does
+            # `kg_extractors or [SimpleLLMPathExtractor(...), ImplicitPathExtractor()]`,
+            # so an empty list would silently re-extract every chunk through the
+            # default extractors. The no-op keeps `_insert_nodes` to its store
+            # writes only — the extractors already ran once, per chunk, below.
             def _build_index():
-                # ✅ Use synchronous index building instead
-                return PropertyGraphIndex.from_documents(
-                    llama_docs,
+                return PropertyGraphIndex(
+                    nodes=[],
                     embed_model=self.embed_model,
                     property_graph_store=self.graph_store,
-                    kg_extractors=[simple_extractor, dynamic_extractor, implicit_extractor],
-                    transformations=[self.splitter],
-                    use_async=False,  # ← FORCE SYNC MODE if available
-                    show_progress=True,
+                    kg_extractors=[_NoOpSplit()],
+                    use_async=False,
                 )
 
             # Document-first: the Document nodes exist before extraction so the
@@ -202,12 +310,190 @@ class GraphExtractionStage:
 
             index = await asyncio.to_thread(_build_index)
 
+            logger.info(f"Building property graph for dataset {dataset_id}")
+
+            # The shared vocabulary: exactly two touch points, both cheap and
+            # both on the single event loop between awaits — read the slice at
+            # chunk start, append new labels at chunk finish. No lock needed.
+            vocabulary = ontology
+            total = len(pairs)
+            state = {"done": 0}
+
+            async def process(chunk: ProcessedChunk, doc) -> bool:
+                """Extract + insert ONE chunk, retrying on failure; return success.
+
+                A chunk that fails `extraction_chunk_retries` retries (exponential
+                backoff, mirroring `_discover_for_chunk`) is SKIPPED: logged,
+                published as an error delta, and the window refills. Never raises
+                on a chunk error, so one bad chunk cannot sink the loop.
+                """
+                nonlocal vocabulary
+                last_exc: Optional[Exception] = None
+                attempts = max(1, self.config.extraction_chunk_retries + 1)
+                for attempt in range(attempts):
+                    try:
+                        slice_ = select_slice(vocabulary, chunk.content, self.config.chunk_slice_size)
+                        extractors = self._build_extractors(slice_)
+                        nodes, entity_labels, relation_labels, delta_nodes, delta_edges = await asyncio.to_thread(
+                            self._extract_chunk, doc, extractors
+                        )
+                        # Serialise the store write: extraction is concurrent, but
+                        # only one chunk writes the shared index at a time. The
+                        # `to_thread` keeps the loop free while the lock waits.
+                        async with self._insert_lock:
+                            await asyncio.to_thread(index.insert_nodes, nodes)
+                    except Exception as exc:
+                        last_exc = exc
+                        if attempt < attempts - 1:
+                            logger.warning(
+                                f"Chunk {chunk.chunk_id} extraction attempt {attempt + 1} "
+                                f"failed: {exc}. Retrying..."
+                            )
+                            await asyncio.sleep(
+                                self.config.extraction_chunk_retry_backoff_seconds * (2 ** attempt)
+                            )
+                        continue
+                    # Synchronous read-modify-write: never split by an await.
+                    vocabulary, new_entities = promote(vocabulary, entity_labels, kind="entity")
+                    vocabulary, new_relations = promote(vocabulary, relation_labels, kind="relation")
+                    state["done"] += 1
+                    if job_id is not None:
+                        publish(job_id, GraphDelta(
+                            nodes=delta_nodes,
+                            edges=delta_edges,
+                            new_labels=new_entities + new_relations,
+                            chunk_id=chunk.chunk_id,
+                            progress=state["done"] / total if total else 0.0,
+                        ))
+                    return True
+                logger.error(
+                    f"Chunk {chunk.chunk_id} failed terminally after {attempts} attempts: {last_exc}"
+                )
+                if job_id is not None:
+                    publish(job_id, GraphDelta(
+                        chunk_id=chunk.chunk_id,
+                        # A non-empty message is load-bearing: `if delta.error:` in
+                        # the WS route treats "" as an ordinary delta. A bare
+                        # `RuntimeError()` would otherwise be emitted as a `delta`.
+                        error=f"{type(last_exc).__name__}: {last_exc}",
+                    ))
+                return False
+
+            # Sliding window: `chunk_parallelism` chunk-tasks in flight at all
+            # times. Seed the first window, then start exactly one replacement
+            # the instant any one finishes — a Semaphore would gate concurrency
+            # but would not keep the window full. Insert order is completion
+            # order, never buffered by `chunk_index`.
+            remaining = iter(pairs)
+            pending: set = set()
+            successes = 0
+            try:
+                for _ in range(max(1, self.config.chunk_parallelism)):
+                    nxt = next(remaining, None)
+                    if nxt is None:
+                        break
+                    pending.add(asyncio.create_task(process(*nxt)))
+                while pending:
+                    finished, pending = await asyncio.wait(
+                        pending, return_when=asyncio.FIRST_COMPLETED
+                    )
+                    for fut in finished:
+                        successes += int(fut.result())
+                    for _ in range(len(finished)):
+                        nxt = next(remaining, None)
+                        if nxt is None:
+                            break
+                        pending.add(asyncio.create_task(process(*nxt)))
+            finally:
+                # An unexpected raise must not strand the other in-flight chunks:
+                # without this they would keep extracting and writing to the store
+                # after the job was marked failed ("Task exception was never
+                # retrieved"). Cancel and await them before propagating.
+                for task in pending:
+                    task.cancel()
+                if pending:
+                    await asyncio.gather(*pending, return_exceptions=True)
+
+            # One bad chunk is a skip, not a catastrophe. A document whose chunks
+            # ALL failed contributed nothing, but it does NOT sink the run: the
+            # job-scoped "every chunk failed" verdict is `_execute_unified_job`'s
+            # (R17) — one bad document must not discard every other document's
+            # work. Real extraction/store errors, timeouts and cancellation still
+            # propagate from the loop above; only per-chunk skips land here.
+            if total and not successes:
+                logger.error(
+                    f"All {total} chunks failed for dataset {dataset_id} — "
+                    f"this document contributed no nodes"
+                )
+
             await asyncio.to_thread(self._link_concepts_to_documents, index, dataset_id)
             return len(index.docstore.docs)
 
         except Exception as e:
             logger.error(f"Error during graph extraction for dataset {dataset_id}: {e}")
             raise
+
+    def _extract_chunk(self, doc, extractors):
+        """Extract ONE chunk exactly once and harvest its delta + proposed labels.
+
+        Runs off the event loop (the path extractors call `asyncio.run`
+        internally, which a running loop would reject). The extractors populate
+        `metadata["nodes"]` / `metadata["relations"]` in place; those are read
+        HERE, before the caller's `index.insert_nodes` pops them (llama-index's
+        `_insert_nodes` removes both keys), so the delta and the proposed labels
+        survive. The insert itself is NOT done here — the caller serialises it
+        under `_insert_lock`.
+
+        `run_transformations([doc], extractors)` from `llama_index.core.ingestion`
+        is exactly `for transform in extractors: nodes = transform(nodes)` — no
+        cache is configured, so this direct loop is the same work with one fewer
+        import (and it keeps the seam stubbable in tests).
+        """
+        nodes = [doc]
+        for extractor in extractors:
+            nodes = list(extractor(nodes))
+        entity_labels, relation_labels = _proposed_labels(nodes)
+        delta_nodes, delta_edges = _delta_payload(nodes)
+        return nodes, entity_labels, relation_labels, delta_nodes, delta_edges
+
+    def _build_extractors(self, ontology: LocalOntology) -> tuple:
+        """The extractor set for one ontology (or vocabulary slice).
+
+        The dynamic extractor's `allowed_*` schemas come from whatever
+        `ontology` is handed in, so a per-chunk slice (Task 7's sliding window)
+        builds its own extractors from a smaller vocabulary: `_run_async` calls
+        this once PER CHUNK with that chunk's slice.
+        """
+        from llama_index.core.indices.property_graph import (
+            SimpleLLMPathExtractor,
+            DynamicLLMPathExtractor,
+            ImplicitPathExtractor,
+        )
+        # num_workers=1: llama-index runs a call's chunks through
+        # run_jobs(jobs, workers=num_workers), so sync mode fans out for
+        # real. The outer semaphore (GraphConfig.ontology_max_concurrency,
+        # one slot per document) is the single concurrency lever: aggregate
+        # in-flight extraction calls = GRAPH_ONTOLOGY_MAX_CONCURRENCY ×
+        # num_workers. Raise num_workers only alongside cutting the semaphore.
+        # Simple extractor - basic triple extraction without schema constraints(Simple extractor captures additional relationships the dynamic one might miss)
+        simple_extractor = SimpleLLMPathExtractor(
+            llm=self.llm,
+            max_paths_per_chunk=self.config.extraction_max_triplets_per_chunk,
+            num_workers=1,
+        )
+        # Dynamic extractor - schema-guided but flexible(Dynamic extractor captures labeled entities/relations following your schema)
+        dynamic_extractor = DynamicLLMPathExtractor(
+            llm=self.llm,
+            allowed_entity_types=ontology.entity_labels,
+            allowed_relation_types=ontology.relation_labels,
+            allowed_entity_props=ontology.entity_props,
+            allowed_relation_props=ontology.relation_props,
+            max_triplets_per_chunk=self.config.extraction_max_triplets_per_chunk,
+            num_workers=1,
+        )
+        # Implicit extractor - from node relationships(Implicit extractor adds structural relationships between nodes that LLMs don't generate)
+        implicit_extractor = ImplicitPathExtractor()
+        return (simple_extractor, dynamic_extractor, implicit_extractor)
 
     def _write_documents(self, dataset_id: str, documents: List[ProcessedChunk]) -> None:
         """MERGE one Document node per unique source document. Sync — called off the loop."""

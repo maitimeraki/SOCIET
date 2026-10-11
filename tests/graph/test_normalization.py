@@ -1,4 +1,7 @@
 """Tests for normalization module."""
+import asyncio
+import itertools
+
 import pytest
 from unittest.mock import AsyncMock, patch, MagicMock
 from src.graph.normalization import (
@@ -215,3 +218,178 @@ class TestMergeCandidate:
         assert candidate.node_id == 123
         assert candidate.labels == ["Person", "Employee"]
         assert candidate.properties["name"] == "Bob"
+
+
+class TestFindSurfaceDuplicates:
+    """Regression tests for surface-duplicate detection keyed by elementId."""
+
+    @pytest.mark.asyncio
+    async def test_duplicate_group_with_string_element_ids(self):
+        """Neo4j 5 elementId() returns a string ("4:abc:123") — duplicate groups must not int() it."""
+        config = MagicMock()
+        config.neo4j_uri = "bolt://localhost:7687"
+        config.neo4j_username = "neo4j"
+        config.neo4j_password = "password"
+        config.neo4j_database = "neo4j"
+
+        with patch('src.graph.normalization.AsyncGraphDatabase'):
+            stage = GraphNormalizationStage(config)
+
+        records = [{
+            "key": "alice",
+            "nodes": [
+                {"id": "4:abc:123", "labels": ["Person"], "props": {"name": "Alice", "source": "doc-a"}},
+                {"id": "4:abc:456", "labels": ["Person"], "props": {"name": "Alice", "source": "doc-b"}},
+            ],
+        }]
+        stage._run = AsyncMock(return_value=records)
+
+        groups = await stage.find_surface_duplicates("ds-1")
+
+        assert len(groups) == 1
+        assert [c.node_id for c in groups[0]] == ["4:abc:123", "4:abc:456"]
+        assert all(isinstance(c.node_id, str) for c in groups[0])
+
+
+class _ConsumeOnCloseResult:
+    """Mimics the neo4j driver: AsyncSession.close() consumes its autocommit
+    result, so any read afterwards raises (ResultConsumedError in the real driver)."""
+
+    def __init__(self, records):
+        self._records = records
+        self._consumed = False
+
+    async def data(self):
+        if self._consumed:
+            raise RuntimeError(
+                "The result has been consumed. Fetch all needed records "
+                "before calling Result.consume()."
+            )
+        return self._records
+
+    def consume(self):
+        self._consumed = True
+
+
+class _ConsumeOnCloseSession:
+    def __init__(self, result):
+        self._result = result
+
+    async def run(self, query, parameters=None):
+        return self._result
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *exc_info):
+        self._result.consume()
+
+
+class _ConsumeOnCloseDriver:
+    def __init__(self, records):
+        self._records = records
+
+    def session(self, **kwargs):
+        return _ConsumeOnCloseSession(_ConsumeOnCloseResult(self._records))
+
+
+class TestRunFetchesRecordsInsideTheSession:
+    """Regression: _run must return fetched records, not the driver Result.
+    Reading a Result after its session closed raises ResultConsumedError,
+    which is exactly how the graph build job failed."""
+
+    @pytest.mark.asyncio
+    async def test_run_returns_fetched_records(self):
+        records = [{"x": 1}]
+        with patch('src.graph.normalization.AsyncGraphDatabase') as mock_db:
+            mock_db.driver.return_value = _ConsumeOnCloseDriver(records)
+            stage = GraphNormalizationStage(MagicMock())
+
+        out = await stage._run("RETURN 1 AS x", {})
+
+        assert out == records
+
+
+class TestPairScoringConcurrency:
+    """Pair scoring fans out concurrently under a fixed in-flight bound."""
+
+    GROUP_SIZE = 4  # -> 6 candidate pairs
+    LIMIT = 2
+
+    def _stage(self) -> GraphNormalizationStage:
+        config = MagicMock()
+        config.neo4j_uri = "bolt://localhost:7687"
+        config.neo4j_username = "neo4j"
+        config.neo4j_password = "password"
+        config.neo4j_database = "neo4j"
+        config.ontology_max_concurrency = self.LIMIT
+        with patch('src.graph.normalization.AsyncGraphDatabase'):
+            return GraphNormalizationStage(config)
+
+    def _instrument(self, stage: GraphNormalizationStage) -> dict:
+        """Swap the per-pair network scorer for a recorder of overlap."""
+        state = {"in_flight": 0, "max_in_flight": 0, "calls": []}
+
+        async def recording_jaccard(id_a, id_b):
+            state["in_flight"] += 1
+            state["max_in_flight"] = max(state["max_in_flight"], state["in_flight"])
+            state["calls"].append((id_a, id_b))
+            await asyncio.sleep(0.01)
+            state["in_flight"] -= 1
+            return 0.5
+
+        stage._neighbor_label_jaccard = recording_jaccard
+        stage._embedding_similarity = AsyncMock(return_value=0.0)
+        return state
+
+    def _group(self):
+        return [
+            MergeCandidate(node_id=f"4:abc:{i}", labels=["Person"], properties={"name": f"n{i}"})
+            for i in range(self.GROUP_SIZE)
+        ]
+
+    def _expected_pairs(self):
+        return [
+            (f"4:abc:{i}", f"4:abc:{j}")
+            for i, j in itertools.combinations(range(self.GROUP_SIZE), 2)
+        ]
+
+    @pytest.mark.asyncio
+    async def test_never_exceeds_configured_concurrency(self):
+        """In-flight pair scoring never exceeds ontology_max_concurrency."""
+        stage = self._stage()
+        state = self._instrument(stage)
+
+        await stage.compute_signals(self._group())
+
+        assert state["max_in_flight"] <= self.LIMIT
+
+    @pytest.mark.asyncio
+    async def test_scores_pairs_concurrently(self):
+        """Pairs overlap in flight — scoring is not one-at-a-time."""
+        stage = self._stage()
+        state = self._instrument(stage)
+
+        await stage.compute_signals(self._group())
+
+        assert state["max_in_flight"] > 1
+
+    @pytest.mark.asyncio
+    async def test_scores_every_pair_exactly_once(self):
+        """Every pair is scored exactly once despite concurrency."""
+        stage = self._stage()
+        state = self._instrument(stage)
+
+        await stage.compute_signals(self._group())
+
+        assert sorted(state["calls"]) == self._expected_pairs()
+
+    @pytest.mark.asyncio
+    async def test_preserves_pair_order_in_signals(self):
+        """signals['pairs'] keeps itertools.combinations order."""
+        stage = self._stage()
+        self._instrument(stage)
+
+        signals = await stage.compute_signals(self._group())
+
+        assert [(p["a"], p["b"]) for p in signals["pairs"]] == self._expected_pairs()

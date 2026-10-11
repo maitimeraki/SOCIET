@@ -1,8 +1,10 @@
 """Tests for the LiteLLM-backed LLMClient."""
+import asyncio
 from types import SimpleNamespace
 import pytest
 from unittest.mock import AsyncMock, patch
 
+from src.llm import client as llm_client
 from src.llm.client import LLMClient
 from src.llm.config_llm import LLMConfig
 
@@ -60,6 +62,27 @@ async def test_caller_model_not_leaked_to_fallback_legs():
 
 
 @pytest.mark.asyncio
+async def test_generate_defaults_to_configured_debate_model():
+    """No model given: the configured debate-tier default is used."""
+    with patch("src.llm.client.litellm.acompletion", new_callable=AsyncMock) as ac:
+        ac.return_value = _resp("ok")
+        await LLMClient().generate("sys", "usr", provider="openai")
+
+        assert ac.await_args.kwargs["model"] == f"openai/{LLMConfig.debate_model}"
+
+
+@pytest.mark.asyncio
+async def test_stream_generate_defaults_to_configured_debate_model():
+    """Streaming honours the same debate-tier default as generate()."""
+    with patch("src.llm.client.litellm.acompletion", new_callable=AsyncMock) as ac:
+        ac.return_value = _stream_of([_chunk("hi")])
+        out = [token async for token in LLMClient().stream_generate("sys", "usr", provider="openai")]
+
+        assert out == ["hi"]
+        assert ac.await_args.kwargs["model"] == f"openai/{LLMConfig.debate_model}"
+
+
+@pytest.mark.asyncio
 async def test_stream_generate_yields_deltas():
     chunks = [_chunk("he"), _chunk(None), SimpleNamespace(choices=[]), _chunk("llo")]
     with patch("src.llm.client.litellm.acompletion", new_callable=AsyncMock) as ac:
@@ -94,3 +117,46 @@ def test_unknown_provider_rejected():
     with pytest.raises(ValueError, match="Unknown provider"):
         import asyncio
         asyncio.run(LLMClient().generate("s", "u", provider="nope"))
+
+
+@pytest.mark.asyncio
+async def test_generate_bounds_every_attempt():
+    """Every litellm attempt carries the ruled per-attempt timeout and retry cap."""
+    assert llm_client.LLM_ATTEMPT_TIMEOUT_SECONDS == 90
+    assert llm_client.LLM_NUM_RETRIES == 1
+    with patch("src.llm.client.litellm.acompletion", new_callable=AsyncMock) as ac:
+        ac.return_value = _resp("ok")
+        await LLMClient().generate("sys", "usr", provider="openai")
+        assert ac.await_args.kwargs["timeout"] == llm_client.LLM_ATTEMPT_TIMEOUT_SECONDS
+        assert ac.await_args.kwargs["num_retries"] == llm_client.LLM_NUM_RETRIES
+
+
+@pytest.mark.asyncio
+async def test_stream_generate_bounds_every_attempt():
+    """The direct streaming call is bounded too — no unbounded network call remains."""
+    with patch("src.llm.client.litellm.acompletion", new_callable=AsyncMock) as ac:
+        ac.return_value = _stream_of([_chunk("hi")])
+        out = [token async for token in LLMClient().stream_generate("sys", "usr", provider="openai")]
+        assert out == ["hi"]
+        assert ac.await_args.kwargs["timeout"] == llm_client.LLM_ATTEMPT_TIMEOUT_SECONDS
+
+
+@pytest.mark.asyncio
+async def test_total_deadline_stops_fallback_chain(monkeypatch):
+    """Past the total deadline the chain gives up — later fallback legs are never attempted."""
+    assert llm_client.LLM_TOTAL_DEADLINE_SECONDS == 300
+    monkeypatch.setattr(llm_client, "LLM_TOTAL_DEADLINE_SECONDS", 0.05)
+    attempted: list[str] = []
+
+    async def _hang(**kwargs):
+        attempted.append(kwargs["model"])
+        await asyncio.Event().wait()  # never resolves — only the deadline can end this
+
+    monkeypatch.setattr(llm_client.litellm, "acompletion", _hang)
+    with pytest.raises(RuntimeError, match="deadline"):
+        # Guard: without the deadline this test would await the hang forever.
+        await asyncio.wait_for(
+            LLMClient().generate("sys", "usr", provider="openai"), timeout=2
+        )
+    assert len(attempted) == 1
+    assert attempted[0].startswith("openai/")

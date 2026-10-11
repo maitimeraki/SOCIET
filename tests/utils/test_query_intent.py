@@ -7,7 +7,7 @@ import json
 
 import pytest
 
-from src.llm.config_llm import get_llm_config
+from src.llm.config_llm import LLMConfig, get_llm_config
 from src.utils import queryIntend as qi
 
 QUERY = "Should the company expand into the European market?"
@@ -154,14 +154,29 @@ def test_fallback_intent_serializes_round_trip():
     assert qi.QueryIntent.model_validate(json.loads(json.dumps(dumped))) == intent
 
 
-def test_model_defaults_to_configuration():
+def test_provider_defaults_to_configuration():
     extractor = qi.QueryIntend(client=StubClient())
 
-    config = get_llm_config()
+    assert extractor.provider == get_llm_config().default_llm_provider
 
-    assert extractor.provider == config.default_llm_provider
-    assert extractor.model == getattr(config, f"{config.default_llm_provider}_model")
-    assert extractor.model
+
+def test_model_default_is_the_analysis_tier(monkeypatch):
+    """Intent is analysis-grade work: no model named → LLMConfig.analysis_model."""
+    monkeypatch.setattr(LLMConfig, "analysis_model", "sentinel-analysis-model")
+
+    extractor = qi.QueryIntend(provider="ollama", client=StubClient())
+
+    assert extractor.model == "sentinel-analysis-model"
+
+
+@pytest.mark.asyncio
+async def test_expand_user_query_sends_the_analysis_model_by_default():
+    stub = StubClient(reply=LLM_JSON)
+
+    intent = await qi.QueryIntend(provider="openai", client=stub).expand_user_query(QUERY)
+
+    assert stub.calls[0]["model"] == LLMConfig.analysis_model
+    assert intent.llm_model == LLMConfig.analysis_model
 
 
 def test_module_has_no_blocking_call_and_no_hardcoded_model():

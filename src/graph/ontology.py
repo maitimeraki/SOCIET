@@ -1,15 +1,16 @@
 import sys
+import os
+import uuid
 import json
 import logging
-from datetime import datetime
 from typing import List, Dict, Any
 from llama_index.llms.openai_like import OpenAILike
 from src.logging.setup_logging import setup_logging
 from src.utils.hydrate_ontology import hydrate_ontology
+from src.llm.config_llm import LLMConfig
 from src.graph.models_graph import (
     ProcessedChunk,
     LocalOntology,
-    OntologyMetadata,
 )
 
 # Configure basic logging
@@ -43,6 +44,12 @@ def _structured_properties(llm_data: Dict[str, Any]) -> Dict[str, Any]:
                     "name": name.strip(),
                     "description": desc.strip()
                 })
+            else:
+                # Bare name, no description — keep it rather than dropping it.
+                parsed_props.append({
+                    "name": prop_str,
+                    "description": ""
+                })
         ent["properties"] = parsed_props # Now matches your class schema
         
     for rel in llm_data.get("relation_types", []):
@@ -54,13 +61,19 @@ def _structured_properties(llm_data: Dict[str, Any]) -> Dict[str, Any]:
                     "name": name.strip(),
                     "description": desc.strip()
                 })
+            else:
+                # Bare name, no description — keep it rather than dropping it.
+                parsed_props.append({
+                    "name": prop_str,
+                    "description": ""
+                })
         rel["properties"] = parsed_props # Now matches your class schema
     
     return llm_data
 
 async def discover_ontology(
     chunks: List[ProcessedChunk],
-    model: str = "gemma4-e4b-64k:latest",
+    model: str = LLMConfig.analysis_model,
     sample_size: int = 10,
 ) -> LocalOntology:
     """
@@ -68,7 +81,7 @@ async def discover_ontology(
 
     Args:
         chunks: List of processed document chunks to analyze
-        model: LLM model to use for discovery (default: gemma4-e4b-64k:latest)
+        model: LLM model to use for discovery (default: LLMConfig.analysis_model)
         sample_size: Number of chunks to sample for discovery (default: 10)
 
     Returns:
@@ -80,7 +93,7 @@ async def discover_ontology(
 
 def discover_ontology_sync(
     chunks: List[ProcessedChunk],
-    model: str = "gemma4-e4b-64k:latest",
+    model: str = LLMConfig.analysis_model,
     sample_size: int = 10,
 ) -> LocalOntology:
     """
@@ -92,17 +105,22 @@ def discover_ontology_sync(
 
 class OntologyDiscoveryStage:
     """Discovers a local ontology schema from a sample of input documents using LLMs. The discovered ontology defines the entity types, relation types, and their properties that will be used for structured extraction in the next stage. This stage is crucial for enabling domain-agnostic graph construction without requiring manual schema definition upfront."""
-    def __init__(self, model: str = "gemma4-e4b-64k:latest", temperature: float = 0.7):
+    def __init__(self, model: str = LLMConfig.analysis_model, temperature: float = 0.7, timeout: float = 60.0):
+        conversation_session_id = str(uuid.uuid4())
         self.llm = OpenAILike(
             model=model,
-            api_base="http://localhost:11434/v1",
-            api_key="ollama",
+            api_base=LLMConfig.nvidia_nim_base_url or "https://integrate.api.nvidia.com/v1",
+            api_key=LLMConfig.nvidia_nim_api_key,
             is_chat_model=True,
-            timeout=480,
+            timeout=timeout, # was 480 — must fit inside the caller's wait_for window
+            max_retries=1, # was llama-index default 3 × SDK default 3 (stacked)
             strict=True, # Reliable Structured Output
             temperature=temperature, # Deterministic output for ontology discovery
             additional_kwargs={
                 "seed": 42, # Fixed seed for reproducibility
+                "extra_headers":{
+               "x-opencode-session": conversation_session_id
+                }
             }
         )
 
@@ -162,9 +180,9 @@ class OntologyDiscoveryStage:
             try:
                 parsed = json.loads(text) # return type -> Dict[str, Any]
                 logger.info(f"Ontology discovery successful. Parsed JSON keys: {parsed}")
-            except Exception:
-                parsed = {}
-                logger.error(f"Failed to parse ontology discovery result: {text}")
+            except Exception as exc:
+                logger.error("Unparseable ontology discovery reply: %s", text[:500])
+                raise RuntimeError(f"unparseable ontology discovery reply: {exc}") from exc
                 
             structured_json = _structured_properties(parsed) # return type -> Dict[str, Any]
             logger.info(f"Structured properties extracted: {structured_json}")
@@ -179,13 +197,6 @@ class OntologyDiscoveryStage:
 
             return ontology
 
-        except Exception as e:
-            logging.error(f"Error during ontology discovery: {e}")
-            return LocalOntology(
-                metadata=OntologyMetadata(
-                    ontology_id=f"onto_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}",
-                    created_at=datetime.utcnow().isoformat()
-                ),
-                entity_types=[],
-                relation_types=[],
-            )
+        except Exception as exc:
+            logger.error(f"Error during ontology discovery: {exc}")
+            raise RuntimeError(str(exc)) from exc

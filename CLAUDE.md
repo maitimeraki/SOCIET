@@ -352,8 +352,14 @@ class SimulationResponse(BaseModel):
 # =============================================================================
 # LLM PROVIDERS (via LiteLLM - 100+ providers supported)
 # =============================================================================
-PRIMARY_LLM_PROVIDER=openai
-PRIMARY_LLM_MODEL=gpt-4
+# Model tiers — single source of truth: LLMConfig in src/llm/config_llm.py.
+#   ANALYSIS: cheap but capable — ontology discovery + graph analysis
+#   DEBATE:   the most powerful — agent debate in the simulation world
+ANALYSIS_LLM_MODEL=claude-sonnet-5
+DEBATE_LLM_MODEL=claude-opus-5-5
+
+# Default provider for the LiteLLM client (openai | anthropic | huggingface | ollama | nvidia_nim)
+DEFAULT_LLM_PROVIDER=ollama
 
 # OpenAI
 OPENAI_API_KEY=sk-...
@@ -361,12 +367,13 @@ OPENAI_API_KEY=sk-...
 # Anthropic
 ANTHROPIC_API_KEY=sk-ant-...
 
-# Azure OpenAI
-AZURE_OPENAI_KEY=...
-AZURE_OPENAI_BASE=https://company.openai.azure.com/v1
+# NVIDIA NIM (OpenAI-compatible gateway used by the graph stages)
+NVIDIA_NIM_API_KEY=nvapi-...
+NVIDIA_NIM_BASE_URL=https://integrate.api.nvidia.com/v1
 
 # Local Gateways
-OLLAMA_BASE_URL=http://localhost:11434/v1
+OLLAMA_MODEL=qwen3.5-16k:4b
+OLLAMA_BASE_URL=http://localhost:11434
 LOCALAI_BASE_URL=http://localhost:8080/v1
 
 # =============================================================================

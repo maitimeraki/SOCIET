@@ -1,5 +1,6 @@
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
+import asyncio
 import uuid
 import itertools
 from neo4j import AsyncGraphDatabase, Query
@@ -36,7 +37,7 @@ class RelationEdge:
 
 @dataclass
 class MergeCandidate:
-    node_id: int
+    node_id: str
     labels: List[str]
     properties: Dict[str, Any]
 
@@ -64,9 +65,13 @@ class GraphNormalizationStage:
     def canonicalize_name(name: str) -> str:
         return name.strip().lower() if name else ""
 
-    async def _run(self, query: Query, parameters: dict):
+    async def _run(self, query: Query, parameters: dict) -> List[Dict[str, Any]]:
+        # Fetch inside the session: AsyncSession.close() consumes the
+        # autocommit result, so a Result escaping this block raises
+        # ResultConsumedError on any later read.
         async with self.driver.session(database=self.config.neo4j_database) as session:
-            return await session.run(query, parameters or {})
+            result = await session.run(query, parameters or {})
+            return await result.data()
 
     # ---------- Candidate detection ----------
     async def find_surface_duplicates(self, dataset_id: str) -> List[List[MergeCandidate]]:
@@ -85,10 +90,10 @@ class GraphNormalizationStage:
         WHERE size(nodes) > 1
         RETURN key, nodes
         """)
-        result = await self._run(q, {"dataset_id": dataset_id})
+        records = await self._run(q, {"dataset_id": dataset_id})
         groups = []
-        async for record in result:
-            nodes = [MergeCandidate(node_id=int(n["id"]), labels=n["labels"], properties=n["props"]) for n in record["nodes"]]
+        for record in records:
+            nodes = [MergeCandidate(node_id=n["id"], labels=n["labels"], properties=n["props"]) for n in record["nodes"]]
             groups.append(nodes)
         return groups
 
@@ -103,22 +108,23 @@ class GraphNormalizationStage:
          - provenance_match (same source system)
          - embedding_similarity (optional external, placeholder here)
         """
-        # fast checks between first two nodes (can be expanded)
         signals = {"pairs": [], "aggregate_confidence": 0.0}
-        # For simplicity compute pairwise for all pairs and average
-        import itertools
-        scores = []
-        for a, b in itertools.combinations(group, 2):
-            type_score = 1.0 if set(a.labels) & set(b.labels) else 0.0
-            provenance_score = 1.0 if a.properties.get("source") and a.properties.get("source") == b.properties.get("source") else 0.0
-            # neighbor overlap: fetch neighboring labels
-            neighbor_score = await self._neighbor_label_jaccard(str(a.node_id), str(b.node_id))
-            # embedding similarity placeholder (0..1) - user must implement actual embed service
-            embed_score = await self._embedding_similarity(a.properties.get("name", ""), b.properties.get("name", ""))
-            # weighted sum
-            weight = 0.25 * type_score + 0.25 * provenance_score + 0.3 * neighbor_score + 0.2 * embed_score
-            scores.append(weight)
-            signals["pairs"].append({
+        # Each pair costs one Neo4j round trip (neighbor Jaccard), so score
+        # pairs concurrently under a fixed in-flight bound instead of
+        # one-at-a-time. gather keeps pair order, so results are unchanged.
+        semaphore = asyncio.Semaphore(max(1, self.config.ontology_max_concurrency))
+
+        async def score_pair(a: MergeCandidate, b: MergeCandidate) -> Dict[str, Any]:
+            async with semaphore:
+                type_score = 1.0 if set(a.labels) & set(b.labels) else 0.0
+                provenance_score = 1.0 if a.properties.get("source") and a.properties.get("source") == b.properties.get("source") else 0.0
+                # neighbor overlap: fetch neighboring labels
+                neighbor_score = await self._neighbor_label_jaccard(str(a.node_id), str(b.node_id))
+                # embedding similarity placeholder (0..1) - user must implement actual embed service
+                embed_score = await self._embedding_similarity(a.properties.get("name", ""), b.properties.get("name", ""))
+                # weighted sum
+                weight = 0.25 * type_score + 0.25 * provenance_score + 0.3 * neighbor_score + 0.2 * embed_score
+            return {
                 "a": a.node_id,
                 "b": b.node_id,
                 "type_score": type_score,
@@ -126,9 +132,16 @@ class GraphNormalizationStage:
                 "neighbor_score": neighbor_score,
                 "embed_score": embed_score,
                 "pair_confidence": weight,
-            })
-        if scores:
-            signals["aggregate_confidence"] = float(sum(scores) / len(scores))
+            }
+
+        pair_results = await asyncio.gather(
+            *(score_pair(a, b) for a, b in itertools.combinations(group, 2))
+        )
+        signals["pairs"] = list(pair_results)
+        if pair_results:
+            signals["aggregate_confidence"] = float(
+                sum(p["pair_confidence"] for p in pair_results) / len(pair_results)
+            )
         return signals
 
     async def _neighbor_label_jaccard(self, id_a: str, id_b: str) -> float:
@@ -145,11 +158,12 @@ class GraphNormalizationStage:
         RETURN apoc.coll.toSet(la) AS la_set, apoc.coll.toSet(lb) AS lb_set
         """)
         try:
-            res = await self._run(q, {"id_a": id_a, "id_b": id_b})
-            rec = await res.single()
-            if res is not None and rec:
-                la_set = rec["la_set"] or []
-                lb_set = rec["lb_set"] or []
+            records = await self._run(q, {"id_a": id_a, "id_b": id_b})
+            if not records:
+                return 0.0
+            rec = records[0]
+            la_set = rec["la_set"] or []
+            lb_set = rec["lb_set"] or []
             
             # FIX: APOC returns lists of lists/sets, we need to flatten and convert to set
             la_set = set(item for sublist in la_set for item in sublist)
@@ -200,7 +214,7 @@ class GraphNormalizationStage:
         originals_param = [{"id": c.node_id} for c in originals]
         await self._run(create_q, {"originals": originals_param, "canonical_id": canonical_id, "dataset_id": canonical_props.get("dataset_id"), "canon_props": canonical_props, "audit_note": audit_note})
 
-    async def soft_link_same_as(self, a_id: int, b_id: int, confidence: float, reason: Optional[str] = None):
+    async def soft_link_same_as(self, a_id: str, b_id: str, confidence: float, reason: Optional[str] = None):
         q = Query("""
         MATCH (a) WHERE elementId(a) = $a_id
         MATCH (b) WHERE elementId(b) = $b_id
@@ -302,7 +316,7 @@ class GraphNormalizationStage:
         """)
         review_id = str(uuid.uuid4())
         group_payload = [{"id": n.node_id, "labels": n.labels, "props": n.properties} for n in group]
-        res = await self._run(q, {"review_id": review_id, "group": group_payload, "signals": signals, "reason": reason})
+        await self._run(q, {"review_id": review_id, "group": group_payload, "signals": signals, "reason": reason})
         return review_id
     
     
@@ -418,14 +432,13 @@ class GraphNormalizationStage:
                     n.created_at = COALESCE(n.created_at, timestamp())
                 RETURN elementId(n) AS neo_id
             """)
-            result = await self._run(q, {
+            records = await self._run(q, {
                 "entity_id": entity.id,
                 "props": props,
                 "graph_id": graph_id
             })
-            record = await result.single()
-            if record:
-                written_ids.append(record["neo_id"])
+            if records:
+                written_ids.append(records[0]["neo_id"])
         return written_ids
 
     async def write_relations(self, relations: List[RelationEdge], graph_id: str) -> int:

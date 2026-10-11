@@ -24,8 +24,9 @@ boundary can hand in `ws_manager.broadcast` unchanged:
                            "share": float | None, "threshold": float}
               verdict     {"converged": bool, "rounds_executed": int}
 
-A run that stops early (nothing synthesized) emits intake, selection, synthesis,
-verdict — no round or convergence event, because neither happened.
+A run whose roster cannot debate (fewer than two agents) — or that never
+produces a pair — raises `SocietyNotDebatableError` after the stage events
+already emitted; the job boundary marks the run failed.
 
 Degradation: no emitter (`None`) → no events; an emitter that raises is logged
 and the run continues. Job state is authoritative; WS delivery is best-effort.
@@ -56,6 +57,23 @@ logger = logging.getLogger(__name__)
 
 #: Async callable that delivers one stage event; see the module docstring.
 StageEmitter = Callable[[dict[str, Any]], Awaitable[None]]
+
+
+class SocietyNotDebatableError(RuntimeError):
+    """The synthesized society cannot debate, so the job must fail.
+
+    Raised when fewer than two agents derive from the graph for the query, or
+    when no round ever produced a pair. A failed job — not an empty debate
+    reported as complete.
+
+    The run's accumulated `warnings` ride along on the instance so the job
+    boundary can surface the diagnostics explaining the failure instead of
+    dropping them at the raise.
+    """
+
+    def __init__(self, message: str, warnings: Optional[list[str]] = None):
+        super().__init__(message)
+        self.warnings: list[str] = list(warnings) if warnings else []
 
 
 @dataclass
@@ -161,20 +179,17 @@ class DebateOrchestrator:
         )
         stage_index = await self._emit_stage(on_stage, stage_index, "synthesis", agents=len(profiles))
 
-        if not profiles:
-            await self._emit_stage(on_stage, stage_index, "verdict", converged=False, rounds_executed=0)
-            return OrchestratedDebateResult(
-                converged=False,
-                verdict="No agents could be synthesized for this query.",
-                final_stances={},
-                warnings=warnings + ["No relevant entities found for query"],
-                rounds_executed=0,
-                intent=intent,
-                selection_rows=selection_rows,
+        if len(profiles) < 2:
+            raise SocietyNotDebatableError(
+                f"society not debatable: the graph yields {len(profiles)} agent(s) for "
+                f"this query; a debate needs at least 2 — ingest more documents or "
+                f"broaden the query.",
+                warnings=warnings,
             )
 
         # Step 2: Run debate rounds
         rounds: list[RoundResult] = []
+        rounds_failed = 0  # rounds whose execution raised (vs. ran and produced no pairs)
         round_runner = RoundRunner(_llm=self._llm_runner, ws_broadcast=ws_broadcast, intent=intent)
         debate_history: list[dict[str, Any]] = []
         snapshot = None  # graph-side society state, read at the start of rounds >= 2
@@ -200,6 +215,13 @@ class DebateOrchestrator:
                 )
                 if not pairs:
                     warnings.append(f"Round {round_num}: No pairs computed")
+                    # Bootstrap: a roster too small to pair must still be able
+                    # to grow, or the society deadlocks before its first round.
+                    await self._maybe_activate(
+                        profiles=profiles, dataset_id=dataset_id, query=query,
+                        query_hash=query_hash, round_num=round_num, config=config,
+                        warnings=warnings, ws_broadcast=ws_broadcast,
+                    )
                     continue
 
                 if snapshot is not None:
@@ -276,54 +298,38 @@ class DebateOrchestrator:
                 except Exception as exc:
                     warnings.append(f"Round {round_num}: commit failed: {exc}")
 
-                # Activation: pull related non-participants in (they debate from next round)
-                if config.max_new_agents_per_round > 0 and len(profiles) < config.max_agents:
-                    try:
-                        candidates = await self._topology.find_activation_candidates(
-                            participants=[p.identity.name for p in profiles],
-                            dataset_id=dataset_id,
-                            query_hash=query_hash,
-                            last_round=round_num,
-                            max_new=min(config.max_new_agents_per_round, config.max_agents - len(profiles)),
-                        )
-                        if candidates:
-                            new_profiles = await self._profile_synthesizer.synthesize_from_names(
-                                names=[c.agent_name for c in candidates],
-                                query=query,
-                                dataset_id=dataset_id,
-                                relevance_by_name={
-                                    c.agent_name: min(1.0, len(c.shared_entities) / 3.0)
-                                    for c in candidates
-                                },
-                            )
-                            # Every candidate may be unresolvable (synthesize_from_names
-                            # returns []): then the roster did not grow, so no activation
-                            # event and no warning — nothing was activated.
-                            if new_profiles:
-                                profiles.extend(new_profiles)
-                                await ws_broadcast({
-                                    "type": "activation",
-                                    "round": round_num,
-                                    "agents": [p.identity.name for p in new_profiles],
-                                    "reasons": {c.agent_name: c.reason for c in candidates},
-                                })
-                                warnings.append(
-                                    f"Round {round_num}: activated {len(new_profiles)} agents: "
-                                    + ", ".join(p.identity.name for p in new_profiles)
-                                )
-                    except Exception as exc:
-                        warnings.append(f"Round {round_num}: activation failed: {exc}")
+                await self._maybe_activate(
+                    profiles=profiles, dataset_id=dataset_id, query=query,
+                    query_hash=query_hash, round_num=round_num, config=config,
+                    warnings=warnings, ws_broadcast=ws_broadcast,
+                )
 
                 if self._check_convergence(rounds, profiles, config=config):
                     break
 
             except Exception as exc:
+                rounds_failed += 1
                 warnings.append(f"Round {round_num} failed: {exc}")
                 continue
 
-        # The loop is over (converged, exhausted, or no pairs ever): the
-        # convergence check is a pure function of the final rounds, so it is
-        # evaluated once here and reused for the event and the result.
+        # The loop is over (converged or exhausted): the convergence check is a
+        # pure function of the final rounds, so it is evaluated once here and
+        # reused for the event and the result.
+        if not rounds:
+            # Word the failure by its actual cause: rounds that raised are not
+            # the same as rounds that ran but never paired.
+            if rounds_failed:
+                raise SocietyNotDebatableError(
+                    f"society not debatable: the debate could not execute — "
+                    f"{rounds_failed} of {config.max_rounds} rounds raised an error "
+                    f"before any pair debated.",
+                    warnings=warnings,
+                )
+            raise SocietyNotDebatableError(
+                f"society not debatable: no pair of agents shared enough context to "
+                f"debate across {config.max_rounds} rounds.",
+                warnings=warnings,
+            )
         converged = self._check_convergence(rounds, profiles, config=config)
         share = self._weighted_share(rounds[-2:], profiles)
         stage_index = await self._emit_stage(
@@ -371,6 +377,64 @@ class DebateOrchestrator:
             supporting_entities=list(verdict.supporting_entities) if verdict else [],
             opposing_entities=list(verdict.opposing_entities) if verdict else [],
         )
+
+    async def _maybe_activate(
+        self,
+        *,
+        profiles: List[Agent],
+        dataset_id: str,
+        query: str,
+        query_hash: str,
+        round_num: int,
+        config: DebateConfig,
+        warnings: list[str],
+        ws_broadcast: Callable[[dict[str, Any]], Awaitable[None]],
+    ) -> None:
+        """Pull related non-participants in (they debate from next round).
+
+        Called after every round that produced pairs (normal growth) and after
+        a round that produced none — the bootstrap path: a society too small to
+        pair must still be able to grow, or it deadlocks. The mentions source
+        simply yields nothing before a round has committed. No-ops when
+        activation is disabled or the roster is already at `max_agents`.
+        """
+        if config.max_new_agents_per_round <= 0 or len(profiles) >= config.max_agents:
+            return
+        try:
+            candidates = await self._topology.find_activation_candidates(
+                participants=[p.identity.name for p in profiles],
+                dataset_id=dataset_id,
+                query_hash=query_hash,
+                last_round=round_num,
+                max_new=min(config.max_new_agents_per_round, config.max_agents - len(profiles)),
+            )
+            if candidates:
+                new_profiles = await self._profile_synthesizer.synthesize_from_names(
+                    names=[c.agent_name for c in candidates],
+                    query=query,
+                    dataset_id=dataset_id,
+                    relevance_by_name={
+                        c.agent_name: min(1.0, len(c.shared_entities) / 3.0)
+                        for c in candidates
+                    },
+                )
+                # Every candidate may be unresolvable (synthesize_from_names
+                # returns []): then the roster did not grow, so no activation
+                # event and no warning — nothing was activated.
+                if new_profiles:
+                    profiles.extend(new_profiles)
+                    await ws_broadcast({
+                        "type": "activation",
+                        "round": round_num,
+                        "agents": [p.identity.name for p in new_profiles],
+                        "reasons": {c.agent_name: c.reason for c in candidates},
+                    })
+                    warnings.append(
+                        f"Round {round_num}: activated {len(new_profiles)} agents: "
+                        + ", ".join(p.identity.name for p in new_profiles)
+                    )
+        except Exception as exc:
+            warnings.append(f"Round {round_num}: activation failed: {exc}")
 
     async def _emit_stage(
         self,

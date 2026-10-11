@@ -1,7 +1,8 @@
 """Run-document store for debate runs: persistence + history (§12.4).
 
-The file is the durable mirror of the live in-memory job; it is rewritten on
-every broadcast, so a hard crash loses at most the in-flight event.
+The file is the durable mirror of the live in-memory job; it is rewritten as
+the run broadcasts (throttled per run — see `debate_api._persist_debate_run`),
+so a hard crash loses at most the events since the last write.
 """
 import json
 import logging
@@ -24,7 +25,8 @@ def write_run_doc(doc: dict[str, Any]) -> None:
     # Temp file + os.replace: a crash mid-write loses at most the in-flight event,
     # never tears the JSON (§19.3).
     tmp = path.with_suffix(".json.tmp")
-    tmp.write_text(json.dumps(doc, ensure_ascii=False, indent=2), encoding="utf-8")
+    # Compact (separators, no indent): the doc is machine-read, not human-diffed.
+    tmp.write_text(json.dumps(doc, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
     os.replace(tmp, path)
 
 

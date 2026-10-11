@@ -13,7 +13,14 @@ from pydantic import BaseModel, Field
 from uuid import UUID, uuid4
 
 from src.graph.config_graph import GraphConfig
+from src.graph.neo4j_bootstrap import ENTITY_EMBEDDINGS_INDEX
+from src.llm.config_llm import LLMConfig
 from src.persona.models_persona import ProvenanceLink
+
+
+# The ollama clients default to httpx `timeout=None` (unbounded) — a stuck
+# localhost embed call would wait forever. 60 s is a generous bound for it.
+_EMBED_TIMEOUT_SECONDS = 60
 
 
 # ---- Supporting Types ----
@@ -54,7 +61,8 @@ class GraphContext:
         self._db = self.config.neo4j_database
         self._embed_model = OllamaEmbedding(
             model_name="nomic-embed-text:v1.5",
-            base_url="http://localhost:11434",
+            base_url=LLMConfig.ollama_base_url,
+            client_kwargs={"timeout": _EMBED_TIMEOUT_SECONDS},
             ollama_additional_kwargs={"mirostat": 0},
         )
 
@@ -107,8 +115,8 @@ class GraphContext:
         """
         query_vector = await self._get_embedding(query)
 
-        cypher = """
-        CALL db.index.vector.queryNodes('entity_embeddings', $limit, $vector)
+        cypher = f"""
+        CALL db.index.vector.queryNodes('{ENTITY_EMBEDDINGS_INDEX}', $limit, $vector)
         YIELD node, score AS vector_score
         RETURN node, vector_score
         ORDER BY vector_score DESC
@@ -122,25 +130,64 @@ class GraphContext:
             )
             rows = await result.data()
 
-        entities: List[EntityNode] = []
-        for row in rows:
-            node = row.get("node")
-            if node is None:
-                continue
-            props = self._node_props(node)
-            labels = list(node.keys()) if hasattr(node, "keys") else props.get("labels", ["Entity"])
+        return [
+            self._entity_from_node(row.get("node"), float(row.get("vector_score", 0.0)))
+            for row in rows
+            if row.get("node") is not None
+        ]
 
-            entities.append(EntityNode(
-                id=str(props.get("id", props.get("name", uuid4()))),
-                name=str(props.get("name", "Unknown")),
-                label=labels[0] if labels else "Entity",
-                properties=props,
-                relevance_score=float(row.get("vector_score", 0.0)),
-                summary=props.get("summary_context") or props.get("summary") or props.get("description"),
-                domain_tags=self._parse_tags(props.get("domain_tags")),
-            ))
+    def _entity_from_node(self, node: Any, relevance_score: float) -> EntityNode:
+        """One EntityNode from a Neo4j node — the single node-reading body the
+        vector search and the neighbour walk both construct through."""
+        props = self._node_props(node)
+        labels = list(node.keys()) if hasattr(node, "keys") else props.get("labels", ["Entity"])
+        return EntityNode(
+            id=str(props.get("id", props.get("name", uuid4()))),
+            name=str(props.get("name", "Unknown")),
+            label=labels[0] if labels else "Entity",
+            properties=props,
+            relevance_score=relevance_score,
+            summary=props.get("summary_context") or props.get("summary") or props.get("description"),
+            domain_tags=self._parse_tags(props.get("domain_tags")),
+        )
 
-        return entities
+    async def find_connected_nodes(self, node_ids: List[str], limit: int = 25) -> List[EntityNode]:
+        """Entity nodes one relationship hop from the seed nodes.
+
+        The roster-expansion walk for required-node derivation: seeds match by
+        id or name (the same tolerance as `get_provenance`), the walk stays on
+        entity-to-entity edges (`__Entity__`, never `Chunk`), and neighbours
+        carry no vector score — relevance is 0.0, so selection ranks them on
+        intent fit alone. Ordered by how many seeds reach a node; capped.
+        """
+        seed_ids = [str(node_id) for node_id in node_ids if str(node_id or "").strip()]
+        if not seed_ids:
+            return []
+
+        cypher = """
+        MATCH (seed:__Entity__)
+        WHERE seed.id IN $node_ids OR seed.name IN $node_ids
+        MATCH (seed)-[r]-(n:__Entity__)
+        WHERE NOT n:Chunk
+          AND NOT (n.id IN $node_ids OR n.name IN $node_ids)
+        WITH n, count(DISTINCT seed) AS seed_degree
+        RETURN n, seed_degree
+        ORDER BY seed_degree DESC
+        LIMIT $limit
+        """
+        async with self._driver.session(database=self._db) as session:
+            result = await session.run(
+                cast(LiteralString, cypher),
+                node_ids=seed_ids,
+                limit=limit,
+            )
+            rows = await result.data()
+
+        return [
+            self._entity_from_node(row.get("n"), 0.0)
+            for row in rows
+            if row.get("n") is not None
+        ]
 
     def _parse_tags(self, tags: Any) -> List[str]:
         """Parse domain_tags from various formats."""
@@ -240,10 +287,11 @@ class GraphContext:
     async def get_provenance(self, entity_id: str) -> List[ProvenanceLink]:
         """Return source chunks that contributed to the entity.
 
-        Traces back through MENTIONS relationships to Chunk nodes.
+        Chunks point at the entities they mention (the llama-index store's
+        direction), so an entity's provenance is its inbound MENTIONS.
         """
         cypher = """
-        MATCH (n)-[:MENTIONS]->(chunk:Chunk)
+        MATCH (n)<-[:MENTIONS]-(chunk:Chunk)
         WHERE n.id = $entity_id OR n.name = $entity_id
         AND chunk.doc_id IS NOT NULL
         RETURN DISTINCT
@@ -279,6 +327,67 @@ class GraphContext:
             ))
 
         return provenance
+
+    async def get_provenance_batch(
+        self, entity_ids: List[str]
+    ) -> Dict[str, List[ProvenanceLink]]:
+        """Return source chunks for a whole roster in ONE query.
+
+        Same per-entity result as `get_provenance` (a row reaches every
+        requested key its node id or name matches, same chunk order), keyed by
+        the requested id/name; entities with no chunks map to an empty list.
+        """
+        by_key: Dict[str, List[ProvenanceLink]] = {key: [] for key in entity_ids}
+        if not by_key:
+            return by_key
+
+        cypher = """
+        MATCH (n)<-[:MENTIONS]-(chunk:Chunk)
+        WHERE (n.id IN $entity_ids OR n.name IN $entity_ids)
+        AND chunk.doc_id IS NOT NULL
+        RETURN DISTINCT
+            n.id AS node_id,
+            n.name AS node_name,
+            chunk.doc_id AS doc_id,
+            chunk.title AS title,
+            chunk.breadcrumb AS breadcrumb,
+            chunk.chunk_id AS chunk_id
+        ORDER BY chunk.chunk_id
+        """
+        async with self._driver.session(database=self._db) as session:
+            result = await session.run(
+                cast(LiteralString, cypher),
+                entity_ids=list(by_key),
+            )
+            rows = await result.data()
+
+        for row in rows:
+            matched = {
+                value for value in (row.get("node_id"), row.get("node_name"))
+                if value is not None
+            } & by_key.keys()
+            if not matched:
+                continue
+
+            chunk_id = row.get("chunk_id")
+            if chunk_id:
+                try:
+                    chunk_uuid = UUID(chunk_id) if isinstance(chunk_id, str) else chunk_id
+                except (ValueError, TypeError):
+                    chunk_uuid = uuid4()
+            else:
+                chunk_uuid = uuid4()
+
+            link = ProvenanceLink(
+                doc_id=row.get("doc_id", ""),
+                title=row.get("title", "Unknown Source"),
+                breadcrumb=row.get("breadcrumb", ""),
+                chunk_id=chunk_uuid,
+            )
+            for key in matched:
+                by_key[key].append(link)
+
+        return by_key
 
 
 # ---- Factory ----

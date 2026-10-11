@@ -39,6 +39,11 @@ class _FakeIndex:
     def __init__(self, docs=None):
         self.docstore = types.SimpleNamespace(docs=docs or {})
 
+    def insert_nodes(self, nodes):
+        # Task 7 inserts per chunk (completion order); the document-model
+        # contract only cares that every built chunk document reaches the index.
+        _FakePropertyGraphIndex.received_docs.extend(nodes)
+
 
 class _FakeDocument:
     def __init__(self, text=None, metadata=None):
@@ -47,15 +52,17 @@ class _FakeDocument:
 
 
 class _FakePropertyGraphIndex:
-    """`from_documents` hands back the test's index and records the build order."""
+    """Callable constructor handing back the test's index and recording build order.
+
+    Task 7 builds one empty index (`PropertyGraphIndex(nodes=[], ...)`) then
+    inserts per chunk, replacing the old single `from_documents` call.
+    """
 
     index = _FakeIndex()
     received_docs: list = []
     events = None
 
-    @classmethod
-    def from_documents(cls, docs, **kwargs):
-        cls.received_docs = list(docs)
+    def __new__(cls, *args, **kwargs):
         if cls.events is not None:
             cls.events.append("build")
         return cls.index
@@ -87,6 +94,9 @@ def graph_env():
         "llama_index.core.node_parser": MagicMock(),
         "llama_index.core.node_parser.text_splitter": MagicMock(),
         "llama_index.core.settings": MagicMock(),
+        # Task 7: `_proposed_labels` / `_delta_payload` read these keys lazily.
+        "llama_index.core.graph_stores": MagicMock(),
+        "llama_index.core.graph_stores.types": MagicMock(),
     }
     with patch.dict(sys.modules, modules), \
             patch("src.graph.graph_build.OpenAILike"), \
@@ -98,7 +108,15 @@ def graph_env():
 
         stage = GraphExtractionStage(GraphConfig())
         stage.graph_store = store
-        yield stage, store, events
+        # This module tests the store seam, not extraction: a pass-through
+        # extractor keeps each built chunk document reaching `insert_nodes` 1:1.
+        with patch.object(GraphExtractionStage, "_build_extractors", return_value=[_pass_extractor]):
+            yield stage, store, events
+
+
+def _pass_extractor(nodes):
+    """Identity extractor — the document-model tests never extract triples."""
+    return nodes
 
 
 def _chunk(chunk_id: str, parent_doc_id: str, tags, index: int = 0) -> ProcessedChunk:
@@ -260,9 +278,9 @@ async def test_llama_document_title_prefers_an_explicit_title(graph_env):
     bare = _chunk("c2", "doc-2", ["b"], index=1)
     await _run(stage, [titled, bare])
 
-    docs = _FakePropertyGraphIndex.received_docs
-    assert docs[0].metadata["title"] == "Executive Summary"
-    assert docs[1].metadata["title"] == "Untitled Document"
+    docs = {d.metadata["chunk_id"]: d for d in _FakePropertyGraphIndex.received_docs}
+    assert docs["c1"].metadata["title"] == "Executive Summary"
+    assert docs["c2"].metadata["title"] == "Untitled Document"
 
 
 @pytest.mark.asyncio

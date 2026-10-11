@@ -5,7 +5,9 @@ import pytest
 from unittest.mock import ANY, AsyncMock, MagicMock, patch
 import asyncio
 
-from src.simulation.orchestrator import DebateOrchestrator, OrchestratedDebateResult
+from src.simulation.orchestrator import (
+    DebateOrchestrator, OrchestratedDebateResult, SocietyNotDebatableError,
+)
 from src.simulation.profile_synthesizer import ProfileSynthesizer
 from src.simulation.topology import CommunicationTopology
 from src.simulation.pair_turn import ActivationCandidate, CommPair
@@ -206,56 +208,39 @@ async def test_ws_broadcast_passed_to_round_runner():
 
 
 @pytest.mark.asyncio
-async def test_no_profiles_returns_early():
-    """If synthesize returns empty, skip all subsequent steps and return empty result."""
+async def test_non_debatable_roster_raises():
+    """0 or 1 agents cannot debate: the job fails loudly, nothing else runs."""
     synth = AsyncMock(spec=ProfileSynthesizer)
     topo = AsyncMock(spec=CommunicationTopology)
-    llm_runner = MagicMock(spec=BatchedLLMRunner)
     verdict_synth = MagicMock(spec=VerdictSynthesizer)
     society_memory = AsyncMock(spec=SocietyMemory)
+    orch = _orch(synth, topo, society_memory, verdict_synth)
 
-    synth.synthesize.return_value = []
+    for roster in ([], [_make_profile(1, "Alice")]):
+        synth.synthesize.return_value = roster
+        with pytest.raises(SocietyNotDebatableError, match="at least 2"):
+            await orch.run("q", "ds1", DebateConfig(max_agents=5, max_rounds=3), AsyncMock())
 
-    orchestrator = DebateOrchestrator(
-        profile_synthesizer=synth,
-        topology=topo,
-        llm_runner=llm_runner,
-        verdict_synthesizer=verdict_synth,
-        society_memory=society_memory,
-    )
-
-    ws_broadcast = AsyncMock()
-    config = DebateConfig(max_agents=5, max_rounds=3)
-
-    result = await orchestrator.run("test query", "ds1", config, ws_broadcast)
-
-    assert result.converged is False
-    assert "No agents could be synthesized" in result.verdict
-    topo.compute_round_pairs.assert_not_called()
+    topo.compute_round_pairs.assert_not_awaited()
     verdict_synth.asynthesize.assert_not_called()
     society_memory.commit_round.assert_not_awaited()
-    society_memory.read_snapshot.assert_not_awaited()
 
 
 @pytest.mark.asyncio
-async def test_empty_roster_result_keeps_accumulated_warnings():
-    """P5-A m1: the early return carries what earlier stages already warned about."""
+async def test_non_debatable_raises_after_the_synthesis_stage_event():
+    """The stream shows how far the run got; the error is what ends it."""
     synth = AsyncMock(spec=ProfileSynthesizer)
     topo = AsyncMock(spec=CommunicationTopology)
     society_memory = AsyncMock(spec=SocietyMemory)
-
-    async def synthesize(**kwargs):
-        kwargs["warnings"].append("S4 selection: degraded to density-only ordering")
-        return []
-
-    synth.synthesize.side_effect = synthesize
+    synth.synthesize.return_value = [_make_profile(1, "Alice")]
     orch = _orch(synth, topo, society_memory)
+    events, emit = _stage_spy()
 
-    result = await orch.run("q", "ds1", DebateConfig(max_agents=5, max_rounds=1), AsyncMock())
+    with pytest.raises(SocietyNotDebatableError):
+        await orch.run("q", "ds1", DebateConfig(max_agents=5, max_rounds=1), AsyncMock(), on_stage=emit)
 
-    assert result.warnings == [
-        "S4 selection: degraded to density-only ordering",
-        "No relevant entities found for query",
+    assert [(e["stage"], e.get("agents")) for e in events] == [
+        ("intake", None), ("selection", None), ("synthesis", 1),
     ]
 
 
@@ -280,7 +265,7 @@ async def test_convergence_check_breaks_loop():
     verdict_synth = MagicMock(spec=VerdictSynthesizer)
     society_memory = AsyncMock(spec=SocietyMemory)
 
-    profiles = [_make_profile(1, "Alice")]
+    profiles = [_make_profile(1, "Alice"), _make_profile(2, "Bob")]
     synth.synthesize.return_value = profiles
     topo.compute_round_pairs.return_value = [
         CommPair(agent_a="Alice", agent_b="Bob", shared_entities=[], score=0.5)
@@ -324,34 +309,64 @@ async def test_convergence_check_breaks_loop():
 
 
 @pytest.mark.asyncio
-async def test_convergence_false_when_insufficient_rounds():
-    """_check_convergence returns False when fewer than 2 rounds."""
+async def test_non_debatable_raise_carries_the_accumulated_warnings():
+    """A failed run must not lose its diagnostics: the warnings ride the exception."""
     synth = AsyncMock(spec=ProfileSynthesizer)
     topo = AsyncMock(spec=CommunicationTopology)
-    llm_runner = MagicMock(spec=BatchedLLMRunner)
-    verdict_synth = MagicMock(spec=VerdictSynthesizer)
     society_memory = AsyncMock(spec=SocietyMemory)
 
-    profiles = [_make_profile(1, "Alice")]
-    synth.synthesize.return_value = profiles
+    async def synthesize(**kwargs):
+        kwargs["warnings"].append("S4 selection degraded to density-only")
+        return [_make_profile(1, "Alice")]
+
+    synth.synthesize.side_effect = synthesize
+    orch = _orch(synth, topo, society_memory)
+
+    with pytest.raises(SocietyNotDebatableError, match="at least 2") as excinfo:
+        await orch.run("q", "ds1", DebateConfig(max_agents=5, max_rounds=1), AsyncMock())
+
+    assert excinfo.value.warnings == ["S4 selection degraded to density-only"]
+
+
+@pytest.mark.asyncio
+async def test_failed_round_raises_cause_aware_message_with_warnings():
+    """Rounds that raise are 'rounds raised', not 'no pair shared context' — and the
+    accumulated failure diagnostics survive on the exception."""
+    synth = AsyncMock(spec=ProfileSynthesizer)
+    topo = AsyncMock(spec=CommunicationTopology)
+    society_memory = AsyncMock(spec=SocietyMemory)
+    synth.synthesize.return_value = [_make_profile(1, "Alice"), _make_profile(2, "Bob")]
+    topo.compute_round_pairs.side_effect = RuntimeError("cypher down")
+    orch = _orch(synth, topo, society_memory)
+    config = DebateConfig(max_agents=5, max_rounds=2, max_new_agents_per_round=0)
+
+    with pytest.raises(SocietyNotDebatableError) as excinfo:
+        await orch.run("q", "ds1", config, AsyncMock())
+
+    message = str(excinfo.value)
+    assert "raised" in message
+    assert "no pair" not in message  # the genuine-no-pair wording is a different cause
+    assert any("Round 1 failed" in w for w in excinfo.value.warnings)
+    assert any("Round 2 failed" in w for w in excinfo.value.warnings)
+
+
+@pytest.mark.asyncio
+async def test_never_paired_run_raises():
+    """A roster that never pairs across every round is a failed debate, not a silent one."""
+    synth = AsyncMock(spec=ProfileSynthesizer)
+    topo = AsyncMock(spec=CommunicationTopology)
+    verdict_synth = MagicMock(spec=VerdictSynthesizer)
+    society_memory = AsyncMock(spec=SocietyMemory)
+    synth.synthesize.return_value = [_make_profile(1, "Alice"), _make_profile(2, "Bob")]
     topo.compute_round_pairs.return_value = []
-    verdict_synth.asynthesize.return_value = _make_verdict()
-    llm_runner.gather = MagicMock(return_value=_AsyncEmptyIter())
+    orch = _orch(synth, topo, society_memory, verdict_synth)
+    config = DebateConfig(max_agents=5, max_rounds=2, max_new_agents_per_round=0)
 
-    orchestrator = DebateOrchestrator(
-        profile_synthesizer=synth,
-        topology=topo,
-        llm_runner=llm_runner,
-        verdict_synthesizer=verdict_synth,
-        society_memory=society_memory,
-    )
+    with pytest.raises(SocietyNotDebatableError, match="no pair"):
+        await orch.run("q", "ds1", config, AsyncMock())
 
-    ws_broadcast = AsyncMock()
-    config = DebateConfig(max_agents=5, max_rounds=1)
-
-    result = await orchestrator.run("test query", "ds1", config, ws_broadcast)
-
-    assert result.converged is False
+    assert topo.compute_round_pairs.await_count == 2  # every round was attempted
+    verdict_synth.asynthesize.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -415,7 +430,7 @@ async def test_commit_failure_degrades_to_warning():
     llm_runner = MagicMock(spec=BatchedLLMRunner)
     verdict_synth = MagicMock(spec=VerdictSynthesizer)
     society_memory = AsyncMock(spec=SocietyMemory)
-    synth.synthesize.return_value = [_make_profile(1, "Alice")]
+    synth.synthesize.return_value = [_make_profile(1, "Alice"), _make_profile(2, "Bob")]
     topo.compute_round_pairs.side_effect = lambda *a, **kw: [
         CommPair(agent_a="Alice", agent_b="Bob", shared_entities=[], score=0.5)
     ]
@@ -439,7 +454,7 @@ async def test_commit_failure_first_round_does_not_abort_loop():
     llm_runner = MagicMock(spec=BatchedLLMRunner)
     verdict_synth = MagicMock(spec=VerdictSynthesizer)
     society_memory = AsyncMock(spec=SocietyMemory)
-    synth.synthesize.return_value = [_make_profile(1, "Alice")]
+    synth.synthesize.return_value = [_make_profile(1, "Alice"), _make_profile(2, "Bob")]
     topo.compute_round_pairs.side_effect = lambda *a, **kw: [
         CommPair(agent_a="Alice", agent_b="Bob", shared_entities=[], score=0.5)
     ]
@@ -513,7 +528,7 @@ async def test_activation_pulls_in_candidates_after_commit():
     society_memory = AsyncMock(spec=SocietyMemory)
     # Explicit successful receipt: an unset AsyncMock return degrades to the commit-failed branch.
     society_memory.commit_round.return_value = _ok_receipt()
-    synth.synthesize.return_value = [_make_profile(1, "Alice")]
+    synth.synthesize.return_value = [_make_profile(1, "Alice"), _make_profile(2, "Bob")]
     new_profile = _make_profile(2, "Carl")
     synth.synthesize_from_names = AsyncMock(return_value=[new_profile])
     topo.compute_round_pairs.side_effect = lambda *a, **kw: [
@@ -550,7 +565,7 @@ async def test_no_activation_event_when_no_candidate_resolves():
     topo = AsyncMock(spec=CommunicationTopology)
     society_memory = AsyncMock(spec=SocietyMemory)
     society_memory.commit_round.return_value = _ok_receipt()
-    synth.synthesize.return_value = [_make_profile(1, "Alice")]
+    synth.synthesize.return_value = [_make_profile(1, "Alice"), _make_profile(2, "Bob")]
     synth.synthesize_from_names = AsyncMock(return_value=[])
     topo.compute_round_pairs.side_effect = lambda *a, **kw: [
         CommPair(agent_a="Alice", agent_b="Bob", shared_entities=[], score=0.5)
@@ -583,7 +598,7 @@ async def test_activation_disabled_by_config():
     society_memory = AsyncMock(spec=SocietyMemory)
     # Explicit successful receipt: an unset AsyncMock return degrades to the commit-failed branch.
     society_memory.commit_round.return_value = _ok_receipt()
-    synth.synthesize.return_value = [_make_profile(1, "Alice")]
+    synth.synthesize.return_value = [_make_profile(1, "Alice"), _make_profile(2, "Bob")]
     synth.synthesize_from_names = AsyncMock(return_value=[])
     topo.compute_round_pairs.side_effect = lambda *a, **kw: [
         CommPair(agent_a="Alice", agent_b="Bob", shared_entities=[], score=0.5)
@@ -606,13 +621,51 @@ async def test_activation_disabled_by_config():
 
 
 @pytest.mark.asyncio
+async def test_no_pair_round_attempts_activation_bootstrap():
+    """A round with no pairs still tries to grow the roster — the bootstrap path."""
+    synth = AsyncMock(spec=ProfileSynthesizer)
+    topo = AsyncMock(spec=CommunicationTopology)
+    society_memory = AsyncMock(spec=SocietyMemory)
+    society_memory.commit_round.return_value = _ok_receipt()
+    synth.synthesize.return_value = [_make_profile(1, "Alice"), _make_profile(2, "Bob")]
+    synth.synthesize_from_names = AsyncMock(return_value=[_make_profile(3, "Carl")])
+    topo.find_activation_candidates = AsyncMock(side_effect=[
+        [ActivationCandidate(agent_name="Carl", shared_entities=["carbon"], reason="shares entities")],
+        [],  # round 2: Carl is a participant now — no more joiners
+    ])
+    topo.compute_round_pairs = AsyncMock(side_effect=lambda profiles, **kw: (
+        # Real pairing depends on who is in the roster: round 2 can only pair
+        # with Carl if round 1 grew it. A roster that never grows pairs nothing.
+        [CommPair(agent_a="Alice", agent_b="Carl", shared_entities=["carbon"], score=0.5)]
+        if any(p.identity.name == "Carl" for p in profiles) else []
+    ))
+    llm_runner = MagicMock(spec=BatchedLLMRunner)
+    llm_runner.gather = MagicMock(side_effect=lambda *a, **kw: _AsyncEmptyIter())
+    verdict_synth = MagicMock(spec=VerdictSynthesizer)
+    verdict_synth.asynthesize.return_value = _make_verdict()
+    ws_calls = []
+
+    async def ws(msg):
+        ws_calls.append(msg)
+
+    orch = _orch(synth, topo, society_memory, verdict_synth, llm_runner)
+    result = await orch.run("q", "ds1", DebateConfig(max_agents=5, max_rounds=2), ws)
+
+    synth.synthesize_from_names.assert_awaited_once()
+    assert synth.synthesize_from_names.await_args.kwargs["names"] == ["Carl"]
+    assert topo.compute_round_pairs.await_count == 2  # round 2 ran after growth
+    assert result.rounds_executed == 1
+    assert any(m.get("type") == "activation" for m in ws_calls)
+
+
+@pytest.mark.asyncio
 async def test_run_threads_intent_to_round_runner_and_result():
     """S3: the run's intent reaches the prompt builder and is exposed on the result."""
     synth = AsyncMock(spec=ProfileSynthesizer)
     topo = AsyncMock(spec=CommunicationTopology)
     society_memory = AsyncMock(spec=SocietyMemory)
     society_memory.commit_round.return_value = _ok_receipt()
-    synth.synthesize.return_value = [_make_profile(1, "Alice")]
+    synth.synthesize.return_value = [_make_profile(1, "Alice"), _make_profile(2, "Bob")]
     topo.compute_round_pairs.return_value = [
         CommPair(agent_a="Alice", agent_b="Bob", shared_entities=[], score=0.5)
     ]
@@ -648,7 +701,7 @@ async def test_run_without_intent_exposes_none():
     topo = AsyncMock(spec=CommunicationTopology)
     society_memory = AsyncMock(spec=SocietyMemory)
     society_memory.commit_round.return_value = _ok_receipt()
-    synth.synthesize.return_value = [_make_profile(1, "Alice")]
+    synth.synthesize.return_value = [_make_profile(1, "Alice"), _make_profile(2, "Bob")]
     topo.compute_round_pairs.return_value = [
         CommPair(agent_a="Alice", agent_b="Bob", shared_entities=[], score=0.5)
     ]
@@ -682,7 +735,9 @@ def _stage_ready_orch(max_rounds: int = 3, profiles=None):
     topo = AsyncMock(spec=CommunicationTopology)
     society_memory = AsyncMock(spec=SocietyMemory)
     society_memory.commit_round.return_value = _ok_receipt()
-    synth.synthesize.return_value = profiles if profiles is not None else [_make_profile(1, "Alice")]
+    synth.synthesize.return_value = (
+        profiles if profiles is not None else [_make_profile(1, "Alice"), _make_profile(2, "Bob")]
+    )
     topo.compute_round_pairs.side_effect = lambda *a, **kw: [
         CommPair(agent_a="Alice", agent_b="Bob", shared_entities=[], score=0.5)
     ]
@@ -700,7 +755,7 @@ async def test_stage_events_follow_the_documented_sequence():
     topo = AsyncMock(spec=CommunicationTopology)
     society_memory = AsyncMock(spec=SocietyMemory)
     society_memory.commit_round.return_value = _ok_receipt()
-    synth.synthesize.return_value = [_make_profile(1, "Alice")]
+    synth.synthesize.return_value = [_make_profile(1, "Alice"), _make_profile(2, "Bob")]
     topo.compute_round_pairs.side_effect = lambda *a, **kw: [
         CommPair(agent_a="Alice", agent_b="Bob", shared_entities=[], score=0.5)
     ]
@@ -729,28 +784,12 @@ async def test_stage_events_follow_the_documented_sequence():
     assert all(e["type"] == "stage" for e in events)
     assert [e["index"] for e in events] == list(range(len(events)))
     assert events[0]["query"] == "q"
-    assert events[2]["agents"] == 1
+    assert events[2]["agents"] == 2
     # the round event reports that round's own execution
     assert (events[3]["round"], events[3]["pairs"], events[3]["turns"]) == (1, 1, 1)
     assert events[4]["round"] == 2 and events[5]["round"] == 3
     assert events[-2]["converged"] is result.converged
     assert events[-2]["rounds_executed"] == result.rounds_executed == 3
-
-
-@pytest.mark.asyncio
-async def test_stage_events_stop_at_verdict_when_nothing_is_synthesized():
-    """No roster → no round/convergence event, but the run still says how it ended."""
-    orch = _stage_ready_orch(profiles=[])
-    events, emit = _stage_spy()
-
-    result = await orch.run(
-        "q", "ds1", DebateConfig(max_agents=5, max_rounds=3), AsyncMock(), on_stage=emit
-    )
-
-    assert [e["stage"] for e in events] == ["intake", "selection", "synthesis", "verdict"]
-    assert events[2]["agents"] == 0
-    assert events[3]["converged"] is False and events[3]["rounds_executed"] == 0
-    assert result.rounds_executed == 0
 
 
 @pytest.mark.asyncio
@@ -807,8 +846,11 @@ async def test_selection_and_agent_events_are_broadcast():
         return profiles
 
     synth.synthesize.side_effect = fake_synthesize
-    topo.compute_round_pairs.return_value = []
+    topo.compute_round_pairs.return_value = [
+        CommPair(agent_a="Alice", agent_b="Bob", shared_entities=[], score=0.5)
+    ]
     verdict_synth.asynthesize.return_value = _make_verdict()
+    society_memory.commit_round.return_value = _ok_receipt()
 
     orchestrator = _orchestrator_with(synth, topo, llm_runner, verdict_synth, society_memory)
     ws_calls = []
@@ -816,7 +858,12 @@ async def test_selection_and_agent_events_are_broadcast():
     async def fake_ws(msg):
         ws_calls.append(msg)
 
-    await orchestrator.run("test query", "ds1", DebateConfig(max_agents=5, max_rounds=1), fake_ws)
+    with patch("src.simulation.orchestrator.RoundRunner") as rr_cls:
+        rr_instance = MagicMock()
+        rr_instance.execute_round = AsyncMock(return_value=RoundResult(round_num=1, turns=[], pairs=[]))
+        rr_cls.return_value = rr_instance
+
+        await orchestrator.run("test query", "ds1", DebateConfig(max_agents=5, max_rounds=1), fake_ws)
 
     types = [m["type"] for m in ws_calls]
     assert types.index("selection") < types.index("agent")
@@ -974,8 +1021,12 @@ async def test_result_carries_the_verdict_payload_for_the_ui():
     verdict_synth = MagicMock(spec=VerdictSynthesizer)
     society_memory = AsyncMock(spec=SocietyMemory)
 
-    synth.synthesize.return_value = [_make_profile(1, "Alice")]
-    topo.compute_round_pairs.return_value = []
+    synth.synthesize.return_value = [_make_profile(1, "Alice"), _make_profile(2, "Bob")]
+    topo.compute_round_pairs.return_value = [
+        CommPair(agent_a="Alice", agent_b="Bob", shared_entities=[], score=0.5)
+    ]
+    # Explicit successful receipt: an unset AsyncMock return degrades to the commit-failed branch.
+    society_memory.commit_round.return_value = _ok_receipt()
     verdict = _make_verdict()
     verdict.cluster_details = {
         Stance.POSITIVE: ClusterSummary(
@@ -993,7 +1044,12 @@ async def test_result_carries_the_verdict_payload_for_the_ui():
     async def fake_ws(msg):
         ws_calls.append(msg)
 
-    result = await orchestrator.run("test query", "ds1", DebateConfig(max_agents=5, max_rounds=1), fake_ws)
+    with patch("src.simulation.orchestrator.RoundRunner") as rr_cls:
+        rr_instance = MagicMock()
+        rr_instance.execute_round = AsyncMock(return_value=RoundResult(round_num=1, turns=[], pairs=[]))
+        rr_cls.return_value = rr_instance
+
+        result = await orchestrator.run("test query", "ds1", DebateConfig(max_agents=5, max_rounds=1), fake_ws)
 
     assert result.confidence_score == 0.9
     assert result.cluster_details["POSITIVE"]["count"] == 2

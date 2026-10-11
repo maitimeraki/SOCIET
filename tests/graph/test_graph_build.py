@@ -21,6 +21,9 @@ def mock_llama_index():
         'llama_index.core.indices': MagicMock(),
         'llama_index.core.indices.property_graph': MagicMock(),
         'llama_index.core.settings': MagicMock(),
+        # Task 7: `_proposed_labels` / `_delta_payload` read these keys lazily.
+        'llama_index.core.graph_stores': MagicMock(),
+        'llama_index.core.graph_stores.types': MagicMock(),
     }):
         yield
 
@@ -144,6 +147,27 @@ class TestGraphExtractionStage:
             assert stage.graph_store is not None
             assert stage.splitter is not None
 
+    def test_schema_refresh_runs_once_per_store(self, monkeypatch):
+        """The stage's store refreshes its schema at most once per instance."""
+        import src.graph.graph_build as gb
+        from src.graph.config_graph import GraphConfig
+
+        class _Probe:
+            def __init__(self, **kwargs):
+                self.refreshes = 0
+
+            def refresh_schema(self, **kwargs):
+                self.refreshes += 1
+
+        monkeypatch.setattr(gb, "Neo4jPropertyGraphStore", _Probe)
+        stage = gb.GraphExtractionStage(GraphConfig())
+        store = stage.graph_store
+        assert isinstance(store, _Probe)
+        store.refresh_schema()
+        store.refresh_schema()
+        store.refresh_schema()
+        assert store.refreshes == 1
+
     @pytest.mark.asyncio
     async def test_run_returns_document_count(self, sample_chunks, sample_ontology):
         """Verify run method returns document count."""
@@ -173,3 +197,188 @@ class TestGraphExtractionStage:
 
             with pytest.raises(RuntimeError, match="Extraction failed"):
                 await stage.run("test-dataset", sample_chunks, sample_ontology)
+
+
+class TestStageConfigWiring:
+    """Stage credentials come from central config, never literals."""
+
+    def test_nim_credentials_come_from_config(self, monkeypatch):
+        """OpenAILike receives the NIM key/base from LLMConfig (env-backed)."""
+        from src.graph.config_graph import GraphConfig
+        from src.graph.graph_build import GraphExtractionStage
+        from src.llm.config_llm import LLMConfig
+
+        monkeypatch.setattr(LLMConfig, "nvidia_nim_api_key", "sentinel-key")
+        monkeypatch.setattr(LLMConfig, "nvidia_nim_base_url", "http://sentinel-base/v1")
+
+        with patch('src.graph.graph_build.OpenAILike') as mock_llm, \
+             patch('src.graph.graph_build.OllamaEmbedding'), \
+             patch('src.graph.graph_build.Neo4jPropertyGraphStore'), \
+             patch('src.graph.graph_build.SentenceSplitter'):
+            GraphExtractionStage(GraphConfig())
+
+            assert mock_llm.call_args.kwargs["api_key"] == "sentinel-key"
+            assert mock_llm.call_args.kwargs["api_base"] == "http://sentinel-base/v1"
+
+    def test_discovery_model_defaults_to_analysis_tier(self):
+        """GraphConfig discovery default is the central analysis-tier model."""
+        from src.graph.config_graph import GraphConfig
+        from src.llm.config_llm import LLMConfig
+
+        assert GraphConfig().discovery_model == LLMConfig.analysis_model
+
+    def test_extraction_model_defaults_to_analysis_tier(self):
+        """GraphConfig extraction default is the central analysis-tier model."""
+        from src.graph.config_graph import GraphConfig
+        from src.llm.config_llm import LLMConfig
+
+        assert GraphConfig().extraction_model == LLMConfig.analysis_model
+
+
+class TestNetworkBounds:
+    """Every network client the stage builds carries an explicit bound."""
+
+    def test_extraction_timeout_defaults_to_300(self):
+        """GraphConfig carries the extraction timeout knob, default 300 s."""
+        from src.graph.config_graph import GraphConfig
+
+        assert GraphConfig().extraction_timeout_seconds == 300
+
+    def test_extraction_llm_timeout_comes_from_config(self):
+        """OpenAILike receives the configured timeout, not a library default."""
+        from src.graph.config_graph import GraphConfig
+        from src.graph.graph_build import GraphExtractionStage
+
+        with patch('src.graph.graph_build.OpenAILike') as mock_llm, \
+             patch('src.graph.graph_build.OllamaEmbedding'), \
+             patch('src.graph.graph_build.Neo4jPropertyGraphStore'), \
+             patch('src.graph.graph_build.SentenceSplitter'):
+            GraphExtractionStage(GraphConfig(extraction_timeout_seconds=123))
+
+            assert mock_llm.call_args.kwargs["timeout"] == 123
+
+    def test_extraction_llm_caps_retries(self):
+        """max_retries=1 — a hung attempt must not stack retries on top of the timeout."""
+        from src.graph.config_graph import GraphConfig
+        from src.graph.graph_build import GraphExtractionStage
+
+        with patch('src.graph.graph_build.OpenAILike') as mock_llm, \
+             patch('src.graph.graph_build.OllamaEmbedding'), \
+             patch('src.graph.graph_build.Neo4jPropertyGraphStore'), \
+             patch('src.graph.graph_build.SentenceSplitter'):
+            GraphExtractionStage(GraphConfig())
+
+            assert mock_llm.call_args.kwargs["max_retries"] == 1
+
+    def test_embed_model_is_bounded_and_env_addressed(self, monkeypatch):
+        """OllamaEmbedding gets LLMConfig's Ollama base URL plus a request timeout."""
+        from src.graph.config_graph import GraphConfig
+        from src.graph.graph_build import GraphExtractionStage
+        from src.llm.config_llm import LLMConfig
+
+        monkeypatch.setattr(LLMConfig, "ollama_base_url", "http://sentinel-ollama:1234")
+
+        with patch('src.graph.graph_build.OpenAILike'), \
+             patch('src.graph.graph_build.OllamaEmbedding') as mock_embed, \
+             patch('src.graph.graph_build.Neo4jPropertyGraphStore'), \
+             patch('src.graph.graph_build.SentenceSplitter'):
+            GraphExtractionStage(GraphConfig())
+
+            kwargs = mock_embed.call_args.kwargs
+            assert kwargs["base_url"] == "http://sentinel-ollama:1234"
+            assert kwargs["client_kwargs"]["timeout"] == 60
+
+    @pytest.mark.asyncio
+    async def test_extractors_pin_num_workers_to_one(self, sample_chunks, sample_ontology):
+        """Sync mode still fans out per document (run_jobs semaphore = num_workers).
+
+        One extraction call now carries a whole document's chunks, so the outer
+        document semaphore (ontology_max_concurrency) must be the only
+        concurrency lever: aggregate in-flight calls = semaphore × num_workers.
+        """
+        import sys
+
+        from src.graph.config_graph import GraphConfig
+        from src.graph.graph_build import GraphExtractionStage
+
+        with patch('src.graph.graph_build.OpenAILike'), \
+             patch('src.graph.graph_build.OllamaEmbedding'), \
+             patch('src.graph.graph_build.Neo4jPropertyGraphStore'), \
+             patch('src.graph.graph_build.SentenceSplitter'):
+            stage = GraphExtractionStage(GraphConfig(ontology_max_concurrency=8))
+
+        await stage.run("test-dataset", sample_chunks, sample_ontology)
+
+        property_graph = sys.modules['llama_index.core.indices.property_graph']
+        for extractor in (
+            property_graph.SimpleLLMPathExtractor,
+            property_graph.DynamicLLMPathExtractor,
+        ):
+            assert extractor.call_args.kwargs["num_workers"] == 1
+
+
+class TestSingleChunkingOwner:
+    """`split_text_sentences` already split the input — extraction must not split again."""
+
+    @pytest.mark.asyncio
+    async def test_documents_reach_extraction_unchunked_once(self, sample_ontology):
+        """Each pre-split chunk becomes exactly one extracted node — no re-split.
+
+        Task 7 replaced the single `from_documents` build with a per-chunk
+        sliding window. The single-chunking-owner invariant now means: the
+        stage wraps each ProcessedChunk in one Document and hands exactly one
+        node to the extractors per chunk (1:1), never re-splitting — and the
+        empty index it builds carries a truthy no-op `kg_extractor`, so the
+        index's own insert path cannot re-run the default extractors either.
+        """
+        import sys
+
+        from src.graph.config_graph import GraphConfig
+        from src.graph.graph_build import GraphExtractionStage
+
+        chunks = [
+            ProcessedChunk(
+                chunk_id=f"chunk-{i}",
+                parent_doc_id="doc-1",
+                chunk_index=i,
+                content_hash=f"hash{i}",
+                content=f"Pre-split chunk body number {i}.",
+                summary_context="Software architecture overview",
+                breadcrumb="docs/architecture",
+                header_level=1,
+                domain_tags=["software"],
+                expertise_level="Technical",
+                metadata={"title": "System Architecture"},
+            )
+            for i in range(3)
+        ]
+
+        seen = []
+
+        def _recording_extractor(nodes):
+            seen.extend(nodes)
+            return nodes
+
+        with patch('src.graph.graph_build.OpenAILike'), \
+             patch('src.graph.graph_build.OllamaEmbedding'), \
+             patch('src.graph.graph_build.Neo4jPropertyGraphStore'), \
+             patch('src.graph.graph_build.SentenceSplitter'):
+            stage = GraphExtractionStage(GraphConfig())
+
+        core = sys.modules['llama_index.core']
+        # Production pins Settings.node_parser = self.splitter; the splitter must
+        # never be reached by the per-chunk path.
+        core.Settings.transformations = [stage.splitter]
+        index = core.PropertyGraphIndex.return_value
+        index.docstore.docs = {f"node-{i}": MagicMock() for i in range(len(chunks))}
+
+        with patch.object(GraphExtractionStage, "_build_extractors", return_value=[_recording_extractor]):
+            count = await stage.run("test-dataset", chunks, sample_ontology)
+
+        assert count == len(chunks)          # one docstore node per chunk
+        assert len(seen) == len(chunks)      # one extraction pass, 1:1 — no re-split
+
+        # the empty index is built with a truthy no-op extractor, so its own
+        # `_insert_nodes` only performs the store writes (never re-extracts)
+        built = core.PropertyGraphIndex.call_args.kwargs
+        assert type(built["kg_extractors"][0]).__name__ == "_NoOpSplit"

@@ -1,21 +1,23 @@
 import { API_BASE } from './rest'
 import type { RunEvent } from '../run/events'
 
-export interface RunSocket {
+export type StreamStatus = 'connecting' | 'open' | 'reconnecting' | 'closed'
+
+export interface StreamSocket {
   close: () => void
 }
 
-export interface RunSocketOptions {
-  /** Called on every (re)connect BEFORE buffered events arrive — reset the fold here (§11.5). */
-  onOpen: () => void
-  onEvent: (event: RunEvent) => void
-  onStatus: (status: 'connecting' | 'open' | 'reconnecting' | 'closed') => void
-}
-
+/** The single reconnect/backoff scheme — every stream in this file rides it. */
 const BACKOFF_MS = [1000, 2000, 4000, 8000, 15000]
 
-export function connectRun(jobId: string, options: RunSocketOptions): RunSocket {
-  const url = `${API_BASE.replace(/^http/, 'ws')}/simulate/${jobId}/stream`
+interface StreamOptions {
+  /** Called on every (re)connect BEFORE buffered frames arrive — reset the fold here (§11.5). */
+  onOpen: () => void
+  onMessage: (raw: unknown) => void
+  onStatus: (status: StreamStatus) => void
+}
+
+function connectStream(url: string, options: StreamOptions): StreamSocket {
   let socket: WebSocket | null = null
   let closed = false
   let attempt = 0
@@ -31,14 +33,13 @@ export function connectRun(jobId: string, options: RunSocketOptions): RunSocket 
       options.onStatus('open')
     }
     socket.onmessage = (message: MessageEvent<string>) => {
-      let event: RunEvent
+      let parsed: unknown
       try {
-        event = JSON.parse(message.data) as RunEvent
+        parsed = JSON.parse(message.data)
       } catch {
         return
       }
-      if (event.type === 'ping' || event.type === 'ack') return // transport keep-alives, never folded
-      options.onEvent(event)
+      options.onMessage(parsed)
     }
     socket.onclose = (event) => {
       if (closed) return
@@ -65,4 +66,46 @@ export function connectRun(jobId: string, options: RunSocketOptions): RunSocket 
       socket?.close()
     },
   }
+}
+
+export type RunSocket = StreamSocket
+
+export interface RunSocketOptions {
+  /** Called on every (re)connect BEFORE buffered events arrive — reset the fold here (§11.5). */
+  onOpen: () => void
+  onEvent: (event: RunEvent) => void
+  onStatus: (status: StreamStatus) => void
+}
+
+export function connectRun(jobId: string, options: RunSocketOptions): RunSocket {
+  const url = `${API_BASE.replace(/^http/, 'ws')}/simulate/${jobId}/stream`
+  return connectStream(url, {
+    onOpen: options.onOpen,
+    onStatus: options.onStatus,
+    onMessage: (raw) => {
+      const event = raw as RunEvent
+      if (event.type === 'ping' || event.type === 'ack') return // transport keep-alives, never folded
+      options.onEvent(event)
+    },
+  })
+}
+
+export interface GraphStreamOptions {
+  /** Every frame off the socket, verbatim: `snapshot` | `delta` | `vocabulary` | `error` | `done`. */
+  onFrame: (frame: unknown) => void
+  onStatus: (status: StreamStatus) => void
+}
+
+/**
+ * `/simulate/{id}/graph_stream` — the graph build's live feed. Reconnect is transport-only:
+ * the server re-sends a full `snapshot` on every (re)connect, so resetting is the caller's
+ * job via the frame, not an `onOpen` hook.
+ */
+export function connectGraphStream(jobId: string, options: GraphStreamOptions): StreamSocket {
+  const url = `${API_BASE.replace(/^http/, 'ws')}/simulate/${jobId}/graph_stream`
+  return connectStream(url, {
+    onOpen: () => {},
+    onStatus: options.onStatus,
+    onMessage: options.onFrame,
+  })
 }
