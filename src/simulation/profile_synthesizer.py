@@ -168,6 +168,16 @@ class ProfileSynthesizer:
                     max_relevance=max_relevance,
                 )
 
+                # Task 1: the same `_effective_stance` precedence the build uses
+                # (distilled → graph derivation → safe default) decides the value
+                # persisted with the entity links, because Task 6's round-1
+                # pairing reads `Persona.stance` before any opinion exists — the
+                # persisted stance must equal the built Agent's.
+                distilled_for_row = distilled.get(row_name) if distilled else None
+                stance_to_persist = PersonaRepository._effective_stance(
+                    node, metrics, distilled_for_row
+                )[0].value
+
                 # D2: write this persona's real provenance edges BEFORE the build,
                 # so the `get_provenance` inside it finds them instead of falling
                 # back to the uuid5 sector fabrication. Never raises into synthesis.
@@ -197,6 +207,7 @@ class ProfileSynthesizer:
                             persona_name=agent_name,
                             dataset_id=dataset_id,
                             chunk_node_ids=chunk_ids,
+                            stance=stance_to_persist,
                         )
                         if inspect.iscoroutine(pending):
                             await pending
@@ -218,7 +229,8 @@ class ProfileSynthesizer:
                     agent_metrics=metrics,
                     sector_results=sector_results,
                     llm_output=None,
-                    distilled=distilled.get(row_name) if distilled else None,
+                    distilled=distilled_for_row,
+                    chunk_node_ids=chunk_ids,
                 )
 
         # S9 visibility: one `agent` event per completed profile, in completion
@@ -300,12 +312,13 @@ class ProfileSynthesizer:
                     node.get("triplet_source_id") if isinstance(node, dict)
                     else getattr(node, "triplet_source_id", None)
                 )
-                if isinstance(chunk_id, str) and chunk_id.strip():
+                chunk_ids = [chunk_id.strip()] if isinstance(chunk_id, str) and chunk_id.strip() else []
+                if chunk_ids:
                     try:
                         pending = self._repo.write_persona_provenance(
                             persona_name=name,
                             dataset_id=dataset_id,
-                            chunk_node_ids=[chunk_id.strip()],
+                            chunk_node_ids=chunk_ids,
                         )
                         if inspect.iscoroutine(pending):
                             await pending
@@ -320,7 +333,7 @@ class ProfileSynthesizer:
                         pending = self._repo.write_persona_entity_links(
                             persona_name=name,
                             dataset_id=dataset_id,
-                            chunk_node_ids=[chunk_id.strip()],
+                            chunk_node_ids=chunk_ids,
                         )
                         if inspect.iscoroutine(pending):
                             await pending
@@ -332,6 +345,7 @@ class ProfileSynthesizer:
                 return await self._repo.build_single_agent_profile_from_node(
                     agent_name=name, node=node, user_query=query, dataset_id=dataset_id,
                     agent_metrics=metrics, sector_results=sector_results, llm_output=None,
+                    chunk_node_ids=chunk_ids,
                 )
 
         results = await asyncio.gather(*(_build(n) for n in names))

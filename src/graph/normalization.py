@@ -201,7 +201,7 @@ class GraphNormalizationStage:
         Create a canonical node and connect originals to it via :ALIAS_OF (non-destructive).
         """
         canonical_id = str(uuid.uuid4())
-        create_q = Query("""
+        create_q = Query(f"""
         UNWIND $originals AS o
         MERGE (canon:{canonical_label} {{ canonical_id: $canonical_id, dataset_id: $dataset_id }})
         ON CREATE SET canon += $canon_props

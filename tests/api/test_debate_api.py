@@ -673,6 +673,11 @@ async def _run_with_depth(job_id: str, depth: str):
     repo = MagicMock()
     result = OrchestratedDebateResult(
         converged=False, verdict="stub", final_stances={}, warnings=[], rounds_executed=0,
+        provenance_by_claim={
+            "Steel tariffs": [
+                {"doc_id": "d1", "title": "Trade Report", "breadcrumb": "", "chunk_id": "c1"}
+            ]
+        },
     )
     orch = MagicMock()
     orch.run = AsyncMock(return_value=result)
@@ -708,6 +713,8 @@ class TestSimulationDepthGate:
         assert job["status"] == "complete"
         assert orch.run.await_args.kwargs["distill"] is False
         assert repo_cls.call_args.kwargs["llm_client"] is llm
+        # Task 8: the same client must reach verdict synthesis, not just the repo.
+        assert orch.run.await_args.kwargs["llm_client"] is llm
 
     @pytest.mark.asyncio
     async def test_standard_and_deep_turn_distillation_on(self):
@@ -717,6 +724,18 @@ class TestSimulationDepthGate:
             assert job["status"] == "complete"
             assert orch.run.await_args.kwargs["distill"] is True
             assert repo_cls.call_args.kwargs["llm_client"] is llm
+            assert orch.run.await_args.kwargs["llm_client"] is llm
+
+    @pytest.mark.asyncio
+    async def test_result_payload_carries_weight_share_and_contested(self):
+        job, _, _, _ = await _run_with_depth(f"depth-{uuid.uuid4()}", "standard")
+        # additive keys ride along with the unchanged confidence_score.
+        assert "confidence_score" in job["result"]
+        assert "weight_share" in job["result"]
+        assert "contested" in job["result"]
+        # Step 8: per-claim provenance must reach the delivered payload, not
+        # just the verdict object.
+        assert job["result"]["provenance_by_claim"]["Steel tariffs"][0]["title"] == "Trade Report"
 
     @pytest.mark.asyncio
     async def test_create_debate_threads_the_requested_depth_to_the_job(self):

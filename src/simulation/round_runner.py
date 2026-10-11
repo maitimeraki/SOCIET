@@ -1,12 +1,42 @@
 """RoundRunner: dispatches pair prompts via BatchedLLMRunner and assembles RoundResult."""
+import re
 from dataclasses import dataclass
 from typing import Optional, Callable
 
-from src.persona.agent import Agent
+from src.persona.agent import (
+    SOURCE_EVIDENCE_MAX_SNIPPETS,
+    SOURCE_EVIDENCE_SNIPPET_CHARS,
+    Agent,
+)
 from src.simulation.llm_batch import BatchedLLMRunner, PairPrompt
 from src.simulation.pair_turn import AgentTurn, RoundResult, CommPair
 from src.simulation.society_memory import SocietySnapshot
 from src.utils.queryIntend import QueryIntent
+
+OPPONENT_STATEMENT_CHARS = 600
+
+
+def _split_reasoning_answer(response: str) -> tuple[str, str]:
+    """Split a deliberation response into (reasoning, answer).
+
+    The turn prompt asks for a REASONING: section then an ANSWER: section. Only
+    the answer is the agent's stated position, so stance parses from it — never
+    from the private reasoning. The delimiter is matched case-sensitively: the
+    prompt asks for uppercase, so a lowercase prose line starting `answer:` is
+    content, not a delimiter. A response without the delimiter degrades to the
+    whole text as the answer (empty reasoning), so a malformed turn is never lost.
+    """
+    match = re.search(r"^\s*ANSWER:\s*", response, flags=re.MULTILINE)
+    if not match:
+        return "", response.strip()
+    answer = response[match.end():].strip()
+    if not answer:
+        return "", response.strip()
+    reasoning = re.sub(
+        r"^\s*REASONING:\s*", "", response[:match.start()].strip(),
+        count=1, flags=re.IGNORECASE,
+    ).strip()
+    return reasoning, answer
 
 
 def _parse_response_stance(
@@ -51,6 +81,32 @@ def _extract_references(content: str, candidates: list[str]) -> list[str]:
     return refs[:5]
 
 
+def _truncate_snippet(text: str, budget: int = SOURCE_EVIDENCE_SNIPPET_CHARS) -> str:
+    """Whitespace-normalised snippet, cut to `budget` at a word boundary."""
+    text = " ".join(str(text).split())
+    if len(text) <= budget:
+        return text
+    cut = text[:budget]
+    return cut.rsplit(" ", 1)[0] if " " in cut else cut
+
+
+def _evidence_block(agent: Agent) -> str:
+    """Labelled source-evidence block, or "" when the agent carries none.
+
+    At most SOURCE_EVIDENCE_MAX_SNIPPETS render, each truncated by
+    `_truncate_snippet`. Empty evidence returns "" so the prompt is unchanged
+    (no stray header).
+    """
+    snippets = [
+        _truncate_snippet(s) for s in agent.source_evidence[:SOURCE_EVIDENCE_MAX_SNIPPETS]
+    ]
+    snippets = [s for s in snippets if s]
+    if not snippets:
+        return ""
+    body = "\n".join(f"- {s}" for s in snippets)
+    return f"YOUR SOURCE EVIDENCE (from the documents you were built from):\n{body}\n"
+
+
 def _build_system_prompt(agent: Agent, opponent: Agent, shared_entities: list[str]) -> str:
     domains = ", ".join(agent.domain_tags[:3])
     shared = ", ".join(shared_entities[:3]) if shared_entities else "none"
@@ -68,6 +124,7 @@ def _build_system_prompt(agent: Agent, opponent: Agent, shared_entities: list[st
         f"Stance on this topic: {agent.stance.value} (intensity {agent.intensity:.2f}).\n"
         f"Confidence breakdown: sources={cb.source_breadth}, nodes={cb.node_density}, connectivity={cb.relationship_connectivity:.2f}\n"
         f"Provenance: {provenance_summary}\n"
+        f"{_evidence_block(agent)}"
         f"You share these entities with your opponent: {shared}\n"
         f"Engage genuinely with opposing viewpoints while staying true to your expertise."
     )
@@ -96,6 +153,7 @@ def _build_user_prompt(
     history: list[dict],
     society: Optional[SocietySnapshot] = None,
     intent: Optional[QueryIntent] = None,
+    max_opinions: int = 6,
 ) -> str:
     history_str = ""
     if history:
@@ -111,11 +169,24 @@ def _build_user_prompt(
     if hasattr(their_stance, "value"):
         their_stance = their_stance.value
 
+    opponent_str = ""
+    if opp_last and opp_last.get("content"):
+        said = _truncate_snippet(opp_last["content"], OPPONENT_STATEMENT_CHARS)
+        if said:
+            opponent_str = f"WHAT {opponent.identity.name} JUST ARGUED:\n{said}\n\n"
+
     society_str = ""
+    self_str = ""
     if society is not None:
-        block = society.to_prompt(speaker=agent.identity.name, opponent=opponent.identity.name)
+        block = society.to_prompt(
+            speaker=agent.identity.name, opponent=opponent.identity.name,
+            max_opinions=max_opinions,
+        )
         if block:
             society_str = f"{block}\n\n"
+        own = society.self_prompt(speaker=agent.identity.name)
+        if own:
+            self_str = f"{own}\n\n"
 
     intent_block = _intent_context_block(intent)
     intent_str = f"{intent_block}\n\n" if intent_block else ""
@@ -125,9 +196,14 @@ def _build_user_prompt(
         f"{intent_str}"
         f"You are responding to: {opponent.identity.name}\n"
         f"Their stance: {their_stance or 'NEUTRAL'} (latest on record)\n\n"
+        f"{opponent_str}"
         f"{society_str}"
+        f"{self_str}"
         f"CONVERSATION HISTORY:\n{history_str or '(No previous turns)'}\n\n"
-        f"Respond to {opponent.identity.name}'s perspective, engaging with specific arguments."
+        f"Think it through before you answer:\n"
+        f"REASONING: (briefly: your position, {opponent.identity.name}'s point, "
+        f"where you clash — your private thinking)\n"
+        f"ANSWER: (your reply to {opponent.identity.name}, engaging with specific arguments)"
     )
 
 
@@ -147,6 +223,7 @@ class RoundRunner:
         query: str,
         history: list[dict],
         society: Optional[SocietySnapshot] = None,
+        max_opinions: int = 6,
     ) -> RoundResult:
         prompts: list[PairPrompt] = []
         profile_map = {p.identity.name: p for p in profiles}
@@ -168,7 +245,7 @@ class RoundRunner:
             meta_a = {"pair": pair, "speaker": agent_a, "opponent": agent_b}
             prompt_a = PairPrompt(
                 system_prompt=_build_system_prompt(agent_a, agent_b, shared),
-                user_prompt=_build_user_prompt(agent_a, agent_b, query, history, society=society, intent=self.intent),
+                user_prompt=_build_user_prompt(agent_a, agent_b, query, history, society=society, intent=self.intent, max_opinions=max_opinions),
                 pair_id=f"{dataset_id}:{pair.agent_a}:{pair.agent_b}",
             )
             prompts.append(prompt_a)
@@ -177,7 +254,7 @@ class RoundRunner:
             meta_b = {"pair": pair, "speaker": agent_b, "opponent": agent_a}
             prompt_b = PairPrompt(
                 system_prompt=_build_system_prompt(agent_b, agent_a, shared),
-                user_prompt=_build_user_prompt(agent_b, agent_a, query, history, society=society, intent=self.intent),
+                user_prompt=_build_user_prompt(agent_b, agent_a, query, history, society=society, intent=self.intent, max_opinions=max_opinions),
                 pair_id=f"{dataset_id}:{pair.agent_b}:{pair.agent_a}",
             )
             prompts.append(prompt_b)
@@ -201,19 +278,21 @@ class RoundRunner:
             if meta is None or result.error:
                 continue
 
+            _, answer = _split_reasoning_answer(result.response)
+
             stance, confidence = _parse_response_stance(
-                result.response,
+                answer,
                 default_stance="NEUTRAL",
                 default_confidence=meta["speaker"].confidence,
             )
             turn = AgentTurn(
                 agent_id=str(meta["speaker"].agent_id),
                 agent_name=meta["speaker"].identity.name,
-                content=result.response,
+                content=answer,
                 stance=stance,
                 confidence=confidence,
                 references=_extract_references(
-                    result.response,
+                    answer,
                     list(dict.fromkeys(
                         (meta["pair"].shared_entities or [])
                         + [meta["opponent"].identity.name]

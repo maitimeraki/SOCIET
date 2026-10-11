@@ -389,3 +389,18 @@ async def test_raising_worker_cancels_its_siblings(monkeypatch):
 
     assert api_server.RUNS[job_id]["status"] == "failed"
     assert extraction.cancelled == ["d1"]  # the sibling was cancelled, not left writing
+
+
+@pytest.mark.asyncio
+async def test_get_job_degrades_on_a_corrupt_runtime_file(tmp_path, monkeypatch):
+    """A crash mid-`_persist_run` leaves invalid JSON. The job read must degrade to
+    the same not-found shape `_job_state` and `_ontology_from_run` already use, not
+    raise out of the endpoint."""
+    monkeypatch.setattr(api_server, "_RUNS_RUNTIME_DIR", tmp_path)
+    api_server.RUNS.pop("job-corrupt", None)
+    (tmp_path / "job-corrupt.json").write_text("{not json", encoding="utf-8")
+
+    result = await api_server.get_job("job-corrupt")
+
+    assert result["status"] == "failed"
+    assert result["stage"] == "not_found"

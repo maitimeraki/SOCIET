@@ -27,7 +27,7 @@ LLM_TOTAL_DEADLINE_SECONDS = 300  # the whole fallback chain, all legs together
 class LLMClient:
     """Multi-provider LLM client over the LiteLLM gateway."""
 
-    PROVIDERS = ["openai", "anthropic", "huggingface", "ollama","openrouter","deepseek","meta","sarvam"]
+    PROVIDERS = ["openai", "anthropic", "huggingface", "ollama","openrouter","deepseek","sarvam","minimax"]
     FALLBACK_ORDER = ["ollama", "openai", "anthropic", "huggingface"]
 
     @staticmethod
@@ -58,14 +58,14 @@ class LLMClient:
         elif provider == "openrouter" and LLMConfig.nvidia_nim_api_key:
             kwargs["api_key"] = LLMConfig.nvidia_nim_api_key
             kwargs["api_base"] = LLMConfig.nvidia_nim_base_url
-        elif provider == "sarvam" and LLMConfig.nvidia_nim_api_key:
-            # conversation_session_id = str(uuid.uuid4())
+        elif provider == "deepseek" and LLMConfig.nvidia_nim_api_key:
+            conversation_session_id = str(uuid.uuid4())
             kwargs["api_key"] = LLMConfig.nvidia_nim_api_key
             kwargs["api_base"] = LLMConfig.nvidia_nim_base_url
-            # kwargs["extra_headers"] = {
-            #         "x-opencode-session": conversation_session_id
-            # }
-            # kwargs["drop_params"] = True
+            kwargs["extra_headers"] = {
+                    "x-opencode-session": conversation_session_id
+            }
+            kwargs["drop_params"] = True
         return kwargs
 
     async def generate(
@@ -102,6 +102,7 @@ class LLMClient:
                         timeout=LLM_ATTEMPT_TIMEOUT_SECONDS,
                         num_retries=LLM_NUM_RETRIES,
                         **self._call_kwargs(p),
+                        
                     )
                     return response.choices[0].message.content or ""
                 except Exception as exc:
@@ -140,6 +141,7 @@ class LLMClient:
                 stream=True,
                 timeout=LLM_ATTEMPT_TIMEOUT_SECONDS,
                 **self._call_kwargs(provider),
+              
             )
             async for chunk in response:
                 delta = chunk.choices[0].delta.content if chunk.choices else None

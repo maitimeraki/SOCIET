@@ -251,6 +251,43 @@ class TestFindSurfaceDuplicates:
         assert all(isinstance(c.node_id, str) for c in groups[0])
 
 
+class TestAliasCanonicalLabelInterpolation:
+    """Regression: the canonical-node MERGE must interpolate its label.
+
+    The query was authored as an f-string (evidenced by `{{ }}` escaping) but
+    the `f` prefix was omitted, so `{canonical_label}` reached Neo4j literally
+    and it raised "Invalid input '{': expected a node label"."""
+
+    def _stage(self) -> GraphNormalizationStage:
+        config = MagicMock()
+        config.neo4j_uri = "bolt://localhost:7687"
+        config.neo4j_username = "neo4j"
+        config.neo4j_password = "password"
+        config.neo4j_database = "neo4j"
+        with patch('src.graph.normalization.AsyncGraphDatabase'):
+            return GraphNormalizationStage(config)
+
+    @pytest.mark.asyncio
+    async def test_canonical_label_is_interpolated_into_the_query(self):
+        stage = self._stage()
+        captured = {}
+
+        async def record(query, params):
+            captured["query"] = str(query)
+            return []
+
+        stage._run = record
+        group = [MergeCandidate(node_id="4:abc:1", labels=["Person"], properties={"name": "Alice"})]
+
+        await stage.create_alias_relationships(
+            "CanonicalEntity", {"dataset_id": "ds-1", "created_by": "auto"}, group
+        )
+
+        assert "{canonical_label}" not in captured["query"]
+        assert "MERGE (canon:CanonicalEntity {" in captured["query"]
+        assert "{{" not in captured["query"]
+
+
 class _ConsumeOnCloseResult:
     """Mimics the neo4j driver: AsyncSession.close() consumes its autocommit
     result, so any read afterwards raises (ResultConsumedError in the real driver)."""

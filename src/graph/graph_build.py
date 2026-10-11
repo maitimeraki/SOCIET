@@ -188,7 +188,7 @@ class GraphExtractionStage:
                             }
             )
         self.embed_model = OllamaEmbedding(
-            model_name="nomic-embed-text:v1.5",
+            model_name="qwen3-embedding:0.6b",
             base_url=LLMConfig.ollama_base_url,
             client_kwargs={"timeout": _EMBED_TIMEOUT_SECONDS},
             ollama_additional_kwargs={"mirostat": 0},

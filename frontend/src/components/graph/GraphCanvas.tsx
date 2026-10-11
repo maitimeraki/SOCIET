@@ -357,8 +357,12 @@ export default function GraphCanvas({ datasetId, jobId }: GraphCanvasProps) {
   const nodeCount = Object.keys(nodes).length
   const notice = simplifiedViewNotice(nodeCount)
   // A new dataset is a new graph — a fresh instance so no stale nodes survive the switch.
+  // `multi: true` is load-bearing: edge identity is `source|target|label`, so two chunks
+  // routinely connect the same pair with different labels. A simple graph rejects the
+  // second `addEdgeWithKey` with a UsageGraphError, which escapes the sync effect and
+  // unmounts the whole page (blank frontend).
   // eslint-disable-next-line react-hooks/exhaustive-deps -- datasetId is the identity trigger, read only as a reset key
-  const graph = useMemo(() => new Graph(), [datasetId])
+  const graph = useMemo(() => new Graph({ multi: true }), [datasetId])
 
   const canvasLabel = graphAriaLabel(nodeCount, Object.keys(edges).length, labels.length)
   const phase = graphStreamPhase(nodeCount, status, done)

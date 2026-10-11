@@ -32,9 +32,13 @@ def write_run_doc(doc: dict[str, Any]) -> None:
 
 def read_run_doc(run_id: str) -> Optional[dict[str, Any]]:
     path = _path(run_id)
-    if not path.exists():
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        # Missing, unreadable, or corrupt — degrade to "not found", matching
+        # `list_run_docs`, rather than raising out of the route.
+        logger.warning("could not read run doc %s: %s", run_id, exc)
         return None
-    return json.loads(path.read_text(encoding="utf-8"))
 
 
 def list_run_docs() -> list[dict[str, Any]]:

@@ -62,8 +62,12 @@ async def test_one_batch_call_carries_every_persona():
     assert set(call) == {"system_prompt", "user_prompt"}  # the generate(...) contract
     assert "PERSONA: Alice" in call["user_prompt"]
     assert "PERSONA: Bob" in call["user_prompt"]
-    assert out["Alice"] == ("Alice's one-liner.", "I am Alice. I weigh the evidence.")
-    assert out["Bob"] == ("Bob's one-liner.", "I am Bob. I follow the grid.")
+    assert (out["Alice"].description, out["Alice"].perspective) == (
+        "Alice's one-liner.", "I am Alice. I weigh the evidence.",
+    )
+    assert (out["Bob"].description, out["Bob"].perspective) == (
+        "Bob's one-liner.", "I am Bob. I follow the grid.",
+    )
 
 
 @pytest.mark.asyncio
@@ -132,13 +136,16 @@ async def test_unparseable_persona_falls_back_to_template_and_warns():
         warnings=warnings,
     )
 
-    assert out["Alice"] == ("Alice distilled.", "I am Alice.")
-    assert out["Bob"][0].startswith("Bob:")  # deterministic template
-    assert "energy" in out["Bob"][1]
-    assert out["Carol"][0].startswith("Carol:")
-    assert len(warnings) == 2  # one per failed persona, each naming it
+    assert (out["Alice"].description, out["Alice"].perspective) == ("Alice distilled.", "I am Alice.")
+    assert out["Bob"].description.startswith("Bob:")  # deterministic template
+    assert "energy" in out["Bob"].perspective
+    assert out["Carol"].description.startswith("Carol:")
+    # Bob + Carol had no parseable block (template); Alice's block parsed but
+    # carried no STANCE line (deterministic derivation) — each names its persona.
+    assert len(warnings) == 3
     assert any("Bob" in w for w in warnings) and any("Carol" in w for w in warnings)
-    assert all("deterministic template" in w for w in warnings)
+    assert any("Alice" in w and "STANCE" in w for w in warnings)
+    assert sum("deterministic template" in w for w in warnings) == 2
 
 
 @pytest.mark.asyncio

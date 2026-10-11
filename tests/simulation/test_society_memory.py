@@ -141,9 +141,11 @@ async def test_read_snapshot_maps_rows_and_buzz():
     assert snap.round == 2
     assert [e["agent"] for e in snap.entries] == ["Alice", "Bob"]  # weight-desc order preserved
     assert snap.neighbor_map == {"Alice": ["Bob"]}
-    # REACTED_TO neighbours are narrowed to this debate; OPPOSES/SUPPORTS stay static
+    # Every marker arm is scoped to this debate: REACTED_TO directly, OPPOSES/SUPPORTS
+    # only when corroborated by a shared graph entity or a same-run REACTED_TO edge.
     nq, nparams = next((q, kw) for (q, kw) in sess.calls if "OPPOSES|SUPPORTS" in q)
-    assert "type(r) <> 'REACTED_TO' OR r.query_hash = $query_hash" in nq
+    assert "type(r) = 'REACTED_TO' AND r.query_hash = $query_hash" in nq
+    assert "NOT e:Chunk AND NOT e:Persona" in nq
     assert nparams["query_hash"] == "qh1"
     assert snap.buzz == [{"entity": "carbon", "mentions": 2}]
     assert snap.version == "r2:2"

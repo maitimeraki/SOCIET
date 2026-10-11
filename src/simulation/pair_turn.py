@@ -76,3 +76,8 @@ class DebateVerdict:
     cluster_details: Dict[Stance, ClusterSummary]
     provenance_by_claim: Dict[str, List[ProvenanceLink]] = field(default_factory=dict)
     rounds_executed: int = 0
+    #: The dominant stance's share of total weight — the honest name for the
+    #: number `confidence_score` has always carried.
+    weight_share: float = 0.0
+    #: True when the dominant share is below the contested threshold (near-tie).
+    contested: bool = False

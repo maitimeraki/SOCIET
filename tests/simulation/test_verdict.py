@@ -17,6 +17,7 @@ class MockProfile:
         self.identity = identity
         self.conviction = conviction
         self.cior = cior
+        self.summary_provenance = []
 
 
 def make_profile(name: str, conviction: float = 0.5, cior: float = 0.0) -> MockProfile:
@@ -85,21 +86,23 @@ class TestCalibrateCIOR:
 
     def test_known_agent_uses_conviction_and_cior(self):
         synthesizer = VerdictSynthesizer()
-        p_alice = make_profile("Alice", conviction=0.8, cior=0.5)  # cior_factor = 0.75
+        # cior_factor(0.5) = 0.5 + (0.5 + 1) / 4 = 0.875
+        p_alice = make_profile("Alice", conviction=0.8, cior=0.5)
         clusters = {s: [] for s in Stance}
         clusters[Stance.POSITIVE] = [make_turn("a1", "Alice", "POSITIVE", 0.5)]
         weights = synthesizer._calibrate_cior(clusters, {"Alice": p_alice})
-        # weight = 0.5 * 0.8 * 0.75 = 0.3
-        assert pytest.approx(weights[Stance.POSITIVE], rel=1e-6) == 0.3
+        # weight = 0.5 * 0.8 * 0.875 = 0.35
+        assert pytest.approx(weights[Stance.POSITIVE], rel=1e-6) == 0.35
 
-    def test_cior_negative_reduces_weight(self):
+    def test_cior_negative_halves_but_never_zeroes_weight(self):
         synthesizer = VerdictSynthesizer()
-        p_gut = make_profile("GutAgent", conviction=1.0, cior=-1.0)  # cior_factor = 0
+        # cior_factor(-1.0) = 0.5 + 0 / 4 = 0.5 (the floor, never 0)
+        p_gut = make_profile("GutAgent", conviction=1.0, cior=-1.0)
         clusters = {s: [] for s in Stance}
         clusters[Stance.NEGATIVE] = [make_turn("g1", "GutAgent", "NEGATIVE", 1.0)]
         weights = synthesizer._calibrate_cior(clusters, {"GutAgent": p_gut})
-        # weight = 1.0 * 1.0 * 0 = 0
-        assert pytest.approx(weights[Stance.NEGATIVE], rel=1e-6) == 0.0
+        # weight = 1.0 * 1.0 * 0.5 = 0.5
+        assert pytest.approx(weights[Stance.NEGATIVE], rel=1e-6) == 0.5
 
 
 class TestSynthesize:

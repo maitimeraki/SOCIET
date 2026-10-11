@@ -17,6 +17,7 @@ lost in the read→subscribe gap; the snapshot stays the FIRST frame sent.
 """
 import asyncio
 import json
+import logging
 from dataclasses import replace
 from typing import Optional
 
@@ -25,6 +26,8 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from src.api import graph_snapshot, graph_stream
 
 router = APIRouter(tags=["graph"])
+
+logger = logging.getLogger(__name__)
 
 _TERMINAL = {"completed", "failed"}
 _POLL_INTERVAL_S = 0.25
@@ -216,7 +219,10 @@ async def stream_graph(websocket: WebSocket, job_id: str):
     if dataset_id is None:
         # Nothing was built for this job (unknown id, or a failure before the
         # dataset was known): there is no snapshot to send. Say done and leave.
-        await websocket.send_json({"type": "done"})
+        try:
+            await websocket.send_json({"type": "done"})
+        except WebSocketDisconnect:
+            pass  # client hung up before the first frame
         return
 
     # Subscribe BEFORE reading the snapshot. Priming one `__anext__` is what
@@ -249,6 +255,26 @@ async def stream_graph(websocket: WebSocket, job_id: str):
             seen_nodes={n["id"] for n in snapshot.nodes},
             seen_edges={(e["source"], e["target"], e["label"]) for e in snapshot.edges},
         )
+    except WebSocketDisconnect:
+        # The client hung up mid-window — a reload, a StrictMode remount, or a
+        # navigation closes the socket while the snapshot is being read, so a
+        # send raises. That is a normal hang-up, not a fault: absorb it here so
+        # it never escapes the ASGI app as an "Exception in ASGI application".
+        # Covers the snapshot and terminal `done` sends, and any disconnect that
+        # escapes `_stream`'s own sends.
+        return
+    except Exception as exc:
+        # A data-retrieval failure after accept (e.g. Neo4j unreachable while
+        # reading the snapshot) would otherwise escape the ASGI app — the HTTP
+        # global handler does not cover WebSockets. Report it on the wire, where
+        # the client already renders `error` frames, then close with `done`.
+        logger.exception("graph_stream: snapshot read failed for dataset %s", dataset_id)
+        try:
+            await websocket.send_json({"type": "error", "message": f"snapshot read failed: {exc}"})
+            await websocket.send_json({"type": "done"})
+        except (WebSocketDisconnect, RuntimeError):
+            pass  # client also gone; nothing left to send
+        return
     finally:
         # Drop the registration and the in-flight `__anext__` on every exit path,
         # including a snapshot read that raised.
