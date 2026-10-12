@@ -1383,18 +1383,23 @@ class PersonaRepository:
     async def fetch_source_evidence_by_chunk(
         self,
         chunk_node_ids: Optional[Sequence[str]],
-        limit: int = SOURCE_EVIDENCE_MAX_SNIPPETS,
     ) -> Dict[str, List[str]]:
         """`{chunk_id: [snippet, ...]}` for the given chunk nodes, in ONE query.
 
         The attributed twin of `fetch_source_evidence` (which stays untouched —
         the round runner reads it): the chunk id rides the RETURN so a caller
         holding several personas gives each its OWN snippets instead of sharing
-        one flat, unattributable list. Same tolerance by construction: blank /
-        non-string ids contribute nothing, an empty input issues no query, a
-        chunk node missing `text` yields no entry, and any driver error is
-        logged and swallowed — evidence is an enrichment, never a reason to
-        fail synthesis.
+        one flat, unattributable list.
+
+        Deliberately **uncapped**: there is no `LIMIT`, because any global cap
+        over a persona-ordered union lets a chunk-heavy persona consume the
+        whole budget and silently starve the personas after it (R19). The
+        caller bounds what each persona receives.
+
+        Same tolerance by construction: blank / non-string ids contribute
+        nothing, an empty input issues no query, a chunk node missing `text`
+        yields no entry, and any driver error is logged and swallowed — evidence
+        is an enrichment, never a reason to fail synthesis.
         """
         ids = list(
             dict.fromkeys(str(cid).strip() for cid in (chunk_node_ids or []) if str(cid or "").strip())
@@ -1407,19 +1412,18 @@ class PersonaRepository:
         MATCH (c:Chunk {id: cid})
         WHERE c.text IS NOT NULL AND trim(c.text) <> ''
         RETURN c.id AS chunk_id, c.text AS text
-        LIMIT $limit
         """
 
         try:
             async with self._driver.session(database=self._db) as session:
-                result = await session.run(cypher, chunk_ids=ids, limit=limit)
+                result = await session.run(cypher, chunk_ids=ids)
                 rows = await result.data()
         except Exception as exc:  # evidence is additive; never fail the build
             logger.warning("source-evidence fetch failed: %s", exc)
             return {}
 
         buckets: Dict[str, List[str]] = {}
-        for row in rows[:limit]:
+        for row in rows:
             chunk_id = str(row.get("chunk_id") or "").strip()
             text = row.get("text")
             if chunk_id and text:

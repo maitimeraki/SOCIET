@@ -127,18 +127,17 @@ class ProfileSynthesizer:
             # T3: the persona's OWN chunk text — the grounding the EVIDENCE block
             # has been missing (entity nodes carry no `summary`). ONE call for the
             # whole batch, keyed by chunk id so each persona gets its own snippets
-            # (R17); the limit scales with the roster or a single persona's cap
-            # would truncate the later personas out of the one query. A roster
-            # with no chunk refs issues no query at all.
+            # (R17). The fetch is deliberately uncapped in Cypher (R19): a global
+            # cap over this persona-ordered union would let a chunk-heavy persona
+            # starve the ones after it. `_own_source_snippets` caps each persona
+            # instead. A roster with no chunk refs issues no query at all.
             batch_chunk_ids = list(dict.fromkeys(
                 chunk_id
                 for _, evidence in top_rows
                 for chunk_id in self._evidence_chunk_ids(evidence)
             ))
             snippets_by_chunk = (
-                await self._repo.fetch_source_evidence_by_chunk(
-                    batch_chunk_ids, limit=SOURCE_EVIDENCE_MAX_SNIPPETS * len(top_rows)
-                )
+                await self._repo.fetch_source_evidence_by_chunk(batch_chunk_ids)
                 if batch_chunk_ids else {}
             )
             distilled = await self._repo.distill_profiles(

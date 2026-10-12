@@ -110,6 +110,23 @@ async def test_fetch_by_chunk_skips_rows_missing_an_id_or_text():
 
 
 @pytest.mark.asyncio
+async def test_fetch_by_chunk_leaves_capping_to_the_caller():
+    """R19: no global LIMIT — a chunk-heavy caller must not starve later chunks.
+
+    The per-persona cap lives in the synthesizer's bucketing, so the query
+    returns every referenced chunk's text and attribution stays complete.
+    """
+    ids = [f"c{i}" for i in range(12)]
+    repo = _repo_returning([{"chunk_id": cid, "text": f"t{cid}"} for cid in ids])
+
+    out = await repo.fetch_source_evidence_by_chunk(ids)
+
+    assert sorted(out) == sorted(ids)
+    session = repo._driver.session.return_value.__aenter__.return_value
+    assert "LIMIT" not in session.run.await_args.args[0].upper()
+
+
+@pytest.mark.asyncio
 async def test_fetch_by_chunk_empty_ids_makes_no_query():
     repo = _repo_returning([])
 

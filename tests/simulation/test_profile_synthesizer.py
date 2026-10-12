@@ -860,23 +860,78 @@ async def test_each_persona_is_grounded_in_only_its_own_source_text():
     assert "Amazon acquired WholeFoods" not in entries["Grid Co"]
 
 
+def _real_chunk_fetch_repo(rows):
+    """A fake-driver repo exposing the REAL `fetch_source_evidence_by_chunk`.
+
+    Lets a synthesizer-level test exercise the actual query + bucketing instead
+    of a mock that can only replay whatever it was handed.
+    """
+    from src.persona.repository import PersonaRepository
+
+    real = PersonaRepository.__new__(PersonaRepository)
+    real._db = "neo4j"
+    session = MagicMock()
+    result = MagicMock()
+    result.data = AsyncMock(return_value=rows)
+    session.run = AsyncMock(return_value=result)
+    session_cm = MagicMock()
+    session_cm.__aenter__ = AsyncMock(return_value=session)
+    session_cm.__aexit__ = AsyncMock(return_value=False)
+    driver = MagicMock()
+    driver.session = MagicMock(return_value=session_cm)
+    real._driver = driver
+    return real
+
+
 @pytest.mark.asyncio
-async def test_the_batch_limit_scales_with_the_roster():
-    """A single-persona cap would truncate later personas out of the one query."""
-    amazon = _cluster_entity("Amazon", 0.9, ["retail"], "amazon summary")
-    amazon.properties = {"name": "Amazon", "triplet_source_id": "c1"}
-    grid = _cluster_entity("Grid Co", 0.5, ["energy"], "grid summary")
-    grid.properties = {"name": "Grid Co", "triplet_source_id": "c3"}
-    synth, repo = _distill_synth([amazon, grid], {})
-    repo.fetch_source_evidence_by_chunk = AsyncMock(return_value={})
+async def test_a_chunk_heavy_persona_does_not_starve_the_later_one():
+    """R19: no global snippet limit — the late persona keeps its own grounding.
+
+    'Heavy' names 11 chunks (its node + a 10-node subgraph) and 'Light' names 1,
+    which lands LAST in the persona-ordered union. Under a global
+    `LIMIT 3 * n_personas` the query returns only Heavy's first rows, so Light
+    silently distills on `[]`.
+    """
+    heavy = _cluster_entity("Heavy", 0.9, ["retail"], "heavy summary")
+    heavy.properties = {"name": "Heavy", "triplet_source_id": "h1"}
+    heavy_subgraph = []
+    for i in range(2, 12):
+        node = _cluster_entity(f"Heavy {i}", 0.05, ["retail"], "")
+        node.properties = {"name": f"Heavy {i}", "triplet_source_id": f"h{i}"}
+        heavy_subgraph.append(node)
+    light = _cluster_entity("Light", 0.5, ["energy"], "light summary")
+    light.properties = {"name": "Light", "triplet_source_id": "L1"}
+
+    async def build_profile(**kwargs):
+        return MagicMock(identity=PersonaIdentity(
+            name=kwargs["agent_name"], archetype="Analyst", communication_style="factual",
+        ))
+
+    repo = MagicMock()
+    repo.fetch_nodes_by_names = AsyncMock(return_value={})
+    repo.calculate_agent_metrics_and_context_for_llm = AsyncMock(return_value={})
+    repo.distill_profiles = AsyncMock(return_value={})
+    repo.build_single_agent_profile_from_node = AsyncMock(side_effect=build_profile)
+    # The real query + bucketing, over a fake driver.
+    repo.fetch_source_evidence_by_chunk = _real_chunk_fetch_repo(
+        [{"chunk_id": cid, "text": f"text-{cid}"} for cid in
+         ["h1", *[f"h{i}" for i in range(2, 12)], "L1"]]
+    ).fetch_source_evidence_by_chunk
+
+    ctx = MagicMock()
+    ctx.find_relevant_entities = AsyncMock(return_value=[heavy, light])
+    ctx.find_connected_nodes_by_seed = AsyncMock(return_value={"Heavy": heavy_subgraph})
+    synth = ProfileSynthesizer(persona_repo=repo, graph_context=ctx)
 
     await synth.synthesize(query="q", dataset_id="ds", max_agents=2, distill=True)
 
-    from src.persona.agent import SOURCE_EVIDENCE_MAX_SNIPPETS
-
-    call = repo.fetch_source_evidence_by_chunk.await_args
-    assert call.args[0] == ["c1", "c3"]
-    assert call.kwargs["limit"] == SOURCE_EVIDENCE_MAX_SNIPPETS * 2
+    entries = {
+        entry["name"]: entry["evidence"]
+        for entry in repo.distill_profiles.await_args.kwargs["personas"]
+    }
+    assert "text-h1" in entries["Heavy"]
+    assert "text-L1" in entries["Light"]  # the late persona is still grounded
+    assert not [t for t in entries["Light"] if t.startswith("text-h")]
 
 
 @pytest.mark.asyncio
