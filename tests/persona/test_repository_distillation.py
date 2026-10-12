@@ -5,6 +5,7 @@ tests never touch Neo4j or the embedding model.
 """
 import pytest
 
+from src.persona.agent import Stance
 from src.persona.repository import PersonaRepository
 
 
@@ -185,3 +186,90 @@ async def test_empty_selection_makes_no_call_and_no_warning():
 
     assert await repo.distill_profiles(personas=[], query="q", warnings=warnings) == {}
     assert client.calls == [] and warnings == []
+
+
+"""Task 4: the distillation carries the persona's full identity, not just a voice."""
+
+
+def test_distilled_profile_carries_identity():
+    from src.persona.repository import DistilledProfile
+
+    d = DistilledProfile(
+        "desc", "persp", archetype="Regulator", communication_style="formal and cautious"
+    )
+
+    assert d.archetype == "Regulator"
+    assert d.communication_style == "formal and cautious"
+
+
+def test_identity_fields_are_appended_after_cior():
+    """The NamedTuple is built positionally at three sites — new fields go last."""
+    from src.persona.repository import DistilledProfile
+
+    assert DistilledProfile._fields[:5] == (
+        "description", "perspective", "stance", "conviction", "cior",
+    )
+    # Every identity field is defaulted, so the 2- and 5-arg positional calls survive.
+    assert DistilledProfile("d", "p")[5:] == (None,) * 7
+
+
+_REPLY_IDENTITY = (
+    "PERSONA: Alice\n"
+    "DESCRIPTION: Alice's one-liner.\n"
+    "ARCHETYPE: Regulator\n"
+    "COMMUNICATION STYLE: formal and cautious\n"
+    "EXPERTISE: Operational\n"
+    "DOMAIN TAGS: banking, compliance\n"
+    "BELIEF: Markets self-correct when the rules are stable.\n"
+    "OPINION: The tax is workable if phased in.\n"
+    "PERSPECTIVE: I am Alice. I weigh the evidence.\n"
+    "STANCE: POSITIVE | 0.7 | 0.4\n"
+)
+
+
+@pytest.mark.asyncio
+async def test_identity_fields_are_parsed_from_the_block():
+    client = _SpyClient(_REPLY_IDENTITY)
+    repo = _repo(client)
+
+    out = await repo.distill_profiles(personas=[_entry("Alice")], query="q")
+
+    alice = out["Alice"]
+    assert alice.archetype == "Regulator"
+    assert alice.communication_style == "formal and cautious"
+    assert alice.expertise_level == "Operational"
+    assert alice.domain_tags == ["banking", "compliance"]
+    assert alice.belief == "Markets self-correct when the rules are stable."
+    assert alice.opinion == "The tax is workable if phased in."
+    assert (alice.description, alice.perspective) == (
+        "Alice's one-liner.", "I am Alice. I weigh the evidence.",
+    )
+    assert (alice.stance, alice.conviction, alice.cior) == (Stance.POSITIVE, 0.7, 0.4)
+
+
+@pytest.mark.asyncio
+async def test_identity_lines_parse_out_of_prompt_order():
+    """A reply that appends BELIEF/OPINION after PERSPECTIVE still parses."""
+    client = _SpyClient(
+        "PERSONA: Alice\nDESCRIPTION: d.\nPERSPECTIVE: I am Alice.\n"
+        "BELIEF: Rules beat discretion.\nSTANCE: NEGATIVE | 0.6 | -0.5\n"
+    )
+    repo = _repo(client)
+
+    alice = (await repo.distill_profiles(personas=[_entry("Alice")], query="q"))["Alice"]
+
+    assert alice.perspective == "I am Alice."
+    assert alice.belief == "Rules beat discretion."
+    assert (alice.stance, alice.conviction, alice.cior) == (Stance.NEGATIVE, 0.6, -0.5)
+
+
+@pytest.mark.asyncio
+async def test_template_derives_archetype_from_the_node_type():
+    repo = _repo(None)
+    entry = _entry("Alice")
+    entry["node"]["label"] = "Regulator"
+
+    out = await repo.distill_profiles(personas=[entry], query="q")
+
+    assert out["Alice"].archetype == "Regulator"
+

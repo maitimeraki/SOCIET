@@ -43,6 +43,11 @@ class DistilledProfile(NamedTuple):
     stance the distillation inferred (`stance`, `conviction`, `cior`) — the
     last three are `None` when the reply supplied no `STANCE:` line, so the
     deterministic graph derivation fills them.
+
+    The identity fields (`archetype` … `opinion`) were appended AFTER `cior`:
+    this tuple is built positionally at the template and block-parser sites, so
+    inserting anywhere earlier would silently rebind them. All are defaulted,
+    so the 2- and 5-argument constructions keep working unchanged.
     """
 
     description: str
@@ -50,6 +55,13 @@ class DistilledProfile(NamedTuple):
     stance: Optional[Stance] = None
     conviction: Optional[float] = None
     cior: Optional[float] = None
+    archetype: Optional[str] = None
+    communication_style: Optional[str] = None
+    expertise_level: Optional[str] = None
+    domain_tags: Optional[List[str]] = None
+    expertise_areas: Optional[List[str]] = None
+    belief: Optional[str] = None
+    opinion: Optional[str] = None
 
 
 class PersonaRepository:
@@ -720,6 +732,69 @@ class PersonaRepository:
         cior = cls._safe_float(parts[2], 0.0, -1.0, 1.0) if len(parts) > 2 else 0.0
         return stance, conviction, cior
 
+    #: The single-line identity labels a distilled block may carry, in prompt
+    #: order: `(label, DistilledProfile field)`.
+    _DISTILL_IDENTITY_LABELS: Tuple[Tuple[str, str], ...] = (
+        ("ARCHETYPE", "archetype"),
+        ("COMMUNICATION STYLE", "communication_style"),
+        ("EXPERTISE", "expertise_level"),
+        ("DOMAIN TAGS", "domain_tags"),
+        ("BELIEF", "belief"),
+        ("OPINION", "opinion"),
+    )
+
+    @classmethod
+    def _identity_label_of(cls, line: str) -> Optional[str]:
+        """The field name a `LABEL: value` line names, or `None` — the detection
+        the scanner and the perspective scrubber must agree on."""
+        stripped = str(line).strip().upper()
+        for label, key in cls._DISTILL_IDENTITY_LABELS:
+            if stripped.startswith(f"{label}:"):
+                return key
+        return None
+
+    @classmethod
+    def _parse_identity_lines(cls, block: str) -> Dict[str, str]:
+        """One distilled block's labelled identity fields, first occurrence wins.
+
+        A whole-block line scan, so a reply that emits the lines out of prompt
+        order (after `PERSPECTIVE`, say) still parses. `MODEL:`-style prose that
+        merely mentions a label mid-line is not matched.
+        """
+        fields: Dict[str, str] = {}
+        for line in str(block).splitlines():
+            key = cls._identity_label_of(line)
+            if key is not None and key not in fields:
+                fields[key] = line.strip().split(":", 1)[1].strip()
+        return fields
+
+    @classmethod
+    def _strip_identity_lines(cls, text: str) -> str:
+        """`text` without the labelled identity lines a reply may interleave —
+        so an out-of-order `BELIEF:` never lands inside the perspective."""
+        kept = [
+            line for line in str(text).splitlines()
+            if cls._identity_label_of(line) is None
+        ]
+        return "\n".join(kept).strip()
+
+    def _distill_identity(self, block: str) -> Dict[str, Any]:
+        """The `DistilledProfile` identity keywords one block declares.
+
+        Only labels the reply actually carried are set, so an omitted label
+        stays `None` and the build falls to the node's own type/tags.
+        """
+        fields = self._parse_identity_lines(block)
+        tags = self._safe_list(fields.get("domain_tags"))
+        return {
+            "archetype": fields.get("archetype") or None,
+            "communication_style": fields.get("communication_style") or None,
+            "expertise_level": fields.get("expertise_level") or None,
+            "domain_tags": tags or None,
+            "belief": fields.get("belief") or None,
+            "opinion": fields.get("opinion") or None,
+        }
+
     async def calculate_agent_metrics_and_context_for_llm(
         self,
         agent_name: str,
@@ -958,9 +1033,15 @@ class PersonaRepository:
                 str(entry.get("name") or ""), evidence, matched_text, []
             )
             derived = self._derive_stance(node, stance_axis)
+            # The graph's own type label is the archetype the template can honestly claim.
+            archetype = str(
+                node.get("archetype") or node.get("type_name") or node.get("label") or ""
+            ).strip() or None
             if derived is None:
-                return DistilledProfile(desc, pers)
-            return DistilledProfile(desc, pers, derived[0], derived[1], derived[2])
+                return DistilledProfile(desc, pers, archetype=archetype)
+            return DistilledProfile(
+                desc, pers, derived[0], derived[1], derived[2], archetype=archetype
+            )
 
         def _block(entry: Dict[str, Any]) -> str:
             node = _entry_node(entry)
@@ -1001,6 +1082,13 @@ class PersonaRepository:
             "form and nothing else:\n"
             "PERSONA: <name>\n"
             "DESCRIPTION: <one concise UI-friendly sentence, 10-25 words>\n"
+            "ARCHETYPE: <a role label from the participant's nature, e.g. "
+            '"Regulator", "The Skeptic", "Operator">\n'
+            "COMMUNICATION STYLE: <3-6 words>\n"
+            "EXPERTISE: <Strategic|Technical|Operational>\n"
+            "DOMAIN TAGS: <comma-separated>\n"
+            "BELIEF: <one sentence — the participant's world model / operating assumption>\n"
+            "OPINION: <one sentence — their specific take on THIS query>\n"
             "PERSPECTIVE: <a 5-8 sentence first-person worldview grounded in the "
             "evidence and the question>\n"
             "STANCE: <POSITIVE|NEGATIVE|NEUTRAL|AMBIVALENT> | <conviction 0-1> | <cior -1 to 1>"
@@ -1070,11 +1158,16 @@ class PersonaRepository:
             name = str(entry.get("name") or "")
             block = blocks_by_key.get(" ".join(name.split()).casefold(), "")
             desc = pers = stance_line = ""
+            identity: Dict[str, Any] = {}
             if block:
+                identity = self._distill_identity(block)
                 parts = block.split("DESCRIPTION:")
                 if len(parts) > 1:
                     dparts = parts[1].split("PERSPECTIVE:")
-                    desc = dparts[0].strip()
+                    # The identity lines sit between DESCRIPTION and PERSPECTIVE,
+                    # so only the head's FIRST line is the description.
+                    head = dparts[0].strip().splitlines()
+                    desc = head[0].strip() if head else ""
                     pers, stance_line = self._split_stance(
                         dparts[1] if len(dparts) > 1 else ""
                     )
@@ -1082,6 +1175,7 @@ class PersonaRepository:
                     sents = block.strip().split(". ")
                     desc = sents[0].strip() + ("." if not sents[0].endswith(".") else "")
                     pers, stance_line = self._split_stance(" ".join(sents[1:]).strip())
+                pers = self._strip_identity_lines(pers)
             if desc:
                 parsed = self._parse_stance_line(stance_line) if stance_line else None
                 if parsed is None:
@@ -1092,10 +1186,10 @@ class PersonaRepository:
                         )
                     parsed = self._derive_stance(_entry_node(entry), stance_axis)
                 if parsed is None:
-                    results[name] = DistilledProfile(desc, pers or desc)
+                    results[name] = DistilledProfile(desc, pers or desc, **identity)
                 else:
                     results[name] = DistilledProfile(
-                        desc, pers or desc, parsed[0], parsed[1], parsed[2]
+                        desc, pers or desc, parsed[0], parsed[1], parsed[2], **identity
                     )
             else:
                 if warnings is not None:
