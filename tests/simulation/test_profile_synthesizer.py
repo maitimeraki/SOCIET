@@ -1053,9 +1053,9 @@ async def test_synthesize_fetches_all_required_nodes_in_one_query():
     assert sorted(session.run.await_args.kwargs["names"]) == ["A", "B", "C"]
     assert [p.identity.name for p in profiles] == ["A", "B", "C"]
     assert _nodes_by_agent(repo) == {
-        "A": {"name": "A", "domain_tags": ["alpha"]},
-        "B": {"name": "B"},  # no row in this test → the node's own properties
-        "C": {"name": "C", "domain_tags": ["gamma"]},
+        "A": {"name": "A", "domain_tags": ["alpha"], "label": "Persona"},
+        "B": {"name": "B", "label": "Persona"},  # no row → the node's own properties
+        "C": {"name": "C", "domain_tags": ["gamma"], "label": "Persona"},
     }
 
 
@@ -1073,9 +1073,9 @@ async def test_synthesize_falls_back_per_name_when_the_batch_misses_one():
     assert session.run.await_count == 1
     assert [p.identity.name for p in profiles] == ["A", "B", "C"]
     assert _nodes_by_agent(repo) == {
-        "A": {"name": "A", "domain_tags": ["alpha"]},
-        "B": {"name": "B"},
-        "C": {"name": "C"},
+        "A": {"name": "A", "domain_tags": ["alpha"], "label": "Persona"},
+        "B": {"name": "B", "label": "Persona"},
+        "C": {"name": "C", "label": "Persona"},
     }
 
 
@@ -1304,6 +1304,36 @@ async def test_synthesize_rosters_seeds_when_the_context_has_no_traversal():
 
 
 """Task 2: each persona's evidence is its node plus the node's 1-hop subgraph."""
+
+
+@pytest.mark.asyncio
+async def test_label_reaches_the_build_node_dict():
+    """Task 5b: the entity's real type label rides into the node dict the build reads."""
+    entity = _cluster_entity("Regulator Corp", 0.9, ["banking"], "banking summary")
+    entity.label = "Regulator"
+    synth, repo = _distill_synth([entity], {})
+
+    await synth.synthesize(query="q", dataset_id="ds", max_agents=1)
+
+    node = repo.build_single_agent_profile_from_node.await_args.kwargs["node"]
+    assert node["label"] == "Regulator"
+
+
+@pytest.mark.asyncio
+async def test_label_reaches_the_build_node_dict_on_the_batch_hit_path():
+    """Same merge when `fetch_nodes_by_names` serves the node (not the fallback)."""
+    entity = _cluster_entity("Regulator Corp", 0.9, ["banking"], "banking summary")
+    entity.label = "Regulator"
+    synth, repo = _distill_synth([entity], {})
+    repo.fetch_nodes_by_names = AsyncMock(
+        return_value={"Regulator Corp": {"name": "Regulator Corp", "domain_tags": ["banking"]}}
+    )
+
+    await synth.synthesize(query="q", dataset_id="ds", max_agents=1)
+
+    node = repo.build_single_agent_profile_from_node.await_args.kwargs["node"]
+    assert node["label"] == "Regulator"
+    assert node["domain_tags"] == ["banking"]  # the fetched properties survive
 
 
 @pytest.mark.asyncio

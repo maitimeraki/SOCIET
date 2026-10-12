@@ -155,6 +155,9 @@ class ProfileSynthesizer:
                     "name": agent_name,
                     **representative.properties,
                 }
+                # The entity's real type label is the build's archetype fallback;
+                # properties alone never carry it.
+                node = {**node, "label": representative.label}
 
                 # Calculate metrics using repo method
                 # For node-level synthesis, we construct synthetic sector_results
