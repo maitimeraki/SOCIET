@@ -23,6 +23,9 @@ logger = logging.getLogger(__name__)
 # input, never the answer — there is no character cap on the narrative itself.
 SUMMARY_TRANSCRIPT_MAX_TURNS = 40
 SUMMARY_TRANSCRIPT_MAX_CHARS = 16000
+# Each turn's private reasoning rides as a bounded subordinate line, so it
+# grounds the answer without blowing the transcript cap.
+SUMMARY_TURN_REASONING_CHARS = 400
 
 # Step 7: a dominant share below this is a near-tie, not a mandate.
 CONTESTED_THRESHOLD = 0.6
@@ -159,6 +162,8 @@ class VerdictSynthesizer:
         budget = SUMMARY_TRANSCRIPT_MAX_CHARS
         for turn in reversed(turns[-SUMMARY_TRANSCRIPT_MAX_TURNS:]):
             line = f"[{turn.stance}] {turn.agent_name}: {turn.content}"
+            if turn.reasoning:
+                line += f"\n  (reasoning: {turn.reasoning[:SUMMARY_TURN_REASONING_CHARS]})"
             if len(line) > budget:
                 break
             lines.append(line)

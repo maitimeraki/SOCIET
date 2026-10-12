@@ -217,6 +217,25 @@ async def test_execute_round_error_continues():
 
 
 @pytest.mark.asyncio
+async def test_execute_round_retains_reasoning():
+    mock_llm = AsyncMock()
+    mock_llm.generate = AsyncMock(
+        return_value="REASONING: Markets self-correct.\nANSWER: I support the proposal."
+    )
+    rr = RoundRunner(BatchedLLMRunner(mock_llm))
+
+    _, alice = make_profile("Alice", ["x"], "x", 0.8)
+    _, bob = make_profile("Bob", ["y"], "y", 0.7)
+    result = await rr.execute_round(
+        [alice, bob], [make_pair("Alice", "Bob", [])], round_num=1, query="Q?", history=[]
+    )
+
+    for turn in result.turns:
+        assert turn.reasoning == "Markets self-correct."
+        assert turn.content == "I support the proposal."
+
+
+@pytest.mark.asyncio
 async def test_execute_round_turn_contains_profile_data():
     mock_llm = AsyncMock()
     mock_llm.generate = AsyncMock(return_value="I am certain this is the right approach.")

@@ -283,7 +283,7 @@ class RoundRunner:
             if meta is None or result.error:
                 continue
 
-            _, answer = _split_reasoning_answer(result.response)
+            reasoning, answer = _split_reasoning_answer(result.response)
 
             stance, confidence = _parse_response_stance(
                 answer,
@@ -296,6 +296,7 @@ class RoundRunner:
                 content=answer,
                 stance=stance,
                 confidence=confidence,
+                reasoning=reasoning,
                 references=_extract_references(
                     answer,
                     list(dict.fromkeys(

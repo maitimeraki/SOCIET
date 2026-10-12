@@ -33,6 +33,9 @@ class AgentTurn:
     stance: str
     confidence: float
     references: List[str] = field(default_factory=list)
+    #: The agent's private REASONING section — grounding material for synthesis,
+    #: never the stated position (that is `content`).
+    reasoning: str = ""
 
 
 @dataclass

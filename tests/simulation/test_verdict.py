@@ -46,6 +46,30 @@ def make_round(num: int, turns: list[AgentTurn]) -> RoundResult:
     return RoundResult(round_num=num, turns=turns, pairs=[])
 
 
+class TestRenderTranscript:
+    """T5: each turn's private reasoning is grounding material for the answer-writer."""
+
+    def test_transcript_includes_reasoning_and_answer(self):
+        synth = VerdictSynthesizer()
+        turn = AgentTurn(
+            agent_id="a1", agent_name="Alice", content="I support it.",
+            stance="POSITIVE", confidence=0.8, reasoning="Because markets self-correct.",
+        )
+        text, _ = synth._render_transcript([make_round(1, [turn])])
+        assert "Because markets self-correct." in text
+        assert "I support it." in text
+
+    def test_transcript_bounds_long_reasoning(self):
+        synth = VerdictSynthesizer()
+        turn = AgentTurn(
+            agent_id="a1", agent_name="Alice", content="answer",
+            stance="POSITIVE", confidence=0.8, reasoning="r" * 100_000,
+        )
+        text, _ = synth._render_transcript([make_round(1, [turn])])
+        # The subordinate reasoning line is capped, so the whole transcript stays bounded.
+        assert len(text) <= 16_000 + len("[POSITIVE] Alice: answer\n  (reasoning: )")
+
+
 class TestClusterOpinions:
     """Unit tests for _cluster_opinions."""
 
