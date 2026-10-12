@@ -62,6 +62,28 @@ async def test_caller_model_not_leaked_to_fallback_legs():
 
 
 @pytest.mark.asyncio
+async def test_ollama_leg_drops_unsupported_params():
+    """The ollama leg forwards both max_tokens and num_predict — drop_params
+    lets litellm discard whichever it rejects instead of raising every call."""
+    with patch("src.llm.client.litellm.acompletion", new_callable=AsyncMock) as ac:
+        ac.return_value = _resp("ok")
+        await LLMClient().generate("sys", "usr", provider="ollama", max_tokens=128)
+
+        assert ac.await_args.kwargs["drop_params"] is True
+        assert ac.await_args.kwargs["num_predict"] == 128
+        assert ac.await_args.kwargs["max_tokens"] == 128
+
+
+@pytest.mark.asyncio
+async def test_non_ollama_legs_do_not_drop_params():
+    with patch("src.llm.client.litellm.acompletion", new_callable=AsyncMock) as ac:
+        ac.return_value = _resp("ok")
+        await LLMClient().generate("sys", "usr", provider="openai")
+
+        assert not ac.await_args.kwargs.get("drop_params")
+
+
+@pytest.mark.asyncio
 async def test_generate_defaults_to_configured_debate_model():
     """No model given: the configured debate-tier default is used."""
     with patch("src.llm.client.litellm.acompletion", new_callable=AsyncMock) as ac:

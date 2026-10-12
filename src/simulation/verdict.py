@@ -71,11 +71,8 @@ def _to_markdown(v: Verdict) -> str:
     ]
     if v.constraints_and_risks:
         parts.append(f"## Constraints & Risks\n{v.constraints_and_risks}")
-    if v.dissenting_views:
-        lines = "\n".join(
-            f"- **{d.get('stance', '')}**: {d.get('view', '')}" for d in v.dissenting_views
-        )
-        parts.append(f"## Dissenting Views\n{lines}")
+    # Dissent is rendered by the frontend as a structured list (plan T6), not
+    # prose here — emitting it in markdown too showed it twice.
     parts.append(f"## Confidence\n{v.confidence:.2f}")
     return "\n\n".join(parts)
 

@@ -527,6 +527,63 @@ class TestLiteralRouting:
         assert acquired.properties["price"] == {"amount": 2.5e9, "currency": "USD"}
         assert "price" not in price_edge.properties   # value not stranded on the dropped edge
 
+    def test_two_same_kind_literals_route_to_their_own_relation(self):
+        """Two money literals must not collide on one real→real edge.
+
+        A deal price adjacent to WholeFoods lands on ACQUIRED; a revenue
+        adjacent to RevenueCo2 lands on HAS_REVENUE — neither overwrites the
+        other (before the fix, the first-match scan sent both to ACQUIRED).
+        """
+        from unittest.mock import MagicMock
+
+        from src.graph.models_graph import (
+            LocalOntology,
+            OntologyMetadata,
+            PropertyDefinition,
+            RelationTypeDefinition,
+        )
+
+        self._pin_kg_keys()
+        stage = self._stage()
+
+        amazon = MagicMock(); amazon.id = "e2"; amazon.name = "Amazon"; amazon.label = "Company"; amazon.properties = {}
+        whole = MagicMock(); whole.id = "e3"; whole.name = "WholeFoods"; whole.label = "Company"; whole.properties = {}
+        revco = MagicMock(); revco.id = "e5"; revco.name = "RevenueCo"; revco.label = "Company"; revco.properties = {}
+        revco2 = MagicMock(); revco2.id = "e6"; revco2.name = "RevenueCo2"; revco2.label = "Company"; revco2.properties = {}
+        deal = MagicMock(); deal.id = "e1"; deal.name = "$2.5 billion"; deal.label = "Money"
+        revenue = MagicMock(); revenue.id = "e4"; revenue.name = "$391 billion"; revenue.label = "Money"
+        acquired = MagicMock(); acquired.source_id = "e2"; acquired.target_id = "e3"; acquired.label = "ACQUIRED"; acquired.properties = {}
+        has_revenue = MagicMock(); has_revenue.source_id = "e5"; has_revenue.target_id = "e6"; has_revenue.label = "HAS_REVENUE"; has_revenue.properties = {}
+        price_edge = MagicMock(); price_edge.source_id = "e3"; price_edge.target_id = "e1"; price_edge.label = "PRICE"; price_edge.properties = {}
+        rev_edge = MagicMock(); rev_edge.source_id = "e6"; rev_edge.target_id = "e4"; rev_edge.label = "REV"; rev_edge.properties = {}
+
+        def _extractor(nodes):
+            nodes[0].metadata = {
+                "nodes": [amazon, whole, revco, revco2, deal, revenue],
+                "relations": [acquired, has_revenue, price_edge, rev_edge],
+            }
+            return nodes
+
+        ontology = LocalOntology(
+            metadata=OntologyMetadata(ontology_id="test-ontology"),
+            relation_types=[
+                RelationTypeDefinition(
+                    type_name="ACQUIRED",
+                    properties=[PropertyDefinition(name="price", value_type="money")],
+                ),
+                RelationTypeDefinition(
+                    type_name="HAS_REVENUE",
+                    properties=[PropertyDefinition(name="amount", value_type="money")],
+                ),
+            ],
+        )
+
+        doc = MagicMock(); doc.metadata = {}
+        stage._extract_chunk(doc, [_extractor], ontology.relation_types)
+
+        assert acquired.properties["price"] == {"amount": 2.5e9, "currency": "USD"}
+        assert has_revenue.properties["amount"] == {"amount": 391e9, "currency": "USD"}
+
     def test_extract_chunk_routes_literals_onto_surviving_entity(self):
         """The literal's only real neighbour takes the value under the relation's
         lowercased label — the value survives the drop (§13.1)."""

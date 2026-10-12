@@ -213,19 +213,48 @@ def _attach_property(holder, slot: str, value) -> None:
     holder.properties = {**(getattr(holder, "properties", None) or {}), slot: value}
 
 
-def _real_relation_target(relations, literals, entities, relation_slots, kind: str):
-    """The first real→real relation declaring a slot of `kind`, else `None`.
+def _real_relation_target(relations, literal_id, entities, relation_slots, kind: str):
+    """The real→real relation the literal's value belongs to, else `None`.
 
     This is the spec §13.2 case: the model leaked a value node, but the edge
     between the two REAL entities it describes already declares the typed slot —
     so the coerced value lands on that surviving edge
     (`(Amazon)-[:ACQUIRED {price}]->(WholeFoods)`).
+
+    A leaked literal is often attached to ONE real entity
+    (`(WholeFoods)-[:PRICE]->(lit)`). When a chunk extracts two same-kind
+    literals (a deal price and a revenue), a plain first-match scan routes BOTH
+    to whichever real→real edge declares the slot first — one overwriting the
+    other. So prefer the real→real edge sharing the literal's own real
+    neighbour; fall back to the first matching real→real edge only when that
+    neighbour's edge declares no such slot.
     """
+    neighbour = None
     for rel in relations:
         source = getattr(rel, "source_id", None)
         target = getattr(rel, "target_id", None)
-        if source in literals or target in literals:
+        if literal_id not in (source, target):
             continue
+        other = target if source == literal_id else source
+        if other in entities:
+            neighbour = other
+            break
+
+    if neighbour is not None:
+        for rel in relations:
+            source = getattr(rel, "source_id", None)
+            target = getattr(rel, "target_id", None)
+            if source not in entities or target not in entities:
+                continue
+            if neighbour not in (source, target):
+                continue
+            slot = _pick_slot(rel, relation_slots, kind)
+            if slot:
+                return rel, slot
+
+    for rel in relations:
+        source = getattr(rel, "source_id", None)
+        target = getattr(rel, "target_id", None)
         if source not in entities or target not in entities:
             continue
         slot = _pick_slot(rel, relation_slots, kind)
@@ -294,7 +323,7 @@ def _route_literals(nodes, relation_slots=None):
         }
         for node_id, value in literals.items():
             kind, coerced = coerce_value(value)
-            target = _real_relation_target(relations, literals, entities, relation_slots, kind)
+            target = _real_relation_target(relations, node_id, entities, relation_slots, kind)
             if target is None:
                 target = _neighbour_target(relations, node_id, entities, relation_slots, kind)
             if target is None:

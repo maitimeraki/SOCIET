@@ -49,6 +49,11 @@ class LLMClient:
             base = getattr(LLMConfig, "ollama_base_url", "http://localhost:11434")
             kwargs["api_base"] = base.rstrip("/")
             kwargs["api_key"] = "ollama"
+            # The Ollama leg forwards BOTH max_tokens and num_predict; litellm's
+            # native ollama/ provider may reject the pair. drop_params makes
+            # litellm silently drop the unsupported one instead of raising, so
+            # the default local provider never fails on the kwarg mismatch.
+            kwargs["drop_params"] = True
         elif provider == "openai" and LLMConfig.openai_api_key:
             kwargs["api_key"] = LLMConfig.openai_api_key
         elif provider == "anthropic" and LLMConfig.anthropic_api_key:
