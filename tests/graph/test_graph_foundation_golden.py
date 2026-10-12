@@ -98,26 +98,32 @@ def test_ontology_hydrates_literal_as_money_slot():
 
 
 def test_extract_chunk_routes_leaked_value_onto_real_to_real_edge():
-    """§13.2 end to end: the extractor leaked "$2.5 billion" as a node AND gave
-    the real→real ACQUIRED edge a declared `price: money` slot. The value lands
-    on that surviving edge; no node named "$2.5 billion" survives and the
-    literal's own PRICE edge is dropped."""
+    """§13.2 end to end: the extractor leaked "$2.5 billion" and "2018" as nodes
+    AND gave the real→real ACQUIRED edge declared `price: money` and `date: date`
+    slots. Each coerced value lands on that surviving edge (both halves of the
+    binding criterion); no literal node survives and the literals' own PRICE/DATE
+    edges are dropped."""
     _pin_kg_keys()
     stage = _stage()
 
     amazon = MagicMock(); amazon.id = "e2"; amazon.name = "Amazon"; amazon.label = "Company"; amazon.properties = {}
     whole = MagicMock(); whole.id = "e3"; whole.name = "WholeFoods"; whole.label = "Company"; whole.properties = {}
     money = MagicMock(); money.id = "e1"; money.name = "$2.5 billion"; money.label = "Money"
+    year = MagicMock(); year.id = "e4"; year.name = "2018"; year.label = "Date"
     acquired = MagicMock(); acquired.source_id = "e2"; acquired.target_id = "e3"; acquired.label = "ACQUIRED"; acquired.properties = {}
     price_edge = MagicMock(); price_edge.source_id = "e3"; price_edge.target_id = "e1"; price_edge.label = "PRICE"; price_edge.properties = {}
+    date_edge = MagicMock(); date_edge.source_id = "e3"; date_edge.target_id = "e4"; date_edge.label = "DATE"; date_edge.properties = {}
 
     def _extractor(nodes):
-        nodes[0].metadata = {"nodes": [amazon, whole, money], "relations": [acquired, price_edge]}
+        nodes[0].metadata = {
+            "nodes": [amazon, whole, money, year],
+            "relations": [acquired, price_edge, date_edge],
+        }
         return nodes
 
     onto = _ontology(
         relation_types=[{"type_name": "ACQUIRED", "description": "",
-                         "properties": ["price: money: deal value"],
+                         "properties": ["price: money: deal value", "date: date: deal date"],
                          "source_entity_types": ["Company"],
                          "target_entity_types": ["Company"]}],
     )
@@ -127,9 +133,10 @@ def test_extract_chunk_routes_leaked_value_onto_real_to_real_edge():
         doc, [_extractor], onto.relation_types
     )
 
-    assert all(n["label"] != "$2.5 billion" for n in delta_nodes)   # (a) literal node gone
+    assert {n["label"] for n in delta_nodes} == {"Amazon", "WholeFoods"}   # (a) literal nodes gone
     acquired_edge = next(e for e in delta_edges if e["label"] == "ACQUIRED")
-    assert acquired_edge["properties"]["price"] == {"amount": 2.5e9, "currency": "USD"}   # (b) coerced onto surviving edge
+    assert acquired_edge["properties"]["price"] == {"amount": 2.5e9, "currency": "USD"}
+    assert acquired_edge["properties"]["date"] == "2018"                  # (b) both coerced onto surviving edge
 
 
 def test_extract_chunk_routes_value_onto_surviving_entity():
@@ -150,6 +157,7 @@ def test_extract_chunk_routes_value_onto_surviving_entity():
     doc = MagicMock(); doc.metadata = {}
     _, _, _, delta_nodes, delta_edges = stage._extract_chunk(doc, [_extractor])
 
-    assert all(n["label"] != "$2.5 billion" for n in delta_nodes)   # literal node gone
+    assert {n["label"] for n in delta_nodes} == {"Amazon"}          # literal node gone
     assert delta_edges == []                                        # dangling edge removed
-    assert delta_nodes[0]["properties"]["acquired"] == {"amount": 2.5e9, "currency": "USD"}
+    amazon_node = next(n for n in delta_nodes if n["label"] == "Amazon")
+    assert amazon_node["properties"]["acquired"] == {"amount": 2.5e9, "currency": "USD"}
