@@ -205,6 +205,41 @@ class GraphContext:
             if row.get("n") is not None
         ]
 
+    async def find_connected_nodes_by_seed(
+        self, node_ids: List[str], limit: int = 10
+    ) -> Dict[str, List[EntityNode]]:
+        """Per-seed 1-hop entity neighbours (entity↔entity only), keyed by seed id
+        AND seed name so a caller resolving either key finds its group. One query.
+        """
+        keys = [str(n) for n in node_ids if str(n or "").strip()]
+        if not keys:
+            return {}
+
+        cypher = """
+        MATCH (seed:__Entity__)-[r]-(n:__Entity__)
+        WHERE (seed.id IN $node_ids OR seed.name IN $node_ids)
+          AND NOT n:Chunk AND NOT (n.id IN $node_ids OR n.name IN $node_ids)
+        RETURN seed.id AS seed_id, seed.name AS seed_name, n, type(r) AS rel_type
+        LIMIT $limit
+        """
+        async with self._driver.session(database=self._db) as session:
+            result = await session.run(
+                cast(LiteralString, cypher),
+                node_ids=keys,
+                limit=limit * max(1, len(keys)),
+            )
+            rows = await result.data()
+
+        grouped: Dict[str, List[EntityNode]] = {}
+        for row in rows:
+            if row.get("n") is None:
+                continue
+            entity = self._entity_from_node(row.get("n"), 0.0)
+            for key in (row.get("seed_id"), row.get("seed_name")):
+                if key:
+                    grouped.setdefault(str(key), []).append(entity)
+        return grouped
+
     def _parse_tags(self, tags: Any) -> List[str]:
         """Parse domain_tags from various formats."""
         if not tags:

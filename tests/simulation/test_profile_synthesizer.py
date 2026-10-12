@@ -1301,3 +1301,51 @@ async def test_synthesize_rosters_seeds_when_the_context_has_no_traversal():
     profiles = await synth.synthesize(query="q", dataset_id="ds", max_agents=3)
 
     assert [p.identity.name for p in profiles] == ["A", "B", "C"]
+
+
+"""Task 2: each persona's evidence is its node plus the node's 1-hop subgraph."""
+
+
+@pytest.mark.asyncio
+async def test_candidate_evidence_includes_the_subgraph():
+    """A seed's candidate is grounded in its neighbours, not one bare node."""
+    seed = _cluster_entity("Amazon", 0.9, ["retail"], "amazon summary")
+    neighbour = _cluster_entity("WholeFoods", 0.0, ["grocery"], "wholefoods summary")
+
+    class _SubgraphContext:
+        async def find_relevant_entities(self, query, limit=10):
+            return [seed]
+
+        async def find_connected_nodes_by_seed(self, node_ids, limit=10):
+            return {"Amazon": [neighbour]}
+
+    synth, repo = _synth_over(_SubgraphContext())
+
+    profiles = await synth.synthesize(query="q", dataset_id="ds", max_agents=1)
+
+    call = repo.build_single_agent_profile_from_node.await_args.kwargs
+    assert call["sector_results"][0]["evidence_nodes"] == ["Amazon", "WholeFoods"]
+    assert call["sector_results"][0]["density"] == 2  # the neighbour joined the evidence
+    assert [p.identity.name for p in profiles] == ["Amazon"]  # representative still the seed
+
+
+@pytest.mark.asyncio
+async def test_subgraph_failure_degrades_to_the_node_alone(caplog):
+    """A raising subgraph fetch is logged and never breaks synthesis."""
+
+    class _RaisingSubgraph:
+        async def find_relevant_entities(self, query, limit=10):
+            return [_cluster_entity("Solo", 0.9, ["x"], "solo summary")]
+
+        async def find_connected_nodes_by_seed(self, node_ids, limit=10):
+            raise RuntimeError("neo4j transient")
+
+    synth, repo = _synth_over(_RaisingSubgraph())
+
+    with caplog.at_level(logging.WARNING, logger="src.simulation.profile_synthesizer"):
+        profiles = await synth.synthesize(query="q", dataset_id="ds", max_agents=1)
+
+    assert "subgraph fetch failed" in caplog.text
+    call = repo.build_single_agent_profile_from_node.await_args.kwargs
+    assert call["sector_results"][0]["evidence_nodes"] == ["Solo"]
+    assert [p.identity.name for p in profiles] == ["Solo"]

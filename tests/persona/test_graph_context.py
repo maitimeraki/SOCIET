@@ -461,3 +461,36 @@ async def test_get_neighbors_reads_real_labels():
     neighbours = await ctx._get_neighbors("seed")
 
     assert [n.label for n in neighbours] == ["Company"]
+
+
+# ---- Per-seed 1-hop subgraph: one query, keyed by id AND name (Task 2) ----
+
+
+@pytest.mark.asyncio
+async def test_find_connected_nodes_by_seed_groups_per_seed():
+    """One query groups each seed's 1-hop entity neighbours under its id and name."""
+    rows = [
+        {"seed_id": "s1", "seed_name": "Amazon", "n": _FakeNode("WholeFoods", "Company"), "rel_type": "ACQUIRED"},
+        {"seed_id": "s2", "seed_name": "EU", "n": _FakeNode("GDPR", "Regulation"), "rel_type": "MANDATES"},
+    ]
+    ctx, driver = _batch_ctx(lambda cypher, params: rows)
+
+    out = await ctx.find_connected_nodes_by_seed(["s1", "s2"], limit=10)
+
+    assert len(driver.queries) == 1
+    cypher, params = driver.queries[0]
+    assert "__Entity__" in cypher and "NOT n:Chunk" in cypher
+    assert params["node_ids"] == ["s1", "s2"]
+    assert {e.name for e in out["s1"]} == {"WholeFoods"}
+    assert {e.name for e in out["s2"]} == {"GDPR"}
+    assert out["s1"][0].label == "Company"      # real type label, not property keys
+    assert out["s1"][0].relevance_score == 0.0  # walked nodes carry no vector score
+    assert out["Amazon"] == out["s1"]           # reachable under the seed name too
+
+
+@pytest.mark.asyncio
+async def test_find_connected_nodes_by_seed_empty_ids_run_no_query():
+    ctx, driver = _batch_ctx(lambda cypher, params: pytest.fail("query executed for empty ids"))
+
+    assert await ctx.find_connected_nodes_by_seed([]) == {}
+    assert driver.queries == []

@@ -84,11 +84,13 @@ class ProfileSynthesizer:
         required = await self._required_nodes(seeds, limit=search_limit)
         target = min(max_agents, int(math.sqrt(len(required)) * 4))
 
+        # Ground each persona in its node's 1-hop subgraph, not one bare node.
+        subgraph = await self._subgraph_by_seed(required, search_limit)
         candidates = [
             SelectionCandidate(
                 name=node.name,
-                text=self._candidate_text([node]),
-                evidence=[node],
+                text=self._candidate_text([node, *subgraph.get(node.id, [])]),
+                evidence=[node, *subgraph.get(node.id, [])],
             )
             for node in required
         ]
@@ -103,12 +105,13 @@ class ProfileSynthesizer:
                 await on_selection(list(rows))
             except Exception as exc:
                 logger.warning("on_selection emitter failed: %s", exc)
-        # Pair each ranked row with its node evidence — positionally aligned with
-        # `required` (same comprehension), so a row consumes its evidence from a
+        # Pair each ranked row with its candidate's evidence — positionally aligned
+        # with `required` (same comprehension), so a row consumes its evidence from a
         # per-name bucket in rank order and two rows sharing a name both survive.
+        # The whole evidence list (node + subgraph) reaches the build and distillation.
         evidence_by_name: dict[str, list[list[EntityNode]]] = defaultdict(list)
-        for candidate, node in zip(candidates, required):
-            evidence_by_name[candidate.name].append([node])
+        for candidate in candidates:
+            evidence_by_name[candidate.name].append(list(candidate.evidence))
         top_rows = [(row, evidence_by_name[row.name].pop(0)) for row in rows[:target]]
 
         # S5: ONE batched distillation call for the whole selection set — the S3
@@ -350,6 +353,27 @@ class ProfileSynthesizer:
 
         results = await asyncio.gather(*(_build(n) for n in names))
         return [p for p in results if p is not None]
+
+    async def _subgraph_by_seed(
+        self, nodes: list[EntityNode], limit: int
+    ) -> dict[str, list[EntityNode]]:
+        """Each node's 1-hop entity neighbours, keyed by node id — ONE query for
+        the whole roster. A missing method, a raising fetch or a non-mapping
+        answer degrades to no neighbours — logged, never raised.
+        """
+        fetch = getattr(self._ctx, "find_connected_nodes_by_seed", None)
+        if not callable(fetch):
+            return {}
+        try:
+            grouped = fetch([node.id for node in nodes], limit=limit)
+            if inspect.iscoroutine(grouped):
+                grouped = await grouped
+        except Exception as exc:
+            logger.warning(
+                "subgraph fetch failed; grounding personas on their own nodes only: %s", exc
+            )
+            return {}
+        return grouped if isinstance(grouped, Mapping) else {}
 
     async def _required_nodes(self, seeds: list[EntityNode], limit: int) -> list[EntityNode]:
         """The roster's candidate nodes: the seeds plus their one-hop entity
