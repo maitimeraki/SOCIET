@@ -3,7 +3,7 @@ import os
 import uuid
 import json
 import logging
-from typing import List, Dict, Any
+from typing import List, Dict, Any, get_args
 from llama_index.llms.openai_like import OpenAILike
 from src.logging.setup_logging import setup_logging
 from src.utils.hydrate_ontology import hydrate_ontology
@@ -11,6 +11,7 @@ from src.llm.config_llm import LLMConfig
 from src.graph.models_graph import (
     ProcessedChunk,
     LocalOntology,
+    PropertyDefinition,
 )
 
 # Configure basic logging
@@ -33,42 +34,25 @@ def _strip_json_fences(text: str) -> str:
         t = t.replace("```json", "").replace("```", "").strip()
     return t
 
+# The accepted value kinds come from the one vocabulary (PropertyDefinition) — never re-list them.
+_VALID_KINDS = set(get_args(PropertyDefinition.model_fields["value_type"].annotation))
+
+
+def _parse_prop(raw: str) -> dict:
+    # "name: value_type: description" | "name: description" | "name"
+    parts = [p.strip() for p in raw.split(":", 2)]
+    if len(parts) == 3 and parts[1].lower() in _VALID_KINDS:
+        return {"name": parts[0], "value_type": parts[1].lower(), "description": parts[2]}
+    if len(parts) >= 2:
+        return {"name": parts[0], "value_type": "string", "description": parts[1]}
+    return {"name": raw.strip(), "value_type": "string", "description": ""}
+
+
 def _structured_properties(llm_data: Dict[str, Any]) -> Dict[str, Any]:
-    # This transforms the flat strings back into your strict Pydantic objects
-    for ent in llm_data.get("entity_types", []):
-        parsed_props = []
-        for prop_str in ent.get("properties", []):
-            if ":" in prop_str:
-                name, desc = prop_str.split(":", 1)
-                parsed_props.append({
-                    "name": name.strip(),
-                    "description": desc.strip()
-                })
-            else:
-                # Bare name, no description — keep it rather than dropping it.
-                parsed_props.append({
-                    "name": prop_str,
-                    "description": ""
-                })
-        ent["properties"] = parsed_props # Now matches your class schema
-        
-    for rel in llm_data.get("relation_types", []):
-        parsed_props = []
-        for prop_str in rel.get("properties", []):
-            if ":" in prop_str:
-                name, desc = prop_str.split(":", 1)
-                parsed_props.append({
-                    "name": name.strip(),
-                    "description": desc.strip()
-                })
-            else:
-                # Bare name, no description — keep it rather than dropping it.
-                parsed_props.append({
-                    "name": prop_str,
-                    "description": ""
-                })
-        rel["properties"] = parsed_props # Now matches your class schema
-    
+    # Transform the flat property strings into the strict Pydantic shapes.
+    for key in ("entity_types", "relation_types"):
+        for block in llm_data.get(key, []):
+            block["properties"] = [_parse_prop(p) for p in block.get("properties", [])]
     return llm_data
 
 async def discover_ontology(
@@ -151,7 +135,7 @@ class OntologyDiscoveryStage:
                     {{
                     "type_name": "EntityTypeName",
                     "description": "Short definition",
-                    "properties": ["name: brief description"]
+                    "properties": ["name: value_type: brief description"]
                     }}
                 ],
                 "relation_types": [
@@ -160,14 +144,16 @@ class OntologyDiscoveryStage:
                     "description": "describes what this relation represents",
                     "source_entity_types": [],
                     "target_entity_types": [],
-                    "properties": ["name: brief description"]
+                    "properties": ["name: value_type: brief description"]
                     }}
                 ],
                 }}
 
                 Rules:
                 1. Use UPPER_SNAKE_CASE for names of properties of relations.
-                2. Properties MUST be a list of strings formatted as "name: description".
+                2. Every property MUST be "name: value_type: description" where value_type is one of:
+                   string, int, float, bool, date, datetime, money, quantity, percentage, enum.
+                   Attribute values (prices, dates, revenues, counts, percentages) are PROPERTIES, never entity types.
                 3. Return Json only
 
                 Sample:

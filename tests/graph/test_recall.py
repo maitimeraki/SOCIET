@@ -52,7 +52,7 @@ class TestNoColonPropertiesSurvive:
         _structured_properties(data)
 
         assert data["entity_types"][0]["properties"] == [
-            {"name": "no colon here", "description": ""}
+            {"name": "no colon here", "value_type": "string", "description": ""}
         ]
 
     def test_relation_property_without_colon_survives(self):
@@ -66,7 +66,7 @@ class TestNoColonPropertiesSurvive:
         _structured_properties(data)
 
         assert data["relation_types"][0]["properties"] == [
-            {"name": "no colon here", "description": ""}
+            {"name": "no colon here", "value_type": "string", "description": ""}
         ]
 
     def test_colon_property_still_parsed(self):
@@ -81,7 +81,7 @@ class TestNoColonPropertiesSurvive:
         _structured_properties(data)
 
         assert data["entity_types"][0]["properties"] == [
-            {"name": "name", "description": "brief description"}
+            {"name": "name", "value_type": "string", "description": "brief description"}
         ]
 
 

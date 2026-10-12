@@ -86,8 +86,8 @@ class TestStructuredProperties:
         assert len(result["entity_types"]) == 1
         assert result["entity_types"][0]["type_name"] == "Person"
         assert result["entity_types"][0]["properties"] == [
-            {"name": "name", "description": "The person's name"},
-            {"name": "age", "description": "How old they are"}
+            {"name": "name", "value_type": "string", "description": "The person's name"},
+            {"name": "age", "value_type": "string", "description": "How old they are"}
         ]
 
     def test_transforms_relation_properties(self):
@@ -104,7 +104,7 @@ class TestStructuredProperties:
 
         assert len(result["relation_types"]) == 1
         assert result["relation_types"][0]["properties"] == [
-            {"name": "since", "description": "When employment started"}
+            {"name": "since", "value_type": "string", "description": "When employment started"}
         ]
 
     def test_handles_missing_properties(self):
@@ -116,6 +116,22 @@ class TestStructuredProperties:
 
         assert result["entity_types"][0]["properties"] == []
         assert result["relation_types"][0]["properties"] == []
+
+
+def test_structured_properties_parses_value_type():
+    from src.graph.ontology import _structured_properties
+    out = _structured_properties({
+        "entity_types": [{"type_name": "Company", "properties": ["revenue: money: annual revenue"]}],
+        "relation_types": [{"type_name": "ACQUIRES", "properties": ["price: money: deal value"]}],
+    })
+    p = out["entity_types"][0]["properties"][0]
+    assert p == {"name": "revenue", "value_type": "money", "description": "annual revenue"}
+
+
+def test_structured_properties_back_compat_two_part():
+    from src.graph.ontology import _structured_properties
+    out = _structured_properties({"entity_types": [{"type_name": "X", "properties": ["founded: year"]}], "relation_types": []})
+    assert out["entity_types"][0]["properties"][0] == {"name": "founded", "value_type": "string", "description": "year"}
 
 
 class TestDiscoverOntology:
