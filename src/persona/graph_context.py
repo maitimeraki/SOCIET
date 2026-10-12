@@ -23,6 +23,10 @@ from src.persona.models_persona import ProvenanceLink
 _EMBED_TIMEOUT_SECONDS = 60
 
 
+# Store/base labels carried by every graph node — never the entity's real type.
+_BASE_LABELS = {"__Entity__", "__Node__", "Chunk", "Document"}
+
+
 # ---- Supporting Types ----
 
 class EntityNode(BaseModel):
@@ -92,6 +96,18 @@ class GraphContext:
         except Exception:
             return {}
 
+    @staticmethod
+    def _node_labels(node: Any, props: Dict[str, Any]) -> List[str]:
+        """The entity's real type label(s): the neo4j Node's `.labels` minus the
+        store/base labels, else `props["labels"]`, else ["Entity"]."""
+        raw = None
+        if hasattr(node, "labels"):
+            raw = list(node.labels)
+        elif isinstance(node, dict):
+            raw = node.get("labels")
+        labels = [str(l) for l in (raw or []) if str(l) not in _BASE_LABELS]
+        return labels or ["Entity"]
+
     async def _get_embedding(self, text: str) -> List[float]:
         """Get embedding for text using Ollama."""
         func = None
@@ -140,11 +156,11 @@ class GraphContext:
         """One EntityNode from a Neo4j node — the single node-reading body the
         vector search and the neighbour walk both construct through."""
         props = self._node_props(node)
-        labels = list(node.keys()) if hasattr(node, "keys") else props.get("labels", ["Entity"])
+        labels = self._node_labels(node, props)
         return EntityNode(
             id=str(props.get("id", props.get("name", uuid4()))),
             name=str(props.get("name", "Unknown")),
-            label=labels[0] if labels else "Entity",
+            label=labels[0],
             properties=props,
             relevance_score=relevance_score,
             summary=props.get("summary_context") or props.get("summary") or props.get("description"),
@@ -270,12 +286,12 @@ class GraphContext:
             if node is None:
                 continue
             props = self._node_props(node)
-            labels = list(node.keys()) if hasattr(node, "keys") else props.get("labels", ["Entity"])
+            labels = self._node_labels(node, props)
 
             neighbors.append(EntityNode(
                 id=str(props.get("id", props.get("name", uuid4()))),
                 name=str(props.get("name", "Unknown")),
-                label=labels[0] if labels else "Entity",
+                label=labels[0],
                 properties={**props, "relation_type": row.get("rel_type", ""), "relation_summary": row.get("rel_summary", "")},
                 relevance_score=1.0,
                 summary=props.get("summary_context") or props.get("summary"),

@@ -419,3 +419,45 @@ async def test_find_connected_nodes_empty_seeds_run_no_query():
 
     assert await ctx.find_connected_nodes([]) == []
     assert driver.queries == []
+
+
+# ---- The entity's real type label, not its property keys (Task 1) ----
+
+
+class _FakeNode:
+    """A neo4j Node stand-in: `.labels` is the type set, `._properties` the props."""
+
+    def __init__(self, name, *labels):
+        self.labels = set(labels) | {"__Entity__"}
+        self._properties = {"id": name, "name": name}
+
+
+def test_entity_from_node_reads_real_label():
+    """`label` is the entity's type (`Company`), never a property key like `id`."""
+    ctx = GraphContext.__new__(GraphContext)  # no driver/db needed
+
+    entity = ctx._entity_from_node(_FakeNode("Amazon", "Company"), 0.9)
+
+    assert entity.label == "Company"
+    assert entity.name == "Amazon"
+
+
+def test_entity_from_node_falls_back_to_props_labels_then_entity():
+    ctx = GraphContext.__new__(GraphContext)
+
+    from_props = ctx._entity_from_node({"id": "e1", "name": "X", "labels": ["Regulator"]}, 0.0)
+    assert from_props.label == "Regulator"
+
+    bare = ctx._entity_from_node({"id": "e2", "name": "Y"}, 0.0)
+    assert bare.label == "Entity"
+
+
+@pytest.mark.asyncio
+async def test_get_neighbors_reads_real_labels():
+    """The neighbour walk keys `label` on the same real type, not property keys."""
+    rows = [{"m": _FakeNode("WholeFoods", "Company"), "rel_type": "ACQUIRED", "rel_summary": ""}]
+    ctx, _ = _batch_ctx(lambda cypher, params: rows)
+
+    neighbours = await ctx._get_neighbors("seed")
+
+    assert [n.label for n in neighbours] == ["Company"]
