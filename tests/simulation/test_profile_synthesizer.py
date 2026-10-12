@@ -804,8 +804,8 @@ async def test_distillation_entry_includes_source_text():
     entity = _cluster_entity("Amazon", 0.9, ["retail"], "amazon summary")
     entity.properties = {"name": "Amazon", "triplet_source_id": "chunk-1"}
     synth, repo = _distill_synth([entity], {})
-    repo.fetch_source_evidence = AsyncMock(
-        return_value=["Amazon acquired WholeFoods for $2.5B"]
+    repo.fetch_source_evidence_by_chunk = AsyncMock(
+        return_value={"chunk-1": ["Amazon acquired WholeFoods for $2.5B"]}
     )
 
     await synth.synthesize(query="q", dataset_id="ds", max_agents=1, distill=True)
@@ -815,7 +815,7 @@ async def test_distillation_entry_includes_source_text():
         "Amazon acquired WholeFoods for $2.5B",
         "amazon summary",
     ]
-    repo.fetch_source_evidence.assert_awaited_once_with(["chunk-1"])
+    assert repo.fetch_source_evidence_by_chunk.await_args.args[0] == ["chunk-1"]
 
 
 @pytest.mark.asyncio
@@ -826,23 +826,68 @@ async def test_source_text_is_fetched_once_for_the_whole_batch():
     grid = _cluster_entity("Grid Co", 0.5, ["energy"], "grid summary")
     grid.properties = {"name": "Grid Co", "triplet_source_id": "c2"}
     synth, repo = _distill_synth([amazon, grid], {})
-    repo.fetch_source_evidence = AsyncMock(return_value=["shared source text"])
+    repo.fetch_source_evidence_by_chunk = AsyncMock(
+        return_value={"c1": ["amazon text"], "c2": ["grid text"]}
+    )
 
     await synth.synthesize(query="q", dataset_id="ds", max_agents=2, distill=True)
 
-    repo.fetch_source_evidence.assert_awaited_once()
-    assert sorted(repo.fetch_source_evidence.await_args.args[0]) == ["c1", "c2"]
+    repo.fetch_source_evidence_by_chunk.assert_awaited_once()
+    assert sorted(repo.fetch_source_evidence_by_chunk.await_args.args[0]) == ["c1", "c2"]
+
+
+@pytest.mark.asyncio
+async def test_each_persona_is_grounded_in_only_its_own_source_text():
+    """R17: distinct chunks → distinct snippets; no persona sees another's text."""
+    amazon = _cluster_entity("Amazon", 0.9, ["retail"], "amazon summary")
+    amazon.properties = {"name": "Amazon", "triplet_source_id": "c1"}
+    grid = _cluster_entity("Grid Co", 0.5, ["energy"], "grid summary")
+    grid.properties = {"name": "Grid Co", "triplet_source_id": "c3"}
+    synth, repo = _distill_synth([amazon, grid], {})
+    repo.fetch_source_evidence_by_chunk = AsyncMock(
+        return_value={"c1": ["Amazon acquired WholeFoods"], "c3": ["Grid demand peaked"]}
+    )
+
+    await synth.synthesize(query="q", dataset_id="ds", max_agents=2, distill=True)
+
+    entries = {
+        entry["name"]: entry["evidence"]
+        for entry in repo.distill_profiles.await_args.kwargs["personas"]
+    }
+    assert "Amazon acquired WholeFoods" in entries["Amazon"]
+    assert "Grid demand peaked" in entries["Grid Co"]
+    assert "Grid demand peaked" not in entries["Amazon"]
+    assert "Amazon acquired WholeFoods" not in entries["Grid Co"]
+
+
+@pytest.mark.asyncio
+async def test_the_batch_limit_scales_with_the_roster():
+    """A single-persona cap would truncate later personas out of the one query."""
+    amazon = _cluster_entity("Amazon", 0.9, ["retail"], "amazon summary")
+    amazon.properties = {"name": "Amazon", "triplet_source_id": "c1"}
+    grid = _cluster_entity("Grid Co", 0.5, ["energy"], "grid summary")
+    grid.properties = {"name": "Grid Co", "triplet_source_id": "c3"}
+    synth, repo = _distill_synth([amazon, grid], {})
+    repo.fetch_source_evidence_by_chunk = AsyncMock(return_value={})
+
+    await synth.synthesize(query="q", dataset_id="ds", max_agents=2, distill=True)
+
+    from src.persona.agent import SOURCE_EVIDENCE_MAX_SNIPPETS
+
+    call = repo.fetch_source_evidence_by_chunk.await_args
+    assert call.args[0] == ["c1", "c3"]
+    assert call.kwargs["limit"] == SOURCE_EVIDENCE_MAX_SNIPPETS * 2
 
 
 @pytest.mark.asyncio
 async def test_no_chunk_refs_means_no_evidence_fetch():
     """A roster whose nodes carry no chunk ref makes no source-evidence query."""
     synth, repo = _distill_synth(_SELECTION_ENTITIES, {})
-    repo.fetch_source_evidence = AsyncMock(return_value=[])
+    repo.fetch_source_evidence_by_chunk = AsyncMock(return_value={})
 
     await synth.synthesize(query="q", dataset_id="ds", max_agents=2, distill=True)
 
-    repo.fetch_source_evidence.assert_not_awaited()
+    repo.fetch_source_evidence_by_chunk.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -1278,7 +1323,7 @@ async def test_synthesize_persists_the_distilled_stance_with_the_entity_links():
     repo = MagicMock()
     repo.fetch_nodes_by_names = AsyncMock(return_value={})
     repo.calculate_agent_metrics_and_context_for_llm = AsyncMock(return_value={})
-    repo.fetch_source_evidence = AsyncMock(return_value=[])
+    repo.fetch_source_evidence_by_chunk = AsyncMock(return_value={})
     repo.distill_profiles = AsyncMock(return_value={
         "Lead": DistilledProfile("d", "p", Stance.POSITIVE, 0.8, 0.6),
     })

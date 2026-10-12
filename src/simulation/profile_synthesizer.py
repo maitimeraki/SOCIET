@@ -7,7 +7,7 @@ from collections import defaultdict
 from collections.abc import Awaitable, Callable, Mapping
 from typing import Any
 
-from src.persona.agent import Agent
+from src.persona.agent import SOURCE_EVIDENCE_MAX_SNIPPETS, Agent
 from src.persona.graph_context import GraphContext, EntityNode
 from src.persona.repository import PersonaRepository
 from src.simulation.debate_config import DebateConfig
@@ -122,26 +122,26 @@ class ProfileSynthesizer:
         if distill:
             # T3: the persona's OWN chunk text — the grounding the EVIDENCE block
             # has been missing (entity nodes carry no `summary`). ONE call for the
-            # whole batch: `fetch_source_evidence` takes a list and UNWINDs it, so
-            # this replaces an N-persona loop. A roster with no chunk refs issues
-            # no query at all.
-            # ponytail: the one call returns a FLAT list, so the batch's snippets
-            # are handed to every persona rather than sliced per persona (the
-            # return has no per-chunk attribution and is capped at
-            # SOURCE_EVIDENCE_MAX_SNIPPETS). Upgrade path: return `c.id` alongside
-            # `c.text` and bucket by the persona's own chunk ids.
+            # whole batch, keyed by chunk id so each persona gets its own snippets
+            # (R17); the limit scales with the roster or a single persona's cap
+            # would truncate the later personas out of the one query. A roster
+            # with no chunk refs issues no query at all.
             batch_chunk_ids = list(dict.fromkeys(
                 chunk_id
                 for _, evidence in top_rows
                 for chunk_id in self._evidence_chunk_ids(evidence)
             ))
-            source_snippets = (
-                await self._repo.fetch_source_evidence(batch_chunk_ids)
-                if batch_chunk_ids else []
+            snippets_by_chunk = (
+                await self._repo.fetch_source_evidence_by_chunk(
+                    batch_chunk_ids, limit=SOURCE_EVIDENCE_MAX_SNIPPETS * len(top_rows)
+                )
+                if batch_chunk_ids else {}
             )
             distilled = await self._repo.distill_profiles(
                 personas=[
-                    self._distillation_entry(row, evidence, source_snippets)
+                    self._distillation_entry(
+                        row, evidence, self._own_source_snippets(evidence, snippets_by_chunk)
+                    )
                     for row, evidence in top_rows
                 ],
                 query=query,
@@ -421,6 +421,23 @@ class ProfileSynthesizer:
                 seen.add(key)
                 required.append(node)
         return required
+
+    @staticmethod
+    def _own_source_snippets(
+        evidence: list[EntityNode], snippets_by_chunk: Mapping[str, list[str]]
+    ) -> list[str]:
+        """This persona's own snippets, in its evidence's chunk order, capped.
+
+        Reading only the chunks this persona's evidence names is what keeps one
+        persona's source text out of another's distillation.
+        """
+        if not isinstance(snippets_by_chunk, Mapping):
+            return []
+        return [
+            snippet
+            for chunk_id in ProfileSynthesizer._evidence_chunk_ids(evidence)
+            for snippet in (snippets_by_chunk.get(chunk_id) or [])
+        ][:SOURCE_EVIDENCE_MAX_SNIPPETS]
 
     def _distillation_entry(
         self,

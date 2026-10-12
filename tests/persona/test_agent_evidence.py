@@ -89,6 +89,44 @@ async def test_fetch_source_evidence_is_capped():
 
 
 @pytest.mark.asyncio
+async def test_fetch_by_chunk_groups_snippets_under_their_chunk_id():
+    """R17: the id rides the RETURN so a caller can attribute snippets."""
+    repo = _repo_returning([
+        {"chunk_id": "c1", "text": "first"},
+        {"chunk_id": "c1", "text": "second"},
+        {"chunk_id": "c2", "text": "third"},
+    ])
+
+    out = await repo.fetch_source_evidence_by_chunk(["c1", "c2"])
+
+    assert out == {"c1": ["first", "second"], "c2": ["third"]}
+
+
+@pytest.mark.asyncio
+async def test_fetch_by_chunk_skips_rows_missing_an_id_or_text():
+    repo = _repo_returning([{"chunk_id": "c1", "text": "only"}, {"chunk_id": "c2"}, {}])
+
+    assert await repo.fetch_source_evidence_by_chunk(["c1", "c2"]) == {"c1": ["only"]}
+
+
+@pytest.mark.asyncio
+async def test_fetch_by_chunk_empty_ids_makes_no_query():
+    repo = _repo_returning([])
+
+    assert await repo.fetch_source_evidence_by_chunk([]) == {}
+    repo._driver.session.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_fetch_by_chunk_swallows_a_driver_error():
+    """Evidence is an enrichment — a dead driver yields {} and a warning, never a raise."""
+    repo = _repo_returning([])
+    repo._driver.session.side_effect = RuntimeError("neo4j down")
+
+    assert await repo.fetch_source_evidence_by_chunk(["c1"]) == {}
+
+
+@pytest.mark.asyncio
 async def test_build_carries_source_evidence_from_chunk_ids():
     """The build path actually consults the persona's chunk ids."""
     repo = PersonaRepository.__new__(PersonaRepository)
