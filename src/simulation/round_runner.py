@@ -15,6 +15,11 @@ from src.utils.queryIntend import QueryIntent
 
 OPPONENT_STATEMENT_CHARS = 600
 
+# Prompt budget for the persona's first-person voice. Rich enough to carry the
+# whole `detailed_perspective` the earlier Phase-2 tasks produce, but still a
+# hard bound so a runaway LLM value cannot blow the prompt.
+PERSONA_PERSPECTIVE_CHARS = 1500
+
 
 def _split_reasoning_answer(response: str) -> tuple[str, str]:
     """Split a deliberation response into (reasoning, answer).
@@ -119,8 +124,8 @@ def _build_system_prompt(agent: Agent, opponent: Agent, shared_entities: list[st
     return (
         f"You are {agent.identity.name}, an expert in {domains}.\n"
         f"Archetype: {agent.identity.archetype}. Communication style: {agent.identity.communication_style}.\n"
-        f"Your perspective: {agent.detailed_perspective[:500]}\n"
-        f"Bio: {agent.bio[:300]}\n"
+        f"Your perspective: {_truncate_snippet(agent.detailed_perspective, PERSONA_PERSPECTIVE_CHARS)}\n"
+        f"Role: {_truncate_snippet(agent.role_description)}\n"
         f"Stance on this topic: {agent.stance.value} (intensity {agent.intensity:.2f}).\n"
         f"Confidence breakdown: sources={cb.source_breadth}, nodes={cb.node_density}, connectivity={cb.relationship_connectivity:.2f}\n"
         f"Provenance: {provenance_summary}\n"

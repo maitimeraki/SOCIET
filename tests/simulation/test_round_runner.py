@@ -5,7 +5,13 @@ from unittest.mock import AsyncMock
 
 from src.persona.agent import Agent, ConfidenceBreakdown, DiscoveryType, ExpertiseLevel, PersonaIdentity
 from src.simulation.llm_batch import BatchedLLMRunner
-from src.simulation.round_runner import RoundRunner, _build_system_prompt, _build_user_prompt, _parse_response_stance
+from src.simulation.round_runner import (
+    PERSONA_PERSPECTIVE_CHARS,
+    RoundRunner,
+    _build_system_prompt,
+    _build_user_prompt,
+    _parse_response_stance,
+)
 from src.simulation.pair_turn import RoundResult, CommPair
 from src.utils.queryIntend import QueryIntent
 
@@ -85,10 +91,11 @@ def test_system_prompt_uses_profile_fields():
 
 
 def test_system_prompt_truncates_perspective():
-    _, alice = make_profile("Alice", ["x"], "x" * 1000, 0.8)
+    _, alice = make_profile("Alice", ["x"], "x" * 5000, 0.8)
     _, bob = make_profile("Bob", ["y"], "y", 0.7)
     prompt = _build_system_prompt(alice, bob, [])
-    assert len(prompt) < 1000 + 200
+    line = next(l for l in prompt.splitlines() if l.startswith("Your perspective: "))
+    assert len(line) - len("Your perspective: ") <= PERSONA_PERSPECTIVE_CHARS
 
 
 def test_user_prompt_includes_query():
