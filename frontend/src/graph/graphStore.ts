@@ -5,6 +5,10 @@ export interface GraphNode {
   id: string
   label: string
   type: string
+  /** The extracted type, as the delta frames it (`type` is the stored label). */
+  kind?: string
+  /** The entity's extracted facts — lineage keys stripped server-side. */
+  properties?: Record<string, unknown>
 }
 
 /** A graph relation. Identity is `source|target|label`. */
@@ -12,6 +16,8 @@ export interface GraphEdge {
   source: string
   target: string
   label: string
+  /** The relation's extracted facts — lineage keys stripped server-side. */
+  properties?: Record<string, unknown>
 }
 
 /** A legend label (an entity type) with its assigned colour. */

@@ -1,5 +1,5 @@
 /* eslint-disable react-refresh/only-export-components -- this module deliberately exports its pure helpers (the gating predicates, the label drawing and syncGraph) so the unit test can drive them without a renderer. */
-import { useCallback, useEffect, useMemo, useRef } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { CSSProperties } from 'react'
 import Graph from 'graphology'
 import forceAtlas2 from 'graphology-layout-forceatlas2'
@@ -257,6 +257,58 @@ function FitCamera({ nodeCount }: { nodeCount: number }) {
 
 const LABEL_HALO_WIDTH = 3
 
+/** How many properties the readout lists — a taste of the fact, not an inspector. */
+const MAX_PROPERTIES = 5
+
+/** A string renders as-is; anything structured (a money object, a list) as compact JSON. */
+const formatValue = (value: unknown): string => (typeof value === 'string' ? value : JSON.stringify(value))
+
+/**
+ * The click-to-inspect readout: the last clicked node/edge's top properties, or nothing.
+ * Deliberately minimal — the graph's only affordance for reading a node's facts.
+ */
+function GraphSelection() {
+  const sigma = useSigma()
+  const nodes = useGraphStore((s) => s.nodes)
+  const edges = useGraphStore((s) => s.edges)
+  const [selected, setSelected] = useState<{ kind: 'node' | 'edge'; key: string } | null>(null)
+
+  useEffect(() => {
+    const onNode = ({ node }: { node: string }) => setSelected({ kind: 'node', key: node })
+    const onEdge = ({ edge }: { edge: string }) => setSelected({ kind: 'edge', key: edge })
+    sigma.on('clickNode', onNode)
+    sigma.on('clickEdge', onEdge)
+    return () => {
+      sigma.off('clickNode', onNode)
+      sigma.off('clickEdge', onEdge)
+    }
+  }, [sigma])
+
+  if (!selected) return null
+  const item = selected.kind === 'node' ? nodes[selected.key] : edges[selected.key]
+  const entries = Object.entries(item?.properties ?? {}).slice(0, MAX_PROPERTIES)
+  if (entries.length === 0) return null
+
+  const edge = selected.kind === 'edge' ? edges[selected.key] : undefined
+  const title =
+    selected.kind === 'node'
+      ? nodes[selected.key]?.label ?? selected.key
+      : `${edge?.source ?? '?'} —${edge?.label ?? '?'}→ ${edge?.target ?? '?'}`
+
+  return (
+    <div className="pointer-events-none absolute bottom-2 left-2 max-w-[70%] rounded-[4px] border border-ink-700 bg-ink-1000/90 px-2.5 py-1.5">
+      <p className="truncate text-micro text-paper-dim">{title}</p>
+      <div className="mt-0.5">
+        {entries.map(([key, value]) => (
+          <p key={key} className="truncate text-micro text-paper-mute">
+            <span className="text-paper-faint">{key}</span>: {formatValue(value)}
+          </p>
+        ))}
+      </div>
+    </div>
+  )
+}
+
 /**
  * Draw a node label with a halo struck in the stage colour first, so an edge cannot cut the text.
  * The geometry mirrors Sigma's default (`x + size + 3`, `y + labelSize / 3`); only the halo is added.
@@ -385,6 +437,7 @@ export default function GraphCanvas({ datasetId, jobId }: GraphCanvasProps) {
         >
           <LiveGraph graph={graph} />
           <FitCamera nodeCount={nodeCount} />
+          <GraphSelection />
         </SigmaContainer>
       </div>
       <GraphLegend labels={labels} />

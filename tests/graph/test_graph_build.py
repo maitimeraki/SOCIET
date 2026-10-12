@@ -7,7 +7,14 @@ from src.graph.models_graph import ProcessedChunk, LocalOntology, OntologyMetada
 # Mock heavy llama_index imports before importing graph_build
 @pytest.fixture(autouse=True)
 def mock_llama_index():
-    """Mock all llama_index imports at fixture level."""
+    """Mock all llama_index imports at fixture level.
+
+    `patch.dict` reaches only modules that have NOT been imported yet: any module
+    importing `graph_build` earlier (e.g. `graph_snapshot`, which reuses its
+    `_public_props`) binds the REAL llama-index classes into graph_build's
+    namespace before this patch runs. Re-point graph_build's own module-level
+    names too, so the stage never dials a real Neo4j whatever the import order.
+    """
     with patch.dict('sys.modules', {
         'llama_index.core': MagicMock(),
         'llama_index.llms': MagicMock(),
@@ -25,7 +32,12 @@ def mock_llama_index():
         'llama_index.core.graph_stores': MagicMock(),
         'llama_index.core.graph_stores.types': MagicMock(),
     }):
-        yield
+        import src.graph.graph_build as gb
+        with patch.object(gb, "OpenAILike", MagicMock()), \
+             patch.object(gb, "OllamaEmbedding", MagicMock()), \
+             patch.object(gb, "Neo4jPropertyGraphStore", MagicMock()), \
+             patch.object(gb, "SentenceSplitter", MagicMock()):
+            yield
 
 
 @pytest.fixture
@@ -597,3 +609,49 @@ class TestLiteralRouting:
         assert delta_nodes == []
         assert ent_labels == []
         assert delta_edges == []
+
+
+class TestDeltaPayloadProperties:
+    """Task 7: a delta carries the extracted facts, not just the node skeleton.
+
+    The autouse fixture serves MagicMock sentinels for the KG metadata keys, so
+    pin them to their real string values — the same seam `TestLiteralRouting`
+    uses — so this exercises the dict lookup the live path performs.
+    """
+
+    @staticmethod
+    def _pin_kg_keys():
+        import sys
+
+        types = sys.modules['llama_index.core.graph_stores.types']
+        types.KG_NODES_KEY = "nodes"
+        types.KG_RELATIONS_KEY = "relations"
+
+    def test_delta_payload_carries_properties(self):
+        from unittest.mock import MagicMock
+
+        from src.graph.graph_build import _delta_payload
+
+        self._pin_kg_keys()
+        item = MagicMock(); item.id = "e1"; item.name = "Amazon"; item.label = "Company"
+        item.properties = {"revenue": "$391B", "chunk_id": "c1"}   # chunk_id is lineage, not a fact
+        node = MagicMock(); node.metadata = {"nodes": [item], "relations": []}
+
+        nodes, _ = _delta_payload([node])
+
+        assert nodes[0]["properties"] == {"revenue": "$391B"}
+        assert nodes[0]["kind"] == "Company"
+
+    def test_delta_payload_carries_edge_properties(self):
+        from unittest.mock import MagicMock
+
+        from src.graph.graph_build import _delta_payload
+
+        self._pin_kg_keys()
+        rel = MagicMock(); rel.source_id = "e2"; rel.target_id = "e3"; rel.label = "ACQUIRED"
+        rel.properties = {"price": "$2.5B", "document_anchor": "x"}
+        node = MagicMock(); node.metadata = {"nodes": [], "relations": [rel]}
+
+        _, edges = _delta_payload([node])
+
+        assert edges[0]["properties"] == {"price": "$2.5B"}

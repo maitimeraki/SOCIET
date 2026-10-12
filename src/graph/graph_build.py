@@ -131,14 +131,37 @@ def _proposed_labels(extracted) -> tuple[List[str], List[str]]:
     return entity_labels, relation_labels
 
 
+# The writers' bookkeeping — llama-index stamps chunk lineage onto every entity,
+# and the pipeline stamps the dataset/ontology id. Never a displayable fact.
+_LINEAGE_KEYS = frozenset({
+    "document_id", "chunk_id", "document_anchor", "chunk_index",
+    "content_hash", "dataset_id", "ontology_id",
+})
+
+
+def _public_props(obj) -> dict:
+    """An entity/relation's display properties: its extraction facts, lineage stripped.
+
+    ONE definition for BOTH projections — the live delta and the reconnect
+    snapshot — so the stripped-key list lives in exactly one place. Accepts an
+    object carrying `.properties` (an `EntityNode`/`Relation`) or a bare props
+    dict (the snapshot's `properties(e)` projection).
+    """
+    props = obj if isinstance(obj, dict) else getattr(obj, "properties", None)
+    if not isinstance(props, dict):
+        return {}
+    return {key: value for key, value in props.items() if key not in _LINEAGE_KEYS}
+
+
 def _delta_payload(extracted) -> tuple[List[dict], List[dict]]:
     """The `(nodes, edges)` a chunk's extraction result contributes to a GraphDelta.
 
     Reads the SAME metadata bags `_proposed_labels` does — and, critically,
     BEFORE `index.insert_nodes` pops them (llama-index's `_insert_nodes` removes
-    `KG_NODES_KEY` / `KG_RELATIONS_KEY`). Node entries are `{id, label, type}`
-    (label = the entity's display name, type = its extracted type); edge entries
-    are `{source, target, label}`. Order-stable, de-duplicated by node id.
+    `KG_NODES_KEY` / `KG_RELATIONS_KEY`). Node entries are
+    `{id, label, type, kind, properties}` (label = the entity's display name,
+    type/kind = its extracted type, properties = its facts); edge entries are
+    `{source, target, label, properties}`. Order-stable, de-duplicated by node id.
     """
     from llama_index.core.graph_stores.types import KG_NODES_KEY, KG_RELATIONS_KEY
 
@@ -155,12 +178,15 @@ def _delta_payload(extracted) -> tuple[List[dict], List[dict]]:
                     "id": item_id,
                     "label": getattr(item, "name", None) or item_id,
                     "type": getattr(item, "label", None),
+                    "kind": getattr(item, "label", None),
+                    "properties": _public_props(item),
                 })
         for rel in metadata.get(KG_RELATIONS_KEY, []):
             edges.append({
                 "source": getattr(rel, "source_id", None),
                 "target": getattr(rel, "target_id", None),
                 "label": getattr(rel, "label", None),
+                "properties": _public_props(rel),
             })
     return nodes, edges
 
