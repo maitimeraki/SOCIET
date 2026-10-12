@@ -31,11 +31,11 @@ def coerce_value(name: str) -> tuple[str, object]:
     """(value_type, value) for a literal string; ("string", name) if not a literal."""
     s = (name or "").strip()
     if _PCT.fullmatch(s):
-        return "percentage", float(s.rstrip("% "))
-    if _MONEY.fullmatch(s):
-        return "money", {"amount": _money_amount(s), "currency": _money_currency(s)}
+        return "percentage", float(s.rstrip("% ").replace(",", ""))
     if _DATE.fullmatch(s):
         return "date", s
+    if _MONEY.fullmatch(s):
+        return "money", {"amount": _money_amount(s), "currency": _money_currency(s)}
     if _QTY.fullmatch(s):
         return "quantity", {"value": s, "unit": _unit(s)}
     return "string", s
