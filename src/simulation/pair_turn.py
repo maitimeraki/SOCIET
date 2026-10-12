@@ -81,3 +81,10 @@ class DebateVerdict:
     weight_share: float = 0.0
     #: True when the dominant share is below the contested threshold (near-tie).
     contested: bool = False
+    #: Markdown answer assembled from the structured verdict (query-grounded).
+    #: Empty when synthesis fell back to `summary`.
+    narrative: str = ""
+    #: Per-cluster dissent rendered from the structured verdict.
+    dissenting_views: List[dict] = field(default_factory=list)
+    #: Cited entities/claims backing the answer.
+    evidence: List[dict] = field(default_factory=list)

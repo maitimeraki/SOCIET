@@ -5,8 +5,15 @@ import pytest
 from unittest.mock import MagicMock
 
 from src.simulation.verdict import VerdictSynthesizer
-from src.simulation.pair_turn import RoundResult, AgentTurn
+from src.simulation.pair_turn import RoundResult, AgentTurn, DebateVerdict
 from src.persona.agent import Stance
+
+
+def test_debate_verdict_has_narrative():
+    v = DebateVerdict(overall_stance=Stance.NEUTRAL, confidence_score=0.0,
+                      supporting_entities=[], opposing_entities=[], summary="s",
+                      cluster_details={}, narrative="## Recommendation\nYes.")
+    assert v.narrative.startswith("## Recommendation")
 
 
 class MockProfile:
