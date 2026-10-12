@@ -35,3 +35,17 @@ def test_merge_of_empty_list_is_an_empty_ontology():
     merged = LocalOntology.merge([])
     assert merged.entity_labels == []
     assert merged.relation_labels == []
+
+
+def test_property_definition_accepts_value_kinds():
+    from src.graph.models_graph import PropertyDefinition
+    for vt in ("money", "quantity", "percentage"):
+        assert PropertyDefinition(name="x", value_type=vt).value_type == vt
+
+
+def test_property_definition_rejects_unknown_value_kind():
+    import pytest
+    from pydantic import ValidationError
+    from src.graph.models_graph import PropertyDefinition
+    with pytest.raises(ValidationError):
+        PropertyDefinition(name="x", value_type="sausage")

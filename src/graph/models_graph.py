@@ -102,7 +102,11 @@ class PropertyDefinition(BaseModel):
         "json",
         "enum",
         "uri",
-        "email"
+        "email",
+        "money",
+        "quantity",
+        "percentage",
+        "number"
     ] = "string"
     description: str = ""
     required: bool = False
