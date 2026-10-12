@@ -750,6 +750,108 @@ class TestSimulationDepthGate:
             _DEBATE_JOBS.pop(response.job_id, None)
 
 
+async def _run_with_result(job_id: str, result: OrchestratedDebateResult):
+    """Run the boundary with the orchestrator stubbed to return `result`."""
+    llm = MagicMock()
+    llm.generate = AsyncMock(return_value=_INTENT_REPLY)
+    ctx = MagicMock()
+    ctx.__aenter__ = AsyncMock(return_value=ctx)
+    ctx.__aexit__ = AsyncMock(return_value=False)
+
+    orch = MagicMock()
+    orch.run = AsyncMock(return_value=result)
+    ws_manager = MagicMock()
+    ws_manager.broadcast = AsyncMock()
+
+    _DEBATE_JOBS[job_id] = {
+        "job_id": job_id, "status": "queued", "query": "Should we tax carbon?",
+        "graph_id": "ds1", "config": {}, "result": None, "error": None,
+    }
+    try:
+        with patch("src.llm.client.LLMClient", return_value=llm), \
+             patch("src.persona.graph_context.GraphContext", return_value=ctx), \
+             patch("src.persona.repository.PersonaRepository"), \
+             patch("src.simulation.orchestrator.DebateOrchestrator", return_value=orch) as orch_cls, \
+             patch("src.api.debate_api._DebateWSManager", return_value=ws_manager):
+            await _run_debate_async(
+                job_id=job_id, query="Should we tax carbon?", graph_id="ds1",
+                config=DebateConfig(max_agents=5, max_rounds=1),
+            )
+    finally:
+        job = _DEBATE_JOBS.pop(job_id, None)
+    return job, ws_manager, orch_cls
+
+
+class TestDebateJobNarrative:
+    """T4: the query-grounded narrative rides the job result and the WS complete frame."""
+
+    @pytest.mark.asyncio
+    async def test_result_and_complete_carry_the_narrative(self):
+        job_id = f"narr-{uuid.uuid4()}"
+        result = OrchestratedDebateResult(
+            converged=True, verdict="short summary", final_stances={}, warnings=[],
+            rounds_executed=1,
+            narrative="## Recommendation\nExpand, cautiously.",
+            dissenting_views=[{"stance": "NEGATIVE", "view": "too soon"}],
+            evidence=[{"entity": "Steel tariffs", "claim": "raises cost"}],
+        )
+
+        job, ws_manager, _ = await _run_with_result(job_id, result)
+
+        assert job["status"] == "complete"
+        # backward-compat: the short summary stays put.
+        assert job["result"]["verdict"] == "short summary"
+        assert job["result"]["narrative"] == "## Recommendation\nExpand, cautiously."
+        assert job["result"]["dissenting_views"] == [{"stance": "NEGATIVE", "view": "too soon"}]
+        assert job["result"]["evidence"] == [{"entity": "Steel tariffs", "claim": "raises cost"}]
+
+        complete_msg = next(
+            call.args[0] for call in ws_manager.broadcast.call_args_list
+            if call.args and call.args[0].get("type") == "complete"
+        )
+        assert complete_msg["verdict"] == "short summary"
+        assert complete_msg["narrative"] == "## Recommendation\nExpand, cautiously."
+        assert complete_msg["dissenting_views"] == [{"stance": "NEGATIVE", "view": "too soon"}]
+        assert complete_msg["evidence"] == [{"entity": "Steel tariffs", "claim": "raises cost"}]
+
+    @pytest.mark.asyncio
+    async def test_request_context_reaches_the_orchestrator(self):
+        """T3/T4: the request's user context is threaded into orchestrator.run."""
+        job_id = f"ctx-{uuid.uuid4()}"
+        result = OrchestratedDebateResult(
+            converged=False, verdict="v", final_stances={}, warnings=[], rounds_executed=0,
+        )
+        llm = MagicMock()
+        llm.generate = AsyncMock(return_value=_INTENT_REPLY)
+        ctx = MagicMock()
+        ctx.__aenter__ = AsyncMock(return_value=ctx)
+        ctx.__aexit__ = AsyncMock(return_value=False)
+        orch = MagicMock()
+        orch.run = AsyncMock(return_value=result)
+        ws_manager = MagicMock()
+        ws_manager.broadcast = AsyncMock()
+
+        _DEBATE_JOBS[job_id] = {
+            "job_id": job_id, "status": "queued", "query": "q",
+            "graph_id": "ds1", "config": {}, "result": None, "error": None,
+        }
+        try:
+            with patch("src.llm.client.LLMClient", return_value=llm), \
+                 patch("src.persona.graph_context.GraphContext", return_value=ctx), \
+                 patch("src.persona.repository.PersonaRepository"), \
+                 patch("src.simulation.orchestrator.DebateOrchestrator", return_value=orch), \
+                 patch("src.api.debate_api._DebateWSManager", return_value=ws_manager):
+                await _run_debate_async(
+                    job_id=job_id, query="q", graph_id="ds1",
+                    config=DebateConfig(max_agents=5, max_rounds=1),
+                    context={"budget": "limited"},
+                )
+        finally:
+            _DEBATE_JOBS.pop(job_id, None)
+
+        assert orch.run.await_args.kwargs["context"] == {"budget": "limited"}
+
+
 class _DisconnectingWSStub:
     """A WS client that is already gone: `accept` succeeds, the first read disconnects."""
 

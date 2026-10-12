@@ -46,6 +46,10 @@ class DebateRequest(BaseModel):
         default="standard",
         description="Depth gate (D3): shallow skips S5 persona distillation; standard/deep run it.",
     )
+    context: Optional[dict] = Field(
+        default=None,
+        description="User-supplied scenario constraints; weighed into the synthesized verdict.",
+    )
     config: DebateConfigRequest = Field(default_factory=DebateConfigRequest)
 
 
@@ -101,6 +105,7 @@ async def _run_debate_async(
     config: DebateConfig,
     selected_domains: Optional[List[str]] = None,
     simulation_depth: str = "standard",
+    context: Optional[dict] = None,
 ) -> None:
     """Background task to run debate and stream results via WebSocket."""
     # Reuse the manager the job already holds: a client that connected before
@@ -172,6 +177,7 @@ async def _run_debate_async(
                 on_stage=ws_manager.broadcast,
                 intent=intent,
                 distill=distill,
+                context=context,
             )
 
         # S9: this layer owns the intent extraction, so it reports the
@@ -190,6 +196,7 @@ async def _run_debate_async(
             _DEBATE_JOBS[job_id]["result"] = {
                 "converged": result.converged,
                 "verdict": result.verdict,
+                "narrative": result.narrative,
                 "final_stances": result.final_stances,
                 "warnings": result.warnings,
                 "rounds_executed": result.rounds_executed,
@@ -204,6 +211,8 @@ async def _run_debate_async(
                 "cluster_details": result.cluster_details,
                 "supporting_entities": result.supporting_entities,
                 "opposing_entities": result.opposing_entities,
+                "dissenting_views": result.dissenting_views,
+                "evidence": result.evidence,
             }
 
         # Send completion event (the verdict fields ride along — §12.3 item 5)
@@ -211,6 +220,7 @@ async def _run_debate_async(
             "type": "complete",
             "converged": result.converged,
             "verdict": result.verdict,
+            "narrative": result.narrative,
             "final_stances": result.final_stances,
             "warnings": result.warnings,
             "rounds_executed": result.rounds_executed,
@@ -221,6 +231,8 @@ async def _run_debate_async(
             "cluster_details": result.cluster_details,
             "supporting_entities": result.supporting_entities,
             "opposing_entities": result.opposing_entities,
+            "dissenting_views": result.dissenting_views,
+            "evidence": result.evidence,
         })
 
     except Exception as exc:
@@ -373,6 +385,7 @@ async def create_debate(request: DebateRequest):
         config=config,
         selected_domains=request.selected_domains,
         simulation_depth=request.simulation_depth,
+        context=request.context,
     ))
 
     return DebateJobResponse(job_id=job_id, status="queued")
