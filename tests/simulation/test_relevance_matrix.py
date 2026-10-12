@@ -8,6 +8,7 @@ from src.simulation.relevance_matrix import (
     SelectionCandidate,
     SelectionRow,
     blended_score,
+    cap_by_type,
     density_component,
     intent_terms,
     rank_candidates,
@@ -237,3 +238,42 @@ def test_document_anchor_and_document_ids_become_document_anchors():
         {"kind": "document", "id": "doc-2"},
         {"kind": "node", "name": "Alice"},
     )
+
+
+"""S7 diversity: the cap spreads a roster across entity types."""
+
+
+def _row(name: str, density: float) -> SelectionRow:
+    return SelectionRow(name=name, semantic=0.0, density=density, blended=density)
+
+
+def test_cap_by_type_trades_one_dominant_type_for_the_next():
+    """A third Company drops in favour of the top Regulator."""
+    rows = [_row("A", 0.9), _row("B", 0.8), _row("C", 0.7), _row("D", 0.6)]
+    types = {"A": "Company", "B": "Company", "C": "Company", "D": "Regulator"}
+
+    assert [r.name for r in cap_by_type(rows, types, target=3)] == ["A", "B", "D"]
+
+
+def test_cap_by_type_backfills_when_one_type_dominates():
+    """A mostly-one-type graph still returns `target` rows — score order, backfilled."""
+    rows = [_row(f"C{i}", 1.0 - i * 0.01) for i in range(5)]
+    types = {f"C{i}": "Company" for i in range(5)}
+
+    assert [r.name for r in cap_by_type(rows, types, target=3)] == ["C0", "C1", "C2"]
+
+
+def test_cap_by_type_never_empties_a_single_seat():
+    """`ceil(1/2) == 1`: a one-seat roster still seats its top row."""
+    rows = [_row("A", 0.9), _row("B", 0.8)]
+
+    assert [r.name for r in cap_by_type(rows, {"A": "Company", "B": "Company"}, target=1)] == ["A"]
+
+
+def test_cap_by_type_keeps_every_row_when_under_target():
+    rows = [_row("A", 0.9), _row("B", 0.8)]
+
+    assert [r.name for r in cap_by_type(rows, {"A": "Company", "B": "Regulator"}, target=5)] == [
+        "A", "B",
+    ]
+

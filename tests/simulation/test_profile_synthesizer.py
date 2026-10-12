@@ -1472,3 +1472,46 @@ async def test_subgraph_failure_degrades_to_the_node_alone(caplog):
     call = repo.build_single_agent_profile_from_node.await_args.kwargs
     assert call["sector_results"][0]["evidence_nodes"] == ["Solo"]
     assert [p.identity.name for p in profiles] == ["Solo"]
+
+
+"""Task 7: the roster is diversified across entity types, not ten of one."""
+
+
+def _typed_entity(name: str, score: float, label: str, tags=("test",)) -> MagicMock:
+    node = _cluster_entity(name, score, list(tags), f"{name} summary")
+    node.label = label
+    return node
+
+
+@pytest.mark.asyncio
+async def test_roster_caps_one_type():
+    """10 Companies outrank 2 Regulators, yet the roster keeps both types."""
+    entities = [
+        _typed_entity(f"Company {i}", 0.95 - i * 0.01, "Company") for i in range(10)
+    ]
+    entities.append(_typed_entity("Regulator A", 0.5, "Regulator"))
+    entities.append(_typed_entity("Regulator B", 0.45, "Regulator"))
+    synth = _selection_synth(entities)
+
+    profiles = await synth.synthesize(query="q", dataset_id="ds", max_agents=5)
+
+    labels = [
+        call.kwargs["node"]["label"]
+        for call in synth._repo.build_single_agent_profile_from_node.await_args_list
+    ]
+    assert len(profiles) == 5
+    assert labels.count("Company") < len(labels)  # one type no longer fills the roster
+    assert "Regulator" in labels
+
+
+@pytest.mark.asyncio
+async def test_roster_cap_never_empties_a_single_seat():
+    """target=1 → cap=1: the one roster seat is still filled."""
+    entities = [
+        _typed_entity(f"Company {i}", 0.9 - i * 0.01, "Company") for i in range(3)
+    ]
+    synth = _selection_synth(entities)
+
+    profiles = await synth.synthesize(query="q", dataset_id="ds", max_agents=1)
+
+    assert len(profiles) == 1

@@ -15,6 +15,7 @@ from src.simulation.relevance_matrix import (
     NoAgentsDerivableError,
     SelectionCandidate,
     SelectionRow,
+    cap_by_type,
     rank_candidates,
 )
 from src.utils.queryIntend import QueryIntent
@@ -112,7 +113,10 @@ class ProfileSynthesizer:
         evidence_by_name: dict[str, list[list[EntityNode]]] = defaultdict(list)
         for candidate in candidates:
             evidence_by_name[candidate.name].append(list(candidate.evidence))
-        top_rows = [(row, evidence_by_name[row.name].pop(0)) for row in rows[:target]]
+        # S7: the seats go to the top rows across entity types, not the top rows
+        # of one type — `cap_by_type` owns that cut next to `rank_candidates`.
+        selected = cap_by_type(rows, {node.name: node.label for node in required}, target)
+        top_rows = [(row, evidence_by_name[row.name].pop(0)) for row in selected]
 
         # S5: ONE batched distillation call for the whole selection set — the S3
         # stance axis plus each row's anchors give every persona a question-aware

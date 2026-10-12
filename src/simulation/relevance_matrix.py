@@ -21,6 +21,7 @@ import logging
 import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
+from math import ceil
 from typing import Any
 
 from src.simulation.debate_config import DebateConfig
@@ -262,3 +263,41 @@ def rank_candidates(
             warnings.append(message)
     rows.sort(key=lambda row: row.density, reverse=True)
     return rows
+
+
+def cap_by_type(
+    rows: Sequence[SelectionRow],
+    type_by_name: Mapping[str, str],
+    target: int,
+) -> list[SelectionRow]:
+    """Take `target` ranked rows, at most `ceil(target/2)` of any one entity type.
+
+    The roster's one selection cut: a pure `rows[:target]` lets one dominant
+    type fill every seat (the S7 "ten Companies" case). Rows stay in score
+    order; a type is skipped once it reaches its cap and the next type's best
+    row takes the seat. A graph that is mostly one type can leave this pass
+    short of `target`, so the skipped remainder backfills in score order — the
+    result is never smaller than `rows[:target]`, and `target == 1` still seats
+    one row (`ceil(1/2) == 1`).
+
+    `type_by_name` maps a row name to its entity type/label; an absent name
+    shares the `None` bucket, so unknown types are capped together.
+    """
+    if target <= 0:
+        return []
+    limit = ceil(target / 2)
+    counts: dict[Any, int] = {}
+    picked: set[int] = set()
+    for index, row in enumerate(rows):
+        if len(picked) >= target:
+            break
+        label = type_by_name.get(row.name)
+        if counts.get(label, 0) >= limit:
+            continue
+        counts[label] = counts.get(label, 0) + 1
+        picked.add(index)
+    for index in range(len(rows)):
+        if len(picked) >= target:
+            break
+        picked.add(index)
+    return [rows[index] for index in sorted(picked)]
