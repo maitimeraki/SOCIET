@@ -120,9 +120,28 @@ class ProfileSynthesizer:
         # failures fall back to the deterministic template and warn (never raise).
         distilled: dict[str, tuple[str, str]] = {}
         if distill:
+            # T3: the persona's OWN chunk text — the grounding the EVIDENCE block
+            # has been missing (entity nodes carry no `summary`). ONE call for the
+            # whole batch: `fetch_source_evidence` takes a list and UNWINDs it, so
+            # this replaces an N-persona loop. A roster with no chunk refs issues
+            # no query at all.
+            # ponytail: the one call returns a FLAT list, so the batch's snippets
+            # are handed to every persona rather than sliced per persona (the
+            # return has no per-chunk attribution and is capped at
+            # SOURCE_EVIDENCE_MAX_SNIPPETS). Upgrade path: return `c.id` alongside
+            # `c.text` and bucket by the persona's own chunk ids.
+            batch_chunk_ids = list(dict.fromkeys(
+                chunk_id
+                for _, evidence in top_rows
+                for chunk_id in self._evidence_chunk_ids(evidence)
+            ))
+            source_snippets = (
+                await self._repo.fetch_source_evidence(batch_chunk_ids)
+                if batch_chunk_ids else []
+            )
             distilled = await self._repo.distill_profiles(
                 personas=[
-                    self._distillation_entry(row, evidence)
+                    self._distillation_entry(row, evidence, source_snippets)
                     for row, evidence in top_rows
                 ],
                 query=query,
@@ -403,11 +422,17 @@ class ProfileSynthesizer:
                 required.append(node)
         return required
 
-    def _distillation_entry(self, row: SelectionRow, evidence: list[EntityNode]) -> dict:
+    def _distillation_entry(
+        self,
+        row: SelectionRow,
+        evidence: list[EntityNode],
+        source_snippets: list[str] | None = None,
+    ) -> dict:
         """One persona's S5 distillation input: identity, the grounding synthesis
-        already holds (node properties, matched sectors, node summaries) and
-        the S4 provenance anchors of its selection row. No extra graph reads —
-        the entry is name-keyed by `row.name`, the same key profiles build under.
+        already holds (the persona's real source snippets, node properties,
+        matched sectors, node summaries) and the S4 provenance anchors of its
+        selection row. No extra graph reads — the entry is name-keyed by
+        `row.name`, the same key profiles build under.
         """
         representative = (
             max(evidence, key=lambda e: e.relevance_score) if evidence else None
@@ -422,7 +447,7 @@ class ProfileSynthesizer:
             "name": row.name,
             "node": dict(properties) if isinstance(properties, dict) else {},
             "sector_results": self._build_sector_results(evidence),
-            "evidence": summaries,
+            "evidence": list(source_snippets or []) + summaries,
             "anchors": [dict(anchor) for anchor in row.anchors],
         }
 
