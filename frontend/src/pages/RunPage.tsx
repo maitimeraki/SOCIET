@@ -206,6 +206,9 @@ export default function RunPage() {
               confidence={view.confidence}
               converged={view.converged}
               summary={view.summary}
+              narrative={view.narrative}
+              dissentingViews={view.dissentingViews}
+              evidence={view.evidence}
               onReplay={() => navigate(`/runs/${runId}/floor`, { state: { replayFrom: 1 } })}
               onExport={exportRun}
               onNew={() => navigate('/new/society')}

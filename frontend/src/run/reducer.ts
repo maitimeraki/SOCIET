@@ -1,6 +1,6 @@
 import type { DebateConfig } from '../api/types'
 import { parsePairId } from './events'
-import type { AgentProfile, ClusterSummary, ConsensusInfo, PairInfo, QueryIntent, RunEvent, SelectionRow, Stance, TurnInfo } from './events'
+import type { AgentProfile, ClusterSummary, ConsensusInfo, DissentingView, EvidenceItem, PairInfo, QueryIntent, RunEvent, SelectionRow, Stance, TurnInfo } from './events'
 
 export interface StageEntry {
   stage: string
@@ -32,6 +32,9 @@ export interface RunActivation {
 export interface RunVerdict {
   converged: boolean
   summary: string
+  narrative: string
+  dissentingViews: DissentingView[]
+  evidence: EvidenceItem[]
   confidence: number | null
   clusters: Record<Stance, ClusterSummary> | null
   finalStances: Record<string, string>
@@ -132,6 +135,9 @@ export function applyEvent(state: RunState, event: RunEvent, now: number): RunSt
         verdict: {
           converged: event.converged,
           summary: event.verdict,
+          narrative: event.narrative ?? '',
+          dissentingViews: event.dissenting_views ?? [],
+          evidence: event.evidence ?? [],
           confidence: event.confidence_score ?? null,
           clusters: event.cluster_details ?? null,
           finalStances: event.final_stances ?? {},

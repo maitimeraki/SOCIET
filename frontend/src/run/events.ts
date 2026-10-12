@@ -93,6 +93,16 @@ export interface ClusterSummary {
   agents: string[]
 }
 
+export interface DissentingView {
+  stance: string
+  view: string
+}
+
+export interface EvidenceItem {
+  entity: string
+  claim: string
+}
+
 export type RunEvent =
   | {
       type: 'stage'
@@ -119,6 +129,10 @@ export type RunEvent =
       type: 'complete'
       converged: boolean
       verdict: string
+      /** Query-grounded markdown answer; empty when synthesis fell back to `verdict`. */
+      narrative?: string
+      dissenting_views?: DissentingView[]
+      evidence?: EvidenceItem[]
       final_stances: Record<string, string>
       warnings: string[]
       rounds_executed: number

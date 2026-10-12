@@ -43,6 +43,16 @@ describe('reducer', () => {
     expect(state.verdict?.converged).toBe(true)
     expect(state.verdict?.clusters?.POSITIVE?.count).toBe(3)
   })
+  it('defaults the narrative and structured dissent when the complete event omits them', () => {
+    const state = applyEvent(
+      initialState,
+      { type: 'complete', converged: false, verdict: 'Fallback.', final_stances: {}, warnings: [], rounds_executed: 0 },
+      1,
+    )
+    expect(state.verdict?.narrative).toBe('')
+    expect(state.verdict?.dissentingViews).toEqual([])
+    expect(state.verdict?.evidence).toEqual([])
+  })
   it('tolerates unknown event types as warnings', () => {
     const state = applyEvent(initialState, { type: 'future_thing' } as unknown as RunEvent, 1)
     expect(state.warnings).toContain('Unhandled event type: future_thing')
