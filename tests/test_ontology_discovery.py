@@ -134,6 +134,15 @@ def test_structured_properties_back_compat_two_part():
     assert out["entity_types"][0]["properties"][0] == {"name": "founded", "value_type": "string", "description": "year"}
 
 
+def test_structured_properties_keeps_full_description_with_extra_colons():
+    from src.graph.ontology import _parse_prop
+    assert _parse_prop("opening_hours: Mon-Fri 9:00-17:00") == {
+        "name": "opening_hours",
+        "value_type": "string",
+        "description": "Mon-Fri 9:00-17:00",
+    }
+
+
 class TestDiscoverOntology:
     """Tests for discover_ontology function."""
 

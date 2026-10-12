@@ -44,7 +44,8 @@ def _parse_prop(raw: str) -> dict:
     if len(parts) == 3 and parts[1].lower() in _VALID_KINDS:
         return {"name": parts[0], "value_type": parts[1].lower(), "description": parts[2]}
     if len(parts) >= 2:
-        return {"name": parts[0], "value_type": "string", "description": parts[1]}
+        name, desc = raw.split(":", 1)
+        return {"name": name.strip(), "value_type": "string", "description": desc.strip()}
     return {"name": raw.strip(), "value_type": "string", "description": ""}
 
 
