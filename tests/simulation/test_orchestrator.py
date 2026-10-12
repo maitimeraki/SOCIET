@@ -696,6 +696,51 @@ async def test_run_threads_intent_to_round_runner_and_result():
 
 
 @pytest.mark.asyncio
+async def test_run_threads_query_and_context_and_returns_the_narrative():
+    """T3: the run's query + user context reach synthesis; the narrative is returned."""
+    synth = AsyncMock(spec=ProfileSynthesizer)
+    topo = AsyncMock(spec=CommunicationTopology)
+    society_memory = AsyncMock(spec=SocietyMemory)
+    society_memory.commit_round.return_value = _ok_receipt()
+    synth.synthesize.return_value = [_make_profile(1, "Alice"), _make_profile(2, "Bob")]
+    topo.compute_round_pairs.return_value = [
+        CommPair(agent_a="Alice", agent_b="Bob", shared_entities=[], score=0.5)
+    ]
+    llm_runner = MagicMock(spec=BatchedLLMRunner)
+    llm_runner.gather = MagicMock(side_effect=lambda *a, **kw: _AsyncEmptyIter())
+    verdict_synth = MagicMock(spec=VerdictSynthesizer)
+    verdict = _make_verdict()
+    verdict.narrative = "## Recommendation\nExpand, cautiously."
+    verdict.dissenting_views = [{"stance": "NEGATIVE", "view": "too soon"}]
+    verdict.evidence = [{"entity": "Steel tariffs", "claim": "raises cost"}]
+    verdict_synth.asynthesize.return_value = verdict
+
+    orch = _orch(synth, topo, society_memory, verdict_synth, llm_runner)
+    result = await orch.run(
+        "Should we expand to Europe?", "ds1", DebateConfig(max_agents=5, max_rounds=1),
+        AsyncMock(), context={"budget": "limited"},
+    )
+
+    call_kwargs = verdict_synth.asynthesize.await_args.kwargs
+    assert call_kwargs["query"] == "Should we expand to Europe?"
+    assert "limited" in call_kwargs["scenario"]
+
+    assert result.narrative == "## Recommendation\nExpand, cautiously."
+    assert result.dissenting_views == [{"stance": "NEGATIVE", "view": "too soon"}]
+    assert result.evidence == [{"entity": "Steel tariffs", "claim": "raises cost"}]
+
+
+@pytest.mark.asyncio
+async def test_run_without_context_still_synthesizes():
+    """T3: context is optional — query alone must still drive synthesis."""
+    orch = _stage_ready_orch(max_rounds=1)
+    result = await orch.run(
+        "q", "ds1", DebateConfig(max_agents=5, max_rounds=1), AsyncMock(),
+    )
+    assert result.narrative == orch._verdict_synthesizer.asynthesize.return_value.narrative
+
+
+@pytest.mark.asyncio
 async def test_run_without_intent_exposes_none():
     """Backward compatibility: older callers pass no intent and the run still completes."""
     synth = AsyncMock(spec=ProfileSynthesizer)

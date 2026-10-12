@@ -37,6 +37,7 @@ cluster breakdown, supporting/opposing entities — §12.3 item 5) and
 deliberately omits `intent`/`selection`.
 """
 import hashlib
+import json
 import logging
 from dataclasses import asdict, dataclass, field
 from typing import Callable, Awaitable, Any, List, Optional
@@ -100,6 +101,11 @@ class OrchestratedDebateResult:
     #: Per-claim traceability (claim → provenance links), JSON-safe. Additive;
     #: None when no claim carried reachable provenance.
     provenance_by_claim: Optional[dict[str, list]] = None
+    #: Query-grounded answer markdown written by verdict synthesis (falls back
+    #: to `verdict`/summary when no LLM client or parse failure). Additive.
+    narrative: str = ""
+    dissenting_views: list = field(default_factory=list)
+    evidence: list = field(default_factory=list)
 
 
 class DebateOrchestrator:
@@ -136,6 +142,7 @@ class DebateOrchestrator:
         intent: Optional[QueryIntent] = None,
         on_stage: Optional[StageEmitter] = None,
         distill: bool = False,
+        context: Optional[dict] = None,
     ) -> OrchestratedDebateResult:
         """
         Run the full debate pipeline with WebSocket streaming.
@@ -155,6 +162,10 @@ class DebateOrchestrator:
         `distill` is the S5 gate (decided by the job boundary from the
         simulation depth, D3): when True, profile synthesis makes ONE batched
         persona-distillation call for the whole selection set.
+
+        `context` is the optional user-supplied scenario context (a JSON-safe
+        dict); it is serialized into the verdict prompt so the answer weighs the
+        user's own constraints, not only the agents' arguments.
         """
         warnings: list[str] = []
         all_turns: list = []
@@ -358,7 +369,8 @@ class DebateOrchestrator:
 
         # Step 3: Synthesize verdict (async path -- no asyncio.run collision)
         verdict = await self._verdict_synthesizer.asynthesize(
-            rounds=rounds, profiles=profiles, llm_client=llm_client
+            rounds=rounds, profiles=profiles, llm_client=llm_client,
+            query=query, scenario=json.dumps(context) if context else "",
         )
         cluster_details = None
         if verdict is not None and verdict.cluster_details:
@@ -402,6 +414,9 @@ class DebateOrchestrator:
             weight_share=verdict.weight_share if verdict else None,
             contested=verdict.contested if verdict else None,
             provenance_by_claim=provenance_by_claim,
+            narrative=verdict.narrative if verdict else "",
+            dissenting_views=verdict.dissenting_views if verdict else [],
+            evidence=verdict.evidence if verdict else [],
         )
 
     async def _maybe_activate(
