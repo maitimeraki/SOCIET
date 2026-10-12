@@ -25,7 +25,7 @@ def hydrate_ontology(tiny_json: Dict[str, Any]) -> Dict[str, Any]:
                 {
                     "name": p["name"],
                     "description": p["description"],
-                    # "value_type": "string", # Default for 4B models
+                    "value_type": p.get("value_type", "string"),
                     "is_indexed": True,     # System decision
                     "is_searchable": True,
                     # "constraints": {}       # System default
@@ -50,7 +50,7 @@ def hydrate_ontology(tiny_json: Dict[str, Any]) -> Dict[str, Any]:
                {
                     "name": prop["name"],
                     "description": prop["description"],
-                    # "value_type": "string", # Default for 4B models
+                    "value_type": prop.get("value_type", "string"),
                     "is_indexed": True,     # System decision
                     "is_searchable": True,
                     # "constraints": {}       # System default

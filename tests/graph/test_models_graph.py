@@ -49,3 +49,11 @@ def test_property_definition_rejects_unknown_value_kind():
     from src.graph.models_graph import PropertyDefinition
     with pytest.raises(ValidationError):
         PropertyDefinition(name="x", value_type="sausage")
+
+
+def test_hydrate_carries_value_type():
+    from src.utils.hydrate_ontology import hydrate_ontology
+    out = hydrate_ontology({"entity_types": [{"type_name": "Company", "description": "", "properties": [{"name": "revenue", "value_type": "money", "description": "annual"}]}], "relation_types": []})
+    from src.graph.models_graph import LocalOntology
+    onto = LocalOntology.model_validate(out)
+    assert onto.entity_types[0].properties[0].value_type == "money"
