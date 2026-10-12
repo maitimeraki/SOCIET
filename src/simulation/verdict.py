@@ -4,6 +4,8 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, List
 
+from pydantic import BaseModel
+
 from src.persona.agent import Agent, SYNTHETIC_PROVENANCE_PREFIX, Stance
 from src.simulation.pair_turn import (
     AgentTurn,
@@ -17,14 +19,62 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-SUMMARY_MAX_CHARS = 600
-
-# Step 9: bound what the summary prompt may carry from the transcript.
-SUMMARY_TRANSCRIPT_MAX_TURNS = 20
-SUMMARY_TRANSCRIPT_MAX_CHARS = 8000
+# Step 9: bound the transcript the answer-writer prompt may carry. Bound the
+# input, never the answer — there is no character cap on the narrative itself.
+SUMMARY_TRANSCRIPT_MAX_TURNS = 40
+SUMMARY_TRANSCRIPT_MAX_CHARS = 16000
 
 # Step 7: a dominant share below this is a near-tie, not a mandate.
 CONTESTED_THRESHOLD = 0.6
+
+# Strict-JSON output budget: enough for a full verdict object, never truncated
+# mid-object.
+VERDICT_MAX_TOKENS = 3000
+
+VERDICT_SYSTEM = (
+    "You are the analyst who answers the user's question from the debate below. "
+    "Reply with ONLY a JSON object, no prose, with keys: answer, reasoning, "
+    "constraints_and_risks, dissenting_views (list of {stance, view}), "
+    "evidence (list of {entity, claim}), confidence. Ground every claim in the "
+    "transcript and the cited entities; do not invent facts."
+)
+
+
+class Verdict(BaseModel):
+    """Structured analyst answer, validated at the boundary (spec §8.1, §8.6)."""
+    answer: str
+    reasoning: str
+    constraints_and_risks: str
+    dissenting_views: list[dict] = []
+    evidence: list[dict] = []
+    confidence: float = 0.0
+
+
+def _strip_code_fence(raw: str) -> str:
+    """Drop a ```json ... ``` fence if the model wrapped its JSON in one."""
+    text = raw.strip()
+    if text.startswith("```"):
+        text = text.split("\n", 1)[1] if "\n" in text else ""
+        if text.rstrip().endswith("```"):
+            text = text.rstrip()[:-3]
+    return text.strip()
+
+
+def _to_markdown(v: Verdict) -> str:
+    """Assemble the narrative markdown from the structured verdict fields."""
+    parts = [
+        f"## Recommendation\n{v.answer}",
+        f"## Reasoning\n{v.reasoning}",
+    ]
+    if v.constraints_and_risks:
+        parts.append(f"## Constraints & Risks\n{v.constraints_and_risks}")
+    if v.dissenting_views:
+        lines = "\n".join(
+            f"- **{d.get('stance', '')}**: {d.get('view', '')}" for d in v.dissenting_views
+        )
+        parts.append(f"## Dissenting Views\n{lines}")
+    parts.append(f"## Confidence\n{v.confidence:.2f}")
+    return "\n\n".join(parts)
 
 
 class VerdictSynthesizer:
@@ -39,53 +89,65 @@ class VerdictSynthesizer:
         rounds: list[RoundResult],
         profiles: list[Agent],
         llm_client: "LLMClient | None" = None,
+        query: str = "",
+        scenario: str = "",
     ) -> DebateVerdict:
-        """Async synthesis -- safe to call from any running event loop."""
+        """Async synthesis -- safe to call from any running event loop.
+
+        Always produces the deterministic template verdict; when a client is
+        given it additionally writes the query-grounded answer into
+        `narrative` (assembled from the structured `Verdict`), falling back to
+        `summary` on any parse/empty/off-topic failure.
+        """
         verdict = self.synthesize(rounds=rounds, profiles=profiles, llm_client=None)
+        parsed = None
         if llm_client is not None:
-            llm_summary = await self._allm_summary(llm_client, verdict, rounds)
-            if llm_summary:
-                verdict.summary = llm_summary
+            parsed = await self._allm_verdict(llm_client, verdict, rounds, query, scenario)
+        if parsed is not None:
+            verdict.dissenting_views = parsed.dissenting_views
+            verdict.evidence = parsed.evidence
+            verdict.narrative = _to_markdown(parsed)
+        else:
+            verdict.narrative = verdict.summary
         return verdict
 
-    async def _allm_summary(
+    async def _allm_verdict(
         self,
         llm_client: "LLMClient",
         verdict: DebateVerdict,
         rounds: list[RoundResult],
-    ) -> str | None:
-        """Async LLM summary -- no asyncio.run, no loop collision.
+        query: str,
+        scenario: str,
+    ) -> Verdict | None:
+        """Strict-JSON answer-writer -- no asyncio.run, no loop collision.
 
-        The prompt carries the bounded debate transcript, not just the
-        aggregates, so the summary is a synthesis of the argument rather than
-        a restatement of the turn count.
+        The prompt carries the query and the bounded transcript, not just the
+        aggregates, so the answer addresses the question from the argument.
+        Returns None on any failure so the caller falls back to `summary`.
         """
         transcript, turns_used = self._render_transcript(rounds)
-        contested_note = " (contested near-tie)" if verdict.contested else ""
-        system_prompt = (
-            "You are a neutral debate summarizer. Write a concise verdict "
-            "summary grounded ONLY in the debate transcript below. Reference "
-            "the actual arguments, not the turn counts. Keep it under 600 chars."
-        )
+        contested_note = " -- contested" if verdict.contested else ""
         user_prompt = (
-            f"Overall stance: {verdict.overall_stance.value}\n"
-            f"Dominant share of weight: {verdict.weight_share:.2f}{contested_note}\n"
-            f"Top supporting entities: {verdict.supporting_entities[:5]}\n"
-            f"Top opposing entities: {verdict.opposing_entities[:5]}\n\n"
-            f"Debate transcript (last {turns_used} turns):\n{transcript}"
+            f"QUESTION: {query or '(none)'}\n"
+            f"SCENARIO CONTEXT: {scenario or '(none)'}\n"
+            f"Overall stance: {verdict.overall_stance.value} "
+            f"(share {verdict.weight_share:.2f}{contested_note})\n"
+            f"Supporting entities: {verdict.supporting_entities[:10]}\n"
+            f"Opposing entities: {verdict.opposing_entities[:10]}\n\n"
+            f"DEBATE TRANSCRIPT (last {turns_used} turns):\n{transcript}"
         )
         try:
             raw = await llm_client.generate(
-                system_prompt=system_prompt,
+                system_prompt=VERDICT_SYSTEM,
                 user_prompt=user_prompt,
-                temperature=0.3,
+                temperature=0.4,
+                max_tokens=VERDICT_MAX_TOKENS,
             )
+            parsed = Verdict.model_validate_json(_strip_code_fence(raw or ""))
         except Exception:
-            logger.exception("LLM summary generation failed; using template")
+            logger.exception("verdict synthesis failed validation; using summary fallback")
             return None
-        if not raw:
-            return None
-        return raw.strip()[:SUMMARY_MAX_CHARS]
+        return parsed if parsed.answer.strip() else None
 
     @staticmethod
     def _render_transcript(rounds: list[RoundResult]) -> tuple[str, int]:

@@ -75,6 +75,7 @@ class LLMClient:
         provider: Optional[str] = None,
         model: Optional[str] = None,
         temperature: Optional[float] = None,
+        max_tokens: Optional[int] = None,
     ) -> str:
         """Generate a completion. Falls back through the provider chain on failure."""
         provider = provider or getattr(LLMConfig, "default_llm_provider", "ollama")
@@ -92,6 +93,12 @@ class LLMClient:
                     # The caller's model id is only meaningful for the provider they
                     # named; a fallback leg must use its own configured model.
                     leg_model = model if p == provider else None
+                    kwargs = self._call_kwargs(p)
+                    if max_tokens is not None:
+                        kwargs["max_tokens"] = max_tokens
+                        if p == "ollama":
+                            # Ollama's native API names the output cap num_predict.
+                            kwargs["num_predict"] = max_tokens
                     response = await litellm.acompletion(
                         model=self._model_str(p, leg_model),
                         messages=[
@@ -101,8 +108,8 @@ class LLMClient:
                         temperature=0.7 if temperature is None else temperature,
                         timeout=LLM_ATTEMPT_TIMEOUT_SECONDS,
                         num_retries=LLM_NUM_RETRIES,
-                        **self._call_kwargs(p),
-                        
+                        **kwargs,
+
                     )
                     return response.choices[0].message.content or ""
                 except Exception as exc:

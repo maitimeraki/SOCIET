@@ -8,6 +8,8 @@ Pins four properties the final report must have:
 """
 from uuid import uuid4
 
+import json
+
 import pytest
 from unittest.mock import AsyncMock, MagicMock
 
@@ -93,12 +95,73 @@ class _SpyLLM:
         return self.calls[-1]["user"]
 
 
+class _FakeLLM:
+    """Mock LLMClient.generate returning a fixed reply (records nothing)."""
+
+    def __init__(self, reply: str):
+        self.reply = reply
+
+    async def generate(self, system_prompt, user_prompt, **kwargs):
+        return self.reply
+
+
+def _valid_verdict_json(answer: str = "Expand slowly.") -> str:
+    return json.dumps({
+        "answer": answer,
+        "reasoning": "The metrics are strong but the cash burn argues for pacing.",
+        "constraints_and_risks": "Cash burn.",
+        "dissenting_views": [{"stance": "NEGATIVE", "view": "Wait until Q3."}],
+        "evidence": [{"entity": "entity_alpha", "claim": "strong metrics"}],
+        "confidence": 0.7,
+    })
+
+
 # --- Step 1/2/3: the summary is grounded in the debate text -----------------
 
 
 class TestGroundedSummary:
     @pytest.mark.asyncio
-    async def test_summary_is_the_llm_text(self):
+    async def test_narrative_answers_the_query(self):
+        rounds = [
+            make_round(1, [make_turn("Alice", "POSITIVE", 0.8)]),
+            make_round(2, [make_turn("Bob", "NEGATIVE", 0.7)]),
+        ]
+        profiles = [make_agent("Alice"), make_agent("Bob")]
+        llm = _FakeLLM(_valid_verdict_json("Expand slowly."))
+
+        verdict = await VerdictSynthesizer().asynthesize(
+            rounds=rounds, profiles=profiles, llm_client=llm,
+            query="Should we expand to Europe?",
+        )
+
+        assert "Recommendation" in verdict.narrative
+        assert "Expand slowly." in verdict.narrative
+        assert verdict.summary  # the short summary still exists for the job field
+
+    @pytest.mark.asyncio
+    async def test_llm_answer_lands_in_narrative_not_summary(self):
+        rounds = [
+            make_round(1, [make_turn("Alice", "POSITIVE", 0.8)]),
+            make_round(2, [make_turn("Bob", "NEGATIVE", 0.7)]),
+        ]
+        profiles = [make_agent("Alice"), make_agent("Bob")]
+        llm = _FakeLLM(_valid_verdict_json("Expand slowly."))
+
+        verdict = await VerdictSynthesizer().asynthesize(
+            rounds=rounds, profiles=profiles, llm_client=llm
+        )
+
+        # the assembled answer lives in narrative; summary is the deterministic template.
+        assert "Recommendation" in verdict.narrative
+        assert verdict.narrative != verdict.summary
+        assert "POSITIVE" in verdict.summary
+        assert "Confidence score" in verdict.summary
+        # structured fields are carried through from the parsed verdict.
+        assert verdict.dissenting_views == [{"stance": "NEGATIVE", "view": "Wait until Q3."}]
+        assert verdict.evidence == [{"entity": "entity_alpha", "claim": "strong metrics"}]
+
+    @pytest.mark.asyncio
+    async def test_non_json_reply_falls_back_to_template_summary(self):
         rounds = [
             make_round(1, [make_turn("Alice", "POSITIVE", 0.8)]),
             make_round(2, [make_turn("Bob", "NEGATIVE", 0.7)]),
@@ -110,7 +173,8 @@ class TestGroundedSummary:
             rounds=rounds, profiles=profiles, llm_client=llm
         )
 
-        assert verdict.summary == "The society leaned positive on the strength of Alice."
+        assert verdict.narrative == verdict.summary
+        assert "POSITIVE" in verdict.summary
 
     @pytest.mark.asyncio
     async def test_summary_prompt_carries_the_debate_text(self):
