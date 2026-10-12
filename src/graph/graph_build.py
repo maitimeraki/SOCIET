@@ -165,12 +165,13 @@ def _delta_payload(extracted) -> tuple[List[dict], List[dict]]:
     return nodes, edges
 
 
-def _pick_slot(rel, relation_slots, kind: str) -> str:
+def _pick_slot(rel, relation_slots, kind: str) -> Optional[str]:
     """The declared property name on this relation whose `value_type` is `kind`.
 
-    `relation_slots` is a `LocalOntology`'s `relation_types`; a relation whose
-    type declares no matching slot falls back to the generic `"value"` name, so
-    a routed literal is never silently lost.
+    `relation_slots` is a `LocalOntology`'s `relation_types`. Returns `None` when
+    the relation's type declares no slot of that kind — the caller decides the
+    fallback, since a real→real edge needs a declared slot but an entity can also
+    take the relation's label as its slot name.
     """
     label = getattr(rel, "label", None)
     for rel_def in relation_slots or []:
@@ -178,44 +179,111 @@ def _pick_slot(rel, relation_slots, kind: str) -> str:
             for prop in rel_def.properties:
                 if prop.value_type == kind:
                     return prop.name
-    return "value"
+    return None
+
+
+def _attach_property(holder, slot: str, value) -> None:
+    """Set `holder.properties[slot] = value`, preserving the holder's others."""
+    holder.properties = {**(getattr(holder, "properties", None) or {}), slot: value}
+
+
+def _real_relation_target(relations, literals, entities, relation_slots, kind: str):
+    """The first real→real relation declaring a slot of `kind`, else `None`.
+
+    This is the spec §13.2 case: the model leaked a value node, but the edge
+    between the two REAL entities it describes already declares the typed slot —
+    so the coerced value lands on that surviving edge
+    (`(Amazon)-[:ACQUIRED {price}]->(WholeFoods)`).
+    """
+    for rel in relations:
+        source = getattr(rel, "source_id", None)
+        target = getattr(rel, "target_id", None)
+        if source in literals or target in literals:
+            continue
+        if source not in entities or target not in entities:
+            continue
+        slot = _pick_slot(rel, relation_slots, kind)
+        if slot:
+            return rel, slot
+    return None
+
+
+def _neighbour_target(relations, literal_id, entities, relation_slots, kind: str):
+    """The real endpoint of the literal's incident relation, else `None`.
+
+    Slot precedence: the relation's declared matching slot, else the relation's
+    lowercased label, else the generic `"value"` — so the value still survives
+    on an entity (§13.1 "edge/entity property").
+    """
+    for rel in relations:
+        source = getattr(rel, "source_id", None)
+        target = getattr(rel, "target_id", None)
+        if literal_id not in (source, target):
+            continue
+        other = target if source == literal_id else source
+        entity = entities.get(other)
+        if entity is None:
+            continue
+        slot = _pick_slot(rel, relation_slots, kind) or (getattr(rel, "label", None) or "").strip().lower()
+        return entity, slot or "value"
+    return None
 
 
 def _route_literals(nodes, relation_slots=None):
-    """Attach each literal's coerced value to the relation that named it, then
-    drop the literal node and any relation orphaned by the drop (spec §6.3).
+    """Route each literal's coerced value onto a SURVIVING target, then drop the
+    literal node and any relation orphaned by the drop (spec §6.3, §13.1).
 
     A literal ("$2.5 billion", "2018") that the extractor emitted as an
-    `EntityNode` is not a referenceable entity: its value belongs in the typed
-    property slot of the edge (or entity) it describes. Runs on the harvested
-    `metadata[KG_NODES_KEY]` / `metadata[KG_RELATIONS_KEY]` bags before
-    `_proposed_labels` / `_delta_payload` read them, so the dropped literal
-    never reaches the node list, the delta, or the proposed label set.
+    `EntityNode` is not a referenceable entity; its value belongs in the typed
+    property slot of the edge or entity it describes. The target is chosen so it
+    survives the drop:
+
+    1. a real→real relation declaring a slot of the coerced kind (§13.2); else
+    2. the real endpoint of the literal's incident relation, under that
+       relation's declared matching slot, else its lowercased label, else
+       `"value"`.
+
+    Runs on the harvested `metadata[KG_NODES_KEY]` / `metadata[KG_RELATIONS_KEY]`
+    bags before `_proposed_labels` / `_delta_payload` read them, so the dropped
+    literal never reaches the node list, the delta, or the proposed label set.
     """
     from llama_index.core.graph_stores.types import KG_NODES_KEY, KG_RELATIONS_KEY
 
     attached, dropped = [], []
     for node in nodes:
         meta = getattr(node, "metadata", None) or {}
+        bag_nodes = meta.get(KG_NODES_KEY, [])
         literals = {
             getattr(i, "id", None): (getattr(i, "name", "") or "")
-            for i in meta.get(KG_NODES_KEY, [])
+            for i in bag_nodes
             if is_literal_value(getattr(i, "name", "") or "")
         }
         if not literals:
             continue
-        for rel in meta.get(KG_RELATIONS_KEY, []):
-            for node_id, value in literals.items():
-                if node_id in (getattr(rel, "source_id", None), getattr(rel, "target_id", None)):
-                    kind, coerced = coerce_value(value)
-                    slot = _pick_slot(rel, relation_slots, kind)
-                    rel.properties = {**(getattr(rel, "properties", None) or {}), slot: coerced}
-                    attached.append((getattr(rel, "label", None), slot))
+        relations = meta.get(KG_RELATIONS_KEY, [])
+        entities = {
+            getattr(i, "id", None): i
+            for i in bag_nodes
+            if getattr(i, "id", None) not in literals
+        }
+        for node_id, value in literals.items():
+            kind, coerced = coerce_value(value)
+            target = _real_relation_target(relations, literals, entities, relation_slots, kind)
+            if target is None:
+                target = _neighbour_target(relations, node_id, entities, relation_slots, kind)
+            if target is None:
+                continue
+            holder, slot = target
+            _attach_property(holder, slot, coerced)
+            attached.append((
+                getattr(holder, "label", None) or getattr(holder, "name", None),
+                slot,
+            ))
         meta[KG_NODES_KEY] = [
-            i for i in meta.get(KG_NODES_KEY, []) if getattr(i, "id", None) not in literals
+            i for i in bag_nodes if getattr(i, "id", None) not in literals
         ]
         meta[KG_RELATIONS_KEY] = [
-            r for r in meta.get(KG_RELATIONS_KEY, [])
+            r for r in relations
             if getattr(r, "source_id", None) not in literals
             and getattr(r, "target_id", None) not in literals
         ]

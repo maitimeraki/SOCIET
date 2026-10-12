@@ -468,18 +468,66 @@ class TestLiteralRouting:
         types.KG_NODES_KEY = "nodes"
         types.KG_RELATIONS_KEY = "relations"
 
-    def test_extract_chunk_routes_literals_to_edge_properties(self):
+    def test_extract_chunk_routes_literals_onto_real_to_real_relation(self):
+        """§13.2: a leaked value lands on the SURVIVING real→real edge's declared
+        slot, and that edge — not the literal's own dangling edge — stays in the
+        delta."""
+        from unittest.mock import MagicMock
+
+        from src.graph.models_graph import (
+            LocalOntology,
+            OntologyMetadata,
+            PropertyDefinition,
+            RelationTypeDefinition,
+        )
+
+        self._pin_kg_keys()
+        stage = self._stage()
+
+        amazon = MagicMock(); amazon.id = "e2"; amazon.name = "Amazon"; amazon.label = "Company"; amazon.properties = {}
+        whole = MagicMock(); whole.id = "e3"; whole.name = "WholeFoods"; whole.label = "Company"; whole.properties = {}
+        money = MagicMock(); money.id = "e1"; money.name = "$2.5 billion"; money.label = "Money"
+        acquired = MagicMock(); acquired.source_id = "e2"; acquired.target_id = "e3"; acquired.label = "ACQUIRED"; acquired.properties = {}
+        price_edge = MagicMock(); price_edge.source_id = "e3"; price_edge.target_id = "e1"; price_edge.label = "PRICE"; price_edge.properties = {}
+
+        def _extractor(nodes):
+            nodes[0].metadata = {"nodes": [amazon, whole, money], "relations": [acquired, price_edge]}
+            return nodes
+
+        ontology = LocalOntology(
+            metadata=OntologyMetadata(ontology_id="test-ontology"),
+            relation_types=[
+                RelationTypeDefinition(
+                    type_name="ACQUIRED",
+                    properties=[PropertyDefinition(name="price", value_type="money")],
+                )
+            ],
+        )
+
+        doc = MagicMock(); doc.metadata = {}
+        _, ent_labels, _, delta_nodes, delta_edges = stage._extract_chunk(
+            doc, [_extractor], ontology.relation_types
+        )
+
+        assert [n["label"] for n in delta_nodes] == ["Amazon", "WholeFoods"]   # literal node gone
+        assert "Money" not in ent_labels
+        assert [(e["source"], e["target"]) for e in delta_edges] == [("e2", "e3")]   # ACQUIRED survives
+        assert acquired.properties["price"] == {"amount": 2.5e9, "currency": "USD"}
+        assert "price" not in price_edge.properties   # value not stranded on the dropped edge
+
+    def test_extract_chunk_routes_literals_onto_surviving_entity(self):
+        """The literal's only real neighbour takes the value under the relation's
+        lowercased label — the value survives the drop (§13.1)."""
         from unittest.mock import MagicMock
 
         self._pin_kg_keys()
         stage = self._stage()
 
-        rel = MagicMock()
-        rel.source_id = "e2"; rel.target_id = "e1"; rel.label = "ACQUIRED"; rel.properties = {}
+        amazon = MagicMock(); amazon.id = "e2"; amazon.name = "Amazon"; amazon.label = "Company"; amazon.properties = {}
+        money = MagicMock(); money.id = "e1"; money.name = "$2.5 billion"; money.label = "Money"
+        rel = MagicMock(); rel.source_id = "e2"; rel.target_id = "e1"; rel.label = "ACQUIRED"; rel.properties = {}
 
         def _extractor(nodes):
-            amazon = MagicMock(); amazon.id = "e2"; amazon.name = "Amazon"; amazon.label = "Company"
-            money = MagicMock(); money.id = "e1"; money.name = "$2.5 billion"; money.label = "Money"
             nodes[0].metadata = {"nodes": [amazon, money], "relations": [rel]}
             return nodes
 
@@ -489,7 +537,44 @@ class TestLiteralRouting:
         assert [n["label"] for n in delta_nodes] == ["Amazon"]     # literal node gone
         assert "Money" not in ent_labels
         assert delta_edges == []                                   # dangling edge removed
-        assert any(v == {"amount": 2.5e9, "currency": "USD"} for v in rel.properties.values())
+        assert amazon.properties["acquired"] == {"amount": 2.5e9, "currency": "USD"}
+
+    def test_literal_routes_into_declared_entity_slot(self):
+        """With a declared matching slot, the entity takes that slot's name."""
+        from unittest.mock import MagicMock
+
+        from src.graph.models_graph import (
+            LocalOntology,
+            OntologyMetadata,
+            PropertyDefinition,
+            RelationTypeDefinition,
+        )
+
+        self._pin_kg_keys()
+        stage = self._stage()
+
+        amazon = MagicMock(); amazon.id = "e2"; amazon.name = "Amazon"; amazon.label = "Company"; amazon.properties = {}
+        money = MagicMock(); money.id = "e1"; money.name = "$2.5 billion"; money.label = "Money"
+        rel = MagicMock(); rel.source_id = "e2"; rel.target_id = "e1"; rel.label = "ACQUIRED"; rel.properties = {}
+
+        def _extractor(nodes):
+            nodes[0].metadata = {"nodes": [amazon, money], "relations": [rel]}
+            return nodes
+
+        ontology = LocalOntology(
+            metadata=OntologyMetadata(ontology_id="test-ontology"),
+            relation_types=[
+                RelationTypeDefinition(
+                    type_name="ACQUIRED",
+                    properties=[PropertyDefinition(name="price", value_type="money")],
+                )
+            ],
+        )
+
+        doc = MagicMock(); doc.metadata = {}
+        stage._extract_chunk(doc, [_extractor], ontology.relation_types)
+
+        assert amazon.properties["price"] == {"amount": 2.5e9, "currency": "USD"}
 
     def test_extract_chunk_drops_relations_between_two_literals(self):
         from unittest.mock import MagicMock
@@ -512,42 +597,3 @@ class TestLiteralRouting:
         assert delta_nodes == []
         assert ent_labels == []
         assert delta_edges == []
-
-    def test_literal_routes_into_declared_typed_slot(self):
-        """A relation declaring a `money` slot receives the value under that
-        slot's name, not the generic `value` fallback."""
-        from unittest.mock import MagicMock
-
-        from src.graph.models_graph import (
-            LocalOntology,
-            OntologyMetadata,
-            PropertyDefinition,
-            RelationTypeDefinition,
-        )
-
-        self._pin_kg_keys()
-        stage = self._stage()
-
-        rel = MagicMock()
-        rel.source_id = "e2"; rel.target_id = "e1"; rel.label = "ACQUIRED"; rel.properties = {}
-
-        def _extractor(nodes):
-            amazon = MagicMock(); amazon.id = "e2"; amazon.name = "Amazon"; amazon.label = "Company"
-            money = MagicMock(); money.id = "e1"; money.name = "$2.5 billion"; money.label = "Money"
-            nodes[0].metadata = {"nodes": [amazon, money], "relations": [rel]}
-            return nodes
-
-        ontology = LocalOntology(
-            metadata=OntologyMetadata(ontology_id="test-ontology"),
-            relation_types=[
-                RelationTypeDefinition(
-                    type_name="ACQUIRED",
-                    properties=[PropertyDefinition(name="price", value_type="money")],
-                )
-            ],
-        )
-
-        doc = MagicMock(); doc.metadata = {}
-        stage._extract_chunk(doc, [_extractor], ontology.relation_types)
-
-        assert rel.properties["price"] == {"amount": 2.5e9, "currency": "USD"}
