@@ -52,6 +52,39 @@ MATCH (d:Document {document_id: row.document_id, dataset_id: $dataset_id})
 MERGE (e)-[:DERIVED_FROM]->(d)
 """
 
+# The dynamic extractor's `extract_prompt`. Its `{...}` placeholders are exactly
+# the ones `DynamicLLMPathExtractor._apredict_with_props` supplies — `text`,
+# `max_knowledge_triplets`, `allowed_entity_types`, `allowed_relation_types`,
+# `allowed_entity_properties`, `allowed_relation_properties` — so `.format()`
+# never raises. The rules below are the prompt half of the literal guard; the
+# deterministic backstop lives in `src.graph.literals` (spec §6.3).
+_EXTRACTION_PROMPT = """Extract up to {max_knowledge_triplets} knowledge triplets from the given text. Each triplet should be in the form of (head, relation, tail) with their respective types and properties.
+---------------------
+INITIAL ONTOLOGY:
+Entity Types: {allowed_entity_types}
+Entity Properties: {allowed_entity_properties}
+Relation Types: {allowed_relation_types}
+Relation Properties: {allowed_relation_properties}
+
+Use these types as a starting point, but introduce new types if necessary based on the context.
+
+RULES:
+1. Emit ONLY real, referenceable entities (organizations, people, places, products, events, concepts).
+2. NEVER emit money, dates, quantities, percentages, or bare numbers as entities.
+3. Put those values in properties, using the declared slots (e.g. price, date, revenue).
+4. Use only the allowed entity and relation types.
+
+GUIDELINES:
+- Output in JSON format: [{{'head': '', 'head_type': '', 'head_props': {{...}}, 'relation': '', 'relation_props': {{...}}, 'tail': '', 'tail_type': '', 'tail_props': {{...}}}}]
+- Use the most complete form for entities (e.g., 'United States of America' instead of 'USA')
+- Keep entities concise (3-5 words max)
+- Break down complex phrases into multiple triplets
+- Ensure the knowledge graph is coherent and easily understandable
+---------------------
+Text: {text}
+Output:
+"""
+
 
 def _document_rows(dataset_id: str, documents: List[ProcessedChunk]) -> List[dict]:
     """One row per unique `parent_doc_id`: its dataset plus the deduped,
@@ -463,9 +496,13 @@ class GraphExtractionStage:
         `ontology` is handed in, so a per-chunk slice (Task 7's sliding window)
         builds its own extractors from a smaller vocabulary: `_run_async` calls
         this once PER CHUNK with that chunk's slice.
+
+        Only two extractors remain: the triple-only `SimpleLLMPathExtractor` is
+        retired because its schema-free prompt was the source of value nodes
+        ("$2.5 billion", "2018") — `_EXTRACTION_PROMPT` plus the literal guard
+        in `_extract_chunk` replaces it.
         """
         from llama_index.core.indices.property_graph import (
-            SimpleLLMPathExtractor,
             DynamicLLMPathExtractor,
             ImplicitPathExtractor,
         )
@@ -475,15 +512,10 @@ class GraphExtractionStage:
         # one slot per document) is the single concurrency lever: aggregate
         # in-flight extraction calls = GRAPH_ONTOLOGY_MAX_CONCURRENCY ×
         # num_workers. Raise num_workers only alongside cutting the semaphore.
-        # Simple extractor - basic triple extraction without schema constraints(Simple extractor captures additional relationships the dynamic one might miss)
-        simple_extractor = SimpleLLMPathExtractor(
-            llm=self.llm,
-            max_paths_per_chunk=self.config.extraction_max_triplets_per_chunk,
-            num_workers=1,
-        )
         # Dynamic extractor - schema-guided but flexible(Dynamic extractor captures labeled entities/relations following your schema)
         dynamic_extractor = DynamicLLMPathExtractor(
             llm=self.llm,
+            extract_prompt=_EXTRACTION_PROMPT,
             allowed_entity_types=ontology.entity_labels,
             allowed_relation_types=ontology.relation_labels,
             allowed_entity_props=ontology.entity_props,
@@ -493,7 +525,7 @@ class GraphExtractionStage:
         )
         # Implicit extractor - from node relationships(Implicit extractor adds structural relationships between nodes that LLMs don't generate)
         implicit_extractor = ImplicitPathExtractor()
-        return (simple_extractor, dynamic_extractor, implicit_extractor)
+        return (dynamic_extractor, implicit_extractor)
 
     def _write_documents(self, dataset_id: str, documents: List[ProcessedChunk]) -> None:
         """MERGE one Document node per unique source document. Sync — called off the loop."""

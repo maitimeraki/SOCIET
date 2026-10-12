@@ -310,11 +310,7 @@ class TestNetworkBounds:
         await stage.run("test-dataset", sample_chunks, sample_ontology)
 
         property_graph = sys.modules['llama_index.core.indices.property_graph']
-        for extractor in (
-            property_graph.SimpleLLMPathExtractor,
-            property_graph.DynamicLLMPathExtractor,
-        ):
-            assert extractor.call_args.kwargs["num_workers"] == 1
+        assert property_graph.DynamicLLMPathExtractor.call_args.kwargs["num_workers"] == 1
 
 
 class TestSingleChunkingOwner:
@@ -382,3 +378,67 @@ class TestSingleChunkingOwner:
         # `_insert_nodes` only performs the store writes (never re-extracts)
         built = core.PropertyGraphIndex.call_args.kwargs
         assert type(built["kg_extractors"][0]).__name__ == "_NoOpSplit"
+
+
+class TestExtractionPromptForbidsValueNodes:
+    """Task 5: the extractor prompt forbids value entities; the triple-only
+    extractor is retired.
+
+    These tests read the extractor class handles OUT of the mocked
+    `llama_index.core.indices.property_graph` module — that is the very module
+    `_build_extractors` imports from, so the assertions exercise the real
+    construction path rather than a second, disconnected mock.
+    """
+
+    def _stage(self):
+        from src.graph.config_graph import GraphConfig
+        from src.graph.graph_build import GraphExtractionStage
+
+        with patch('src.graph.graph_build.OpenAILike'), \
+             patch('src.graph.graph_build.OllamaEmbedding'), \
+             patch('src.graph.graph_build.Neo4jPropertyGraphStore'), \
+             patch('src.graph.graph_build.SentenceSplitter'):
+            return GraphExtractionStage(GraphConfig())
+
+    def test_no_simple_extractor_and_prompt_forbids_value_nodes(self, sample_ontology):
+        import sys
+
+        stage = self._stage()
+        property_graph = sys.modules['llama_index.core.indices.property_graph']
+        property_graph.reset_mock()
+
+        extractors = stage._build_extractors(sample_ontology)
+
+        assert property_graph.SimpleLLMPathExtractor.call_count == 0   # triple-only extractor retired
+        assert len(extractors) == 2                                    # dynamic + implicit
+        prompt = property_graph.DynamicLLMPathExtractor.call_args.kwargs["extract_prompt"]
+        assert "never" in prompt.lower() and "propert" in prompt.lower()
+
+    def test_extraction_prompt_braces_match_extractor_kwargs(self):
+        """Every `{...}` the custom prompt references is one the extractor supplies.
+
+        `DynamicLLMPathExtractor` formats its prompt with exactly
+        `text`, `max_knowledge_triplets`, `allowed_entity_types`,
+        `allowed_relation_types`, `allowed_entity_properties` and
+        `allowed_relation_properties`; an unknown brace raises `KeyError` at
+        extraction time, so the used set must be a subset of the supplied set.
+        """
+        import string
+
+        from src.graph.graph_build import _EXTRACTION_PROMPT
+
+        supplied = {
+            "text",
+            "max_knowledge_triplets",
+            "allowed_entity_types",
+            "allowed_relation_types",
+            "allowed_entity_properties",
+            "allowed_relation_properties",
+        }
+        used = {
+            name
+            for _, name, _, _ in string.Formatter().parse(_EXTRACTION_PROMPT)
+            if name
+        }
+        assert used <= supplied
+        _EXTRACTION_PROMPT.format(**{name: "x" for name in supplied})   # renders, no KeyError

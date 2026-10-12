@@ -108,8 +108,8 @@ class TestHydrateKeepsAllEntityTypes:
         assert rel["target_entity_types"] == ["Company", "Organization"]
 
 
-class TestExtractorCaps:
-    """Both extractors read their cap from GraphConfig, not a hardcoded literal."""
+class TestExtractorCap:
+    """The extractor reads its cap from GraphConfig, not a hardcoded literal."""
 
     def _stage(self):
         from src.graph.config_graph import GraphConfig
@@ -121,7 +121,9 @@ class TestExtractorCaps:
              patch('src.graph.graph_build.SentenceSplitter'):
             return GraphExtractionStage(GraphConfig())
 
-    def test_both_extractors_use_configured_cap(self):
+    def test_dynamic_extractor_uses_configured_cap(self):
+        """Task 5 retired the triple-only extractor; the dynamic one keeps the
+        configured cap."""
         from src.graph.config_graph import GraphConfig
 
         stage = self._stage()
@@ -135,10 +137,6 @@ class TestExtractorCaps:
 
         cap = GraphConfig().extraction_max_triplets_per_chunk
         property_graph = sys.modules['llama_index.core.indices.property_graph']
-        assert (
-            property_graph.SimpleLLMPathExtractor.call_args.kwargs["max_paths_per_chunk"]
-            == cap
-        )
         assert (
             property_graph.DynamicLLMPathExtractor.call_args.kwargs["max_triplets_per_chunk"]
             == cap
