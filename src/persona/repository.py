@@ -393,29 +393,53 @@ class PersonaRepository:
         batched query and carried as `source_evidence` (never written to the
         graph). `None`/empty yields no evidence and issues no query.
         """
-        # Identity
+        # Domain tags come FIRST: the archetype's last-resort fallback reads them
+        # (R8 — the original ordering read `domain_tags[0]` before it existed).
+        distilled_tags = getattr(distilled, "domain_tags", None)
+        domain_tags = (
+            (distilled_tags if distilled and distilled_tags else None)
+            or node.get("domain_tags") or node.get("tags")
+            or agent_metrics.get("matched_sectors", [])
+        )
+        if isinstance(domain_tags, str):
+            domain_tags = [t.strip() for t in domain_tags.split(",") if t.strip()]
+
+        # Identity — every leg derived from the graph or the distillation, so the
+        # erased "Strategic Analyst" / "strategic and factual" constants are gone.
+        # `Participant` / the style clause are last resorts for a graph that
+        # yields nothing at all, never a substitute for derived identity.
         identity = PersonaIdentity(
             name=node.get("name", agent_name),
-            archetype=node.get("archetype") or node.get("type_name", "Strategic Analyst"),
-            communication_style=node.get("communication_style") or node.get("tone", "strategic and factual"),
+            archetype=(
+                (getattr(distilled, "archetype", None) if distilled else None)
+                or node.get("archetype") or node.get("type_name") or node.get("label")
+                or (domain_tags[0] if domain_tags else None)
+                or "Participant"
+            ),
+            communication_style=(
+                (getattr(distilled, "communication_style", None) if distilled else None)
+                or node.get("communication_style") or node.get("tone")
+                or "direct and evidence-led"
+            ),
         )
 
         discovery_type = DiscoveryType.INTENT_DRIVEN if user_query and user_query.strip() else DiscoveryType.GRAPH_DISCOVERY
 
-        # Expertise
-        expertise_str = node.get("expertise_level") or node.get("expertise") or "Strategic"
-        try:
-            expertise_level = ExpertiseLevel(expertise_str)
-        except Exception:
+        # Expertise — when nothing derives, `expertise_level` is left at the
+        # model's own enum default rather than a hardcoded "Strategic" string.
+        expertise_str = (
+            (getattr(distilled, "expertise_level", None) if distilled else None)
+            or node.get("expertise_level") or node.get("expertise")
+        )
+        expertise_level = ExpertiseLevel.STRATEGIC
+        if expertise_str:
             try:
-                expertise_level = ExpertiseLevel(str(expertise_str).capitalize())
+                expertise_level = ExpertiseLevel(expertise_str)
             except Exception:
-                expertise_level = ExpertiseLevel.STRATEGIC
-
-        # Domain tags
-        domain_tags = node.get("domain_tags") or node.get("tags") or agent_metrics.get("matched_sectors", [])
-        if isinstance(domain_tags, str):
-            domain_tags = [t.strip() for t in domain_tags.split(",") if t.strip()]
+                try:
+                    expertise_level = ExpertiseLevel(str(expertise_str).capitalize())
+                except Exception:
+                    expertise_level = ExpertiseLevel.STRATEGIC
 
         # Description and perspective — the S5 distillation wins when supplied
         description = agent_metrics.get("context_text") or node.get("summary") or f"{agent_name} - Domain expert"
@@ -464,8 +488,14 @@ class PersonaRepository:
         # persisted `Persona.stance` cannot disagree.
         stance, conviction, cior = self._effective_stance(node, agent_metrics, distilled)
         intensity = self._safe_float(node.get("intensity"), 0.5, 0.0, 1.0)
-        belief = str(node.get("belief") or node.get("world_model") or "")
-        opinion = str(node.get("opinion") or node.get("current_take") or perspective[:500])
+        belief = str(
+            (getattr(distilled, "belief", None) if distilled else None)
+            or node.get("belief") or node.get("world_model") or ""
+        )
+        opinion = str(
+            (getattr(distilled, "opinion", None) if distilled else None)
+            or node.get("opinion") or node.get("current_take") or perspective[:500]
+        )
         communication_radius = self._safe_int(node.get("communication_radius"), 1, 1, 5)
 
         instinct_tags = self._safe_list(node.get("instinct_tags"))
