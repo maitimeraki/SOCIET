@@ -11,6 +11,7 @@ from llama_index.graph_stores.neo4j import Neo4jPropertyGraphStore
 from src.graph.config_graph import GraphConfig
 from src.llm.config_llm import LLMConfig
 from src.graph.models_graph import ProcessedChunk, LocalOntology
+from src.graph.literals import is_literal_value, coerce_value
 from src.graph.vocabulary import promote, select_slice
 from src.api.graph_stream import GraphDelta, publish
 
@@ -162,6 +163,69 @@ def _delta_payload(extracted) -> tuple[List[dict], List[dict]]:
                 "label": getattr(rel, "label", None),
             })
     return nodes, edges
+
+
+def _pick_slot(rel, relation_slots, kind: str) -> str:
+    """The declared property name on this relation whose `value_type` is `kind`.
+
+    `relation_slots` is a `LocalOntology`'s `relation_types`; a relation whose
+    type declares no matching slot falls back to the generic `"value"` name, so
+    a routed literal is never silently lost.
+    """
+    label = getattr(rel, "label", None)
+    for rel_def in relation_slots or []:
+        if getattr(rel_def, "type_name", None) == label:
+            for prop in rel_def.properties:
+                if prop.value_type == kind:
+                    return prop.name
+    return "value"
+
+
+def _route_literals(nodes, relation_slots=None):
+    """Attach each literal's coerced value to the relation that named it, then
+    drop the literal node and any relation orphaned by the drop (spec §6.3).
+
+    A literal ("$2.5 billion", "2018") that the extractor emitted as an
+    `EntityNode` is not a referenceable entity: its value belongs in the typed
+    property slot of the edge (or entity) it describes. Runs on the harvested
+    `metadata[KG_NODES_KEY]` / `metadata[KG_RELATIONS_KEY]` bags before
+    `_proposed_labels` / `_delta_payload` read them, so the dropped literal
+    never reaches the node list, the delta, or the proposed label set.
+    """
+    from llama_index.core.graph_stores.types import KG_NODES_KEY, KG_RELATIONS_KEY
+
+    attached, dropped = [], []
+    for node in nodes:
+        meta = getattr(node, "metadata", None) or {}
+        literals = {
+            getattr(i, "id", None): (getattr(i, "name", "") or "")
+            for i in meta.get(KG_NODES_KEY, [])
+            if is_literal_value(getattr(i, "name", "") or "")
+        }
+        if not literals:
+            continue
+        for rel in meta.get(KG_RELATIONS_KEY, []):
+            for node_id, value in literals.items():
+                if node_id in (getattr(rel, "source_id", None), getattr(rel, "target_id", None)):
+                    kind, coerced = coerce_value(value)
+                    slot = _pick_slot(rel, relation_slots, kind)
+                    rel.properties = {**(getattr(rel, "properties", None) or {}), slot: coerced}
+                    attached.append((getattr(rel, "label", None), slot))
+        meta[KG_NODES_KEY] = [
+            i for i in meta.get(KG_NODES_KEY, []) if getattr(i, "id", None) not in literals
+        ]
+        meta[KG_RELATIONS_KEY] = [
+            r for r in meta.get(KG_RELATIONS_KEY, [])
+            if getattr(r, "source_id", None) not in literals
+            and getattr(r, "target_id", None) not in literals
+        ]
+        dropped.extend(literals.values())
+    if dropped:
+        logger.info(
+            "Routed %d literal slot(s) %s; dropped %d literal node(s)",
+            len(attached), attached[:5], len(dropped),
+        )
+    return nodes
 
 
 class _NoOpSplit:
@@ -368,7 +432,7 @@ class GraphExtractionStage:
                         slice_ = select_slice(vocabulary, chunk.content, self.config.chunk_slice_size)
                         extractors = self._build_extractors(slice_)
                         nodes, entity_labels, relation_labels, delta_nodes, delta_edges = await asyncio.to_thread(
-                            self._extract_chunk, doc, extractors
+                            self._extract_chunk, doc, extractors, slice_.relation_types
                         )
                         # Serialise the store write: extraction is concurrent, but
                         # only one chunk writes the shared index at a time. The
@@ -466,7 +530,7 @@ class GraphExtractionStage:
             logger.error(f"Error during graph extraction for dataset {dataset_id}: {e}")
             raise
 
-    def _extract_chunk(self, doc, extractors):
+    def _extract_chunk(self, doc, extractors, relation_slots=None):
         """Extract ONE chunk exactly once and harvest its delta + proposed labels.
 
         Runs off the event loop (the path extractors call `asyncio.run`
@@ -481,10 +545,15 @@ class GraphExtractionStage:
         is exactly `for transform in extractors: nodes = transform(nodes)` — no
         cache is configured, so this direct loop is the same work with one fewer
         import (and it keeps the seam stubbable in tests).
+
+        `relation_slots` is the chunk slice's `relation_types`; literal nodes are
+        routed into those declared slots (falling back to `"value"`) and removed
+        before the labels and delta are harvested.
         """
         nodes = [doc]
         for extractor in extractors:
             nodes = list(extractor(nodes))
+        _route_literals(nodes, relation_slots)
         entity_labels, relation_labels = _proposed_labels(nodes)
         delta_nodes, delta_edges = _delta_payload(nodes)
         return nodes, entity_labels, relation_labels, delta_nodes, delta_edges

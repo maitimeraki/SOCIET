@@ -442,3 +442,112 @@ class TestExtractionPromptForbidsValueNodes:
         }
         assert used <= supplied
         _EXTRACTION_PROMPT.format(**{name: "x" for name in supplied})   # renders, no KeyError
+
+
+class TestLiteralRouting:
+    """Task 6: a literal node becomes a typed property slot, then disappears."""
+
+    def _stage(self):
+        from src.graph.config_graph import GraphConfig
+        from src.graph.graph_build import GraphExtractionStage
+
+        with patch('src.graph.graph_build.OpenAILike'), \
+             patch('src.graph.graph_build.OllamaEmbedding'), \
+             patch('src.graph.graph_build.Neo4jPropertyGraphStore'), \
+             patch('src.graph.graph_build.SentenceSplitter'):
+            return GraphExtractionStage(GraphConfig())
+
+    @staticmethod
+    def _pin_kg_keys():
+        """`_extract_chunk` reads KG_NODES_KEY/KG_RELATIONS_KEY from the mocked
+        `llama_index.core.graph_stores.types`; pin them to their real string
+        values so this test's metadata bag is the one the code reads."""
+        import sys
+
+        types = sys.modules['llama_index.core.graph_stores.types']
+        types.KG_NODES_KEY = "nodes"
+        types.KG_RELATIONS_KEY = "relations"
+
+    def test_extract_chunk_routes_literals_to_edge_properties(self):
+        from unittest.mock import MagicMock
+
+        self._pin_kg_keys()
+        stage = self._stage()
+
+        rel = MagicMock()
+        rel.source_id = "e2"; rel.target_id = "e1"; rel.label = "ACQUIRED"; rel.properties = {}
+
+        def _extractor(nodes):
+            amazon = MagicMock(); amazon.id = "e2"; amazon.name = "Amazon"; amazon.label = "Company"
+            money = MagicMock(); money.id = "e1"; money.name = "$2.5 billion"; money.label = "Money"
+            nodes[0].metadata = {"nodes": [amazon, money], "relations": [rel]}
+            return nodes
+
+        doc = MagicMock(); doc.metadata = {}
+        _, ent_labels, _, delta_nodes, delta_edges = stage._extract_chunk(doc, [_extractor])
+
+        assert [n["label"] for n in delta_nodes] == ["Amazon"]     # literal node gone
+        assert "Money" not in ent_labels
+        assert delta_edges == []                                   # dangling edge removed
+        assert any(v == {"amount": 2.5e9, "currency": "USD"} for v in rel.properties.values())
+
+    def test_extract_chunk_drops_relations_between_two_literals(self):
+        from unittest.mock import MagicMock
+
+        self._pin_kg_keys()
+        stage = self._stage()
+
+        rel = MagicMock()
+        rel.source_id = "e1"; rel.target_id = "e2"; rel.label = "ON"; rel.properties = {}
+
+        def _extractor(nodes):
+            year = MagicMock(); year.id = "e1"; year.name = "2018"; year.label = "Date"
+            share = MagicMock(); share.id = "e2"; share.name = "40%"; share.label = "Percentage"
+            nodes[0].metadata = {"nodes": [year, share], "relations": [rel]}
+            return nodes
+
+        doc = MagicMock(); doc.metadata = {}
+        _, ent_labels, _, delta_nodes, delta_edges = stage._extract_chunk(doc, [_extractor])
+
+        assert delta_nodes == []
+        assert ent_labels == []
+        assert delta_edges == []
+
+    def test_literal_routes_into_declared_typed_slot(self):
+        """A relation declaring a `money` slot receives the value under that
+        slot's name, not the generic `value` fallback."""
+        from unittest.mock import MagicMock
+
+        from src.graph.models_graph import (
+            LocalOntology,
+            OntologyMetadata,
+            PropertyDefinition,
+            RelationTypeDefinition,
+        )
+
+        self._pin_kg_keys()
+        stage = self._stage()
+
+        rel = MagicMock()
+        rel.source_id = "e2"; rel.target_id = "e1"; rel.label = "ACQUIRED"; rel.properties = {}
+
+        def _extractor(nodes):
+            amazon = MagicMock(); amazon.id = "e2"; amazon.name = "Amazon"; amazon.label = "Company"
+            money = MagicMock(); money.id = "e1"; money.name = "$2.5 billion"; money.label = "Money"
+            nodes[0].metadata = {"nodes": [amazon, money], "relations": [rel]}
+            return nodes
+
+        ontology = LocalOntology(
+            metadata=OntologyMetadata(ontology_id="test-ontology"),
+            relation_types=[
+                RelationTypeDefinition(
+                    type_name="ACQUIRED",
+                    properties=[PropertyDefinition(name="price", value_type="money")],
+                )
+            ],
+        )
+
+        doc = MagicMock(); doc.metadata = {}
+        stage._extract_chunk(doc, [_extractor], ontology.relation_types)
+
+        assert rel.properties["price"] == {"amount": 2.5e9, "currency": "USD"}

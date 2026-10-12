@@ -195,7 +195,7 @@ class TestSlidingWindow:
         barrier = threading.Barrier(2, timeout=10)
         state = {"active": 0, "peak": 0, "starts": 0}
 
-        def _gated_extract(self, doc, extractors):
+        def _gated_extract(self, doc, extractors, relation_slots=None):
             with lock:
                 state["active"] += 1
                 state["peak"] = max(state["peak"], state["active"])

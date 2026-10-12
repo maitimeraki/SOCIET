@@ -127,7 +127,7 @@ def _stage(**config_kwargs):
         return GraphExtractionStage(GraphConfig(**config_kwargs))
 
 
-def _good(self, doc, extractors):
+def _good(self, doc, extractors, relation_slots=None):
     return (
         [object()],  # one node inserted per successful chunk
         ["Person"],
@@ -190,10 +190,10 @@ class TestOneBadChunkAmongFour:
             extraction_chunk_retry_backoff_seconds=0.0,
         )
 
-        def _extract(self, doc, extractors):
+        def _extract(self, doc, extractors, relation_slots=None):
             if doc.chunk.chunk_id == FAILING_CHUNK:
                 raise RuntimeError("provider 500")
-            return _good(self, doc, extractors)
+            return _good(self, doc, extractors, relation_slots)
 
         indexes, extract_patch = _wire(stage, chunks, _extract)
         recorded = []
@@ -228,7 +228,7 @@ class TestOneBadChunkAmongFour:
             extraction_chunk_retry_backoff_seconds=0.0,
         )
 
-        def _extract(self, doc, extractors):
+        def _extract(self, doc, extractors, relation_slots=None):
             raise RuntimeError()
 
         _, extract_patch = _wire(stage, chunks, _extract)
@@ -280,10 +280,10 @@ class TestJobScopedFailureVerdict:
             extraction_chunk_retry_backoff_seconds=0.0,
         )
 
-        def _extract(self, doc, extractors):
+        def _extract(self, doc, extractors, relation_slots=None):
             if doc.chunk.parent_doc_id == "doc-a":
                 raise RuntimeError("provider 500")
-            return _good(self, doc, extractors)
+            return _good(self, doc, extractors, relation_slots)
 
         _, extract_patch = _wire(stage, chunks, _extract)
         recorded = []
@@ -343,11 +343,11 @@ class TestFailureLeavesNoOrphanedWriters:
             extraction_chunk_retry_backoff_seconds=0.0,
         )
 
-        def _extract(self, doc, extractors):
+        def _extract(self, doc, extractors, relation_slots=None):
             if doc.chunk.chunk_id == FAILING_CHUNK:
                 return ([], ["EXPLODE"], [], [], [])  # fails later, in promote
             time.sleep(0.3)  # hold the siblings in flight
-            return _good(self, doc, extractors)
+            return _good(self, doc, extractors, relation_slots)
 
         def _promote(vocabulary, proposed, kind="entity"):
             if "EXPLODE" in proposed:
