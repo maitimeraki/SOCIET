@@ -1515,3 +1515,33 @@ async def test_roster_cap_never_empties_a_single_seat():
     profiles = await synth.synthesize(query="q", dataset_id="ds", max_agents=1)
 
     assert len(profiles) == 1
+
+
+"""Task 7b: a late joiner is built with the graph's own type, not the hollow default."""
+
+
+@pytest.mark.asyncio
+async def test_joiner_gets_a_real_archetype():
+    """A joiner from a Regulator node derives archetype "Regulator", not a constant.
+
+    The real `fetch_nodes_by_names` reads the node's Neo4j label (its entity
+    type) and the real build derives the identity from it — the same Task 5
+    precedence the roster uses.
+    """
+    repo, _ = _repo_with_counted_queries([
+        {
+            "name": "Regulator Node",
+            "n": {"name": "Regulator Node", "domain_tags": ["banking"]},
+            "is_entity": True,
+            "labels": ["__Entity__", "Regulator"],
+        },
+    ])
+    repo.calculate_agent_metrics_and_context_for_llm = AsyncMock(return_value={})
+    repo.get_provenance = AsyncMock(return_value=[])
+    synth = ProfileSynthesizer(repo, MagicMock())
+
+    profiles = await synth.synthesize_from_names(["Regulator Node"], "q", "ds")
+
+    assert [p.identity.name for p in profiles] == ["Regulator Node"]
+    assert profiles[0].identity.archetype == "Regulator"
+    assert profiles[0].identity.archetype != "Strategic Analyst"

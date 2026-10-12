@@ -301,8 +301,11 @@ class ProfileSynthesizer:
         Activation path: candidates surfaced by topology are converted through
         the same repository pipeline as query-driven synthesis.
         Joiners are deliberately **not** distilled (no mid-loop LLM calls), so
-        they keep the template bio/perspective; they do get the same D2
-        provenance write as the initial roster when their node carries a
+        they keep the template bio/perspective. Their identity is still derived
+        from the graph rather than a hollow constant: `fetch_nodes_by_names`
+        carries the node's real type label, so the build applies the same Task 5
+        archetype/style/domain precedence the roster gets. They also get the
+        same D2 provenance write as the initial roster when their node carries a
         `triplet_source_id`, with the same log-and-continue tolerance.
         """
         if not names:

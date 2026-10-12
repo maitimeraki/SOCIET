@@ -36,6 +36,20 @@ logger = setup_logging()
 _EMBED_TIMEOUT_SECONDS = 60
 
 
+# Store/base labels carried by every graph node — never the entity's real type.
+# Mirrors `graph_context._BASE_LABELS`; the type is a Neo4j label, not a property.
+_BASE_LABELS = frozenset({"__Entity__", "__Node__", "Chunk", "Document"})
+
+
+def _real_type_label(labels: Any) -> str:
+    """The first non-base Neo4j label a node carries, or "" when it has none."""
+    for label in labels or ():
+        text = str(label).strip()
+        if text and text not in _BASE_LABELS:
+            return text
+    return ""
+
+
 class DistilledProfile(NamedTuple):
     """One persona's S5 distillation result.
 
@@ -281,7 +295,7 @@ class PersonaRepository:
         query = """
         MATCH (n)
         WHERE n.name IN $names
-        RETURN n.name AS name, n, n:__Entity__ AS is_entity
+        RETURN n.name AS name, n, n:__Entity__ AS is_entity, labels(n) AS labels
         """
         async with self._driver.session(database=self._db) as session:
             res = await session.run(cast(LiteralString, query), names=names)
@@ -293,8 +307,16 @@ class PersonaRepository:
             node = r.get("n")
             if not node or not name:
                 continue
+            props = self._node_props(node)
+            # A node's real type is a Neo4j label, never a property, so a
+            # props-only read drops it. Carry it as `label` so the build's
+            # Task 5 identity precedence (`node["label"]`) can derive the
+            # archetype — joiners reach the build through this fetch alone.
+            label = _real_type_label(r.get("labels"))
+            if label and not props.get("label"):
+                props = {**props, "label": label}
             if name not in out or r.get("is_entity"):
-                out[name] = self._node_props(node)
+                out[name] = props
         return out
 
     async def build_agent_profiles_from_sectors(
