@@ -149,6 +149,10 @@ app.include_router(ingest_router)
 from src.api.graph_stream_api import router as graph_stream_router
 app.include_router(graph_stream_router)
 
+# Auth API (accounts, sessions, CSRF) under /api/v1/auth
+from src.api.auth_api import router as auth_router
+app.include_router(auth_router)
+
 
 RUNS: Dict[str, Dict[str, Any]] = {}
 _RUNS_LOCK = asyncio.Lock()

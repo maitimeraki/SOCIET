@@ -46,7 +46,7 @@ class User(Base):
     disabled_at: Mapped[datetime.datetime | None] = mapped_column(DateTime(timezone=True))
 
 
-class Session(Base):
+class UserSession(Base):
     __tablename__ = "sessions"
 
     id: Mapped[uuid.UUID] = mapped_column(

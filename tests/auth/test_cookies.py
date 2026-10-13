@@ -1,0 +1,138 @@
+"""Cookie attribute and CSRF double-submit tests (no DB, no live server)."""
+
+import uuid
+
+import pytest
+from fastapi import HTTPException
+from fastapi.responses import Response
+from starlette.requests import Request
+
+from src.auth import cookies
+from src.config.settings import Settings
+
+
+def _response() -> Response:
+    return Response()
+
+
+def _request(
+    method: str, path: str, *, cookies_: dict | None = None, headers: dict | None = None
+) -> Request:
+    raw_headers = []
+    if cookies_:
+        raw_headers.append(
+            (b"cookie", "; ".join(f"{k}={v}" for k, v in cookies_.items()).encode())
+        )
+    for key, value in (headers or {}).items():
+        raw_headers.append((key.lower().encode(), value.encode()))
+    return Request(
+        {
+            "type": "http",
+            "http_version": "1.1",
+            "method": method,
+            "scheme": "http",
+            "path": path,
+            "raw_path": path.encode(),
+            "query_string": b"",
+            "headers": raw_headers,
+            "client": ("127.0.0.1", 1234),
+            "server": ("testserver", 80),
+        }
+    )
+
+
+# --- cookie attributes ------------------------------------------------------
+
+
+def test_session_cookie_is_httponly_lax_and_bounded():
+    response = _response()
+    cookies.set_session_cookie(response, uuid.uuid4())
+
+    header = response.headers["set-cookie"].lower()
+    assert "sid=" in header
+    assert "httponly" in header
+    assert "samesite=lax" in header
+    assert "path=/" in header
+    assert f"max-age={30 * 24 * 3600}" in header  # session_ttl_days default
+    assert "secure" not in header  # cookie_secure default is False
+
+
+def test_session_cookie_secure_flag_follows_settings(monkeypatch):
+    monkeypatch.setattr(cookies, "get_settings", lambda: Settings(cookie_secure=True))
+
+    response = _response()
+    cookies.set_session_cookie(response, uuid.uuid4())
+
+    assert "secure" in response.headers["set-cookie"].lower()
+
+
+def test_clear_session_cookie_expires_it():
+    response = _response()
+    cookies.clear_session_cookie(response)
+
+    header = response.headers["set-cookie"].lower()
+    assert "sid=" in header
+    assert "max-age=0" in header
+    assert "path=/" in header
+
+
+def test_csrf_cookie_is_readable_by_scripts():
+    response = _response()
+    cookies.set_csrf_cookie(response)
+
+    header = response.headers["set-cookie"].lower()
+    assert "csrf=" in header
+    assert "httponly" not in header
+
+
+# --- double-submit verification ---------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_safe_methods_pass_without_a_token():
+    await cookies.verify_csrf(_request("GET", "/api/v1/auth/me"))
+
+
+@pytest.mark.asyncio
+async def test_state_changing_request_without_a_csrf_cookie_is_403_outside_the_exempt_list():
+    with pytest.raises(HTTPException) as excinfo:
+        await cookies.verify_csrf(_request("POST", "/api/v1/auth/logout"))
+    assert excinfo.value.status_code == 403
+
+    await cookies.verify_csrf(_request("POST", "/api/v1/auth/signup"))
+    await cookies.verify_csrf(_request("POST", "/api/v1/auth/login"))
+
+
+@pytest.mark.asyncio
+async def test_missing_or_mismatched_header_is_403_once_a_csrf_cookie_exists():
+    with pytest.raises(HTTPException) as missing:
+        await cookies.verify_csrf(_request("POST", "/api/v1/auth/logout", cookies_={"csrf": "tok"}))
+    with pytest.raises(HTTPException) as mismatched:
+        await cookies.verify_csrf(
+            _request(
+                "POST",
+                "/api/v1/auth/logout",
+                cookies_={"csrf": "tok"},
+                headers={"X-CSRF-Token": "other"},
+            )
+        )
+    assert missing.value.status_code == mismatched.value.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_matching_header_passes():
+    await cookies.verify_csrf(
+        _request(
+            "POST",
+            "/api/v1/auth/logout",
+            cookies_={"csrf": "tok"},
+            headers={"X-CSRF-Token": "tok"},
+        )
+    )
+
+
+@pytest.mark.asyncio
+async def test_exempt_paths_still_need_the_header_when_a_csrf_cookie_exists():
+    with pytest.raises(HTTPException) as excinfo:
+        await cookies.verify_csrf(_request("POST", "/api/v1/auth/login", cookies_={"csrf": "tok"}))
+    assert excinfo.value.status_code == 403

@@ -15,7 +15,7 @@ from sqlalchemy import delete, select
 from sqlalchemy.exc import IntegrityError
 
 from src.db.engine import get_engine, get_session_factory
-from src.db.models import AuditLog, Dataset, Job, Run, RunEvent, Session, Upload, User
+from src.db.models import AuditLog, Dataset, Job, Run, RunEvent, Upload, User, UserSession
 
 pytestmark = pytest.mark.skipif(
     not os.getenv("DATABASE_URL"), reason="DATABASE_URL is not set"
@@ -42,7 +42,7 @@ async def test_schema_roundtrip_and_fk_behavior():
             await db.flush()  # pulls the server-generated uuid
             ids["user"] = user.id
 
-            session_row = Session(
+            session_row = UserSession(
                 user_id=user.id,
                 expires_at=datetime.datetime.now(datetime.UTC) + datetime.timedelta(hours=1),
                 user_agent="pytest/1.0",
@@ -92,7 +92,7 @@ async def test_schema_roundtrip_and_fk_behavior():
             assert user.created_at.tzinfo is not None and user.updated_at.tzinfo is not None
 
             session_row = (
-                await db.execute(select(Session).where(Session.id == ids["session"]))
+                await db.execute(select(UserSession).where(UserSession.id == ids["session"]))
             ).scalar_one()
             assert (session_row.user_id, session_row.user_agent, session_row.revoked_at) == (
                 ids["user"],
@@ -177,7 +177,7 @@ async def test_schema_roundtrip_and_fk_behavior():
 
         async with factory() as db:
             children = (
-                (Session, "session"),
+                (UserSession, "session"),
                 (Dataset, "dataset"),
                 (Run, "run"),
                 (Job, "job"),

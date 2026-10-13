@@ -15,6 +15,9 @@ class Settings(BaseSettings):
     env: Literal["dev", "staging", "prod"] = "dev"
     database_url: str | None = None
     redis_url: str = "redis://localhost:6379/0"
+    session_ttl_days: int = 30
+    cookie_secure: bool = False  # env COOKIE_SECURE; False for plain-HTTP dev
+    ws_ticket_ttl_seconds: int = 30
 
 
 @lru_cache
