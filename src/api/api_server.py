@@ -1,15 +1,14 @@
 import asyncio
 import time
 import uuid
-import json
 import sys
 import logging
-from pathlib import Path
 
 import redis.asyncio as aioredis
 from sqlalchemy import text
 
 from src.logging.setup_logging import setup_logging
+from src.api import run_doc
 from src.api.errors import error_response, install_error_handlers
 from src.api.limits import JSONBodySizeLimitMiddleware, install_rate_limiter
 from src.api.middleware import LoggingMiddleware, SecurityHeadersMiddleware
@@ -171,7 +170,19 @@ async def lifespan(app: FastAPI)-> AsyncGenerator[None, None]:
         # individual requests surface the failure.
         logger.exception("Neo4j schema bootstrap failed; continuing startup")
 
-    # 1b. LLM connectivity probe — degrades, never aborts.
+    # 1b. Interrupted-run reconciliation (plan §5): this process just started,
+    # so any job still `running` in the rows belongs to a dead one — mark it
+    # failed/'interrupted' rather than letting it poll "running" forever.
+    try:
+        swept = await run_doc.sweep_interrupted()
+        if swept:
+            logger.warning("Marked %d interrupted job(s) failed at startup", swept)
+    except Exception:
+        # Same policy as the Neo4j bootstrap: log, don't abort boot — /ready
+        # reports Postgres unavailability, and writes surface it per request.
+        logger.exception("Interrupted-run sweep failed; continuing startup")
+
+    # 1c. LLM connectivity probe — degrades, never aborts.
     await _probe_llm(app)
 
     yield
@@ -232,29 +243,24 @@ simulate_router = APIRouter(prefix="/simulate", tags=["simulate"])
 
 RUNS: Dict[str, Dict[str, Any]] = {}
 _RUNS_LOCK = asyncio.Lock()
-_RUNS_RUNTIME_DIR = Path("src/api/runtime/jobs")
-_RUNS_RUNTIME_DIR.mkdir(parents=True, exist_ok=True)
+
 
 async def _persist_run(job_id: str, run: Dict[str, Any]) -> None:
-    path = _RUNS_RUNTIME_DIR / f"{job_id}.json"
-    await asyncio.to_thread(path.write_text, json.dumps(run, ensure_ascii=False, indent=2), "utf-8")
+    """Write the job's rows (Postgres is the truth; RUNS is the live cache)."""
+    await run_doc.write_job_doc(run)
 
 
 async def _ontology_from_run(ontology_job_id: Optional[str]) -> Optional[LocalOntology]:
     """The completed ontology job's merged schema, or None if absent/not finished.
 
-    Never raises: `_persist_run` writes non-atomically, so a crash mid-write
-    leaves invalid JSON — a raising read here would strand the build job in
-    "queued" forever. A bad read degrades to the per-chunk discovery path.
+    Read from the job's rows (`run_doc`), never the live dict. Never raises: a
+    raising read here would strand the build job in "queued" forever, so a bad
+    read degrades to the per-chunk discovery path.
     """
     if not ontology_job_id:
         return None
     try:
-        run = RUNS.get(ontology_job_id)
-        if run is None:
-            path = _RUNS_RUNTIME_DIR / f"{ontology_job_id}.json"
-            if path.exists():
-                run = json.loads(await asyncio.to_thread(path.read_text, "utf-8"))
+        run = await run_doc.read_job_doc(ontology_job_id)
         payload = ((run or {}).get("result") or {}).get("ontology")
         return LocalOntology.model_validate(payload) if payload else None
     except Exception as exc:
@@ -671,18 +677,7 @@ async def build_graph_async(
 
 @simulate_router.get("/jobs/{job_id}")
 async def get_job(job_id: str, user: User = Depends(current_user)):
-    async with _RUNS_LOCK:
-        run = RUNS.get(job_id)
-    if run is None:
-        # `_persist_run` writes non-atomically, so a crash mid-write leaves
-        # invalid JSON; that reads as "not found" — as does a doc with no owner
-        # (legacy, R14) — never as a different user's job.
-        path = _RUNS_RUNTIME_DIR / f"{job_id}.json"
-        try:
-            run = json.loads(await asyncio.to_thread(path.read_text, "utf-8"))
-        except (OSError, ValueError) as exc:
-            logger.warning(f"Could not read job {job_id} from runtime file ({exc})")
-            run = None
+    run = await run_doc.read_job_doc(job_id)
     if run is None:
         raise HTTPException(status_code=404, detail="Job not found")
     await require_owner(run.get("user_id"), user)

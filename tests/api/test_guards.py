@@ -15,6 +15,7 @@ import json
 import os
 import sys
 import uuid
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 from urllib.parse import quote
@@ -116,7 +117,7 @@ def _isolate_job_state():
 
 def _owned_job(account, **extra) -> dict:
     job = {
-        "job_id": extra.pop("job_id", f"guard-{uuid.uuid4()}"),
+        "job_id": extra.pop("job_id", str(uuid.uuid4())),
         "user_id": account.id,
         "status": "queued",
         "query": "Should we tax carbon?",
@@ -127,6 +128,20 @@ def _owned_job(account, **extra) -> dict:
     }
     job.update(extra)
     return job
+
+
+async def _write_run_rows(account, job_id: str, *, status: str = "queued", result=None) -> None:
+    """The run's rows — what every read below now answers from."""
+    await run_doc.write_run_doc({
+        "run_id": job_id,
+        "user_id": account.id,
+        "status": status,
+        "query": "Should we tax carbon?",
+        "dataset_id": "ds-1",
+        "config": {},
+        "result": result,
+        "error": None,
+    })
 
 
 # --- the R15 mount table (no DB needed) --------------------------------------
@@ -214,28 +229,39 @@ async def test_unauthenticated_requests_get_the_uniform_401(client, method, path
 @pytest.mark.asyncio
 async def test_debate_status_is_owner_only(client, accounts):
     owner, other = accounts
-    job = _owned_job(owner)
-    _DEBATE_JOBS[job["job_id"]] = job
+    job_id = str(uuid.uuid4())
+    await _write_run_rows(owner, job_id)
+    _DEBATE_JOBS.pop(job_id, None)  # the row answers, not the dict
 
-    mine = await client.get(f"/simulate/{job['job_id']}", cookies=_cookie(owner))
-    theirs = await client.get(f"/simulate/{job['job_id']}", cookies=_cookie(other))
+    mine = await client.get(f"/simulate/{job_id}", cookies=_cookie(owner))
+    theirs = await client.get(f"/simulate/{job_id}", cookies=_cookie(other))
 
     assert mine.status_code == 200
-    assert mine.json()["job_id"] == job["job_id"]
+    assert mine.json()["job_id"] == job_id
     assert theirs.status_code == 404
     assert _error(theirs)["code"] == "not_found"
 
 
 @requires_db
 @pytest.mark.asyncio
-async def test_a_legacy_job_without_an_owner_is_not_found(client, accounts):
-    """R14: a doc predating guards is unownable — not found even for the caller."""
+async def test_a_legacy_doc_is_not_a_truth_source(client, accounts, tmp_path):
+    """R14/§13: a doc predating guards lived only as JSON. Legacy files are
+    read-only history now — no row, no answer, for anyone (the migration
+    script is the only reader)."""
     owner, _ = accounts
-    job = _owned_job(owner, job_id=f"legacy-{uuid.uuid4()}")
-    job.pop("user_id")
-    _DEBATE_JOBS[job["job_id"]] = job
+    job_id = str(uuid.uuid4())
+    legacy_dir = Path("src/api/runtime/debates")
+    legacy_dir.mkdir(parents=True, exist_ok=True)
+    legacy_file = legacy_dir / f"{job_id}.json"
+    legacy_file.write_text(
+        json.dumps({"run_id": job_id, "query": "legacy question", "events": []}),
+        encoding="utf-8",
+    )
+    try:
+        response = await client.get(f"/simulate/debates/{job_id}", cookies=_cookie(owner))
+    finally:
+        legacy_file.unlink()
 
-    response = await client.get(f"/simulate/{job['job_id']}", cookies=_cookie(owner))
     assert response.status_code == 404
 
 
@@ -243,11 +269,14 @@ async def test_a_legacy_job_without_an_owner_is_not_found(client, accounts):
 @pytest.mark.asyncio
 async def test_simulate_job_status_is_owner_only(client, accounts):
     owner, other = accounts
-    job = _owned_job(owner)
-    api_server.RUNS[job["job_id"]] = job
+    job_id = str(uuid.uuid4())
+    await run_doc.write_job_doc({
+        "job_id": job_id, "user_id": owner.id, "mode": "ontology", "status": "queued",
+        "progress": 0.0, "stage": "queued", "error": None, "result": None,
+    })
 
-    mine = await client.get(f"/simulate/jobs/{job['job_id']}", cookies=_cookie(owner))
-    theirs = await client.get(f"/simulate/jobs/{job['job_id']}", cookies=_cookie(other))
+    mine = await client.get(f"/simulate/jobs/{job_id}", cookies=_cookie(owner))
+    theirs = await client.get(f"/simulate/jobs/{job_id}", cookies=_cookie(other))
 
     assert mine.status_code == 200
     assert theirs.status_code == 404
@@ -256,37 +285,21 @@ async def test_simulate_job_status_is_owner_only(client, accounts):
 
 @requires_db
 @pytest.mark.asyncio
-async def test_run_docs_are_listed_and_read_for_their_owner_only(
-    client, accounts, monkeypatch, tmp_path
-):
+async def test_run_docs_are_listed_and_read_for_their_owner_only(client, accounts):
     owner, other = accounts
-    monkeypatch.setattr(run_doc, "RUNS_DIR", tmp_path)
-    for run_id, user_id in (
-        ("run-mine", owner.id),
-        ("run-theirs", other.id),
-        ("run-legacy", None),
-    ):
-        run_doc.write_run_doc(
-            {
-                "run_id": run_id,
-                "user_id": user_id,
-                "created_at": "2026-10-02T10:00:00+00:00",
-                "query": f"question {run_id}",
-                "events": [],
-            }
-        )
+    mine_id, theirs_id = str(uuid.uuid4()), str(uuid.uuid4())
+    await _write_run_rows(owner, mine_id)
+    await _write_run_rows(other, theirs_id)
 
     listing = await client.get("/simulate/debates", cookies=_cookie(owner))
     assert listing.status_code == 200
-    assert [doc["run_id"] for doc in listing.json()] == ["run-mine"]
+    assert [doc["run_id"] for doc in listing.json()] == [mine_id]
 
-    mine = await client.get("/simulate/debates/run-mine", cookies=_cookie(owner))
-    theirs = await client.get("/simulate/debates/run-theirs", cookies=_cookie(owner))
-    legacy = await client.get("/simulate/debates/run-legacy", cookies=_cookie(owner))
+    mine = await client.get(f"/simulate/debates/{mine_id}", cookies=_cookie(owner))
+    theirs = await client.get(f"/simulate/debates/{theirs_id}", cookies=_cookie(owner))
 
     assert mine.status_code == 200
     assert theirs.status_code == 404
-    assert legacy.status_code == 404
 
 
 # --- both mounts, authenticated ----------------------------------------------
@@ -426,8 +439,10 @@ async def _open_ws(path: str, *, ticket: str | None = None, sid: str | None = No
     return _WS(task, frames, inbox)
 
 
-def _stream_job(account, job_id: str) -> str:
+async def _stream_job(account, job_id: str) -> str:
+    """A startable job: its row (the ownership read) + the live in-memory job."""
     _DEBATE_JOBS[job_id] = _owned_job(account, job_id=job_id)
+    await _write_run_rows(account, job_id)
     return job_id
 
 
@@ -436,7 +451,8 @@ def _stream_job(account, job_id: str) -> str:
 @pytest.mark.parametrize("path", _both_mounts("/simulate/{job}/stream"))
 async def test_debate_stream_refuses_an_unauthenticated_handshake(accounts, path):
     owner, _ = accounts
-    ws = await _open_ws(path.format(job=_stream_job(owner, f"ws-{uuid.uuid4()}")))
+    job_id = await _stream_job(owner, str(uuid.uuid4()))
+    ws = await _open_ws(path.format(job=job_id))
 
     frame = await ws.first()
     assert frame["type"] == "websocket.close"
@@ -449,7 +465,7 @@ async def test_debate_stream_refuses_an_unauthenticated_handshake(accounts, path
 @pytest.mark.asyncio
 async def test_debate_stream_refuses_a_non_owners_ticket(accounts, redis_reset):
     owner, other = accounts
-    job_id = _stream_job(owner, f"ws-{uuid.uuid4()}")
+    job_id = await _stream_job(owner, str(uuid.uuid4()))
     ticket = await service.issue_ws_ticket(uuid.UUID(other.id))
 
     ws = await _open_ws(f"/simulate/{job_id}/stream", ticket=ticket)
@@ -465,7 +481,7 @@ async def test_debate_stream_refuses_a_non_owners_ticket(accounts, redis_reset):
 @pytest.mark.asyncio
 async def test_debate_stream_accepts_a_ticket_once_and_rejects_the_reuse(accounts, redis_reset):
     owner, _ = accounts
-    job_id = _stream_job(owner, f"ws-{uuid.uuid4()}")
+    job_id = await _stream_job(owner, str(uuid.uuid4()))
     ticket = await service.issue_ws_ticket(uuid.UUID(owner.id))
 
     first = await _open_ws(f"/simulate/{job_id}/stream", ticket=ticket)
@@ -491,7 +507,7 @@ async def test_debate_stream_accepts_a_ticket_once_and_rejects_the_reuse(account
 @pytest.mark.parametrize("path", _both_mounts("/simulate/{job}/stream"))
 async def test_debate_stream_accepts_the_session_cookie(accounts, path):
     owner, _ = accounts
-    job_id = _stream_job(owner, f"ws-{uuid.uuid4()}")
+    job_id = await _stream_job(owner, str(uuid.uuid4()))
 
     ws = await _open_ws(path.format(job=job_id), sid=owner.sid)
 
@@ -516,8 +532,12 @@ async def test_graph_stream_refuses_an_unauthenticated_handshake():
 @pytest.mark.asyncio
 async def test_graph_stream_refuses_a_non_owners_ticket(accounts, redis_reset):
     owner, other = accounts
-    job_id = f"ws-{uuid.uuid4()}"
-    api_server.RUNS[job_id] = {"user_id": owner.id, "status": "running", "result": {"dataset_id": "ds-1"}}
+    job_id = str(uuid.uuid4())
+    await run_doc.write_job_doc({
+        "job_id": job_id, "user_id": owner.id, "mode": "build_graph", "status": "running",
+        "progress": 0.5, "stage": "build_graph_running", "error": None,
+        "result": {"dataset_id": "ds-1"},
+    })
     ticket = await service.issue_ws_ticket(uuid.UUID(other.id))
 
     ws = await _open_ws(f"/simulate/{job_id}/graph_stream", ticket=ticket)
@@ -534,9 +554,12 @@ async def test_graph_stream_refuses_a_non_owners_ticket(accounts, redis_reset):
 @pytest.mark.parametrize("path", _both_mounts("/simulate/{job}/graph_stream"))
 async def test_graph_stream_accepts_the_session_cookie(accounts, path):
     owner, _ = accounts
-    job_id = f"ws-{uuid.uuid4()}"
+    job_id = str(uuid.uuid4())
     # Owned, terminal, dataset-less: after accept the route says done and leaves.
-    api_server.RUNS[job_id] = {"user_id": owner.id, "status": "failed", "result": {}}
+    await run_doc.write_job_doc({
+        "job_id": job_id, "user_id": owner.id, "mode": "build_graph", "status": "failed",
+        "progress": 0.0, "stage": "failed", "error": "boom", "result": {},
+    })
 
     ws = await _open_ws(path.format(job=job_id), sid=owner.sid)
 

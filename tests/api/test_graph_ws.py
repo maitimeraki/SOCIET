@@ -41,6 +41,17 @@ def _ws_authenticated(monkeypatch):
     monkeypatch.setattr("src.api.graph_stream_api.websocket_user", _user)
 
 
+@pytest.fixture(autouse=True)
+def _job_run_from_the_seeded_dict(monkeypatch):
+    """These tests are about frame mechanics, not storage: serve the job read
+    from the dict they seed. The row-backed read is covered in test_run_truth."""
+
+    async def _job_run(job_id: str):
+        return api_server.RUNS.get(job_id)
+
+    monkeypatch.setattr("src.api.graph_stream_api._job_run", _job_run)
+
+
 def _register_run(job_id: str, status: str, result: dict) -> None:
     api_server.RUNS[job_id] = {"user_id": str(_WS_USER.id), "status": status, "result": result}
 

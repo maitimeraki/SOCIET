@@ -16,7 +16,6 @@ snapshot, so a delta published while the snapshot is built is queued rather than
 lost in the read→subscribe gap; the snapshot stays the FIRST frame sent.
 """
 import asyncio
-import json
 import logging
 from dataclasses import replace
 from typing import Optional
@@ -37,23 +36,10 @@ _DRAIN_GRACE_S = 0.1
 
 
 async def _job_run(job_id: str) -> Optional[dict]:
-    """The run dict for a job — memory first, then the persisted run.
+    """The job doc for an id — read from its rows (the truth), never a dict."""
+    from src.api import run_doc
 
-    Mirrors `api_server._ontology_from_run`: a job no longer in `RUNS` (server
-    restarted, or evicted) is read back from its runtime JSON. Lazy import — the
-    router is included before `RUNS` exists in `api_server`'s module body.
-    """
-    from src.api.api_server import RUNS, _RUNS_RUNTIME_DIR
-
-    run = RUNS.get(job_id)
-    if run is None:
-        path = _RUNS_RUNTIME_DIR / f"{job_id}.json"
-        if path.exists():
-            try:
-                run = json.loads(await asyncio.to_thread(path.read_text, "utf-8"))
-            except (OSError, ValueError):
-                run = None
-    return run
+    return await run_doc.read_job_doc(job_id)
 
 
 async def _job_state(job_id: str) -> tuple[str, Optional[str]]:

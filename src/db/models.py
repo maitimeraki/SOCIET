@@ -102,6 +102,17 @@ class Run(Base):
     created_at: Mapped[datetime.datetime] = _timestamptz_default()
     finished_at: Mapped[datetime.datetime | None] = mapped_column(DateTime(timezone=True))
 
+    # Serves the keyset-paginated history list: own runs, newest first, by
+    # (created_at, id) DESC (plan §6).
+    __table_args__ = (
+        Index(
+            "runs_user_id_created_at_id_idx",
+            "user_id",
+            text("created_at DESC"),
+            text("id DESC"),
+        ),
+    )
+
 
 class Job(Base):
     __tablename__ = "jobs"
@@ -120,6 +131,8 @@ class Job(Base):
     queued_at: Mapped[datetime.datetime] = _timestamptz_default()
     started_at: Mapped[datetime.datetime | None] = mapped_column(DateTime(timezone=True))
     finished_at: Mapped[datetime.datetime | None] = mapped_column(DateTime(timezone=True))
+
+    __table_args__ = (Index("jobs_user_id_idx", "user_id"),)
 
 
 class Upload(Base):

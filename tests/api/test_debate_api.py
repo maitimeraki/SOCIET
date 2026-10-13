@@ -3,16 +3,21 @@ Tests for Debate API endpoints.
 """
 import asyncio
 import json
+import os
 import uuid
 from dataclasses import asdict
 from types import SimpleNamespace
 
 import pytest
+import pytest_asyncio
 from unittest.mock import AsyncMock, patch, MagicMock
 from fastapi import FastAPI, WebSocketDisconnect
 from fastapi.testclient import TestClient
+from httpx import ASGITransport, AsyncClient
+from sqlalchemy import delete
 
 from src.auth.deps import current_user
+from src.api import run_doc
 from src.api.debate_api import (
     router,
     create_debate,
@@ -24,6 +29,8 @@ from src.api.debate_api import (
     _DEBATE_JOBS,
     _DEBATE_JOBS_LOCK,
 )
+from src.db.engine import get_session_factory
+from src.db.models import User
 from src.simulation.orchestrator import OrchestratedDebateResult
 from src.persona.agent import (
     Agent,
@@ -39,6 +46,54 @@ from src.simulation.pair_turn import CommPair, DebateVerdict, RoundResult
 
 
 _ROUTE_USER = SimpleNamespace(id=uuid.uuid4())
+
+requires_db = pytest.mark.skipif(not os.getenv("DATABASE_URL"), reason="DATABASE_URL is not set")
+
+
+@pytest_asyncio.fixture
+async def job_owner(db):
+    """A real account for the DB-backed route tests — the routes write rows and
+    jobs.user_id is an FK, so a bare SimpleNamespace id cannot own one. The
+    route fixtures (`client`, `ws_authenticated`) act as this caller for the
+    test's duration, so ownership resolves to the row's user."""
+    factory = get_session_factory()
+    async with factory() as session:
+        user = User(
+            email=f"auth-test-debate-{uuid.uuid4().hex[:10]}@example.com",
+            password_hash="not-a-real-hash",
+        )
+        session.add(user)
+        await session.commit()
+        owner_id = user.id
+    route_user_id = _ROUTE_USER.id
+    _ROUTE_USER.id = owner_id
+    try:
+        yield SimpleNamespace(id=str(owner_id))
+    finally:
+        _ROUTE_USER.id = route_user_id
+        async with factory() as session:
+            await session.execute(delete(User).where(User.id == owner_id))
+            await session.commit()
+
+
+async def _write_run_row(run_id: str, owner_id: str, *, status: str = "queued", result=None) -> None:
+    """The run's rows, as `create_debate` would have written them."""
+    await run_doc.write_run_doc({
+        "run_id": run_id, "user_id": owner_id, "status": status,
+        "query": "Should we tax carbon?", "dataset_id": "ds1",
+        "config": {}, "result": result, "error": None,
+    })
+
+
+@pytest_asyncio.fixture
+async def db_client(job_owner):
+    """The debate router in a real app, serving requests as the row's owner."""
+    app = FastAPI()
+    app.include_router(router)
+    app.dependency_overrides[current_user] = lambda: SimpleNamespace(id=uuid.UUID(job_owner.id))
+    transport = ASGITransport(app=app, client=("10.99.8.3", 5000))
+    async with AsyncClient(transport=transport, base_url="http://testserver") as http:
+        yield http
 
 
 @pytest.fixture
@@ -65,16 +120,16 @@ class TestRoutesThroughTheApp:
     def test_unknown_job_is_404(self, client):
         assert client.get("/simulate/no-such-job").status_code == 404
 
-    def test_queued_job_status_is_reported(self, client):
-        job_id = f"route-{uuid.uuid4()}"
-        _DEBATE_JOBS[job_id] = {
-            "job_id": job_id, "user_id": str(_ROUTE_USER.id), "status": "queued",
-            "query": "q", "graph_id": "ds1", "config": {}, "result": None, "error": None,
-        }
-        try:
-            response = client.get(f"/simulate/{job_id}")
-        finally:
-            _DEBATE_JOBS.pop(job_id, None)
+    @requires_db
+    @pytest.mark.asyncio
+    async def test_queued_job_status_is_reported(self, db_client, job_owner):
+        """The route answers from the run's row — the in-memory dict is empty."""
+        job_id = str(uuid.uuid4())
+        await _write_run_row(job_id, job_owner.id)
+        _DEBATE_JOBS.pop(job_id, None)
+
+        response = await db_client.get(f"/simulate/{job_id}")
+
         assert (response.status_code, response.json()["status"]) == (200, "queued")
 
     def test_create_debate_rejects_a_blank_query(self, client):
@@ -747,9 +802,12 @@ class TestSimulationDepthGate:
         # just the verdict object.
         assert job["result"]["provenance_by_claim"]["Steel tariffs"][0]["title"] == "Trade Report"
 
-    def test_create_debate_threads_the_requested_depth_to_the_job(self, client):
+    @requires_db
+    @pytest.mark.asyncio
+    async def test_create_debate_threads_the_requested_depth_to_the_job(self, db_client, job_owner):
+        """202 only after the queued run exists as a row (accept-time durability)."""
         with patch("src.api.debate_api._run_debate_async", new=AsyncMock()) as runner:
-            response = client.post(
+            response = await db_client.post(
                 "/simulate/debate",
                 json={"query": "Should we tax carbon?", "simulation_depth": "deep"},
             )
@@ -757,6 +815,7 @@ class TestSimulationDepthGate:
         try:
             assert response.status_code == 202
             assert runner.call_args.kwargs["simulation_depth"] == "deep"
+            assert (await run_doc.read_run_head(job_id))["status"] == "queued"
         finally:
             _DEBATE_JOBS.pop(job_id, None)
 
@@ -897,11 +956,13 @@ def ws_authenticated(monkeypatch):
 class TestManagerlessJobStream:
     """Re-review obs #1: a client on a job with no manager must not deadlock."""
 
+    @requires_db
     @pytest.mark.asyncio
-    async def test_managerless_job_registers_a_manager_and_returns(self, ws_authenticated):
-        job_id = f"ws-{uuid.uuid4()}"
+    async def test_managerless_job_registers_a_manager_and_returns(self, ws_authenticated, job_owner):
+        job_id = str(uuid.uuid4())
+        await _write_run_row(job_id, job_owner.id)
         _DEBATE_JOBS[job_id] = {
-            "job_id": job_id, "user_id": str(_ROUTE_USER.id), "status": "queued",
+            "job_id": job_id, "user_id": job_owner.id, "status": "queued",
             "query": "q", "graph_id": "ds1", "config": {}, "result": None, "error": None,
         }
         ws = _DisconnectingWSStub()

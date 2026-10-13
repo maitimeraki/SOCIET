@@ -4,20 +4,49 @@ Chunking is sentence-aware (shared owner: chunkProcessor.split_text_sentences);
 these assertions fail under the retired fixed character windows.
 """
 import asyncio
-import json
 import logging
+import os
+import sys
 import uuid
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
+import pytest_asyncio
 from fastapi import HTTPException
+from sqlalchemy import delete
 
 import src.api.api_server as api_server
+import src.api.run_doc as run_doc
 from src.api.api_server import _chunk_documents
+from src.db.engine import get_session_factory
+from src.db.models import User
 from src.graph.config_graph import GraphConfig
 from src.graph.models_graph import GlobalInputDocument, LocalOntology
 from src.graph.vocabulary import spread_indexes
+
+if sys.platform == "win32":
+    asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+
+requires_db = pytest.mark.skipif(not os.getenv("DATABASE_URL"), reason="DATABASE_URL is not set")
+
+
+@pytest_asyncio.fixture
+async def job_owner(db):
+    """An account for the row-backed job reads; deleting it cascades the rows."""
+    factory = get_session_factory()
+    async with factory() as session:
+        user = User(
+            email=f"run-truth-{uuid.uuid4().hex[:10]}@example.com",
+            password_hash="not-a-real-hash",
+        )
+        session.add(user)
+        await session.commit()
+        account = SimpleNamespace(id=str(user.id))
+    yield account
+    async with factory() as session:
+        await session.execute(delete(User).where(User.id == uuid.UUID(account.id)))
+        await session.commit()
 
 
 SENTENCES = [
@@ -163,11 +192,13 @@ async def test_build_job_reuses_ontology_and_skips_discovery(monkeypatch):
     discovery = _CountingDiscovery()
     extraction = _FakeExtraction()
     _patch_build_pipeline(monkeypatch, discovery, extraction)
-    api_server.RUNS["onto-done"] = {
-        "job_id": "onto-done",
-        "status": "completed",
-        "result": {"ontology": _ontology("PERSON").model_dump()},
-    }
+
+    # The ontology job's stored schema, without a database: this test is about
+    # the reuse path, not the row read (covered in TestOntologyFromRun).
+    async def _stored_ontology(job_id):
+        return {"result": {"ontology": _ontology("PERSON").model_dump()}} if job_id == "onto-done" else None
+
+    monkeypatch.setattr(api_server.run_doc, "read_job_doc", _stored_ontology)
     job_id = "test-build-reuse"
     api_server.RUNS[job_id] = {"job_id": job_id, "result": None}
 
@@ -292,38 +323,53 @@ async def test_build_job_retries_transient_discovery_failure(monkeypatch):
 
 
 class TestOntologyFromRun:
-    """The persisted-run read must never raise: a bad read falls back to discovery."""
+    """The persisted-run read goes to the rows and must never raise: a bad read
+    falls back to per-chunk discovery."""
 
+    @requires_db
     @pytest.mark.asyncio
-    async def test_valid_persisted_run_file_is_parsed(self, tmp_path, monkeypatch):
-        monkeypatch.setattr(api_server, "_RUNS_RUNTIME_DIR", tmp_path)
-        api_server.RUNS.pop("onto-on-disk", None)
-        run = {
-            "job_id": "onto-on-disk",
+    async def test_a_persisted_run_is_read_from_its_rows(self, job_owner):
+        job_id = str(uuid.uuid4())
+        await run_doc.write_job_doc({
+            "job_id": job_id,
+            "user_id": job_owner.id,
+            "mode": "ontology",
             "status": "completed",
+            "progress": 1.0,
+            "stage": "completed",
+            "error": None,
             "result": {"ontology": _ontology("PERSON").model_dump()},
-        }
-        (tmp_path / "onto-on-disk.json").write_text(json.dumps(run), encoding="utf-8")
+        })
 
-        ontology = await api_server._ontology_from_run("onto-on-disk")
+        ontology = await api_server._ontology_from_run(job_id)
 
         assert ontology is not None
         assert ontology.entity_labels == ["PERSON"]
 
+    @requires_db
     @pytest.mark.asyncio
-    async def test_corrupt_persisted_run_file_returns_none_and_warns(
-        self, tmp_path, monkeypatch, caplog
-    ):
-        """A crash mid-`_persist_run` leaves invalid JSON; the read degrades, never raises."""
-        monkeypatch.setattr(api_server, "_RUNS_RUNTIME_DIR", tmp_path)
-        api_server.RUNS.pop("onto-corrupt", None)
-        (tmp_path / "onto-corrupt.json").write_text("{not json", encoding="utf-8")
+    async def test_an_unknown_job_returns_none(self, job_owner):
+        assert await api_server._ontology_from_run(str(uuid.uuid4())) is None
+        assert await api_server._ontology_from_run(None) is None
+
+    @requires_db
+    @pytest.mark.asyncio
+    async def test_a_failing_read_returns_none_and_warns(self, job_owner, monkeypatch, caplog):
+        """A raising read must not strand the build job "queued" forever — it
+        degrades to the per-chunk discovery path, with the failure logged."""
+        job_id = str(uuid.uuid4())
+
+        async def boom(_job_id):
+            raise RuntimeError("database is down")
+
+        monkeypatch.setattr(api_server.run_doc, "read_job_doc", boom)
 
         with caplog.at_level(logging.WARNING, logger=api_server.logger.name):
-            ontology = await api_server._ontology_from_run("onto-corrupt")
+            ontology = await api_server._ontology_from_run(job_id)
 
         assert ontology is None
-        assert "onto-corrupt" in caplog.text
+        assert job_id in caplog.text
+        assert "database is down" in caplog.text
 
 
 class _ExplodingExtractionInit:
@@ -394,16 +440,12 @@ async def test_raising_worker_cancels_its_siblings(monkeypatch):
     assert extraction.cancelled == ["d1"]  # the sibling was cancelled, not left writing
 
 
+@requires_db
 @pytest.mark.asyncio
-async def test_get_job_degrades_on_a_corrupt_runtime_file(tmp_path, monkeypatch):
-    """A crash mid-`_persist_run` leaves invalid JSON. The job read must degrade to
-    not-found — never raise out of the endpoint, and never answer as if the doc
-    existed (ownership cannot be established for it)."""
-    monkeypatch.setattr(api_server, "_RUNS_RUNTIME_DIR", tmp_path)
-    api_server.RUNS.pop("job-corrupt", None)
-    (tmp_path / "job-corrupt.json").write_text("{not json", encoding="utf-8")
-
+async def test_get_job_is_404_for_an_unknown_job(job_owner):
+    """No row, no answer: the read must 404 rather than raise, and never answer
+    as if the doc existed (ownership cannot be established for it)."""
     with pytest.raises(HTTPException) as exc:
-        await api_server.get_job("job-corrupt", user=SimpleNamespace(id=uuid.uuid4()))
+        await api_server.get_job(str(uuid.uuid4()), user=SimpleNamespace(id=uuid.UUID(job_owner.id)))
 
     assert exc.value.status_code == 404

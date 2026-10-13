@@ -9,7 +9,7 @@ from dataclasses import asdict
 from datetime import datetime, timezone
 from typing import Dict, Any, List, Literal, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Request, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel, Field
 
 from src.api import run_doc
@@ -87,19 +87,27 @@ class DebateStreamComplete(BaseModel):
     warnings: list[str]
 
 
-# In-memory job storage
+# In-process working state for live runs: the WebSocket managers and the
+# handoff between the run task and the routes. NOT the truth — rows are
+# (`run_doc`); every read below goes to the database.
 _DEBATE_JOBS: Dict[str, Dict[str, Any]] = {}
 _DEBATE_JOBS_LOCK = asyncio.Lock()
 
 
-def _job_to_status_response(job_id: str, job: Dict[str, Any]) -> DebateStatusResponse:
-    """Convert job dict to status response."""
-    return DebateStatusResponse(
-        job_id=job_id,
-        status=job.get("status", "unknown"),
-        result=job.get("result"),
-        error=job.get("error"),
-    )
+def _job_doc(job: dict) -> dict:
+    """The doc shape of a live job, for the row write."""
+    return {
+        "run_id": job.get("job_id"),
+        "user_id": job.get("user_id"),
+        "created_at": job.get("created_at"),
+        "query": job.get("query"),
+        "dataset_id": job.get("graph_id"),
+        "config": job.get("config"),
+        "status": job.get("status"),
+        "events": [],
+        "result": job.get("result"),
+        "error": job.get("error"),
+    }
 
 
 async def _run_debate_async(
@@ -293,7 +301,15 @@ class _DebateWSManager:
             connections = list(self.connections)
 
         if self.job_id is not None:
-            await _persist_debate_run(self.job_id)
+            try:
+                # Every streamed event is a row — the log is the durable record
+                # (§4), so this is not throttled (the head write below is).
+                await run_doc.append_run_event(self.job_id, len(self.buffer), data)
+                await _persist_debate_run(self.job_id)
+            except Exception as exc:
+                # Persistence is best-effort by contract: a DB hiccup must not
+                # kill the live stream (the failure is logged, never swallowed).
+                logger.warning("run event persist failed for %s: %s", self.job_id, exc)
 
         for ws in connections:
             try:
@@ -302,20 +318,23 @@ class _DebateWSManager:
                 pass  # Client disconnected
 
 
-# Run-doc persistence throttle: one disk write per run per window. The doc is
-# always written whole, so a skipped event is carried by the next write — disk
-# work no longer scales with event count. Keyed per run id; the entry is dropped
-# on the terminal write so finished runs leave no state behind.
+# Run-doc persistence throttle: one head write per run per window. The head is
+# always written whole, so a skipped transition is carried by the next write —
+# write work no longer scales with event count. Keyed per run id; the entry is
+# dropped on the terminal write so finished runs leave no state behind.
 _PERSIST_MIN_INTERVAL_S = 0.5
 _TERMINAL_STATUSES = {"complete", "failed", "cancelled"}
 _LAST_PERSIST_AT: Dict[str, float] = {}
 
 
 async def _persist_debate_run(job_id: str) -> None:
-    """Mirror the live job to its run document. Log-and-continue — persistence never breaks a run.
+    """Write the live job's head rows (status/result/error) to Postgres.
 
-    Throttled to one write per run per `_PERSIST_MIN_INTERVAL_S` (monotonic
-    clock). Terminal states bypass the throttle so the final doc is never stale.
+    The events are rows of their own (appended in `broadcast`); this is the
+    head only, throttled to one write per run per `_PERSIST_MIN_INTERVAL_S`
+    (monotonic clock). Terminal states bypass the throttle so the final head
+    is never stale. Best-effort by contract: a failed write is logged, never
+    raised — persistence must not break a live run.
     """
     try:
         job = _DEBATE_JOBS.get(job_id)
@@ -330,18 +349,7 @@ async def _persist_debate_run(job_id: str) -> None:
             if last is not None and now - last < _PERSIST_MIN_INTERVAL_S:
                 return
             _LAST_PERSIST_AT[job_id] = now
-        doc = {
-            "run_id": job_id,
-            "user_id": job.get("user_id"),
-            "created_at": job.get("created_at"),
-            "query": job.get("query"),
-            "dataset_id": job.get("graph_id"),
-            "config": job.get("config"),
-            "status": job.get("status"),
-            "events": manager.buffer,
-            "result": job.get("result"),
-        }
-        await asyncio.to_thread(run_doc.write_run_doc, doc)
+        await run_doc.write_run_doc(_job_doc(job))
     except Exception as exc:
         logger.warning("run doc persist failed for %s: %s", job_id, exc)
 
@@ -389,6 +397,9 @@ async def create_debate(
             "error": None,
         }
 
+    # Durable at accept time: the queued run exists as rows before the 202.
+    await run_doc.write_run_doc(_job_doc(_DEBATE_JOBS[job_id]))
+
     # Start background task
     asyncio.create_task(_run_debate_async(
         job_id=job_id,
@@ -404,46 +415,37 @@ async def create_debate(
 
 
 @router.get("/debates")
-async def list_debates(user: User = Depends(current_user)):
-    """Newest-first run summaries for the history views (§12.4)."""
-    live = set(_DEBATE_JOBS.keys())
-    docs = await asyncio.to_thread(run_doc.list_run_docs)
-    owned = [doc for doc in docs if str(doc.get("user_id")) == str(user.id)]
-    return [_summarize_run_doc(doc, live) for doc in owned]
+async def list_debates(
+    request: Request,
+    user: User = Depends(current_user),
+    limit: int = Query(25, ge=1, le=100),
+    cursor: Optional[str] = None,
+):
+    """Newest-first run summaries for the history views (§12.4).
+
+    `/api/v1/simulate/debates` is keyset-paginated over ``(created_at, id)``
+    DESC (plan §6): ``{items, next_cursor}``. The legacy alias keeps today's
+    array shape (R15 deprecation window) — both mounts share this function, so
+    the response branches on the request path.
+    """
+    if request.url.path.startswith("/api/v1"):
+        try:
+            return await run_doc.list_run_summaries(user.id, limit=limit, cursor=cursor)
+        except run_doc.InvalidCursor:
+            raise HTTPException(
+                status_code=400,
+                detail={"code": "invalid_cursor", "message": "The pagination cursor is not valid."},
+            )
+    return (await run_doc.list_run_summaries(user.id))["items"]
 
 
 @router.get("/debates/{run_id}")
 async def get_debate_doc(run_id: str, user: User = Depends(current_user)):
-    doc = await asyncio.to_thread(run_doc.read_run_doc, run_id)
+    doc = await run_doc.read_run_doc(run_id)
     if doc is None:
         raise HTTPException(status_code=404, detail="Run not found")
     await require_owner(doc.get("user_id"), user)
     return doc
-
-
-def _summarize_run_doc(doc: dict, live: set[str]) -> dict:
-    result = doc.get("result") or {}
-    clusters = result.get("cluster_details") or {}
-    verdict_stance = None
-    if clusters:
-        dominant = max(clusters.values(), key=lambda cluster: cluster.get("total_weight", 0.0))
-        verdict_stance = dominant.get("stance")
-    status = doc.get("status", "unknown")
-    if status == "running" and doc.get("run_id") not in live:
-        status = "interrupted"  # server restarted; honest, no auto-resume (§7.10)
-    rounds_from_events = sum(
-        1 for event in doc.get("events", []) if event.get("type") == "stage" and event.get("stage") == "round"
-    )
-    return {
-        "run_id": doc.get("run_id"),
-        "created_at": doc.get("created_at"),
-        "query": doc.get("query"),
-        "dataset_id": doc.get("dataset_id"),
-        "status": status,
-        "rounds_executed": result.get("rounds_executed", rounds_from_events),
-        "converged": result.get("converged"),
-        "verdict_stance": verdict_stance,
-    }
 
 
 @router.get("/{job_id}", response_model=DebateStatusResponse)
@@ -451,14 +453,17 @@ async def get_debate_status(job_id: str, user: User = Depends(current_user)):
     """
     Get debate simulation status and result.
     """
-    async with _DEBATE_JOBS_LOCK:
-        job = _DEBATE_JOBS.get(job_id)
-
-    if not job:
+    head = await run_doc.read_run_head(job_id)
+    if head is None or head.get("kind") != "debate":
         raise HTTPException(status_code=404, detail="Job not found")
-    await require_owner(job.get("user_id"), user)
+    await require_owner(head.get("user_id"), user)
 
-    return _job_to_status_response(job_id, job)
+    return DebateStatusResponse(
+        job_id=job_id,
+        status=head["status"],
+        result=head["result"],
+        error=head["error"],
+    )
 
 
 @router.websocket("/{job_id}/stream")
@@ -475,24 +480,29 @@ async def stream_debate(websocket: WebSocket, job_id: str):
         await websocket.close(code=4401, reason="Authentication required")
         return
 
-    async with _DEBATE_JOBS_LOCK:
-        job = _DEBATE_JOBS.get(job_id)
+    head = await run_doc.read_run_head(job_id)
     try:
-        await require_owner((job or {}).get("user_id"), user)
+        if head is None or head.get("kind") != "debate":
+            raise HTTPException(status_code=404, detail="Not found.")
+        await require_owner(head.get("user_id"), user)
     except HTTPException:
         await websocket.close(code=4404, reason="Job not found")
         return
 
-    await websocket.accept()
-
     async with _DEBATE_JOBS_LOCK:
+        job = _DEBATE_JOBS.get(job_id)
+        if job is None:
+            # A row without a live job in this process: nothing to stream.
+            await websocket.close(code=4404, reason="Job not found")
+            return
         ws_manager = job.get("ws_manager")
         if ws_manager is None:
-            # Job not started yet, create a new manager. The outer lock is
-            # already held here, so this write is atomic without re-taking it.
+            # Job not started yet, create a new manager. The lock is already
+            # held here, so this write is atomic without re-taking it.
             ws_manager = _DebateWSManager(job_id=job_id)
-            if "ws_manager" not in _DEBATE_JOBS[job_id]:
-                _DEBATE_JOBS[job_id]["ws_manager"] = ws_manager
+            job["ws_manager"] = ws_manager
+
+    await websocket.accept()
 
     await ws_manager.attach(websocket)
 
