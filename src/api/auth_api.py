@@ -16,6 +16,7 @@ from src.auth.cookies import (
     verify_csrf,
 )
 from src.auth.deps import cookie_session_id, current_user, require_owner
+from src.api.limits import limiter
 from src.config.settings import get_settings
 from src.db.engine import get_db
 from src.db.models import User, UserSession
@@ -83,6 +84,7 @@ def _session_out(row: UserSession) -> SessionOut:
 
 
 @router.post("/signup", response_model=UserOut, status_code=201)
+@limiter.limit(lambda: get_settings().rate_limit_signup)
 async def signup(
     body: SignupRequest,
     request: Request,
@@ -102,6 +104,7 @@ async def signup(
 
 
 @router.post("/login", response_model=UserOut)
+@limiter.limit(lambda: get_settings().rate_limit_login)
 async def login(
     body: LoginRequest,
     request: Request,

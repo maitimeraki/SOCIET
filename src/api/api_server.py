@@ -1,14 +1,23 @@
 import asyncio
+import time
 import uuid
 import json
 import sys
 import logging
 from pathlib import Path
+
+import redis.asyncio as aioredis
+from sqlalchemy import text
+
 from src.logging.setup_logging import setup_logging
-from src.api.middleware import LoggingMiddleware
+from src.api.errors import error_response, install_error_handlers
+from src.api.limits import JSONBodySizeLimitMiddleware, install_rate_limiter
+from src.api.middleware import LoggingMiddleware, SecurityHeadersMiddleware
+from src.config.settings import get_settings
+from src.db.engine import get_engine
 from fastapi import FastAPI, BackgroundTasks, HTTPException, status, Request
-from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from typing import TYPE_CHECKING, List, Dict, Optional, AsyncGenerator, Any, Set
 from contextlib import asynccontextmanager
 from src.api.config_api import (
@@ -51,6 +60,76 @@ logging.basicConfig(level=logging.ERROR, format="%(asctime)s - %(levelname)s - %
 # logger = logging.getLogger(__name__)
 logger = setup_logging()  # Ensure logging is configured with handler clearing to prevent duplication
 
+_PROBE_CACHE_SECONDS = 60.0
+
+
+async def _probe_llm(app: FastAPI) -> bool:
+    """One bounded LLM call; records the verdict on ``app.state``.
+
+    Never raises — a dead provider leaves the app degraded but serving (plan
+    §9: degraded-alive instead of boot abort).
+    """
+    config = get_llm_config()
+    try:
+        test = await asyncio.wait_for(
+            global_llm_client.generate(
+                "You are a test system.",
+                "Say 'OK' if working.",
+                provider=config.default_llm_provider,
+                model=config.debate_model,
+                temperature=0.7,
+            ),
+            timeout=get_settings().llm_probe_timeout_seconds,
+        )
+        ok = bool(test)
+        if ok:
+            logger.info(f"LLM connected: {config.default_llm_provider}")
+        else:
+            logger.warning("LLM probe returned an empty completion")
+    except Exception as exc:
+        logger.warning("LLM connectivity test failed: %s", exc, exc_info=True)
+        ok = False
+
+    app.state.degraded = not ok
+    app.state.last_llm_probe_at = time.monotonic()
+    return ok
+
+
+async def _llm_healthy(app: FastAPI) -> bool:
+    """Last probe's verdict, re-probing only when the cached one is stale."""
+    last = getattr(app.state, "last_llm_probe_at", None)
+    if last is not None and time.monotonic() - last < _PROBE_CACHE_SECONDS:
+        return not getattr(app.state, "degraded", False)
+    return await _probe_llm(app)
+
+
+async def _postgres_ok() -> bool:
+    async def _ping() -> None:
+        async with get_engine().connect() as connection:
+            await connection.execute(text("SELECT 1"))
+
+    try:
+        await asyncio.wait_for(_ping(), timeout=get_settings().llm_probe_timeout_seconds)
+        return True
+    except Exception as exc:
+        logger.warning("Readiness: Postgres is not reachable: %s", exc)
+        return False
+
+
+async def _redis_ok() -> bool:
+    # A client per probe: the auth service's pooled client is bound to whichever
+    # event loop created it, and readiness must answer on any loop.
+    client = aioredis.from_url(get_settings().redis_url, decode_responses=True)
+    try:
+        await asyncio.wait_for(client.ping(), timeout=get_settings().llm_probe_timeout_seconds)
+        return True
+    except Exception as exc:
+        logger.warning("Readiness: Redis is not reachable: %s", exc)
+        return False
+    finally:
+        await client.aclose()
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI)-> AsyncGenerator[None, None]:
     """Startup and shutdown events for the API server.
@@ -58,10 +137,12 @@ async def lifespan(app: FastAPI)-> AsyncGenerator[None, None]:
     On startup:
       1. Apply Neo4j schema bootstrap (constraints, indexes, vector index)
          so writes and vector retrieval don't fail at runtime.
-      2. Probe the LLM provider.
+      2. Probe the LLM provider — a failure degrades, it does not abort.
     """
     # 1. Setup: Everything before 'yield' runs on STARTUP
     logger.info("Starting up API server...")
+    app.state.degraded = False
+    app.state.last_llm_probe_at = None
 
     # 1a. Apply Neo4j schema bootstrap (idempotent).
     try:
@@ -88,21 +169,8 @@ async def lifespan(app: FastAPI)-> AsyncGenerator[None, None]:
         # individual requests surface the failure.
         logger.exception("Neo4j schema bootstrap failed; continuing startup")
 
-    # 1b. LLM connectivity probe.
-    client = global_llm_client
-    try:
-        test = await client.generate(
-            "You are a test system.",
-            "Say 'OK' if working.",
-            provider=get_llm_config().default_llm_provider,
-            model=get_llm_config().debate_model,
-            temperature=0.7,
-        )
-        if test:
-            logger.info(f"LLM connected: {get_llm_config().default_llm_provider}")
-    except Exception as e:
-        logger.exception(f"LLM connectivity test failed: {e}")
-        raise RuntimeError("LLM provider is not reachable. Check configuration.")
+    # 1b. LLM connectivity probe — degrades, never aborts.
+    await _probe_llm(app)
 
     yield
     # 2. Shutdown: Everything after 'yield' runs on SHUTDOWN
@@ -114,24 +182,22 @@ app = FastAPI(
     lifespan=lifespan
 )
 
+app.add_middleware(JSONBodySizeLimitMiddleware)
+app.add_middleware(TrustedHostMiddleware, allowed_hosts=get_settings().allowed_hosts)
+# allow_credentials=True is only sound with an explicit origin list (plan §6),
+# hence CORS_ALLOWED_ORIGINS — never "*".
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://localhost:3000", "http://127.0.0.1:5173","*"],
+    allow_origins=get_settings().cors_allowed_origins,
+    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
-app.add_middleware(LoggingMiddleware)
+app.add_middleware(SecurityHeadersMiddleware)
+app.add_middleware(LoggingMiddleware)  # outermost: stamps the correlation ID first
 
-
-@app.exception_handler(Exception)
-async def global_exception_handler(request: Request, exc: Exception):
-    """Global exception handler with correlation ID support."""
-    correlation_id = getattr(request.state, "correlation_id", "unknown")
-    logger.error(f"Unhandled exception [{correlation_id}]: {exc}", exc_info=True)
-    return JSONResponse(
-        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-        content={"error": "Internal server error", "correlation_id": correlation_id},
-    )
+install_error_handlers(app)
+install_rate_limiter(app)
 
 
 # Persona API (hatch personas from user query)
@@ -667,9 +733,28 @@ if __name__=="__main__":
 
 @app.get("/health")
 async def health_check():
-    """Health check endpoint for monitoring."""
+    """Liveness: the process is up. Always 200 (plan §9)."""
     return {
         "status": "healthy",
         "version": "1.0",
         "active_jobs": len(RUNS),
     }
+
+
+@app.get("/ready")
+async def readiness_check(request: Request):
+    """Readiness: Postgres + Redis reachable and the LLM last probed OK.
+
+    503 (uniform error contract) tells the proxy to drop the replica from
+    rotation without restarting it; the LLM verdict is cached, so this costs at
+    most one bounded probe per ``_PROBE_CACHE_SECONDS``.
+    """
+    if not await _llm_healthy(request.app):
+        return error_response(
+            503, "service_unavailable", "LLM provider is not reachable.", request
+        )
+    if not await _postgres_ok():
+        return error_response(503, "service_unavailable", "Database is not reachable.", request)
+    if not await _redis_ok():
+        return error_response(503, "service_unavailable", "Cache is not reachable.", request)
+    return {"status": "ready"}

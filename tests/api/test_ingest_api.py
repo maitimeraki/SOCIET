@@ -5,6 +5,7 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from src.api.errors import install_error_handlers
 from src.api.ingest_api import router
 
 
@@ -13,6 +14,7 @@ def client():
     # FastAPI >=0.135 requires the app-level AsyncExitStack middleware; a bare
     # router lacks it ("fastapi_middleware_astack not found in request scope").
     app = FastAPI()
+    install_error_handlers(app)
     app.include_router(router)
     return TestClient(app)
 
@@ -151,7 +153,10 @@ def test_url_fetch_failure_is_502(client, monkeypatch):
 def test_url_http_error_is_502_with_code(client, monkeypatch):
     monkeypatch.setattr("requests.get", lambda *args, **kwargs: _FakeResponse(403, ""))
     response = client.post("/api/ingest/url", json={"url": "https://example.com/secret"})
-    assert response.json()["detail"] == "Download failed: HTTP 403"
+    error = response.json()["error"]
+    assert error["message"] == "Download failed: HTTP 403"
+    # 502 is outside the status→code map, so it keeps the generic code.
+    assert error["code"] == "http_error"
 
 
 def test_api_server_registers_ingest_routes():

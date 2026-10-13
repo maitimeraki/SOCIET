@@ -18,6 +18,7 @@ from httpx import ASGITransport, AsyncClient
 
 from src.api.auth_api import router as auth_router
 from src.api.auth_api import ws_ticket_router
+from src.api.errors import install_error_handlers
 from src.auth import service
 from src.auth.cookies import CSRF_COOKIE, CSRF_HEADER
 from src.config.settings import get_settings
@@ -33,6 +34,7 @@ requires_db = pytest.mark.skipif(not os.getenv("DATABASE_URL"), reason="DATABASE
 PASSWORD = "hunter2hunter2"
 
 _app = FastAPI()
+install_error_handlers(_app)  # the uniform error contract, as on the real app
 _app.include_router(auth_router)
 _app.include_router(ws_ticket_router)
 
@@ -129,6 +131,8 @@ async def test_signup_sets_session_and_csrf_cookies(db):
 
 @pytest.mark.asyncio
 async def test_signup_validation_errors_are_422():
+    # Pre-existing: needs DATABASE_URL. `get_db` resolves before the body is
+    # validated, so with no session factory the request 500s before the 422.
     async with _client() as client:
         short_password = await client.post(
             "/api/v1/auth/signup", json={"email": _email(), "password": "short"}
@@ -188,9 +192,11 @@ async def test_wrong_password_and_unknown_email_are_indistinguishable(db):
         unknown_email = await _login(client, _email(), "totally-wrong")
 
     assert wrong_password.status_code == unknown_email.status_code == 401
-    assert wrong_password.json() == unknown_email.json() == {
-        "detail": "Email or password is incorrect."
-    }
+    for response in (wrong_password, unknown_email):
+        # The uniform error contract (plan §6); the bodies stay indistinguishable.
+        error = response.json()["error"]
+        assert error["code"] == "unauthorized"
+        assert error["message"] == "Email or password is incorrect."
 
 
 @requires_db

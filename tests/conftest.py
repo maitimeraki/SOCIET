@@ -6,6 +6,15 @@ every test a fresh event loop, and a pooled async connection cannot be reused
 across loops.
 """
 
+import os
+
+# The suite must never trip a rate limit, and every ASGI test client shares the
+# 127.0.0.1 bucket. Set before any app import (conftest loads first; the limits
+# are read per request via get_settings(), which is lru_cached).
+os.environ.setdefault("RATE_LIMIT_LOGIN", "1000/minute")
+os.environ.setdefault("RATE_LIMIT_SIGNUP", "10000/hour")
+os.environ.setdefault("RATE_LIMIT_DEBATE_ENQUEUE", "10000/hour")
+
 import pytest_asyncio
 from sqlalchemy import delete
 
