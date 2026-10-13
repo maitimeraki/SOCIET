@@ -61,11 +61,28 @@ def clear_csrf_cookie(response: Response) -> None:
     )
 
 
+def _tokens_match(header_token: str, cookie_token: str) -> bool:
+    """Timing-safe comparison at the byte level.
+
+    Our tokens are url-safe base64 (ASCII only). A non-ASCII value — both sides
+    are client-controlled — fails closed: ``secrets.compare_digest`` raises
+    TypeError on non-ASCII str, which would surface as a 500.
+    """
+    try:
+        return secrets.compare_digest(
+            header_token.encode("ascii"), cookie_token.encode("ascii")
+        )
+    except UnicodeEncodeError:
+        return False
+
+
 async def verify_csrf(request: Request) -> None:
     """Double-submit check (plan §3) for state-changing requests.
 
     With a csrf cookie present, the X-CSRF-Token header must match it. Without
-    one, only the signup/login entry points pass; everything else is 403.
+    one, only the signup/login entry points pass and a request carrying a
+    session cookie is 403; a request with no session at all falls through to
+    the endpoint's own auth (401), since there is no session to protect.
     """
     if request.method not in _STATE_CHANGING:
         return
@@ -74,8 +91,10 @@ async def verify_csrf(request: Request) -> None:
     if not cookie_token:
         if request.url.path in CSRF_EXEMPT_PATHS:
             return
-        raise HTTPException(status_code=403, detail="CSRF token missing or invalid.")
+        if request.cookies.get(SESSION_COOKIE):
+            raise HTTPException(status_code=403, detail="CSRF token missing or invalid.")
+        return
 
     header_token = request.headers.get(CSRF_HEADER)
-    if not header_token or not secrets.compare_digest(header_token, cookie_token):
+    if not header_token or not _tokens_match(header_token, cookie_token):
         raise HTTPException(status_code=403, detail="CSRF token missing or invalid.")

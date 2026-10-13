@@ -31,3 +31,13 @@ async def db():
     async with factory() as session:
         await _purge(session)
     await get_engine().dispose()
+
+
+@pytest_asyncio.fixture
+async def redis_reset():
+    """Close the cached Redis client after the test so the next test's fresh
+    event loop does not reuse a pool bound to a dead loop."""
+    from src.auth import service
+
+    yield
+    await service.close_redis()

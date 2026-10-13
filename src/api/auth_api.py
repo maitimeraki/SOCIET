@@ -16,11 +16,18 @@ from src.auth.cookies import (
     verify_csrf,
 )
 from src.auth.deps import cookie_session_id, current_user, require_owner
+from src.config.settings import get_settings
 from src.db.engine import get_db
 from src.db.models import User, UserSession
 
 router = APIRouter(
     prefix="/api/v1/auth", tags=["auth"], dependencies=[Depends(verify_csrf)]
+)
+
+# POST /api/v1/ws-ticket sits outside the /auth prefix (plan §3: the auth
+# surface owns minting; the WS handshake redeems it in Task 4).
+ws_ticket_router = APIRouter(
+    prefix="/api/v1", tags=["auth"], dependencies=[Depends(verify_csrf)]
 )
 
 
@@ -53,6 +60,11 @@ class SessionOut(BaseModel):
     last_seen_at: datetime.datetime
     user_agent: str | None
     ip: str | None
+
+
+class WsTicketOut(BaseModel):
+    ticket: str
+    expires_in: int
 
 
 def _client_ip(request: Request) -> str | None:
@@ -162,3 +174,11 @@ async def revoke_session(
         raise HTTPException(status_code=404, detail="Not found.")
     await require_owner(row.user_id, user)
     await service.revoke_session(db, row)
+
+
+@ws_ticket_router.post("/ws-ticket", response_model=WsTicketOut)
+async def create_ws_ticket(user: User = Depends(current_user)) -> WsTicketOut:
+    """Mint a fresh single-use ticket for the WebSocket handshake (R4)."""
+    ttl = get_settings().ws_ticket_ttl_seconds
+    ticket = await service.issue_ws_ticket(user.id, ttl_seconds=ttl)
+    return WsTicketOut(ticket=ticket, expires_in=ttl)

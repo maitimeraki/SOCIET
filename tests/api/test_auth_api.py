@@ -17,7 +17,10 @@ from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 
 from src.api.auth_api import router as auth_router
+from src.api.auth_api import ws_ticket_router
+from src.auth import service
 from src.auth.cookies import CSRF_COOKIE, CSRF_HEADER
+from src.config.settings import get_settings
 from src.db.models import UserSession
 
 if sys.platform == "win32":
@@ -31,6 +34,7 @@ PASSWORD = "hunter2hunter2"
 
 _app = FastAPI()
 _app.include_router(auth_router)
+_app.include_router(ws_ticket_router)
 
 
 def _client() -> AsyncClient:
@@ -75,6 +79,7 @@ def test_auth_router_is_mounted_on_the_app():
         "/api/v1/auth/password",
         "/api/v1/auth/sessions",
         "/api/v1/auth/sessions/{session_id}",
+        "/api/v1/ws-ticket",
     } <= paths
 
 
@@ -92,6 +97,10 @@ def test_router_exposes_exactly_the_specified_paths():
     methods = {route.path: route.methods for route in auth_router.routes}
     assert "POST" in methods["/api/v1/auth/signup"]
     assert "DELETE" in methods["/api/v1/auth/sessions/{session_id}"]
+
+    ws_paths = {route.path for route in ws_ticket_router.routes}
+    assert ws_paths == {"/api/v1/ws-ticket"}
+    assert "POST" in next(iter(ws_ticket_router.routes)).methods
 
 
 # --- account lifecycle -------------------------------------------------------
@@ -330,8 +339,42 @@ async def test_csrf_required_on_state_changing_requests(db):
         mismatched = await client.post(
             "/api/v1/auth/logout", headers={CSRF_HEADER: "not-the-cookie"}
         )
+        # Raw latin-1 byte 0xE9: the header reaches the app as a non-ASCII str.
+        non_ascii = await client.post(
+            "/api/v1/auth/logout", headers={b"X-CSRF-Token": b"\xe9"}
+        )
         accepted = await client.post("/api/v1/auth/logout", headers=_csrf(client))
 
     assert missing.status_code == 403
     assert mismatched.status_code == 403
+    assert non_ascii.status_code == 403
     assert accepted.status_code == 204
+
+
+# --- WebSocket tickets -------------------------------------------------------
+
+
+@requires_db
+@pytest.mark.asyncio
+async def test_ws_ticket_issue_is_single_use(db, redis_reset):
+    async with _client() as client:
+        await _signup(client, _email())
+        me = await client.get("/api/v1/auth/me")
+        response = await client.post("/api/v1/ws-ticket", headers=_csrf(client))
+
+    assert response.status_code == 200
+    body = response.json()
+    assert set(body) == {"ticket", "expires_in"}
+    assert body["expires_in"] == get_settings().ws_ticket_ttl_seconds
+
+    user_id = await service.redeem_ws_ticket(body["ticket"])
+    assert user_id == uuid.UUID(me.json()["id"])
+    assert await service.redeem_ws_ticket(body["ticket"]) is None
+
+
+@requires_db
+@pytest.mark.asyncio
+async def test_ws_ticket_requires_a_session(db):
+    async with _client() as client:
+        response = await client.post("/api/v1/ws-ticket")
+    assert response.status_code == 401

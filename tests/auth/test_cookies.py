@@ -18,13 +18,15 @@ def _response() -> Response:
 def _request(
     method: str, path: str, *, cookies_: dict | None = None, headers: dict | None = None
 ) -> Request:
+    # Header values travel as raw bytes and are decoded latin-1, so encode the
+    # same way to reach the request with exactly the string a client sent.
     raw_headers = []
     if cookies_:
         raw_headers.append(
-            (b"cookie", "; ".join(f"{k}={v}" for k, v in cookies_.items()).encode())
+            (b"cookie", "; ".join(f"{k}={v}" for k, v in cookies_.items()).encode("latin-1"))
         )
     for key, value in (headers or {}).items():
-        raw_headers.append((key.lower().encode(), value.encode()))
+        raw_headers.append((key.lower().encode(), value.encode("latin-1")))
     return Request(
         {
             "type": "http",
@@ -94,13 +96,28 @@ async def test_safe_methods_pass_without_a_token():
 
 
 @pytest.mark.asyncio
-async def test_state_changing_request_without_a_csrf_cookie_is_403_outside_the_exempt_list():
+async def test_session_without_a_csrf_cookie_is_403_outside_the_exempt_list():
+    session_cookie = {"sid": str(uuid.uuid4())}
+
     with pytest.raises(HTTPException) as excinfo:
-        await cookies.verify_csrf(_request("POST", "/api/v1/auth/logout"))
+        await cookies.verify_csrf(
+            _request("POST", "/api/v1/auth/logout", cookies_=session_cookie)
+        )
     assert excinfo.value.status_code == 403
 
-    await cookies.verify_csrf(_request("POST", "/api/v1/auth/signup"))
-    await cookies.verify_csrf(_request("POST", "/api/v1/auth/login"))
+    await cookies.verify_csrf(
+        _request("POST", "/api/v1/auth/signup", cookies_=session_cookie)
+    )
+    await cookies.verify_csrf(
+        _request("POST", "/api/v1/auth/login", cookies_=session_cookie)
+    )
+
+
+@pytest.mark.asyncio
+async def test_state_changing_request_with_no_session_passes_the_csrf_layer():
+    # Nothing to protect: the endpoint's own auth dependency answers 401.
+    await cookies.verify_csrf(_request("POST", "/api/v1/auth/logout"))
+    await cookies.verify_csrf(_request("POST", "/api/v1/ws-ticket"))
 
 
 @pytest.mark.asyncio
@@ -117,6 +134,31 @@ async def test_missing_or_mismatched_header_is_403_once_a_csrf_cookie_exists():
             )
         )
     assert missing.value.status_code == mismatched.value.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_non_ascii_tokens_are_403_not_500():
+    # secrets.compare_digest raises TypeError on non-ASCII str; both values are
+    # client-controlled, so the check must fail closed.
+    with pytest.raises(HTTPException) as non_ascii_header:
+        await cookies.verify_csrf(
+            _request(
+                "POST",
+                "/api/v1/auth/logout",
+                cookies_={"csrf": "tok"},
+                headers={"X-CSRF-Token": "é"},
+            )
+        )
+    with pytest.raises(HTTPException) as non_ascii_both:
+        await cookies.verify_csrf(
+            _request(
+                "POST",
+                "/api/v1/auth/logout",
+                cookies_={"csrf": "é"},
+                headers={"X-CSRF-Token": "é"},
+            )
+        )
+    assert non_ascii_header.value.status_code == non_ascii_both.value.status_code == 403
 
 
 @pytest.mark.asyncio
