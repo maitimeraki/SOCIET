@@ -14,6 +14,7 @@ stubbed `read_snapshot`) so no cross-thread queue access is involved.
 import asyncio
 import threading
 import uuid
+from types import SimpleNamespace
 
 import pytest
 from fastapi import FastAPI, WebSocketDisconnect
@@ -23,6 +24,25 @@ import src.api.graph_snapshot as graph_snapshot
 from src.api import api_server, graph_stream
 from src.api.graph_stream import GraphDelta
 from src.api.graph_stream_api import _drain_queued, router
+
+# Every run these tests register belongs to this (fake) caller.
+_WS_USER = SimpleNamespace(id=uuid.uuid4())
+
+
+@pytest.fixture(autouse=True)
+def _ws_authenticated(monkeypatch):
+    """These tests are about streaming, not the handshake: authenticate every
+    connection as the run's owner. The handshake guard — refusal, single-use
+    ticket, ownership — is covered against the real session path in test_guards.py."""
+
+    async def _user(_websocket):
+        return _WS_USER
+
+    monkeypatch.setattr("src.api.graph_stream_api.websocket_user", _user)
+
+
+def _register_run(job_id: str, status: str, result: dict) -> None:
+    api_server.RUNS[job_id] = {"user_id": str(_WS_USER.id), "status": status, "result": result}
 
 
 def _app() -> FastAPI:
@@ -62,7 +82,7 @@ def _clean_runs():
 
 def test_first_frame_is_snapshot_then_deltas_vocabulary_and_done(monkeypatch):
     job_id = f"ws-{uuid.uuid4()}"
-    api_server.RUNS[job_id] = {"status": "running", "result": {"dataset_id": "ds-1"}}
+    _register_run(job_id, "running", {"dataset_id": "ds-1"})
 
     def _emit_after_subscribe() -> None:
         # Runs on the app loop 50ms after the snapshot is read, i.e. after the
@@ -108,7 +128,7 @@ def test_first_frame_is_snapshot_then_deltas_vocabulary_and_done(monkeypatch):
 def test_late_client_after_completion_gets_snapshot_then_done(monkeypatch):
     """R14: the sentinel-only path would strand this client forever."""
     job_id = f"ws-{uuid.uuid4()}"
-    api_server.RUNS[job_id] = {"status": "completed", "result": {"dataset_id": "ds-done"}}
+    _register_run(job_id, "completed", {"dataset_id": "ds-done"})
 
     async def fake_snapshot(dataset_id: str) -> GraphDelta:
         assert dataset_id == "ds-done"
@@ -167,7 +187,7 @@ def test_delta_published_during_the_snapshot_window_is_delivered_once(monkeypatc
     not lost in the read→subscribe gap — and de-duplicated against the snapshot so a
     node carried by both is delivered exactly once."""
     job_id = f"ws-{uuid.uuid4()}"
-    api_server.RUNS[job_id] = {"status": "running", "result": {"dataset_id": "ds-gap"}}
+    _register_run(job_id, "running", {"dataset_id": "ds-gap"})
 
     async def fake_snapshot(dataset_id: str) -> GraphDelta:
         assert dataset_id == "ds-gap"
@@ -212,8 +232,15 @@ class _DisconnectingWS:
     when a client closes during the snapshot window (reload, StrictMode remount,
     navigation). No receive side is reached — the route returns before streaming."""
 
+    def __init__(self) -> None:
+        self.accepted = False
+        self.closed: int | None = None
+
     async def accept(self) -> None:
-        pass
+        self.accepted = True
+
+    async def close(self, code: int = 1000, reason: str | None = None) -> None:
+        self.closed = code
 
     async def send_json(self, payload: dict) -> None:
         raise WebSocketDisconnect(code=1006)
@@ -226,7 +253,7 @@ async def test_disconnect_during_snapshot_window_does_not_escape_the_route(monke
     (uvicorn logged a full `Exception in ASGI application`). The route must absorb it
     and return cleanly, dropping the subscription."""
     job_id = f"ws-{uuid.uuid4()}"
-    api_server.RUNS[job_id] = {"status": "running", "result": {"dataset_id": "ds-gone"}}
+    _register_run(job_id, "running", {"dataset_id": "ds-gone"})
 
     async def fake_snapshot(dataset_id: str) -> GraphDelta:
         return GraphDelta(nodes=[], edges=[], new_labels=[])
@@ -238,11 +265,34 @@ async def test_disconnect_during_snapshot_window_does_not_escape_the_route(monke
 
 
 @pytest.mark.asyncio
-async def test_disconnect_on_unknown_job_done_send_does_not_escape():
-    """Same class of hang-up on the other pre-stream send: the `done` frame for a
-    job with no dataset. That send sits outside the streaming try, so it needs the
-    guard too."""
-    job_id = f"ws-{uuid.uuid4()}"  # never registered: _job_state -> ("failed", None)
+async def test_unknown_job_is_refused_before_accept():
+    """An id that maps to no run — ownable by nobody — is refused at the
+    handshake (4404) and never accepted, let alone streamed to."""
+    job_id = f"ws-{uuid.uuid4()}"  # never registered
+    from src.api.graph_stream_api import stream_graph
+
+    ws = _DisconnectingWS()
+    await stream_graph(ws, job_id)  # must return, not raise
+
+    assert ws.accepted is False
+    assert ws.closed == 4404
+
+
+@pytest.mark.asyncio
+async def test_disconnect_on_done_send_for_a_job_without_a_dataset_does_not_escape(
+    monkeypatch,
+):
+    """Same class of hang-up on the other pre-stream send: the `done` frame for an
+    owned job with no dataset. That send sits outside the streaming try, so it
+    needs the guard too."""
+    job_id = f"ws-{uuid.uuid4()}"
+    # Owned, terminal, and no dataset: a failure before the dataset was known.
+    _register_run(job_id, "failed", {})
+
+    async def fake_snapshot(dataset_id: str) -> GraphDelta:  # pragma: no cover
+        raise AssertionError("no snapshot may be read for a dataset-less job")
+
+    monkeypatch.setattr(graph_snapshot, "read_snapshot", fake_snapshot)
     from src.api.graph_stream_api import stream_graph
 
     await stream_graph(_DisconnectingWS(), job_id)  # must return, not raise
@@ -267,7 +317,7 @@ async def test_snapshot_read_failure_is_reported_and_does_not_escape(monkeypatch
     snapshot — must not escape as an ASGI exception (the HTTP global handler does
     not cover WebSockets). It is reported as an `error` frame, then `done`."""
     job_id = f"ws-{uuid.uuid4()}"
-    api_server.RUNS[job_id] = {"status": "running", "result": {"dataset_id": "ds-boom"}}
+    _register_run(job_id, "running", {"dataset_id": "ds-boom"})
 
     async def boom(dataset_id: str) -> GraphDelta:
         raise RuntimeError("neo4j unreachable")

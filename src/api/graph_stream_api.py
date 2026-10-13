@@ -21,9 +21,10 @@ import logging
 from dataclasses import replace
 from typing import Optional
 
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
 
 from src.api import graph_snapshot, graph_stream
+from src.auth.deps import require_owner, websocket_user
 
 router = APIRouter(tags=["graph"])
 
@@ -35,8 +36,8 @@ _POLL_INTERVAL_S = 0.25
 _DRAIN_GRACE_S = 0.1
 
 
-async def _job_state(job_id: str) -> tuple[str, Optional[str]]:
-    """(status, dataset_id) for a run — memory first, then the persisted run.
+async def _job_run(job_id: str) -> Optional[dict]:
+    """The run dict for a job — memory first, then the persisted run.
 
     Mirrors `api_server._ontology_from_run`: a job no longer in `RUNS` (server
     restarted, or evicted) is read back from its runtime JSON. Lazy import — the
@@ -52,6 +53,12 @@ async def _job_state(job_id: str) -> tuple[str, Optional[str]]:
                 run = json.loads(await asyncio.to_thread(path.read_text, "utf-8"))
             except (OSError, ValueError):
                 run = None
+    return run
+
+
+async def _job_state(job_id: str) -> tuple[str, Optional[str]]:
+    """(status, dataset_id) for a run."""
+    run = await _job_run(job_id)
     if run is None:
         return "failed", None
     result = run.get("result") or {}
@@ -208,6 +215,20 @@ async def _stream(
 
 @router.websocket("/simulate/{job_id}/graph_stream")
 async def stream_graph(websocket: WebSocket, job_id: str):
+    # Authenticate before `accept()` (R4): a live sid cookie or a one-time
+    # ``?ticket=``; then the job must be the caller's. Nothing is streamed to an
+    # unauthenticated or non-owner socket.
+    user = await websocket_user(websocket)
+    if user is None:
+        await websocket.close(code=4401, reason="Authentication required")
+        return
+    run = await _job_run(job_id)
+    try:
+        await require_owner((run or {}).get("user_id"), user)
+    except HTTPException:
+        await websocket.close(code=4404, reason="Job not found")
+        return
+
     await websocket.accept()
 
     # Resolve the dataset from the run, waiting out a queued job.

@@ -9,10 +9,14 @@ from dataclasses import asdict
 from datetime import datetime, timezone
 from typing import Dict, Any, List, Literal, Optional
 
-from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, Depends, HTTPException, Request, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel, Field
 
 from src.api import run_doc
+from src.api.limits import limiter, service_available
+from src.auth.deps import current_user, require_owner, websocket_user
+from src.config.settings import get_settings
+from src.db.models import User
 from src.simulation.debate_config import DebateConfig
 
 
@@ -328,6 +332,7 @@ async def _persist_debate_run(job_id: str) -> None:
             _LAST_PERSIST_AT[job_id] = now
         doc = {
             "run_id": job_id,
+            "user_id": job.get("user_id"),
             "created_at": job.get("created_at"),
             "query": job.get("query"),
             "dataset_id": job.get("graph_id"),
@@ -342,35 +347,42 @@ async def _persist_debate_run(job_id: str) -> None:
 
 
 @router.post("/debate", response_model=DebateJobResponse, status_code=202)
-async def create_debate(request: DebateRequest):
+@limiter.limit(lambda: get_settings().rate_limit_debate_enqueue)
+async def create_debate(
+    body: DebateRequest,
+    request: Request,
+    user: User = Depends(current_user),
+    _available: None = Depends(service_available),
+):
     """
     Start a new debate simulation.
 
     Returns a job_id for polling status or WebSocket streaming.
     """
-    if not request.query or not request.query.strip():
+    if not body.query or not body.query.strip():
         raise HTTPException(status_code=400, detail="query is required")
 
     job_id = str(uuid.uuid4())
     config = DebateConfig(
-        max_agents=request.config.max_agents,
-        max_rounds=request.config.max_rounds,
-        comm_radius=request.config.comm_radius,
-        min_entity_overlap=request.config.min_entity_overlap,
-        max_pairs_per_round=request.config.max_pairs_per_round,
-        convergence_threshold=request.config.convergence_threshold,
-        llm_concurrency=request.config.llm_concurrency,
-        topology_score_threshold=request.config.topology_score_threshold,
-        max_new_agents_per_round=request.config.max_new_agents_per_round,
-        snapshot_top_k=request.config.snapshot_top_k,
+        max_agents=body.config.max_agents,
+        max_rounds=body.config.max_rounds,
+        comm_radius=body.config.comm_radius,
+        min_entity_overlap=body.config.min_entity_overlap,
+        max_pairs_per_round=body.config.max_pairs_per_round,
+        convergence_threshold=body.config.convergence_threshold,
+        llm_concurrency=body.config.llm_concurrency,
+        topology_score_threshold=body.config.topology_score_threshold,
+        max_new_agents_per_round=body.config.max_new_agents_per_round,
+        snapshot_top_k=body.config.snapshot_top_k,
     )
 
     async with _DEBATE_JOBS_LOCK:
         _DEBATE_JOBS[job_id] = {
             "job_id": job_id,
+            "user_id": str(user.id),
             "status": "queued",
-            "query": request.query,
-            "graph_id": request.graph_id,
+            "query": body.query,
+            "graph_id": body.graph_id,
             "config": asdict(config),
             "created_at": datetime.now(timezone.utc).isoformat(),
             "result": None,
@@ -380,30 +392,32 @@ async def create_debate(request: DebateRequest):
     # Start background task
     asyncio.create_task(_run_debate_async(
         job_id=job_id,
-        query=request.query,
-        graph_id=request.graph_id,
+        query=body.query,
+        graph_id=body.graph_id,
         config=config,
-        selected_domains=request.selected_domains,
-        simulation_depth=request.simulation_depth,
-        context=request.context,
+        selected_domains=body.selected_domains,
+        simulation_depth=body.simulation_depth,
+        context=body.context,
     ))
 
     return DebateJobResponse(job_id=job_id, status="queued")
 
 
 @router.get("/debates")
-async def list_debates():
+async def list_debates(user: User = Depends(current_user)):
     """Newest-first run summaries for the history views (§12.4)."""
     live = set(_DEBATE_JOBS.keys())
     docs = await asyncio.to_thread(run_doc.list_run_docs)
-    return [_summarize_run_doc(doc, live) for doc in docs]
+    owned = [doc for doc in docs if str(doc.get("user_id")) == str(user.id)]
+    return [_summarize_run_doc(doc, live) for doc in owned]
 
 
 @router.get("/debates/{run_id}")
-async def get_debate_doc(run_id: str):
+async def get_debate_doc(run_id: str, user: User = Depends(current_user)):
     doc = await asyncio.to_thread(run_doc.read_run_doc, run_id)
     if doc is None:
         raise HTTPException(status_code=404, detail="Run not found")
+    await require_owner(doc.get("user_id"), user)
     return doc
 
 
@@ -433,7 +447,7 @@ def _summarize_run_doc(doc: dict, live: set[str]) -> dict:
 
 
 @router.get("/{job_id}", response_model=DebateStatusResponse)
-async def get_debate_status(job_id: str):
+async def get_debate_status(job_id: str, user: User = Depends(current_user)):
     """
     Get debate simulation status and result.
     """
@@ -442,6 +456,7 @@ async def get_debate_status(job_id: str):
 
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
+    await require_owner(job.get("user_id"), user)
 
     return _job_to_status_response(job_id, job)
 
@@ -450,18 +465,27 @@ async def get_debate_status(job_id: str):
 async def stream_debate(websocket: WebSocket, job_id: str):
     """
     WebSocket endpoint to stream debate rounds in real-time.
-    """
-    # Accept before any close: ASGI servers drop a pre-accept close code, so the
-    # 4004 rejection below only reaches the client on an accepted connection.
-    await websocket.accept()
 
-    # Verify job exists
+    Authenticated before `accept()` (R4): a live sid cookie or a one-time
+    ``?ticket=``; then the job must be the caller's. Failures close the
+    handshake with a policy code and nothing is ever streamed.
+    """
+    user = await websocket_user(websocket)
+    if user is None:
+        await websocket.close(code=4401, reason="Authentication required")
+        return
+
     async with _DEBATE_JOBS_LOCK:
         job = _DEBATE_JOBS.get(job_id)
-        if not job:
-            await websocket.close(code=4004, reason="Job not found")
-            return
+    try:
+        await require_owner((job or {}).get("user_id"), user)
+    except HTTPException:
+        await websocket.close(code=4404, reason="Job not found")
+        return
 
+    await websocket.accept()
+
+    async with _DEBATE_JOBS_LOCK:
         ws_manager = job.get("ws_manager")
         if ws_manager is None:
             # Job not started yet, create a new manager. The outer lock is

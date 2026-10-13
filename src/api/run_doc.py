@@ -3,6 +3,10 @@
 The file is the durable mirror of the live in-memory job; it is rewritten as
 the run broadcasts (throttled per run — see `debate_api._persist_debate_run`),
 so a hard crash loses at most the events since the last write.
+
+Every doc carries ``user_id`` — the creating user's id, as a string (R14).
+Docs written before guards landed have no ``user_id``; they are legacy and
+ownership checks treat them as NOT FOUND until Task 5's backfill.
 """
 import json
 import logging

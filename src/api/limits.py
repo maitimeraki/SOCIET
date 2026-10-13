@@ -17,7 +17,9 @@ from src.config.settings import get_settings
 
 # Process-local limits, keyed by client IP. A shared Redis store is the swap
 # for multi-replica deployments (plan §6).
-limiter = Limiter(key_func=get_remote_address)
+# key_style="endpoint": the bucket scope is the handler, not the path — so the
+# legacy and /api/v1 mounts of one route share a budget instead of doubling it.
+limiter = Limiter(key_func=get_remote_address, key_style="endpoint")
 
 
 class JSONBodySizeLimitMiddleware(BaseHTTPMiddleware):

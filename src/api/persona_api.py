@@ -1,14 +1,18 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from typing import List, Optional
 
+from src.auth.deps import current_user
+from src.db.models import User
 from src.graph.config_graph import GraphConfig
 from src.persona.agent import Agent
 from src.persona.repository import PersonaRepository
 from src.logging.setup_logging import setup_logging
 
 
-router = APIRouter(prefix="/api/personas", tags=["personas"])
+# Mounted twice by `api_server`: prefix "/api" keeps today's /api/personas/hatch
+# alias; "/api/v1" is the canonical surface (R15).
+router = APIRouter(prefix="/personas", tags=["personas"])
 logger = setup_logging()
 
 
@@ -18,7 +22,7 @@ class HatchRequest(BaseModel):
 
 
 @router.post("/hatch", response_model=List[dict])
-async def hatch_personas(req: HatchRequest):
+async def hatch_personas(req: HatchRequest, user: User = Depends(current_user)):
     """Hatch agents from a natural-language query.
 
     Returns the canonical Agent model (bio, stance, confidence, conviction,

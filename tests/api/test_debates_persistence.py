@@ -1,6 +1,8 @@
 """Run-document persistence + the /simulate/debates routes (route order guarded)."""
 import json
 import time
+import uuid
+from types import SimpleNamespace
 
 import pytest
 from fastapi import FastAPI
@@ -9,6 +11,12 @@ from fastapi.testclient import TestClient
 import src.api.debate_api as debate_api
 import src.api.run_doc as run_doc
 from src.api.debate_api import _DEBATE_JOBS, _DEBATE_JOBS_LOCK, _DebateWSManager, _persist_debate_run, router
+from src.auth.deps import current_user
+
+# The store's owner: every doc these tests write belongs to this (fake) caller.
+# These tests are about persistence/routing, not auth — the guards themselves
+# are covered against the real session path in test_guards.py.
+STORE_USER = SimpleNamespace(id=uuid.uuid4())
 
 
 @pytest.fixture
@@ -41,7 +49,8 @@ def fake_clock(monkeypatch):
 
 def _register_job(run_id: str, manager: _DebateWSManager, status: str = "running") -> None:
     _DEBATE_JOBS[run_id] = {
-        "job_id": run_id, "status": status, "query": "q", "graph_id": "ds-1",
+        "job_id": run_id, "user_id": str(STORE_USER.id), "status": status,
+        "query": "q", "graph_id": "ds-1",
         "config": {"max_rounds": 2}, "created_at": "2026-10-02T10:00:00+00:00",
         "result": None, "error": None, "ws_manager": manager,
     }
@@ -56,12 +65,20 @@ def client():
     """Real app wrapper: a bare router cannot serve requests (FastAPI >=0.135)."""
     app = FastAPI()
     app.include_router(router)
+    app.dependency_overrides[current_user] = lambda: STORE_USER
     return TestClient(app)
 
 
-def _doc(run_id: str, created_at: str, status: str = "complete", result: dict | None = None) -> dict:
+def _doc(
+    run_id: str,
+    created_at: str,
+    status: str = "complete",
+    result: dict | None = None,
+    user_id: str | None = str(STORE_USER.id),
+) -> dict:
     return {
         "run_id": run_id,
+        "user_id": user_id,
         "created_at": created_at,
         "query": f"question {run_id}",
         "dataset_id": "ds-1",
@@ -142,7 +159,8 @@ async def test_persist_debate_run_mirrors_the_live_job(store_dir):
     manager = _DebateWSManager()
     async with _DEBATE_JOBS_LOCK:
         _DEBATE_JOBS["job-x"] = {
-            "job_id": "job-x", "status": "running", "query": "q", "graph_id": "ds-1",
+            "job_id": "job-x", "user_id": str(STORE_USER.id), "status": "running",
+            "query": "q", "graph_id": "ds-1",
             "config": {"max_rounds": 2}, "created_at": "2026-10-02T10:00:00+00:00",
             "result": None, "error": None, "ws_manager": manager,
         }
@@ -152,6 +170,8 @@ async def test_persist_debate_run_mirrors_the_live_job(store_dir):
         doc = run_doc.read_run_doc("job-x")
         assert doc["events"][0]["stage"] == "intake"
         assert doc["status"] == "running"
+        # R14: the creator's id rides the doc, so ownership survives a restart.
+        assert doc["user_id"] == str(STORE_USER.id)
     finally:
         async with _DEBATE_JOBS_LOCK:
             _DEBATE_JOBS.pop("job-x", None)

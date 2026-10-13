@@ -6,9 +6,12 @@ these assertions fail under the retired fixed character windows.
 import asyncio
 import json
 import logging
+import uuid
+from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
+from fastapi import HTTPException
 
 import src.api.api_server as api_server
 from src.api.api_server import _chunk_documents
@@ -394,13 +397,13 @@ async def test_raising_worker_cancels_its_siblings(monkeypatch):
 @pytest.mark.asyncio
 async def test_get_job_degrades_on_a_corrupt_runtime_file(tmp_path, monkeypatch):
     """A crash mid-`_persist_run` leaves invalid JSON. The job read must degrade to
-    the same not-found shape `_job_state` and `_ontology_from_run` already use, not
-    raise out of the endpoint."""
+    not-found — never raise out of the endpoint, and never answer as if the doc
+    existed (ownership cannot be established for it)."""
     monkeypatch.setattr(api_server, "_RUNS_RUNTIME_DIR", tmp_path)
     api_server.RUNS.pop("job-corrupt", None)
     (tmp_path / "job-corrupt.json").write_text("{not json", encoding="utf-8")
 
-    result = await api_server.get_job("job-corrupt")
+    with pytest.raises(HTTPException) as exc:
+        await api_server.get_job("job-corrupt", user=SimpleNamespace(id=uuid.uuid4()))
 
-    assert result["status"] == "failed"
-    assert result["stage"] == "not_found"
+    assert exc.value.status_code == 404

@@ -5,12 +5,14 @@ import asyncio
 import json
 import uuid
 from dataclasses import asdict
+from types import SimpleNamespace
 
 import pytest
 from unittest.mock import AsyncMock, patch, MagicMock
 from fastapi import FastAPI, WebSocketDisconnect
 from fastapi.testclient import TestClient
 
+from src.auth.deps import current_user
 from src.api.debate_api import (
     router,
     create_debate,
@@ -36,6 +38,9 @@ from src.simulation.debate_config import DebateConfig
 from src.simulation.pair_turn import CommPair, DebateVerdict, RoundResult
 
 
+_ROUTE_USER = SimpleNamespace(id=uuid.uuid4())
+
+
 @pytest.fixture
 def client():
     """Create test client.
@@ -43,9 +48,14 @@ def client():
     FastAPI >=0.135 requires the app-level AsyncExitStack middleware; a bare
     router lacks it ("fastapi_middleware_astack not found in request scope"),
     so the previous `TestClient(router)` could not serve a request at all.
+
+    These tests are about routing, not auth, so `current_user` is overridden
+    with a fixed caller; the guards themselves are covered by
+    tests/api/test_guards.py against the real session path.
     """
     app = FastAPI()
     app.include_router(router)
+    app.dependency_overrides[current_user] = lambda: _ROUTE_USER
     return TestClient(app)
 
 
@@ -58,8 +68,8 @@ class TestRoutesThroughTheApp:
     def test_queued_job_status_is_reported(self, client):
         job_id = f"route-{uuid.uuid4()}"
         _DEBATE_JOBS[job_id] = {
-            "job_id": job_id, "status": "queued", "query": "q",
-            "graph_id": "ds1", "config": {}, "result": None, "error": None,
+            "job_id": job_id, "user_id": str(_ROUTE_USER.id), "status": "queued",
+            "query": "q", "graph_id": "ds1", "config": {}, "result": None, "error": None,
         }
         try:
             response = client.get(f"/simulate/{job_id}")
@@ -737,17 +747,18 @@ class TestSimulationDepthGate:
         # just the verdict object.
         assert job["result"]["provenance_by_claim"]["Steel tariffs"][0]["title"] == "Trade Report"
 
-    @pytest.mark.asyncio
-    async def test_create_debate_threads_the_requested_depth_to_the_job(self):
+    def test_create_debate_threads_the_requested_depth_to_the_job(self, client):
         with patch("src.api.debate_api._run_debate_async", new=AsyncMock()) as runner:
-            response = await create_debate(
-                DebateRequest(query="Should we tax carbon?", simulation_depth="deep")
+            response = client.post(
+                "/simulate/debate",
+                json={"query": "Should we tax carbon?", "simulation_depth": "deep"},
             )
-            await asyncio.sleep(0)  # let the scheduled job task start
+        job_id = response.json()["job_id"]
         try:
+            assert response.status_code == 202
             assert runner.call_args.kwargs["simulation_depth"] == "deep"
         finally:
-            _DEBATE_JOBS.pop(response.job_id, None)
+            _DEBATE_JOBS.pop(job_id, None)
 
 
 async def _run_with_result(job_id: str, result: OrchestratedDebateResult):
@@ -861,6 +872,9 @@ class _DisconnectingWSStub:
     async def accept(self):
         self.accepted = True
 
+    async def close(self, code=1000, reason=None):
+        pass
+
     async def receive_text(self):
         raise WebSocketDisconnect()
 
@@ -868,15 +882,27 @@ class _DisconnectingWSStub:
         pass
 
 
+@pytest.fixture
+def ws_authenticated(monkeypatch):
+    """These tests are about the stream, not the handshake: authenticate every
+    connection as the job's owner. The handshake itself — cookie/ticket, refusal,
+    ownership — is covered against the real session path in test_guards.py."""
+
+    async def _user(_websocket):
+        return _ROUTE_USER
+
+    monkeypatch.setattr("src.api.debate_api.websocket_user", _user)
+
+
 class TestManagerlessJobStream:
     """Re-review obs #1: a client on a job with no manager must not deadlock."""
 
     @pytest.mark.asyncio
-    async def test_managerless_job_registers_a_manager_and_returns(self):
+    async def test_managerless_job_registers_a_manager_and_returns(self, ws_authenticated):
         job_id = f"ws-{uuid.uuid4()}"
         _DEBATE_JOBS[job_id] = {
-            "job_id": job_id, "status": "queued", "query": "q",
-            "graph_id": "ds1", "config": {}, "result": None, "error": None,
+            "job_id": job_id, "user_id": str(_ROUTE_USER.id), "status": "queued",
+            "query": "q", "graph_id": "ds1", "config": {}, "result": None, "error": None,
         }
         ws = _DisconnectingWSStub()
         try:

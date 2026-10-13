@@ -1,5 +1,7 @@
 """Ingest API tests: extraction shapes, per-file failures, url fetch."""
 import io
+import uuid
+from types import SimpleNamespace
 
 import pytest
 from fastapi import FastAPI
@@ -7,15 +9,22 @@ from fastapi.testclient import TestClient
 
 from src.api.errors import install_error_handlers
 from src.api.ingest_api import router
+from src.auth.deps import current_user
+
+_INGEST_USER = SimpleNamespace(id=uuid.uuid4())
 
 
 @pytest.fixture
 def client():
     # FastAPI >=0.135 requires the app-level AsyncExitStack middleware; a bare
     # router lacks it ("fastapi_middleware_astack not found in request scope").
+    # Mounted with the legacy "/api" prefix, exactly as api_server does.
     app = FastAPI()
     install_error_handlers(app)
-    app.include_router(router)
+    app.include_router(router, prefix="/api")
+    # These tests are about extraction, not auth; the guard itself is covered
+    # against the real session path in test_guards.py.
+    app.dependency_overrides[current_user] = lambda: _INGEST_USER
     return TestClient(app)
 
 
@@ -163,4 +172,5 @@ def test_api_server_registers_ingest_routes():
     from src.api.api_server import app
 
     paths = {route.path for route in app.routes}
-    assert "/api/ingest/files" in paths
+    # Both mounts: the legacy alias and the canonical /api/v1 surface (R15).
+    assert {"/api/ingest/files", "/api/v1/ingest/files"} <= paths

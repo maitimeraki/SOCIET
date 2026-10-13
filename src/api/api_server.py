@@ -13,9 +13,11 @@ from src.logging.setup_logging import setup_logging
 from src.api.errors import error_response, install_error_handlers
 from src.api.limits import JSONBodySizeLimitMiddleware, install_rate_limiter
 from src.api.middleware import LoggingMiddleware, SecurityHeadersMiddleware
+from src.auth.deps import current_user, require_owner
 from src.config.settings import get_settings
 from src.db.engine import get_engine
-from fastapi import FastAPI, BackgroundTasks, HTTPException, status, Request
+from src.db.models import User
+from fastapi import APIRouter, FastAPI, BackgroundTasks, Depends, HTTPException, status, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from typing import TYPE_CHECKING, List, Dict, Optional, AsyncGenerator, Any, Set
@@ -200,25 +202,32 @@ install_error_handlers(app)
 install_rate_limiter(app)
 
 
-# Persona API (hatch personas from user query)
+# R15: each router is mounted twice — the legacy alias keeps today's exact
+# path; `/api/v1` is the canonical surface. Both mounts share the route
+# functions, so the guards on them cover both.
 from src.api.persona_api import router as persona_router
-app.include_router(persona_router)
-# Debate API
 from src.api.debate_api import router as debate_router
-app.include_router(debate_router)
-
-# Ingest API (documents → GlobalInputDocument payloads)
 from src.api.ingest_api import router as ingest_router
-app.include_router(ingest_router)
-
-# Graph streaming API (live build progress over WebSocket)
 from src.api.graph_stream_api import router as graph_stream_router
-app.include_router(graph_stream_router)
+from src.api.auth_api import router as auth_router, ws_ticket_router
+
+app.include_router(persona_router, prefix="/api")     # /api/personas/hatch
+app.include_router(debate_router)                     # /simulate/*
+app.include_router(ingest_router, prefix="/api")      # /api/ingest/*
+app.include_router(graph_stream_router)               # WS /simulate/{id}/graph_stream
+
+app.include_router(persona_router, prefix="/api/v1")  # /api/v1/personas/hatch
+app.include_router(debate_router, prefix="/api/v1")   # /api/v1/simulate/*
+app.include_router(ingest_router, prefix="/api/v1")   # /api/v1/ingest/*
+app.include_router(graph_stream_router, prefix="/api/v1")  # WS /api/v1/simulate/{id}/graph_stream
 
 # Auth API (accounts, sessions, CSRF) under /api/v1/auth
-from src.api.auth_api import router as auth_router, ws_ticket_router
 app.include_router(auth_router)
 app.include_router(ws_ticket_router)
+
+# Unified graph jobs (ontology / build_graph / normalize_graph / jobs). The
+# router is populated at the bottom of this module, so it is mounted there.
+simulate_router = APIRouter(prefix="/simulate", tags=["simulate"])
 
 
 RUNS: Dict[str, Dict[str, Any]] = {}
@@ -609,11 +618,16 @@ async def _execute_unified_job(
         if normalization_stage is not None:
             await normalization_stage.close()
 
-@app.post("/simulate/ontology", status_code=status.HTTP_202_ACCEPTED)
-async def discover_ontology_async(dataset_id: str, documents: List[GlobalInputDocument]):
+@simulate_router.post("/ontology", status_code=status.HTTP_202_ACCEPTED)
+async def discover_ontology_async(
+    dataset_id: str,
+    documents: List[GlobalInputDocument],
+    user: User = Depends(current_user),
+):
     job_id = str(uuid.uuid4())
     run = {
         "job_id": job_id,
+        "user_id": str(user.id),
         "mode": "ontology",
         "status": "queued",
         "progress": 0.0,
@@ -628,15 +642,17 @@ async def discover_ontology_async(dataset_id: str, documents: List[GlobalInputDo
     asyncio.create_task(_execute_unified_job(job_id, "ontology", dataset_id, documents))
     return {"job_id": job_id, "status": "queued", "message": "Ontology job accepted."}
 
-@app.post("/simulate/build_graph", status_code=status.HTTP_202_ACCEPTED)
+@simulate_router.post("/build_graph", status_code=status.HTTP_202_ACCEPTED)
 async def build_graph_async(
     dataset_id: str,
     documents: List[GlobalInputDocument],
     ontology_job_id: Optional[str] = None,
+    user: User = Depends(current_user),
 ):
     job_id = str(uuid.uuid4())
     run = {
         "job_id": job_id,
+        "user_id": str(user.id),
         "mode": "build_graph",
         "status": "queued",
         "progress": 0.0,
@@ -653,23 +669,24 @@ async def build_graph_async(
     )
     return {"job_id": job_id, "status": "queued", "message": "Build graph job accepted."}
 
-@app.get("/simulate/jobs/{job_id}")
-async def get_job(job_id: str):
+@simulate_router.get("/jobs/{job_id}")
+async def get_job(job_id: str, user: User = Depends(current_user)):
     async with _RUNS_LOCK:
         run = RUNS.get(job_id)
-        if run:
-            return run
-
-    # `_persist_run` writes non-atomically, so a crash mid-write leaves invalid
-    # JSON; degrade to the same not-found shape `_job_state` uses rather than
-    # letting the read raise out of the endpoint.
-    path = _RUNS_RUNTIME_DIR / f"{job_id}.json"
-    try:
-        payload = await asyncio.to_thread(path.read_text, "utf-8")
-        return json.loads(payload)
-    except (OSError, ValueError) as exc:
-        logger.warning(f"Could not read job {job_id} from runtime file ({exc})")
-        return {"job_id": job_id, "status": "failed", "stage": "not_found", "error": "job id not found"}
+    if run is None:
+        # `_persist_run` writes non-atomically, so a crash mid-write leaves
+        # invalid JSON; that reads as "not found" — as does a doc with no owner
+        # (legacy, R14) — never as a different user's job.
+        path = _RUNS_RUNTIME_DIR / f"{job_id}.json"
+        try:
+            run = json.loads(await asyncio.to_thread(path.read_text, "utf-8"))
+        except (OSError, ValueError) as exc:
+            logger.warning(f"Could not read job {job_id} from runtime file ({exc})")
+            run = None
+    if run is None:
+        raise HTTPException(status_code=404, detail="Job not found")
+    await require_owner(run.get("user_id"), user)
+    return run
 
 
 @app.post("/simulate/async", status_code=status.HTTP_202_ACCEPTED)
@@ -688,11 +705,16 @@ async def create_simulation(query: UserQuery, background_tasks: BackgroundTasks)
     )
 
 
-@app.post('/simulate/normalize_graph', status_code=status.HTTP_202_ACCEPTED)
-async def normalize_graph(dataset_id: str, background_tasks: BackgroundTasks):
+@simulate_router.post('/normalize_graph', status_code=status.HTTP_202_ACCEPTED)
+async def normalize_graph(
+    dataset_id: str,
+    background_tasks: BackgroundTasks,
+    user: User = Depends(current_user),
+):
     job_id = str(uuid.uuid4())
     run = {
         "job_id": job_id,
+        "user_id": str(user.id),
         "mode": "normalize_graph",
         "status": "queued",
         "progress": 0.0,
@@ -724,6 +746,12 @@ async def normalize_graph(dataset_id: str, background_tasks: BackgroundTasks):
 
     asyncio.create_task(_normalize())
     return {"job_id": job_id, "status": "queued", "message": "Graph normalization job accepted."}
+
+
+# The unified-job routes above are all registered on `simulate_router` now:
+# mount it bare (legacy `/simulate/*`) and under `/api/v1` (R15).
+app.include_router(simulate_router)
+app.include_router(simulate_router, prefix="/api/v1")
 
 
 if __name__=="__main__":
