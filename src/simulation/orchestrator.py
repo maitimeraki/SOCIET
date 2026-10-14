@@ -77,6 +77,14 @@ class SocietyNotDebatableError(RuntimeError):
         self.warnings: list[str] = list(warnings) if warnings else []
 
 
+class DebateCancelled(RuntimeError):
+    """The owner cancelled the run — a terminal `cancelled`, not a failure.
+
+    Raised from the round loop when the job's ``cancel_check`` reports the flag;
+    the job boundary maps it to the cancelled row instead of marking it failed.
+    """
+
+
 @dataclass
 class OrchestratedDebateResult:
     """Result from orchestrated debate."""
@@ -143,6 +151,7 @@ class DebateOrchestrator:
         on_stage: Optional[StageEmitter] = None,
         distill: bool = False,
         context: Optional[dict] = None,
+        cancel_check: Optional[Callable[[], bool]] = None,
     ) -> OrchestratedDebateResult:
         """
         Run the full debate pipeline with WebSocket streaming.
@@ -166,6 +175,12 @@ class DebateOrchestrator:
         `context` is the optional user-supplied scenario context (a JSON-safe
         dict); it is serialized into the verdict prompt so the answer weighs the
         user's own constraints, not only the agents' arguments.
+
+        `cancel_check` is the owner's cancel flag, read at each round boundary
+        (and so between the LLM batches those rounds run). ``None`` — the
+        default — never cancels, so existing callers are unaffected; a True
+        reading raises `DebateCancelled`, which the job boundary records as the
+        run's terminal `cancelled` state.
         """
         warnings: list[str] = []
         all_turns: list = []
@@ -214,6 +229,12 @@ class DebateOrchestrator:
         query_hash = hashlib.sha256(query.encode("utf-8")).hexdigest()[:16]
 
         for round_num in range(1, config.max_rounds + 1):
+            # Outside the try: a cancelled run is terminal, not a round failure
+            # to be collected into `warnings` and continued past.
+            if cancel_check is not None and cancel_check():
+                raise DebateCancelled(
+                    f"debate cancelled after {len(rounds)} round(s)"
+                )
             try:
                 warnings_before = len(warnings)
 

@@ -34,7 +34,19 @@ class Settings(BaseSettings):
     rate_limit_signup: str = "10/hour"
     rate_limit_debate_enqueue: str = "20/hour"
 
-    @field_validator("cors_allowed_origins", "allowed_hosts", mode="before")
+    # --- Job queue (plan §5). ``rq`` dispatches to the Redis-backed worker
+    # (Task 8's compose); ``inline`` runs the same task in-process — the dev
+    # fallback on Windows, where RQ's fork-based workers cannot run.
+    queue_mode: Literal["rq", "inline"] = "rq"
+    job_timeout_debate_seconds: int = 1800
+    job_timeout_graph_seconds: int = 900
+    max_jobs_per_user: int = 3
+    job_retry_max: int = 2
+    job_retry_intervals: Annotated[list[int], NoDecode] = [30, 120]
+
+    @field_validator(
+        "cors_allowed_origins", "allowed_hosts", "job_retry_intervals", mode="before"
+    )
     @classmethod
     def _split_comma_separated(cls, value: object) -> object:
         if isinstance(value, str):

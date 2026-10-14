@@ -7,12 +7,13 @@ import time
 import uuid
 from dataclasses import asdict
 from datetime import datetime, timezone
-from typing import Dict, Any, List, Literal, Optional
+from typing import Callable, Dict, Any, List, Literal, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel, Field
 
 from src.api import run_doc
+from src.api.jobs_api import enqueue_or_http
 from src.api.limits import limiter, service_available
 from src.auth.deps import current_user, require_owner, websocket_user
 from src.config.settings import get_settings
@@ -110,6 +111,29 @@ def _job_doc(job: dict) -> dict:
     }
 
 
+async def _ensure_live_job(job_id: str) -> dict:
+    """The live entry for a job this process did not create, seeded from its rows.
+
+    The worker runs the task in its own process, where the dict is empty; the
+    rows are the truth, so the live entry is rebuilt from them rather than
+    assumed present.
+    """
+    doc = await run_doc.read_run_doc(job_id)
+    if doc is None:
+        return {}
+    return {
+        "job_id": job_id,
+        "user_id": doc.get("user_id"),
+        "status": doc.get("status") or "queued",
+        "query": doc.get("query"),
+        "graph_id": doc.get("dataset_id"),
+        "config": doc.get("config") or {},
+        "created_at": doc.get("created_at"),
+        "result": doc.get("result"),
+        "error": doc.get("error"),
+    }
+
+
 async def _run_debate_async(
     job_id: str,
     query: str,
@@ -118,8 +142,11 @@ async def _run_debate_async(
     selected_domains: Optional[List[str]] = None,
     simulation_depth: str = "standard",
     context: Optional[dict] = None,
+    cancel_check: Optional[Callable[[], bool]] = None,
 ) -> None:
     """Background task to run debate and stream results via WebSocket."""
+    from src.simulation.orchestrator import DebateCancelled
+
     # Reuse the manager the job already holds: a client that connected before
     # the task started created and stored one (`stream_debate`), and replacing
     # it would silently drop that client from the S9 stage-event stream.
@@ -130,8 +157,11 @@ async def _run_debate_async(
 
     try:
         async with _DEBATE_JOBS_LOCK:
-            _DEBATE_JOBS[job_id]["status"] = "running"
-            _DEBATE_JOBS[job_id]["ws_manager"] = ws_manager
+            job = _DEBATE_JOBS.get(job_id)
+            if job is None:
+                job = _DEBATE_JOBS[job_id] = await _ensure_live_job(job_id)
+            job["status"] = "running"
+            job["ws_manager"] = ws_manager
 
         await _persist_debate_run(job_id)  # written at job start, events empty (§12.4)
 
@@ -190,6 +220,7 @@ async def _run_debate_async(
                 intent=intent,
                 distill=distill,
                 context=context,
+                cancel_check=cancel_check,
             )
 
         # S9: this layer owns the intent extraction, so it reports the
@@ -247,14 +278,22 @@ async def _run_debate_async(
             "evidence": result.evidence,
         })
 
+    except DebateCancelled as exc:
+        # Cancelled is terminal, not failed: mark the live state and let the
+        # raise reach the job boundary, which owns the cancelled row write.
+        async with _DEBATE_JOBS_LOCK:
+            _DEBATE_JOBS.setdefault(job_id, {})["status"] = "cancelled"
+        await ws_manager.broadcast({"type": "cancelled", "error": str(exc)})
+        raise
+
     except Exception as exc:
         # A raise on the orchestrator's not-debatable paths carries the run's
         # accumulated warnings; surface them with the error (broadcast → buffered
         # → persisted) so a failed run does not lose its diagnostics.
         warnings = list(getattr(exc, "warnings", []) or [])
         async with _DEBATE_JOBS_LOCK:
-            _DEBATE_JOBS[job_id]["status"] = "failed"
-            _DEBATE_JOBS[job_id]["error"] = str(exc)
+            _DEBATE_JOBS.setdefault(job_id, {})["status"] = "failed"
+            _DEBATE_JOBS.setdefault(job_id, {})["error"] = str(exc)
 
         await ws_manager.broadcast({
             "type": "error",
@@ -370,7 +409,6 @@ async def create_debate(
     if not body.query or not body.query.strip():
         raise HTTPException(status_code=400, detail="query is required")
 
-    job_id = str(uuid.uuid4())
     config = DebateConfig(
         max_agents=body.config.max_agents,
         max_rounds=body.config.max_rounds,
@@ -382,6 +420,22 @@ async def create_debate(
         topology_score_threshold=body.config.topology_score_threshold,
         max_new_agents_per_round=body.config.max_new_agents_per_round,
         snapshot_top_k=body.config.snapshot_top_k,
+    )
+
+    # Durable at accept time: `enqueue` writes the queued rows before it
+    # dispatches, so the 202 always follows a row that exists.
+    job_id = await enqueue_or_http(
+        "debate",
+        {
+            "user_id": str(user.id),
+            "query": body.query,
+            "graph_id": body.graph_id,
+            "config": asdict(config),
+            "selected_domains": body.selected_domains,
+            "simulation_depth": body.simulation_depth,
+            "context": body.context,
+            "correlation_id": getattr(request.state, "correlation_id", None),
+        },
     )
 
     async with _DEBATE_JOBS_LOCK:
@@ -396,20 +450,6 @@ async def create_debate(
             "result": None,
             "error": None,
         }
-
-    # Durable at accept time: the queued run exists as rows before the 202.
-    await run_doc.write_run_doc(_job_doc(_DEBATE_JOBS[job_id]))
-
-    # Start background task
-    asyncio.create_task(_run_debate_async(
-        job_id=job_id,
-        query=body.query,
-        graph_id=body.graph_id,
-        config=config,
-        selected_domains=body.selected_domains,
-        simulation_depth=body.simulation_depth,
-        context=body.context,
-    ))
 
     return DebateJobResponse(job_id=job_id, status="queued")
 

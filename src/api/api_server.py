@@ -221,6 +221,7 @@ from src.api.debate_api import router as debate_router
 from src.api.ingest_api import router as ingest_router
 from src.api.graph_stream_api import router as graph_stream_router
 from src.api.auth_api import router as auth_router, ws_ticket_router
+from src.api.jobs_api import enqueue_or_http, router as jobs_router
 
 app.include_router(persona_router, prefix="/api")     # /api/personas/hatch
 app.include_router(debate_router)                     # /simulate/*
@@ -624,54 +625,101 @@ async def _execute_unified_job(
         if normalization_stage is not None:
             await normalization_stage.close()
 
+async def _ensure_run_slot(job_id: str, mode: str) -> None:
+    """The live RUNS entry for a job this process did not create.
+
+    `RUNS` is a live-process cache and the row is the truth: the same job
+    dispatched to the queue worker starts with an empty dict there.
+    """
+    async with _RUNS_LOCK:
+        if job_id in RUNS:
+            return
+        doc = await run_doc.read_job_doc(job_id) or {}
+        RUNS[job_id] = {
+            "job_id": job_id,
+            "user_id": doc.get("user_id"),
+            "mode": doc.get("mode") or mode,
+            "status": doc.get("status") or "queued",
+            "progress": doc.get("progress") or 0.0,
+            "stage": doc.get("stage") or "queued",
+            "error": doc.get("error"),
+            "result": doc.get("result"),
+        }
+
+
+async def run_graph_job(
+    job_id: str,
+    mode: str,
+    dataset_id: str,
+    documents: List[GlobalInputDocument],
+    ontology_job_id: Optional[str] = None,
+) -> None:
+    """Queue entrypoint for the unified graph jobs (ontology / build_graph)."""
+    await _ensure_run_slot(job_id, mode)
+    await _execute_unified_job(job_id, mode, dataset_id, documents, ontology_job_id=ontology_job_id)
+
+
+async def run_normalize_job(job_id: str, dataset_id: str) -> None:
+    """Queue entrypoint for graph normalization (was the route's inline closure).
+
+    Re-raises after the terminal write: the queue lifecycle owns the failure
+    verdict, and a swallowed exception would let it record the job as succeeded.
+    """
+    await _ensure_run_slot(job_id, "normalize_graph")
+    try:
+        cfg = GraphConfig()
+        normalization_stage = GraphNormalizationStage(cfg)
+        await normalization_stage.run(dataset_id=dataset_id)
+
+        async with _RUNS_LOCK:
+            RUNS[job_id]["status"] = "completed"
+            RUNS[job_id]["stage"] = "completed"
+            RUNS[job_id]["progress"] = 1.0
+            await _persist_run(job_id, RUNS[job_id])
+    except Exception as exc:
+        async with _RUNS_LOCK:
+            RUNS[job_id]["status"] = "failed"
+            RUNS[job_id]["stage"] = "failed"
+            RUNS[job_id]["error"] = str(exc)
+            await _persist_run(job_id, RUNS[job_id])
+        raise
+
+
 @simulate_router.post("/ontology", status_code=status.HTTP_202_ACCEPTED)
 async def discover_ontology_async(
     dataset_id: str,
     documents: List[GlobalInputDocument],
+    request: Request,
     user: User = Depends(current_user),
 ):
-    job_id = str(uuid.uuid4())
-    run = {
-        "job_id": job_id,
-        "user_id": str(user.id),
-        "mode": "ontology",
-        "status": "queued",
-        "progress": 0.0,
-        "stage": "queued",
-        "error": None,
-        "result": None,
-    }
-    async with _RUNS_LOCK:
-        RUNS[job_id] = run
-        await _persist_run(job_id, run)
-
-    asyncio.create_task(_execute_unified_job(job_id, "ontology", dataset_id, documents))
+    job_id = await enqueue_or_http(
+        "ontology",
+        {
+            "user_id": str(user.id),
+            "dataset_id": dataset_id,
+            "documents": [doc.model_dump(mode="json") for doc in documents],
+            "correlation_id": getattr(request.state, "correlation_id", None),
+        },
+    )
     return {"job_id": job_id, "status": "queued", "message": "Ontology job accepted."}
 
 @simulate_router.post("/build_graph", status_code=status.HTTP_202_ACCEPTED)
 async def build_graph_async(
     dataset_id: str,
     documents: List[GlobalInputDocument],
+    request: Request,
     ontology_job_id: Optional[str] = None,
     user: User = Depends(current_user),
 ):
-    job_id = str(uuid.uuid4())
-    run = {
-        "job_id": job_id,
-        "user_id": str(user.id),
-        "mode": "build_graph",
-        "status": "queued",
-        "progress": 0.0,
-        "stage": "queued",
-        "error": None,
-        "result": None,
-    }
-    async with _RUNS_LOCK:
-        RUNS[job_id] = run
-        await _persist_run(job_id, run)
-
-    asyncio.create_task(
-        _execute_unified_job(job_id, "build_graph", dataset_id, documents, ontology_job_id=ontology_job_id)
+    job_id = await enqueue_or_http(
+        "build_graph",
+        {
+            "user_id": str(user.id),
+            "dataset_id": dataset_id,
+            "documents": [doc.model_dump(mode="json") for doc in documents],
+            "ontology_job_id": ontology_job_id,
+            "correlation_id": getattr(request.state, "correlation_id", None),
+        },
     )
     return {"job_id": job_id, "status": "queued", "message": "Build graph job accepted."}
 
@@ -703,43 +751,17 @@ async def create_simulation(query: UserQuery, background_tasks: BackgroundTasks)
 @simulate_router.post('/normalize_graph', status_code=status.HTTP_202_ACCEPTED)
 async def normalize_graph(
     dataset_id: str,
-    background_tasks: BackgroundTasks,
+    request: Request,
     user: User = Depends(current_user),
 ):
-    job_id = str(uuid.uuid4())
-    run = {
-        "job_id": job_id,
-        "user_id": str(user.id),
-        "mode": "normalize_graph",
-        "status": "queued",
-        "progress": 0.0,
-        "stage": "queued",
-        "error": None,
-        "result": None,
-    }
-    async with _RUNS_LOCK:
-        RUNS[job_id] = run
-        await _persist_run(job_id, run)
-
-    async def _normalize():
-        try:
-            cfg = GraphConfig()
-            normalization_stage = GraphNormalizationStage(cfg)
-            await normalization_stage.run(dataset_id=dataset_id)
-
-            async with _RUNS_LOCK:
-                RUNS[job_id]["status"] = "completed"
-                RUNS[job_id]["stage"] = "completed"
-                RUNS[job_id]["progress"] = 1.0
-                await _persist_run(job_id, RUNS[job_id])
-        except Exception as exc:
-            async with _RUNS_LOCK:
-                RUNS[job_id]["status"] = "failed"
-                RUNS[job_id]["stage"] = "failed"
-                RUNS[job_id]["error"] = str(exc)
-                await _persist_run(job_id, RUNS[job_id])
-
-    asyncio.create_task(_normalize())
+    job_id = await enqueue_or_http(
+        "normalize_graph",
+        {
+            "user_id": str(user.id),
+            "dataset_id": dataset_id,
+            "correlation_id": getattr(request.state, "correlation_id", None),
+        },
+    )
     return {"job_id": job_id, "status": "queued", "message": "Graph normalization job accepted."}
 
 
@@ -747,6 +769,11 @@ async def normalize_graph(
 # mount it bare (legacy `/simulate/*`) and under `/api/v1` (R15).
 app.include_router(simulate_router)
 app.include_router(simulate_router, prefix="/api/v1")
+
+# Job cancellation: `/api/v1/jobs/{id}` and the legacy `/simulate/jobs/{id}`
+# twin, next to the status route above.
+app.include_router(jobs_router, prefix="/api/v1")
+app.include_router(jobs_router, prefix="/simulate")
 
 
 if __name__=="__main__":

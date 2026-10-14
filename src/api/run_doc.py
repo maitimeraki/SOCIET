@@ -396,6 +396,73 @@ async def list_run_summaries(
     return {"items": items, "next_cursor": next_cursor}
 
 
+# --- job lifecycle (the queue's running/terminal transitions) ----------------
+
+async def set_job_status(
+    job_id: str,
+    status: str,
+    error: Optional[str] = None,
+    only_if_active: bool = False,
+) -> bool:
+    """Move a job's rows to ``status`` without touching the result payload.
+
+    The queue lifecycle owns the transitions (``running`` on start, the terminal
+    state on success/failure/cancel); the job body owns the result — so this
+    writes ``jobs.status``/``error``/timestamps plus the run's status only, never
+    ``runs.verdict``. Returns False for an unknown or non-uuid id.
+
+    ``only_if_active`` skips a row that already reached a terminal state: the
+    first terminal writer wins, so the lifecycle's success marker cannot
+    overwrite a body that already recorded a failure.
+    """
+    key = _as_uuid(job_id)
+    if key is None:
+        return False
+    now = _now()
+    terminal = status in TERMINAL_STATUSES
+    match = update(Job).where(Job.id == key)
+    if only_if_active:
+        match = match.where(Job.status.notin_(TERMINAL_STATUSES))
+    async with get_session_factory()() as session:
+        applied = await session.execute(
+            match.values(
+                status=status,
+                error=error,
+                started_at=func.coalesce(Job.started_at, now if status == "running" else None),
+                finished_at=func.coalesce(Job.finished_at, now if terminal else None),
+            )
+        )
+        if not applied.rowcount and only_if_active:
+            # The row is already terminal: leave the run's status alone too.
+            await session.commit()
+            return False
+        run = (
+            update(Run).where(Run.id == key).values(status=status)
+            if not terminal
+            else update(Run)
+            .where(Run.id == key)
+            .values(status=status, finished_at=func.coalesce(Run.finished_at, now))
+        )
+        await session.execute(run)
+        await session.commit()
+    return bool(applied.rowcount)
+
+
+async def count_active_jobs(user_id: uuid.UUID | str) -> int:
+    """Non-terminal jobs owned by a user, across every kind — the concurrency cap."""
+    owner = _as_uuid(user_id)
+    if owner is None:
+        return 0
+    async with get_session_factory()() as session:
+        return (
+            await session.execute(
+                select(func.count())
+                .select_from(Job)
+                .where(Job.user_id == owner, Job.status.notin_(TERMINAL_STATUSES))
+            )
+        ).scalar_one()
+
+
 # --- boot reconciliation -----------------------------------------------------
 
 

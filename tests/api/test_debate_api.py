@@ -4,6 +4,7 @@ Tests for Debate API endpoints.
 import asyncio
 import json
 import os
+import sys
 import uuid
 from dataclasses import asdict
 from types import SimpleNamespace
@@ -43,6 +44,9 @@ from src.persona.agent import (
 )
 from src.simulation.debate_config import DebateConfig
 from src.simulation.pair_turn import CommPair, DebateVerdict, RoundResult
+
+if sys.platform == "win32":
+    asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
 
 _ROUTE_USER = SimpleNamespace(id=uuid.uuid4())
@@ -804,20 +808,36 @@ class TestSimulationDepthGate:
 
     @requires_db
     @pytest.mark.asyncio
-    async def test_create_debate_threads_the_requested_depth_to_the_job(self, db_client, job_owner):
-        """202 only after the queued run exists as a row (accept-time durability)."""
-        with patch("src.api.debate_api._run_debate_async", new=AsyncMock()) as runner:
-            response = await db_client.post(
-                "/simulate/debate",
-                json={"query": "Should we tax carbon?", "simulation_depth": "deep"},
-            )
-        job_id = response.json()["job_id"]
+    async def test_create_debate_threads_the_requested_depth_to_the_job(
+        self, db_client, job_owner, monkeypatch
+    ):
+        """202 only after the queued run exists as a row (accept-time durability).
+
+        The dispatch is a background job now, so the depth reaches the run from
+        the queued payload: run it inline and drain before asserting.
+        """
+        from src.config.settings import get_settings
+        from src.jobs import queue as jobs_queue
+
+        monkeypatch.setenv("QUEUE_MODE", "inline")
+        get_settings.cache_clear()
+        job_id = None
         try:
-            assert response.status_code == 202
-            assert runner.call_args.kwargs["simulation_depth"] == "deep"
-            assert (await run_doc.read_run_head(job_id))["status"] == "queued"
+            with patch("src.api.debate_api._run_debate_async", new=AsyncMock()) as runner:
+                response = await db_client.post(
+                    "/simulate/debate",
+                    json={"query": "Should we tax carbon?", "simulation_depth": "deep"},
+                )
+                job_id = response.json()["job_id"]
+                assert (await run_doc.read_run_head(job_id))["status"] == "queued"
+                await jobs_queue.drain_inline()
         finally:
-            _DEBATE_JOBS.pop(job_id, None)
+            get_settings.cache_clear()
+            if job_id is not None:
+                _DEBATE_JOBS.pop(job_id, None)
+
+        assert response.status_code == 202
+        assert runner.call_args.kwargs["simulation_depth"] == "deep"
 
 
 async def _run_with_result(job_id: str, result: OrchestratedDebateResult):
