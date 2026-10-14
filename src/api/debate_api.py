@@ -19,12 +19,16 @@ from fastapi import (
     WebSocketDisconnect,
 )
 from pydantic import BaseModel, Field
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.api import run_doc
 from src.api.jobs_api import enqueue_or_http
 from src.api.limits import limiter, service_available
+from src.audit import client_ip
+from src.audit import record as audit_record
 from src.auth.deps import current_user, require_owner, websocket_user
 from src.config.settings import get_settings
+from src.db.engine import get_db
 from src.db.models import User
 from src.simulation.debate_config import DebateConfig
 
@@ -428,6 +432,7 @@ async def create_debate(
     body: DebateRequest,
     request: Request,
     user: User = Depends(current_user),
+    db: AsyncSession = Depends(get_db),
     _available: None = Depends(service_available),
 ):
     """
@@ -480,6 +485,9 @@ async def create_debate(
             "error": None,
         }
 
+    await audit_record(
+        db, "run_create", user_id=user.id, target=job_id, ip=client_ip(request)
+    )
     return DebateJobResponse(job_id=job_id, status="queued")
 
 

@@ -47,3 +47,36 @@ def get_upload(key: str) -> IO[bytes]:
 def delete_upload(key: str) -> None:
     """Remove one object — the rollback when an enqueue is refused."""
     _client().delete_object(Bucket=get_settings().s3_bucket, Key=key)
+
+
+def put_bytes(key: str, data: bytes) -> str:
+    """Store ``data`` under an explicit key (account exports); return the key."""
+    _client().put_object(Bucket=get_settings().s3_bucket, Key=key, Body=data)
+    return key
+
+
+def presigned_url(key: str, ttl_seconds: int) -> str:
+    """A short-lived GET URL for one object (generated at read time, §12)."""
+    return _client().generate_presigned_url(
+        "get_object",
+        Params={"Bucket": get_settings().s3_bucket, "Key": key},
+        ExpiresIn=ttl_seconds,
+    )
+
+
+def delete_prefix(prefix: str) -> int:
+    """Delete every object under ``prefix`` — account delete (plan §12).
+
+    Paginated list + batched delete: an account's objects are all under
+    ``<user_id>/``, so one prefix sweep clears them. Returns the count removed.
+    """
+    client = _client()
+    bucket = get_settings().s3_bucket
+    removed = 0
+    paginator = client.get_paginator("list_objects_v2")
+    for page in paginator.paginate(Bucket=bucket, Prefix=prefix):
+        keys = [{"Key": obj["Key"]} for obj in page.get("Contents", [])]
+        if keys:
+            client.delete_objects(Bucket=bucket, Delete={"Objects": keys})
+            removed += len(keys)
+    return removed

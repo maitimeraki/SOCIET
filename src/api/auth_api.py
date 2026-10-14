@@ -8,6 +8,7 @@ from pydantic import BaseModel, ConfigDict, EmailStr, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.api.limits import limiter
+from src.audit import record as audit_record
 from src.auth import service
 from src.auth.cookies import (
     clear_csrf_cookie,
@@ -120,6 +121,7 @@ async def login(
     )
     set_session_cookie(response, session.id)
     set_csrf_cookie(response)
+    await audit_record(db, "login", user_id=user.id, ip=_client_ip(request))
     return UserOut.model_validate(user)
 
 
@@ -135,6 +137,7 @@ async def logout(
         await service.logout(db, sid)
     clear_session_cookie(response)
     clear_csrf_cookie(response)
+    await audit_record(db, "logout", user_id=user.id, ip=_client_ip(request))
 
 
 @router.get("/me", response_model=UserOut)
@@ -156,6 +159,7 @@ async def change_password(
         body.new_password,
         keep_session_id=cookie_session_id(request),
     )
+    await audit_record(db, "password_change", user_id=user.id, ip=_client_ip(request))
 
 
 @router.get("/sessions", response_model=list[SessionOut])
@@ -169,6 +173,7 @@ async def list_sessions(
 @router.delete("/sessions/{session_id}", status_code=204)
 async def revoke_session(
     session_id: uuid.UUID,
+    request: Request,
     user: User = Depends(current_user),
     db: AsyncSession = Depends(get_db),
 ) -> None:
@@ -177,11 +182,23 @@ async def revoke_session(
         raise HTTPException(status_code=404, detail="Not found.")
     await require_owner(row.user_id, user)
     await service.revoke_session(db, row)
+    await audit_record(
+        db,
+        "session_revoke",
+        user_id=user.id,
+        target=str(session_id),
+        ip=_client_ip(request),
+    )
 
 
 @ws_ticket_router.post("/ws-ticket", response_model=WsTicketOut)
-async def create_ws_ticket(user: User = Depends(current_user)) -> WsTicketOut:
+async def create_ws_ticket(
+    request: Request,
+    user: User = Depends(current_user),
+    db: AsyncSession = Depends(get_db),
+) -> WsTicketOut:
     """Mint a fresh single-use ticket for the WebSocket handshake (R4)."""
     ttl = get_settings().ws_ticket_ttl_seconds
     ticket = await service.issue_ws_ticket(user.id, ttl_seconds=ttl)
+    await audit_record(db, "ws_ticket_issue", user_id=user.id, ip=_client_ip(request))
     return WsTicketOut(ticket=ticket, expires_in=ttl)

@@ -29,7 +29,7 @@ from src.api.config_api import (
 from src.api.errors import error_response, install_error_handlers
 from src.api.limits import JSONBodySizeLimitMiddleware, install_rate_limiter
 from src.api.middleware import LoggingMiddleware, SecurityHeadersMiddleware
-from src.auth.deps import current_user, require_owner
+from src.auth.deps import current_user
 from src.config.settings import get_settings
 from src.db.engine import get_engine
 from src.db.models import User
@@ -794,11 +794,11 @@ async def build_graph_async(
 
 @simulate_router.get("/jobs/{job_id}")
 async def get_job(job_id: str, user: User = Depends(current_user)):
-    run = await run_doc.read_job_doc(job_id)
-    if run is None:
-        raise HTTPException(status_code=404, detail="Job not found")
-    await require_owner(run.get("user_id"), user)
-    return run
+    # The one status implementation lives in `jobs_api` (also mounted as
+    # `/api/v1/jobs/{id}`); this keeps the legacy `/simulate/jobs/{id}` twin.
+    from src.api.jobs_api import get_job_status
+
+    return await get_job_status(job_id, user)
 
 
 @app.post("/simulate/async", status_code=status.HTTP_202_ACCEPTED)
@@ -847,6 +847,11 @@ app.include_router(simulate_router, prefix="/api/v1")
 # twin, next to the status route above.
 app.include_router(jobs_router, prefix="/api/v1")
 app.include_router(jobs_router, prefix="/simulate")
+
+# Account lifecycle (delete/export) — new surface, v1-only (R15).
+from src.api.account_api import router as account_router
+
+app.include_router(account_router)
 
 
 if __name__ == "__main__":

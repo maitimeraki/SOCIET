@@ -19,6 +19,8 @@ from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.api.jobs_api import enqueue_or_http
+from src.audit import client_ip
+from src.audit import record as audit_record
 from src.auth.deps import current_user
 from src.config.settings import get_settings
 from src.db.engine import get_db
@@ -168,6 +170,9 @@ async def ingest_files(
     except Exception:
         await _discard_staged(db, object_keys)
         raise
+    await audit_record(
+        db, "upload", user_id=user.id, target=job_id, ip=client_ip(request)
+    )
     return {"job_id": job_id, "status": "queued"}
 
 
@@ -203,6 +208,9 @@ async def ingest_url(
             "url": request.url,
             "correlation_id": getattr(http_request.state, "correlation_id", None),
         },
+    )
+    await audit_record(
+        db, "upload", user_id=user.id, target=job_id, ip=client_ip(http_request)
     )
     return {"job_id": job_id, "status": "queued"}
 

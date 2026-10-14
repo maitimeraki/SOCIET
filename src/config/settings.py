@@ -69,6 +69,10 @@ class Settings(BaseSettings):
     extract_timeout_seconds: int = 30
     extract_max_output_bytes: int = 5_000_000
 
+    # --- Account lifecycle (plan §12): how long an export's presigned download
+    # URL stays valid. Short by design — the URL is minted per read.
+    export_url_ttl_seconds: int = 900
+
     @field_validator(
         "cors_allowed_origins", "allowed_hosts", "job_retry_intervals", mode="before"
     )
