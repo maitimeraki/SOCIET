@@ -48,3 +48,34 @@ def test_distinct_uploads_do_not_collide(s3):
     storage.put_upload("user-1", "b", b"second")
     with storage.get_upload("user-1/b") as body:
         assert body.read() == b"second"
+
+
+def test_client_is_constructed_with_the_configured_endpoint(monkeypatch):
+    """Cover the line that routes uploads to MinIO rather than real AWS.
+
+    Independent of moto (which only intercepts the default endpoint): stub
+    ``boto3.client`` and assert the endpoint + credentials come from settings.
+    """
+    from src.config.settings import get_settings
+
+    captured: dict[str, object] = {}
+
+    def fake_client(service, **kwargs):
+        captured["service"] = service
+        captured.update(kwargs)
+        return object()
+
+    monkeypatch.setattr(storage.boto3, "client", fake_client)
+    storage._client.cache_clear()
+    try:
+        storage._client()
+    finally:
+        storage._client.cache_clear()
+
+    settings = get_settings()
+    assert captured["service"] == "s3"
+    assert captured["endpoint_url"] == "http://127.0.0.1:9000"
+    assert captured["endpoint_url"] == settings.s3_endpoint_url
+    assert captured["aws_access_key_id"] == settings.s3_access_key
+    assert captured["aws_secret_access_key"] == settings.s3_secret_key
+    assert captured["region_name"] == settings.s3_region
