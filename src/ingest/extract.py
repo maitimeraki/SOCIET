@@ -24,9 +24,70 @@ class ExtractionError(ValueError):
         self.status_code = status_code
 
 
+class IngestValidationError(ExtractionError):
+    """An upload that fails format validation (mismatched or spoofed type).
+
+    Distinct from `ExtractionError` so the route layer can map it onto the
+    uniform 422 contract *before* any storage or extraction happens.
+    """
+
+
 def _extension(filename: str) -> str:
     dot = filename.rfind(".")
     return filename[dot:].lower() if dot >= 0 else ""
+
+
+# The extension is only a hint: `validate_upload` confirms the bytes match it.
+_KIND_BY_EXTENSION = {
+    ".pdf": "pdf",
+    ".docx": "docx",
+    ".md": "text",
+    ".markdown": "text",
+    ".txt": "text",
+}
+_TEXT_SAMPLE_BYTES = 8192
+
+
+def _looks_like_text(data: bytes) -> bool:
+    """UTF-8/ASCII heuristic over the sampled head: decodes and has no NUL."""
+    sample = data[:_TEXT_SAMPLE_BYTES]
+    if b"\x00" in sample:
+        return False
+    try:
+        sample.decode("utf-8")
+    except UnicodeDecodeError:
+        return False
+    return True
+
+
+def sniff_kind(data: bytes) -> str:
+    """Classify bytes by content: 'pdf', 'docx', 'text', or 'unknown'."""
+    if data[:5] == b"%PDF-":
+        return "pdf"
+    if data[:4] == b"PK\x03\x04":  # zip container (docx)
+        return "docx"
+    if _looks_like_text(data):
+        return "text"
+    return "unknown"
+
+
+def validate_upload(filename: str, data: bytes) -> str:
+    """Validate one upload's bytes against its extension; return the kind.
+
+    Raises `IngestValidationError` when the extension is outside the allowlist
+    or the content does not match it (a PDF renamed .txt is rejected, and so
+    on). Pure stdlib — no libmagic.
+    """
+    extension = _extension(filename)
+    expected = _KIND_BY_EXTENSION.get(extension)
+    if expected is None:
+        raise IngestValidationError(f"Unsupported file type ({extension or filename})")
+    kind = sniff_kind(data)
+    if kind != expected:
+        raise IngestValidationError(
+            f"File contents do not match the {extension} extension"
+        )
+    return kind
 
 
 def _document(
