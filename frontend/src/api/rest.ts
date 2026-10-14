@@ -9,8 +9,16 @@ import type {
   RunSummary,
 } from './types'
 import type { ConsensusInfo } from '../run/events'
+import { apiBase, apiBaseError } from '../config/env'
 
-export const API_BASE: string = import.meta.env.VITE_API_BASE ?? 'http://127.0.0.1:8000'
+export const API_BASE: string = apiBase ?? ''
+
+export class ConfigError extends Error {
+  constructor(detail: string) {
+    super(detail)
+    this.name = 'ConfigError'
+  }
+}
 
 export class ApiError extends Error {
   status: number
@@ -31,6 +39,9 @@ export class NetworkError extends Error {
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  // apiBaseError is non-null exactly when apiBase is null: fail recoverably at call time rather than
+  // fetching a bare path that would silently hit the static host. `''` (same-origin) passes through.
+  if (apiBaseError !== null) throw new ConfigError(apiBaseError)
   let response: Response
   try {
     response = await fetch(`${API_BASE}${path}`, init)

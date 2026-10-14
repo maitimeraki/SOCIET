@@ -3,6 +3,8 @@ import { NetworkError, health, ingestFiles } from './rest'
 
 afterEach(() => {
   vi.unstubAllGlobals()
+  vi.unstubAllEnvs()
+  vi.resetModules()
 })
 
 describe('rest client', () => {
@@ -28,5 +30,17 @@ describe('rest client', () => {
     await ingestFiles([new File(['hello'], 'notes.txt')])
     const body = fetchMock.mock.calls[0][1].body as FormData
     expect((body.get('files') as File).name).toBe('notes.txt')
+  })
+
+  it('short-circuits with a recoverable ConfigError when VITE_API_BASE is unset', async () => {
+    vi.stubEnv('VITE_API_BASE', undefined)
+    vi.resetModules()
+    const fetchMock = vi.fn()
+    vi.stubGlobal('fetch', fetchMock)
+
+    const rest = await import('./rest')
+
+    await expect(rest.health()).rejects.toBeInstanceOf(rest.ConfigError)
+    expect(fetchMock).not.toHaveBeenCalled()
   })
 })

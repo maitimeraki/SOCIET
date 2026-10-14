@@ -20,7 +20,14 @@ export default function HealthDot() {
 
   const dot =
     state === 'online' ? 'bg-good' : state === 'offline' ? 'bg-critical' : 'bg-paper-faint'
-  const label = state === 'online' ? 'API online' : state === 'offline' ? 'API unreachable — start uvicorn' : 'checking…'
+  const label =
+    state === 'online'
+      ? 'API online'
+      : state === 'offline'
+        ? import.meta.env.DEV
+          ? 'API unreachable — start uvicorn'
+          : 'connecting…'
+        : 'checking…'
 
   return (
     <span className="inline-flex items-center gap-2" title={`Checked ${API_BASE}/health`}>

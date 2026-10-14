@@ -9,9 +9,12 @@ import '@fontsource/ibm-plex-mono/500.css'
 import '@react-sigma/core/lib/style.css'
 import './index.css'
 import App from './App'
+import AppErrorBoundary from './components/AppErrorBoundary'
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    <App />
+    <AppErrorBoundary>
+      <App />
+    </AppErrorBoundary>
   </StrictMode>,
 )
