@@ -1,0 +1,37 @@
+# Caddy reverse proxy for the Societas stack (Task 8).
+#
+# SITE_ADDRESS defaults to `localhost` so a local run serves plain HTTP and
+# never requests a certificate; set it to a real domain in prod and Caddy
+# provisions Let's Encrypt TLS automatically.
+{$SITE_ADDRESS:localhost} {
+	encode zstd gzip
+
+	# Security headers — applied to SPA responses AND proxied API responses.
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		X-Frame-Options "DENY"
+		# Minimal CSP. No loosening was needed: Tailwind is compiled at build
+		# time, fonts ship in-bundle (@fontsource-*), and the Vite bundle emits
+		# only same-origin module scripts. `style-src 'unsafe-inline'` is
+		# required for React inline style attributes.
+		Content-Security-Policy "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'"
+	}
+
+	# REST + WebSocket API. Caddy transparently forwards the Upgrade header, so
+	# /simulate/*/stream and /simulate/*/graph_stream work over the same proxy.
+	handle /api/* {
+		reverse_proxy api:8000
+	}
+	handle /simulate/* {
+		reverse_proxy api:8000
+	}
+
+	# Static SPA with history fallback.
+	handle {
+		root * /srv
+		try_files {path} /index.html
+		file_server
+	}
+}
