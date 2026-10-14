@@ -64,9 +64,7 @@ def validate_url(url: str) -> str:
         raise IngestValidationError("URL is missing a host")
     for ip in _resolve(parsed.hostname):
         if not _is_public(ip):
-            raise IngestValidationError(
-                f"URL resolves to a non-public address ({ip})"
-            )
+            raise IngestValidationError(f"URL resolves to a non-public address ({ip})")
     return url
 
 
@@ -76,9 +74,7 @@ def _read_capped(response: requests.Response, max_bytes: int) -> bytes:
     for chunk in response.iter_content(chunk_size=_CHUNK_BYTES):
         total += len(chunk)
         if total > max_bytes:
-            raise IngestValidationError(
-                f"Response exceeds the {max_bytes} byte limit"
-            )
+            raise IngestValidationError(f"Response exceeds the {max_bytes} byte limit")
         chunks.append(chunk)
     return b"".join(chunks)
 
