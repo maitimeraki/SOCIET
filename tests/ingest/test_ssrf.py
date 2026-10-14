@@ -71,6 +71,8 @@ def _install_get(monkeypatch, responses, calls=None):
         "http://172.16.0.1/",  # RFC1918
         "http://[::ffff:127.0.0.1]/",  # mapped IPv6 loopback
         "http://[fc00::1]/",  # IPv6 unique-local
+        "http://100.64.0.1/",  # CGNAT / RFC 6598 shared space
+        "http://100.100.100.200/",  # Alibaba Cloud metadata, inside CGNAT range
         "http://0.0.0.0/",  # unspecified
         "http://224.0.0.1/",  # multicast
         "http://internal.example/",  # hostname resolving private
@@ -96,6 +98,12 @@ def test_reject_bad_scheme_or_host(url):
 
 def test_allow_public_host():
     assert ssrf.validate_url("http://public.example/") == "http://public.example/"
+
+
+@pytest.mark.parametrize("ip", ["93.184.216.34", "8.8.8.8"])
+def test_allow_public_ip_literals(ip):
+    # The CGNAT fix must not over-reject globally routable addresses.
+    assert ssrf.validate_url(f"http://{ip}/") == f"http://{ip}/"
 
 
 # --- fetch behaviour --------------------------------------------------------

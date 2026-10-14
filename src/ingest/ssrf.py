@@ -38,6 +38,10 @@ def _is_public(ip: str) -> bool:
         or address.is_reserved
         or address.is_unspecified
         or getattr(address, "is_site_local", False)
+        # Belt-and-suspenders: also catch shared/non-routable space the flags
+        # above miss, e.g. CGNAT 100.64.0.0/10 (RFC 6598) — is_global is False
+        # there but every flag above is False too.
+        or not address.is_global
     )
 
 
