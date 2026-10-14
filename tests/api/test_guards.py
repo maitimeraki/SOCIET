@@ -351,13 +351,15 @@ async def test_ingest_url_is_guarded_on_both_mounts(client, accounts, path):
 @pytest.mark.parametrize("path", _both_mounts("/api/ingest/files"))
 async def test_ingest_files_is_guarded_on_both_mounts(client, accounts, path):
     owner, _ = accounts
+    # A PDF body under a .txt name: auth passes and the handler runs, then the
+    # magic-byte gate refuses it (422) before any bucket/DB work — so this needs
+    # no S3 and no Redis.
     response = await client.post(
         path,
-        files={"files": ("notes.txt", b"hello world", "text/plain")},
+        files={"files": ("fake.txt", b"%PDF-1.7\njunk\n%%EOF\n", "text/plain")},
         cookies=_cookie(owner),
     )
-    assert response.status_code == 200, response.text
-    assert len(response.json()["documents"]) == 1
+    assert response.status_code == 422, response.text
 
 
 @requires_db

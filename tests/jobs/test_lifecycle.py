@@ -150,3 +150,37 @@ async def test_a_body_that_already_failed_is_not_marked_successful(owner, monkey
 
     doc = await run_doc.read_job_doc(job_id)
     assert (doc["status"], doc["error"]) == ("failed", "all chunks failed")
+
+
+async def test_the_extract_upload_kind_is_wired_through_the_lifecycle(
+    owner, monkeypatch
+):
+    """The ingest job kind has an RQ target, a core, and a terminal status."""
+    assert tasks.TASKS["extract_upload"] is tasks.extract_upload
+
+    job_id = str(uuid.uuid4())
+    await run_doc.write_job_doc(
+        {
+            "job_id": job_id,
+            "user_id": owner,
+            "mode": "extract_upload",
+            "status": "queued",
+            "progress": 0.0,
+            "stage": "queued",
+            "error": None,
+            "result": None,
+        }
+    )
+    ran: list[list[str]] = []
+
+    async def core(_job_id, payload):
+        ran.append(payload["upload_ids"])
+
+    monkeypatch.setitem(tasks.CORES, "extract_upload", core)
+
+    await tasks.execute(
+        "extract_upload", job_id, {"user_id": owner, "upload_ids": ["u1"]}
+    )
+
+    assert ran == [["u1"]]
+    assert await _status(job_id) == "completed"

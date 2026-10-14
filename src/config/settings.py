@@ -64,6 +64,11 @@ class Settings(BaseSettings):
     upload_quota_bytes_month: int = 104_857_600  # 100 MB
     upload_quota_files_month: int = 200
 
+    # --- Bounded extraction (plan §7): the worker runs every extractor in an
+    # isolated child process with a hard wall-clock timeout and an output cap.
+    extract_timeout_seconds: int = 30
+    extract_max_output_bytes: int = 5_000_000
+
     @field_validator(
         "cors_allowed_origins", "allowed_hosts", "job_retry_intervals", mode="before"
     )

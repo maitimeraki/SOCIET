@@ -15,7 +15,10 @@ writes are the same code.
 """
 
 import asyncio
+import base64
+import json
 import logging
+import uuid
 from typing import Any
 
 from src.jobs.queue import (
@@ -39,6 +42,7 @@ _SUCCESS_STATUS = {
     "ontology": "completed",
     "build_graph": "completed",
     "normalize_graph": "completed",
+    "extract_upload": "completed",
 }
 
 
@@ -97,6 +101,127 @@ async def _normalize_graph_core(job_id: str, payload: dict[str, Any]) -> None:
     await api_server.run_normalize_job(job_id, payload["dataset_id"])
 
 
+def _read_object(object_key: str) -> bytes:
+    from src.ingest.storage import get_upload
+
+    with get_upload(object_key) as body:
+        return body.read()
+
+
+async def _extract_file_upload(
+    user_id: str, upload_id: str, filename: str, timeout: int, max_output_bytes: int
+) -> None:
+    """Read one stored object, re-sniff it, extract it in the bounded child."""
+    from src.db.engine import get_session_factory
+    from src.ingest import repository
+    from src.ingest.bounded import run_extraction
+    from src.ingest.extract import ExtractionError, validate_upload
+
+    async with get_session_factory()() as session:
+        row = await repository.get_upload_row(session, upload_id)
+        if row is None or str(row.user_id) != str(user_id):
+            raise ExtractionError(f"upload {upload_id} is not on the job's owner")
+        object_key = row.object_key
+
+    data = await asyncio.to_thread(_read_object, object_key)
+    # Defense in depth: the route already sniffed this, but the bytes have left
+    # the process (bucket round-trip) since then.
+    validate_upload(filename, data)
+    result = await asyncio.to_thread(
+        run_extraction,
+        {
+            "kind": "file",
+            "filename": filename,
+            "data": base64.b64encode(data).decode("ascii"),
+        },
+        timeout=timeout,
+        max_output_bytes=max_output_bytes,
+    )
+    async with get_session_factory()() as session:
+        row = await repository.get_upload_row(session, upload_id)
+        if row is not None:
+            row.extracted_text = json.dumps(result["document"], ensure_ascii=False)
+            await session.commit()
+
+
+async def _extract_url_upload(
+    user_id: str, url: str, timeout: int, max_output_bytes: int
+) -> str:
+    """Fetch + extract one URL in the bounded child; record it as an upload row.
+
+    A URL has no object to store, so ``object_key`` is the source URL itself —
+    the row is only a carrier for the extracted payload the documents endpoint
+    serves. Returns the new upload id.
+    """
+    from src.db.engine import get_session_factory
+    from src.ingest import repository
+    from src.ingest.bounded import run_extraction
+
+    result = await asyncio.to_thread(
+        run_extraction,
+        {"kind": "url", "url": url},
+        timeout=timeout,
+        max_output_bytes=max_output_bytes,
+    )
+    meta = result["meta"]
+    upload_id = uuid.uuid4()
+    async with get_session_factory()() as session:
+        repository.insert_upload(
+            session,
+            upload_id=upload_id,
+            user_id=uuid.UUID(str(user_id)),
+            object_key=meta["source_url"],
+            size=meta["bytes"],
+            mime="text/html",
+            sha256=meta["sha256"],
+            extracted_text=json.dumps(result["document"], ensure_ascii=False),
+        )
+        await session.commit()
+    return str(upload_id)
+
+
+async def _extract_upload_core(job_id: str, payload: dict[str, Any]) -> None:
+    """The extraction job body: file batch or one URL, output into the rows."""
+    from src.api import run_doc
+    from src.config.settings import get_settings
+
+    settings = get_settings()
+    timeout = settings.extract_timeout_seconds
+    max_output_bytes = settings.extract_max_output_bytes
+    user_id = payload["user_id"]
+
+    if payload.get("kind") == "url":
+        upload_ids = [
+            await _extract_url_upload(
+                user_id, payload["url"], timeout, max_output_bytes
+            )
+        ]
+    else:
+        filenames = payload.get("filenames") or {}
+        upload_ids = list(payload["upload_ids"])
+        for upload_id in upload_ids:
+            await _extract_file_upload(
+                user_id,
+                upload_id,
+                filenames.get(upload_id) or upload_id,
+                timeout,
+                max_output_bytes,
+            )
+
+    await run_doc.write_job_doc(
+        {
+            "job_id": job_id,
+            "user_id": user_id,
+            "mode": "extract_upload",
+            "status": "completed",
+            "stage": "completed",
+            "progress": 1.0,
+            "error": None,
+            "result": {"upload_ids": upload_ids},
+        }
+    )
+
+
 #: kind → async core. The tests swap a core out to drive the lifecycle without
 #: standing up Neo4j/LLM.
 CORES = {
@@ -104,6 +229,7 @@ CORES = {
     "ontology": _ontology_core,
     "build_graph": _build_graph_core,
     "normalize_graph": _normalize_graph_core,
+    "extract_upload": _extract_upload_core,
 }
 
 
@@ -174,10 +300,15 @@ def normalize_graph(job_id: str, payload: dict[str, Any]) -> None:
     asyncio.run(execute("normalize_graph", job_id, payload))
 
 
+def extract_upload(job_id: str, payload: dict[str, Any]) -> None:
+    asyncio.run(execute("extract_upload", job_id, payload))
+
+
 #: The RQ targets, by kind.
 TASKS = {
     "debate": run_debate,
     "ontology": ontology,
     "build_graph": build_graph,
     "normalize_graph": normalize_graph,
+    "extract_upload": extract_upload,
 }
