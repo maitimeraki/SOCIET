@@ -383,6 +383,96 @@ async def _account_export_core(job_id: str, payload: dict[str, Any]) -> None:
     )
 
 
+async def purge_retention_core(dry_run: bool = False) -> dict[str, int]:
+    """Age-based retention purge (plan §12). Returns the counts it touched.
+
+    Three independent windows (``retention_*_days`` settings):
+
+    * **raw uploads** — delete the stored OBJECT for an upload row older than the
+      raw window; the row is kept (its metadata and ``extracted_text`` survive).
+      A URL upload carries its source URL as ``object_key`` and has no object,
+      so it is skipped.
+    * **runs** — fully delete runs older than the runs window, with their
+      ``run_events`` and ``jobs`` rows (dependency order, no cascade relied on).
+    * **audit** — trim ``audit_log`` rows older than the audit window.
+
+    ``dry_run`` counts and writes nothing — not the rows, not the objects.
+    """
+    import datetime
+
+    from sqlalchemy import delete, func, select
+
+    from src.config.settings import get_settings
+    from src.db.engine import get_session_factory
+    from src.db.models import AuditLog, Job, Run, RunEvent, Upload
+    from src.ingest import storage
+
+    settings = get_settings()
+    now = datetime.datetime.now(datetime.timezone.utc)
+    raw_cutoff = now - datetime.timedelta(days=settings.retention_raw_uploads_days)
+    runs_cutoff = now - datetime.timedelta(days=settings.retention_runs_days)
+    audit_cutoff = now - datetime.timedelta(days=settings.retention_audit_days)
+
+    async with get_session_factory()() as session:
+        object_keys = [
+            key
+            for (key,) in (
+                await session.execute(
+                    select(Upload.object_key).where(Upload.created_at < raw_cutoff)
+                )
+            ).all()
+            if not key.startswith(("http://", "https://"))
+        ]
+        run_ids = [
+            run_id
+            for (run_id,) in (
+                await session.execute(
+                    select(Run.id).where(Run.created_at < runs_cutoff)
+                )
+            ).all()
+        ]
+        audit_count = (
+            await session.execute(
+                select(func.count())
+                .select_from(AuditLog)
+                .where(AuditLog.at < audit_cutoff)
+            )
+        ).scalar_one()
+
+        counts = {
+            "raw_objects": len(object_keys),
+            "runs": len(run_ids),
+            "audit": audit_count,
+        }
+        if dry_run:
+            return counts
+
+        for key in object_keys:
+            await asyncio.to_thread(storage.delete_upload, key)
+        if run_ids:
+            await session.execute(delete(RunEvent).where(RunEvent.run_id.in_(run_ids)))
+            await session.execute(delete(Job).where(Job.run_id.in_(run_ids)))
+            await session.execute(delete(Run).where(Run.id.in_(run_ids)))
+        await session.execute(delete(AuditLog).where(AuditLog.at < audit_cutoff))
+        await session.commit()
+
+    logger.info(
+        "retention purge: %d object(s), %d run(s), %d audit row(s)",
+        counts["raw_objects"],
+        counts["runs"],
+        counts["audit"],
+    )
+    return counts
+
+
+def purge_retention(dry_run: bool = False) -> dict[str, int]:
+    """The RQ-schedulable entrypoint (plan §12) — ``scripts/purge_retention.py``
+    calls the same core. Scheduling this is deployment's job: push it onto the
+    worker's queue directly (``get_queue().enqueue(tasks.purge_retention)``) from
+    cron or RQ-scheduler, or run the script on a timer."""
+    return asyncio.run(purge_retention_core(dry_run=dry_run))
+
+
 #: kind → async core. The tests swap a core out to drive the lifecycle without
 #: standing up Neo4j/LLM.
 CORES = {

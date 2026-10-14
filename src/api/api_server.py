@@ -195,7 +195,13 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     await _probe_llm(app)
 
     yield
-    # 2. Shutdown: Everything after 'yield' runs on SHUTDOWN
+    # 2. Shutdown: Everything after 'yield' runs on SHUTDOWN.
+    # Uvicorn has already stopped accepting connections (no new work arrives);
+    # bound how long in-flight jobs may run before this process exits (§9).
+    app.state.shutting_down = True
+    from src.jobs import queue as jobs_queue
+
+    await jobs_queue.graceful_shutdown(get_settings().shutdown_drain_seconds)
 
 
 app = FastAPI(

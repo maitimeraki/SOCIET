@@ -1,6 +1,8 @@
 """Queue helpers: cancel flags, dispatch-mode selection, the per-user cap."""
 
+import asyncio
 import os
+import time
 import uuid
 
 import pytest
@@ -136,3 +138,44 @@ async def test_a_dispatch_failure_marks_the_row_failed_not_queued(owner, monkeyp
     doc = await run_doc.read_job_doc(seen["job_id"])
     assert (doc["status"], doc["error"]) == ("failed", "redis down")
     assert await run_doc.count_active_jobs(owner) == 0
+
+
+async def _stuck_inline_task() -> asyncio.Task:
+    task = asyncio.create_task(asyncio.sleep(60))
+    jobs_queue._INLINE_TASKS[task] = "job-x"
+    return task
+
+
+@pytest.mark.asyncio
+async def test_graceful_shutdown_bounds_the_inline_drain(monkeypatch):
+    """A job that will not finish must not hold shutdown past the window."""
+    monkeypatch.setenv("QUEUE_MODE", "inline")
+    get_settings.cache_clear()
+    task = await _stuck_inline_task()
+    try:
+        started = time.monotonic()
+        await jobs_queue.graceful_shutdown(0.05)
+        assert time.monotonic() - started < 5  # never waits the 60s sleep
+        assert task.cancelled() or task.cancelling()  # in-flight work cancelled
+    finally:
+        get_settings.cache_clear()
+        jobs_queue._INLINE_TASKS.pop(task, None)
+
+
+@pytest.mark.asyncio
+async def test_graceful_shutdown_in_rq_mode_leaves_the_worker_to_salvage(monkeypatch):
+    """rq mode: the API process owns no job, so it neither waits nor cancels."""
+    monkeypatch.setenv("QUEUE_MODE", "rq")
+    get_settings.cache_clear()
+    task = await _stuck_inline_task()
+    try:
+        started = time.monotonic()
+        await jobs_queue.graceful_shutdown(30)
+        assert time.monotonic() - started < 1  # returns at once
+        assert not task.done()  # the worker salvages it, not the API
+    finally:
+        get_settings.cache_clear()
+        jobs_queue._INLINE_TASKS.pop(task, None)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task

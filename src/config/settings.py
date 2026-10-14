@@ -79,6 +79,17 @@ class Settings(BaseSettings):
     metrics_enabled: bool = False
     metrics_port: int = 9100
 
+    # --- Retention (plan §12), in days. The purge ships as a script
+    # (``scripts/purge_retention.py``) and an RQ-schedulable task
+    # (``src.jobs.tasks.purge_retention``); scheduling it is deployment's job.
+    retention_runs_days: int = 365
+    retention_raw_uploads_days: int = 30
+    retention_audit_days: int = 365
+
+    # --- Graceful shutdown (plan §9): the bounded window in-flight jobs get to
+    # finish before the API process exits. Never blocks past it.
+    shutdown_drain_seconds: int = 30
+
     @field_validator(
         "cors_allowed_origins", "allowed_hosts", "job_retry_intervals", mode="before"
     )

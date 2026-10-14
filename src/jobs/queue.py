@@ -145,6 +145,39 @@ async def drain_inline() -> None:
         await asyncio.gather(*list(_INLINE_TASKS), return_exceptions=True)
 
 
+def cancel_inline() -> int:
+    """Cancel every in-flight inline job (graceful shutdown). Their rows stay
+    ``running``; the next boot's interrupted sweep reconciles them (§7.10)."""
+    tasks = list(_INLINE_TASKS)
+    for task in tasks:
+        task.cancel()
+    return len(tasks)
+
+
+async def graceful_shutdown(seconds: int) -> None:
+    """Bounded drain of in-flight work at API shutdown (plan §9).
+
+    The API process never blocks past ``seconds``. In ``rq`` mode the worker owns
+    execution and RQ salvages its own in-flight job on SIGTERM (finish or
+    requeue) — the API process holds nothing to drain. In ``inline`` mode the
+    process runs the jobs itself: give them up to ``seconds`` to finish, then
+    cancel what remains (their rows stay ``running`` for the boot sweep).
+    """
+    if get_settings().queue_mode == "rq":
+        logger.info("shutdown: rq mode — the worker salvages its in-flight job")
+        return
+    try:
+        await asyncio.wait_for(drain_inline(), timeout=seconds)
+        logger.info("shutdown: inline jobs drained")
+    except (asyncio.TimeoutError, TimeoutError):
+        cancelled = cancel_inline()
+        logger.warning(
+            "shutdown: inline drain exceeded %ss — cancelled %d in-flight job(s)",
+            seconds,
+            cancelled,
+        )
+
+
 def _tasks():
     """The task registry (lazy: ``tasks`` imports this module back)."""
     from src.jobs import tasks

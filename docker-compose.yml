@@ -63,6 +63,9 @@ services:
       POSTGRES_DB: ${POSTGRES_DB:-societas}
     volumes:
       - pg_data:/var/lib/postgresql/data
+      # Least-privilege app role (plan §8). Runs once on a fresh volume; the
+      # api/worker can then connect as `societas_app` (see the SQL's notes).
+      - ./scripts/setup_db_roles.sql:/docker-entrypoint-initdb.d/10-setup-db-roles.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U \"$$POSTGRES_USER\" -d \"$$POSTGRES_DB\""]
       interval: 5s
