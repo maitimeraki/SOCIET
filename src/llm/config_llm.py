@@ -2,7 +2,7 @@ from pydantic_settings import BaseSettings
 from functools import lru_cache
 from typing import Optional
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import dotenv
 
@@ -49,7 +49,20 @@ class LLMConfig:
     # DEBATE: the most powerful — agent debate in the simulation world.
     analysis_model: str = os.getenv("ANALYSIS_LLM_MODEL", "claude-sonnet-5")
     debate_model: str = os.getenv("DEBATE_LLM_MODEL", "claude-opus-5-5")
-    
+
+    # Verdict answer-writer (the final narrative). Defaults to the ANALYSIS tier
+    # — it is a single structured-JSON call over the completed debate, not the
+    # debate itself. VERDICT_LLM_MODEL overrides the model, VERDICT_MAX_TOKENS the
+    # strict-JSON output budget. default_factory (not a class-body default) reads
+    # the env when the config is built, so cache-clearing re-reads it.
+    verdict_model: str = field(
+        default_factory=lambda: os.getenv("VERDICT_LLM_MODEL")
+        or os.getenv("ANALYSIS_LLM_MODEL", "claude-sonnet-5")
+    )
+    verdict_max_tokens: int = field(
+        default_factory=lambda: int(os.getenv("VERDICT_MAX_TOKENS", "3000"))
+    )
+
     @classmethod
     def update_provider(cls, provider: str): 
         """Update the default provider"""

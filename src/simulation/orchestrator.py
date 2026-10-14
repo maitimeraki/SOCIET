@@ -112,6 +112,9 @@ class OrchestratedDebateResult:
     #: Query-grounded answer markdown written by verdict synthesis (falls back
     #: to `verdict`/summary when no LLM client or parse failure). Additive.
     narrative: str = ""
+    #: "ok" when `narrative` is the LLM answer; "fallback" when it degraded to
+    #: the summary. Additive — lets the client tell the two apart.
+    narrative_status: str = "ok"
     dissenting_views: list = field(default_factory=list)
     evidence: list = field(default_factory=list)
 
@@ -392,6 +395,7 @@ class DebateOrchestrator:
         verdict = await self._verdict_synthesizer.asynthesize(
             rounds=rounds, profiles=profiles, llm_client=llm_client,
             query=query, scenario=json.dumps(context) if context else "",
+            run_id=dataset_id,
         )
         cluster_details = None
         if verdict is not None and verdict.cluster_details:
@@ -436,6 +440,7 @@ class DebateOrchestrator:
             contested=verdict.contested if verdict else None,
             provenance_by_claim=provenance_by_claim,
             narrative=verdict.narrative if verdict else "",
+            narrative_status=verdict.narrative_status if verdict else "ok",
             dissenting_views=verdict.dissenting_views if verdict else [],
             evidence=verdict.evidence if verdict else [],
         )

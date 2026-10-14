@@ -905,6 +905,28 @@ class TestDebateJobNarrative:
         assert complete_msg["evidence"] == [{"entity": "Steel tariffs", "claim": "raises cost"}]
 
     @pytest.mark.asyncio
+    async def test_result_and_complete_carry_the_narrative_status_flag(self):
+        """T7: the narrative fallback flag reaches the client, not just the log."""
+        job_id = f"narr-status-{uuid.uuid4()}"
+        result = OrchestratedDebateResult(
+            converged=True, verdict="short summary", final_stances={}, warnings=[],
+            rounds_executed=1,
+            narrative="short summary",
+            narrative_status="fallback",
+        )
+
+        job, ws_manager, _ = await _run_with_result(job_id, result)
+
+        assert job["status"] == "complete"
+        assert job["result"]["narrative_status"] == "fallback"
+
+        complete_msg = next(
+            call.args[0] for call in ws_manager.broadcast.call_args_list
+            if call.args and call.args[0].get("type") == "complete"
+        )
+        assert complete_msg["narrative_status"] == "fallback"
+
+    @pytest.mark.asyncio
     async def test_request_context_reaches_the_orchestrator(self):
         """T3/T4: the request's user context is threaded into orchestrator.run."""
         job_id = f"ctx-{uuid.uuid4()}"

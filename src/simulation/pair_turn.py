@@ -87,6 +87,10 @@ class DebateVerdict:
     #: Markdown answer assembled from the structured verdict (query-grounded).
     #: Empty when synthesis fell back to `summary`.
     narrative: str = ""
+    #: "ok" when `narrative` is the query-grounded answer; "fallback" when it
+    #: degraded to `summary` (no client, or the answer-writer produced no
+    #: parseable JSON after bounded retries). Never silent.
+    narrative_status: str = "ok"
     #: Per-cluster dissent rendered from the structured verdict.
     dissenting_views: List[dict] = field(default_factory=list)
     #: Cited entities/claims backing the answer.

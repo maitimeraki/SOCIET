@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING, List
 
 from pydantic import BaseModel
 
+from src.llm.config_llm import get_llm_config
 from src.persona.agent import Agent, SYNTHETIC_PROVENANCE_PREFIX, Stance
 from src.simulation.pair_turn import (
     AgentTurn,
@@ -30,9 +31,18 @@ SUMMARY_TURN_REASONING_CHARS = 400
 # Step 7: a dominant share below this is a near-tie, not a mandate.
 CONTESTED_THRESHOLD = 0.6
 
-# Strict-JSON output budget: enough for a full verdict object, never truncated
-# mid-object.
-VERDICT_MAX_TOKENS = 3000
+# Bounded latency budget for the answer-writer: the first call plus two
+# retries, each asking more strictly for bare JSON. After this the narrative
+# falls back to `summary` — flagged on the verdict, never silent. The model and
+# token budget come from LLMConfig (verdict_model / verdict_max_tokens).
+VERDICT_MAX_ATTEMPTS = 3
+
+# Appended to the prompt on retries: the previous reply was not valid JSON, so
+# the format constraint is restated explicitly.
+VERDICT_JSON_REINFORCEMENT = (
+    "\n\nYour previous reply was not valid JSON. Reply with ONLY the JSON "
+    "object — no markdown fences, no prose before or after it."
+)
 
 VERDICT_SYSTEM = (
     "You are the analyst who answers the user's question from the debate below. "
@@ -53,14 +63,52 @@ class Verdict(BaseModel):
     confidence: float = 0.0
 
 
-def _strip_code_fence(raw: str) -> str:
-    """Drop a ```json ... ``` fence if the model wrapped its JSON in one."""
-    text = raw.strip()
-    if text.startswith("```"):
-        text = text.split("\n", 1)[1] if "\n" in text else ""
-        if text.rstrip().endswith("```"):
-            text = text.rstrip()[:-3]
-    return text.strip()
+def _extract_json_object(raw: str) -> str | None:
+    """Return the first balanced `{...}` object in `raw`, or None.
+
+    Tolerates markdown fences and prose before/after the object (both are
+    common from a small model) by locating the first `{` and matching braces.
+    String-aware, so a brace inside a JSON string never ends the match early.
+    """
+    text = raw or ""
+    start = text.find("{")
+    if start == -1:
+        return None
+    depth = 0
+    in_string = False
+    escaped = False
+    for i in range(start, len(text)):
+        ch = text[i]
+        if in_string:
+            if escaped:
+                escaped = False
+            elif ch == "\\":
+                escaped = True
+            elif ch == '"':
+                in_string = False
+            continue
+        if ch == '"':
+            in_string = True
+        elif ch == "{":
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+            if depth == 0:
+                return text[start : i + 1]
+    return None
+
+
+def _parse_verdict(raw: str) -> Verdict | None:
+    """Repair-then-validate: extract the JSON object, then validate it. None
+    when there is no parseable object or the answer came back empty."""
+    candidate = _extract_json_object(raw)
+    if candidate is None:
+        return None
+    try:
+        parsed = Verdict.model_validate_json(candidate)
+    except Exception:
+        return None
+    return parsed if parsed.answer.strip() else None
 
 
 def _to_markdown(v: Verdict) -> str:
@@ -91,13 +139,17 @@ class VerdictSynthesizer:
         llm_client: "LLMClient | None" = None,
         query: str = "",
         scenario: str = "",
+        run_id: str = "",
     ) -> DebateVerdict:
         """Async synthesis -- safe to call from any running event loop.
 
         Always produces the deterministic template verdict; when a client is
         given it additionally writes the query-grounded answer into
-        `narrative` (assembled from the structured `Verdict`), falling back to
-        `summary` on any parse/empty/off-topic failure.
+        `narrative` (assembled from the structured `Verdict`). When the
+        answer-writer cannot produce parseable JSON after bounded retries + a
+        repair pass — or no client was given — the narrative degrades to
+        `summary` and `narrative_status` is set to `"fallback"` (flagged, and
+        logged with the run/query, never silent).
         """
         verdict = self.synthesize(rounds=rounds, profiles=profiles, llm_client=None)
         parsed = None
@@ -107,8 +159,16 @@ class VerdictSynthesizer:
             verdict.dissenting_views = parsed.dissenting_views
             verdict.evidence = parsed.evidence
             verdict.narrative = _to_markdown(parsed)
-        else:
-            verdict.narrative = verdict.summary
+            return verdict
+        verdict.narrative = verdict.summary
+        verdict.narrative_status = "fallback"
+        logger.warning(
+            "verdict narrative degraded to the summary (run=%s, query=%r): %s",
+            run_id or "(none)",
+            query[:120],
+            "no LLM client given" if llm_client is None
+            else "answer-writer produced no parseable JSON after retries",
+        )
         return verdict
 
     async def _allm_verdict(
@@ -123,7 +183,10 @@ class VerdictSynthesizer:
 
         The prompt carries the query and the bounded transcript, not just the
         aggregates, so the answer addresses the question from the argument.
-        Returns None on any failure so the caller falls back to `summary`.
+        Bounded retries (VERDICT_MAX_ATTEMPTS total calls): each retry restates
+        the bare-JSON constraint, and every reply goes through the repair pass in
+        `_parse_verdict`. Returns None only once every attempt has failed, so the
+        caller can flag the fallback.
         """
         transcript, turns_used = self._render_transcript(rounds)
         contested_note = " -- contested" if verdict.contested else ""
@@ -136,18 +199,31 @@ class VerdictSynthesizer:
             f"Opposing entities: {verdict.opposing_entities[:10]}\n\n"
             f"DEBATE TRANSCRIPT (last {turns_used} turns):\n{transcript}"
         )
-        try:
-            raw = await llm_client.generate(
-                system_prompt=VERDICT_SYSTEM,
-                user_prompt=user_prompt,
-                temperature=0.4,
-                max_tokens=VERDICT_MAX_TOKENS,
+        cfg = get_llm_config()
+        for attempt in range(1, VERDICT_MAX_ATTEMPTS + 1):
+            prompt = user_prompt if attempt == 1 else user_prompt + VERDICT_JSON_REINFORCEMENT
+            try:
+                raw = await llm_client.generate(
+                    system_prompt=VERDICT_SYSTEM,
+                    user_prompt=prompt,
+                    temperature=0.4,
+                    max_tokens=cfg.verdict_max_tokens,
+                    model=cfg.verdict_model,
+                )
+            except Exception:
+                logger.exception(
+                    "verdict answer-writer attempt %d/%d raised",
+                    attempt, VERDICT_MAX_ATTEMPTS,
+                )
+                continue
+            parsed = _parse_verdict(raw)
+            if parsed is not None:
+                return parsed
+            logger.warning(
+                "verdict answer-writer attempt %d/%d returned no parseable JSON",
+                attempt, VERDICT_MAX_ATTEMPTS,
             )
-            parsed = Verdict.model_validate_json(_strip_code_fence(raw or ""))
-        except Exception:
-            logger.exception("verdict synthesis failed validation; using summary fallback")
-            return None
-        return parsed if parsed.answer.strip() else None
+        return None
 
     @staticmethod
     def _render_transcript(rounds: list[RoundResult]) -> tuple[str, int]:
