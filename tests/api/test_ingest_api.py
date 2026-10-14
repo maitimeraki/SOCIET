@@ -220,6 +220,27 @@ async def test_over_quota_is_429_with_retry_after(owner, monkeypatch):
     assert await _uploads_for(owner) == []
 
 
+@pytest.mark.asyncio
+async def test_url_over_quota_is_429_with_retry_after(owner, monkeypatch):
+    # The SSRF guard is out of scope here; the quota gate is what is under test.
+    monkeypatch.setattr("src.api.ingest_api.validate_url", lambda url: url)
+    monkeypatch.setenv("UPLOAD_QUOTA_FILES_MONTH", "0")
+    from src.config.settings import get_settings
+
+    get_settings.cache_clear()
+    try:
+        async with _client(owner) as client:
+            response = await client.post(
+                "/api/v1/ingest/url", json={"url": "https://example.com/report"}
+            )
+    finally:
+        get_settings.cache_clear()
+
+    assert response.status_code == 429, response.text
+    assert _error(response)["code"] == "quota_exceeded"
+    assert int(response.headers["Retry-After"]) >= 1
+
+
 # --- the 202 flow + worker extraction ----------------------------------------
 #
 # These are synchronous: the SimpleWorker burst runs the real task target, which
@@ -331,6 +352,25 @@ def test_a_failed_extraction_marks_the_job_failed(s3, monkeypatch):
         done = _run(run_doc.read_job_doc(job_id))
         assert done["status"] == "failed", done
         assert done["error"]
+    finally:
+        _run(_drop_owner(owner))
+        get_settings.cache_clear()
+
+
+def test_an_enqueue_refusal_rolls_back_the_staged_upload(s3, monkeypatch):
+    # The per-user job cap refuses the enqueue (429) *after* the upload is
+    # stored — the row and its object must not survive as an orphan.
+    monkeypatch.setenv("MAX_JOBS_PER_USER", "0")
+    from src.config.settings import get_settings
+
+    get_settings.cache_clear()
+    owner = _run(_make_owner())
+    try:
+        status, body = _post_files(owner, "notes.txt", TEXT, "text/plain")
+        assert status == 429, body
+        assert body["error"]["code"] == "job_limit_exceeded"
+        assert _run(_uploads_for(owner)) == []
+        assert storage._client().list_objects_v2(Bucket=BUCKET)["KeyCount"] == 0
     finally:
         _run(_drop_owner(owner))
         get_settings.cache_clear()

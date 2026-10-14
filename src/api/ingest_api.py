@@ -11,6 +11,7 @@ enqueue). The extracted payloads are read back through ``GET /documents``.
 import asyncio
 import hashlib
 import json
+import logging
 import uuid
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, UploadFile
@@ -19,17 +20,20 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.api.jobs_api import enqueue_or_http
 from src.auth.deps import current_user
+from src.config.settings import get_settings
 from src.db.engine import get_db
 from src.db.models import User
 from src.ingest import repository
 from src.ingest.extract import IngestValidationError, mime_for_filename, validate_upload
 from src.ingest.quota import QuotaExceeded, enforce_upload_quota
 from src.ingest.ssrf import validate_url
-from src.ingest.storage import put_upload
+from src.ingest.storage import delete_upload, put_upload
 
 # Mounted twice by `api_server`: prefix "/api" keeps today's /api/ingest/* alias;
 # "/api/v1" is the canonical surface (R15).
 router = APIRouter(prefix="/ingest", tags=["ingest"])
+
+logger = logging.getLogger(__name__)
 
 MAX_FILES = 20
 MAX_BYTES = 20 * 1024 * 1024
@@ -43,6 +47,50 @@ def _validation_error(detail: str) -> HTTPException:
     return HTTPException(
         status_code=422, detail={"code": "validation_error", "message": detail}
     )
+
+
+async def _enforce_quota(
+    db: AsyncSession, user_id, *, incoming_bytes: int = 0, incoming_files: int = 0
+) -> None:
+    """The per-user quota gate, mapped onto the uniform 429 + Retry-After."""
+    try:
+        await enforce_upload_quota(
+            db,
+            user_id,
+            incoming_bytes=incoming_bytes,
+            incoming_files=incoming_files,
+        )
+    except QuotaExceeded as exc:
+        raise HTTPException(
+            status_code=429,
+            detail={
+                "code": "quota_exceeded",
+                "message": "Upload quota exceeded for this month.",
+            },
+            headers={"Retry-After": str(exc.retry_after)},
+        ) from exc
+
+
+async def _discard_staged(db: AsyncSession, object_keys: list[str]) -> None:
+    """Roll back rows + objects when the enqueue is refused.
+
+    Without this a 429 from the per-user job cap would leave the upload stored
+    with no job to extract it — a permanent empty row in the FE.
+    """
+    from sqlalchemy import delete
+
+    from src.db.models import Upload
+
+    try:
+        await db.execute(delete(Upload).where(Upload.object_key.in_(object_keys)))
+        await db.commit()
+    except Exception as exc:  # noqa: BLE001 — never mask the enqueue's refusal
+        logger.warning("could not roll back staged upload rows: %s", exc)
+    for key in object_keys:
+        try:
+            await asyncio.to_thread(delete_upload, key)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("could not delete staged object %s: %s", key, exc)
 
 
 @router.post("/files", status_code=202)
@@ -81,27 +129,19 @@ async def ingest_files(
         staged.append((uuid.uuid4(), name, data))
 
     # Quota is checked before anything is stored (429 + Retry-After).
-    try:
-        await enforce_upload_quota(
-            db,
-            user.id,
-            incoming_bytes=sum(len(data) for _, _, data in staged),
-            incoming_files=len(staged),
-        )
-    except QuotaExceeded as exc:
-        raise HTTPException(
-            status_code=429,
-            detail={
-                "code": "quota_exceeded",
-                "message": "Upload quota exceeded for this month.",
-            },
-            headers={"Retry-After": str(exc.retry_after)},
-        ) from exc
+    await _enforce_quota(
+        db,
+        user.id,
+        incoming_bytes=sum(len(data) for _, _, data in staged),
+        incoming_files=len(staged),
+    )
 
     upload_ids: list[str] = []
     filenames: dict[str, str] = {}
+    object_keys: list[str] = []
     for upload_id, name, data in staged:
         key = await asyncio.to_thread(put_upload, user.id, upload_id, data)
+        object_keys.append(key)
         repository.insert_upload(
             db,
             upload_id=upload_id,
@@ -115,15 +155,19 @@ async def ingest_files(
         filenames[str(upload_id)] = name
     await db.commit()
 
-    job_id = await enqueue_or_http(
-        "extract_upload",
-        {
-            "user_id": str(user.id),
-            "upload_ids": upload_ids,
-            "filenames": filenames,
-            "correlation_id": getattr(request.state, "correlation_id", None),
-        },
-    )
+    try:
+        job_id = await enqueue_or_http(
+            "extract_upload",
+            {
+                "user_id": str(user.id),
+                "upload_ids": upload_ids,
+                "filenames": filenames,
+                "correlation_id": getattr(request.state, "correlation_id", None),
+            },
+        )
+    except Exception:
+        await _discard_staged(db, object_keys)
+        raise
     return {"job_id": job_id, "status": "queued"}
 
 
@@ -132,14 +176,24 @@ async def ingest_url(
     request: UrlRequest,
     http_request: Request,
     user: User = Depends(current_user),
+    db: AsyncSession = Depends(get_db),
 ):
-    """SSRF-check the URL and queue its fetch + extraction."""
+    """SSRF-check the URL, gate on quota, and queue its fetch + extraction."""
     if not request.url.strip():
         raise _validation_error("url is required")
     try:
         validate_url(request.url)
     except IngestValidationError as exc:
         raise _validation_error(exc.detail) from exc
+
+    # A URL's size is unknown until it is fetched: reserve the fetch cap as the
+    # bounded worst case, and one file slot.
+    await _enforce_quota(
+        db,
+        user.id,
+        incoming_bytes=get_settings().extract_max_output_bytes,
+        incoming_files=1,
+    )
 
     job_id = await enqueue_or_http(
         "extract_upload",

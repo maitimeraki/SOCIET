@@ -42,3 +42,8 @@ def put_upload(user_id: object, upload_id: object, data: bytes) -> str:
 def get_upload(key: str) -> IO[bytes]:
     """Return a readable byte stream for ``key`` (caller closes it)."""
     return _client().get_object(Bucket=get_settings().s3_bucket, Key=key)["Body"]
+
+
+def delete_upload(key: str) -> None:
+    """Remove one object — the rollback when an enqueue is refused."""
+    _client().delete_object(Bucket=get_settings().s3_bucket, Key=key)

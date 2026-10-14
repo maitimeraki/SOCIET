@@ -39,7 +39,9 @@ def _extract(request: dict) -> dict:
 
     try:
         if request["kind"] == "url":
-            document, meta = extract_url(request["url"])
+            document, meta = extract_url(
+                request["url"], max_bytes=request["max_output_bytes"]
+            )
             return {"ok": True, "document": document, "meta": meta}
         document = extract_document(
             request["filename"], base64.b64decode(request["data"])
