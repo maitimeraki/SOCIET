@@ -6,6 +6,7 @@ strictly higher than the same-stance pair at equal Jaccard -- is proven here
 against the real graph. Skipped when Neo4j is unreachable; everything seeded is
 cleaned up by its unique dataset id.
 """
+
 import os
 from types import SimpleNamespace
 from unittest.mock import MagicMock
@@ -17,7 +18,7 @@ from dotenv import load_dotenv
 
 from src.persona.repository import PersonaRepository
 from src.simulation.debate_config import DebateConfig
-from src.simulation.topology import CommunicationTopology, _STANCE_DIVERGENCE_BONUS
+from src.simulation.topology import _STANCE_DIVERGENCE_BONUS, CommunicationTopology
 
 load_dotenv()
 
@@ -30,7 +31,10 @@ async def live():
     db = os.getenv("NEO4J_DATABASE", "neo4j")
 
     repo = PersonaRepository(
-        neo4j_uri=uri, neo4j_user=user, neo4j_password=pwd, neo4j_database=db,
+        neo4j_uri=uri,
+        neo4j_user=user,
+        neo4j_password=pwd,
+        neo4j_database=db,
     )
     try:
         async with repo._driver.session(database=db) as session:
@@ -56,7 +60,9 @@ async def _seed_shared_entity(repo, db, ds, entity):
                     dataset_id: $ds, triplet_source_id: $chunk_id, _test: true})
             CREATE (c)-[:MENTIONS]->(e)
             """,
-            chunk_id=chunk_id, ds=ds, entity=entity,
+            chunk_id=chunk_id,
+            ds=ds,
+            entity=entity,
         )
     return chunk_id
 
@@ -72,20 +78,28 @@ def _score_for(pairs, a, b):
     for p in pairs:
         if {p.agent_a, p.agent_b} == {a, b}:
             return p.score
-    raise AssertionError(f"no pair for {a}/{b} in {[(p.agent_a, p.agent_b) for p in pairs]}")
+    raise AssertionError(
+        f"no pair for {a}/{b} in {[(p.agent_a, p.agent_b) for p in pairs]}"
+    )
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("round_num", [1, 2])
-async def test_opposed_stance_pairs_outscore_same_stance_at_equal_jaccard(live, round_num):
+async def test_opposed_stance_pairs_outscore_same_stance_at_equal_jaccard(
+    live, round_num
+):
     """Definition of done: opposed (POSITIVE/NEGATIVE) > same (POSITIVE/POSITIVE),
     at equal Jaccard, in BOTH the round-1 and round-2+ Cypher bodies."""
     repo, db = live
     ds = f"itest-stance-{uuid4().hex[:10]}"
     entity = f"itest-stance-entity-{uuid4().hex[:8]}"
     # A/B opposed; C/D same-stance. Round 2 reads current_stance, so seed both.
-    stances = {"itest-A": "POSITIVE", "itest-B": "NEGATIVE",
-               "itest-C": "POSITIVE", "itest-D": "POSITIVE"}
+    stances = {
+        "itest-A": "POSITIVE",
+        "itest-B": "NEGATIVE",
+        "itest-C": "POSITIVE",
+        "itest-D": "POSITIVE",
+    }
 
     try:
         chunk_id = await _seed_shared_entity(repo, db, ds, entity)
@@ -95,12 +109,15 @@ async def test_opposed_stance_pairs_outscore_same_stance_at_equal_jaccard(live, 
             await session.run(
                 "MATCH (p:Persona) WHERE p.dataset_id = $ds AND p.name IN $names "
                 "SET p.current_stance = p.stance",
-                ds=ds, names=list(stances),
+                ds=ds,
+                names=list(stances),
             )
 
         topology = CommunicationTopology(repo._driver, db)
         pairs = await topology.compute_round_pairs(
-            _roster(*stances), dataset_id=ds, round_num=round_num,
+            _roster(*stances),
+            dataset_id=ds,
+            round_num=round_num,
             config=DebateConfig(comm_radius=1),
         )
 
@@ -109,12 +126,16 @@ async def test_opposed_stance_pairs_outscore_same_stance_at_equal_jaccard(live, 
         assert opposed > same, f"round {round_num}: opposed {opposed} !> same {same}"
     finally:
         async with repo._driver.session(database=db) as session:
-            await session.run("MATCH (n) WHERE n.dataset_id = $ds DETACH DELETE n", ds=ds)
+            await session.run(
+                "MATCH (n) WHERE n.dataset_id = $ds DETACH DELETE n", ds=ds
+            )
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("round_num", [1, 2])
-async def test_missing_stance_adds_no_bonus_and_does_not_break_the_query(live, round_num):
+async def test_missing_stance_adds_no_bonus_and_does_not_break_the_query(
+    live, round_num
+):
     """Legacy personas carry no stance: the divergence term must be 0 (not an
     error), so existing pairings are unchanged when Task 1 has not run."""
     repo, db = live
@@ -130,7 +151,9 @@ async def test_missing_stance_adds_no_bonus_and_does_not_break_the_query(live, r
 
         topology = CommunicationTopology(repo._driver, db)
         pairs = await topology.compute_round_pairs(
-            _roster(*stances), dataset_id=ds, round_num=round_num,
+            _roster(*stances),
+            dataset_id=ds,
+            round_num=round_num,
             config=DebateConfig(comm_radius=1),
         )
 
@@ -140,7 +163,9 @@ async def test_missing_stance_adds_no_bonus_and_does_not_break_the_query(live, r
         assert _score_for(pairs, "itest-M1", "itest-N1") == pytest.approx(1.0)
     finally:
         async with repo._driver.session(database=db) as session:
-            await session.run("MATCH (n) WHERE n.dataset_id = $ds DETACH DELETE n", ds=ds)
+            await session.run(
+                "MATCH (n) WHERE n.dataset_id = $ds DETACH DELETE n", ds=ds
+            )
 
 
 def test_both_pair_cyphers_carry_the_guarded_divergence_term():

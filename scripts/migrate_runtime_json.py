@@ -17,6 +17,7 @@ clobbered by its stale legacy file).
     python scripts/migrate_runtime_json.py --owner-email you@example.com --dry-run
     python scripts/migrate_runtime_json.py --owner-email you@example.com --verify
 """
+
 import argparse
 import asyncio
 import json
@@ -181,7 +182,9 @@ async def _verify(owner: uuid.UUID | None, spot_checks: int) -> int:
             if _canonical(row["result"]) == _canonical(doc["result"]):
                 verdict_matches += 1
             else:
-                problems.append(f"debates/{path.name}: verdict differs from the source JSON")
+                problems.append(
+                    f"debates/{path.name}: verdict differs from the source JSON"
+                )
 
     present_events = 0
     if run_ids:
@@ -200,11 +203,15 @@ async def _verify(owner: uuid.UUID | None, spot_checks: int) -> int:
         f"verify: run_events rows {present_events} present, {expected_events} expected "
         f"(streamed + one run_meta per run)"
     )
-    print(f"verify: verdict spot-checks {verdict_matches}/{checked_verdicts} byte-for-byte")
+    print(
+        f"verify: verdict spot-checks {verdict_matches}/{checked_verdicts} byte-for-byte"
+    )
     if owner is not None:
         print(f"verify: ownership mismatches: {owned_mismatch}")
     if present_events != expected_events:
-        problems.append(f"run_events count {present_events} != expected {expected_events}")
+        problems.append(
+            f"run_events count {present_events} != expected {expected_events}"
+        )
     if jobs_found != len(job_files):
         problems.append(f"jobs rows {jobs_found} != files {len(job_files)}")
     if runs_found != len(debate_files):
@@ -212,7 +219,9 @@ async def _verify(owner: uuid.UUID | None, spot_checks: int) -> int:
 
     for problem in problems:
         print(f"verify: PROBLEM: {problem}")
-    print("verify: OK" if not problems else f"verify: FAILED ({len(problems)} problem(s))")
+    print(
+        "verify: OK" if not problems else f"verify: FAILED ({len(problems)} problem(s))"
+    )
     return 0 if not problems else 1
 
 
@@ -224,12 +233,31 @@ async def _main(args: argparse.Namespace) -> int:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--owner-email", required=True, help="an EXISTING account that owns the migrated rows")
+    parser = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
+    parser.add_argument(
+        "--owner-email",
+        required=True,
+        help="an EXISTING account that owns the migrated rows",
+    )
     mode = parser.add_mutually_exclusive_group()
-    mode.add_argument("--dry-run", action="store_true", help="print what would be written; write nothing")
-    mode.add_argument("--verify", action="store_true", help="check rows against the legacy files; write nothing")
-    parser.add_argument("--spot-checks", type=int, default=DEFAULT_SPOT_CHECKS, help="verdict spot-checks in --verify")
+    mode.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="print what would be written; write nothing",
+    )
+    mode.add_argument(
+        "--verify",
+        action="store_true",
+        help="check rows against the legacy files; write nothing",
+    )
+    parser.add_argument(
+        "--spot-checks",
+        type=int,
+        default=DEFAULT_SPOT_CHECKS,
+        help="verdict spot-checks in --verify",
+    )
     return asyncio.run(_main(parser.parse_args()))
 
 

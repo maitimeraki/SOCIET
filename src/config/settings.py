@@ -27,7 +27,11 @@ class Settings(BaseSettings):
         "http://127.0.0.1:5173",
     ]
     # "testserver" is required: the FastAPI TestClient dials that host.
-    allowed_hosts: Annotated[list[str], NoDecode] = ["localhost", "127.0.0.1", "testserver"]
+    allowed_hosts: Annotated[list[str], NoDecode] = [
+        "localhost",
+        "127.0.0.1",
+        "testserver",
+    ]
     max_json_bytes: int = 1_048_576  # 1 MB, JSON bodies only
     llm_probe_timeout_seconds: int = 5  # budget for one readiness probe
     rate_limit_login: str = "5/minute"

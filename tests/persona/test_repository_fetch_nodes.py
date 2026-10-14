@@ -7,8 +7,10 @@ returns the rows in, or the I2 joiner write silently degrades.
 
 No live Neo4j: the driver is stubbed (same seam as `test_repository_provenance`).
 """
-import pytest
+
 from unittest.mock import AsyncMock, MagicMock
+
+import pytest
 
 from src.persona.repository import PersonaRepository
 
@@ -62,9 +64,15 @@ async def test_entity_row_wins_whatever_the_row_order(rows):
 @pytest.mark.asyncio
 async def test_no_collision_names_are_returned_verbatim():
     """A name held by one node only is unchanged — and still returned."""
-    repo, _ = _repo_returning([
-        {"name": "Bob", "n": {"name": "Bob", "domain_tags": ["energy"]}, "is_entity": False},
-    ])
+    repo, _ = _repo_returning(
+        [
+            {
+                "name": "Bob",
+                "n": {"name": "Bob", "domain_tags": ["energy"]},
+                "is_entity": False,
+            },
+        ]
+    )
 
     out = await repo.fetch_nodes_by_names(["Bob", "Missing"])
 

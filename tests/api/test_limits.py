@@ -149,7 +149,9 @@ def test_signup_has_its_own_setting(monkeypatch):
         return None
 
     async def _reject_signup(*args, **kwargs):
-        raise HTTPException(status_code=409, detail="An account with this email already exists.")
+        raise HTTPException(
+            status_code=409, detail="An account with this email already exists."
+        )
 
     monkeypatch.setattr("src.api.auth_api.service.signup", _reject_signup)
 

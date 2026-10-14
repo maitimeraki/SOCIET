@@ -4,6 +4,7 @@ One job: bytes in, `GlobalInputDocument`-shaped dict out. No graph, no LLM.
 Failures raise `ExtractionError` with a user-facing sentence; the API layer
 maps them onto the per-file failure cards.
 """
+
 import io
 import re
 import uuid
@@ -28,7 +29,9 @@ def _extension(filename: str) -> str:
     return filename[dot:].lower() if dot >= 0 else ""
 
 
-def _document(title: str, text: str, source_type: str, mime_type: str, pages: Optional[int] = None) -> dict[str, Any]:
+def _document(
+    title: str, text: str, source_type: str, mime_type: str, pages: Optional[int] = None
+) -> dict[str, Any]:
     word_count = len(WORD_RE.findall(text))
     if word_count == 0:
         raise ExtractionError("Empty document — 0 words extracted")
@@ -69,7 +72,9 @@ def extract_docx(filename: str, data: bytes) -> dict[str, Any]:
 
 
 def extract_plain(filename: str, data: bytes, mime_type: str) -> dict[str, Any]:
-    return _document(filename, data.decode("utf-8", errors="replace"), "file", mime_type)
+    return _document(
+        filename, data.decode("utf-8", errors="replace"), "file", mime_type
+    )
 
 
 def extract_document(filename: str, data: bytes) -> dict[str, Any]:
@@ -92,7 +97,9 @@ def extract_url(url: str) -> dict[str, Any]:
     from bs4 import BeautifulSoup
 
     try:
-        response = requests.get(url, timeout=15, headers={"User-Agent": "SimulationWorld/1.0"})
+        response = requests.get(
+            url, timeout=15, headers={"User-Agent": "SimulationWorld/1.0"}
+        )
     except requests.RequestException as exc:
         raise ExtractionError(f"Download failed: {exc}", 502) from exc
     if response.status_code >= 400:

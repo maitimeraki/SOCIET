@@ -13,6 +13,7 @@ from src.auth.service import redeem_ws_ticket
 from src.db.engine import get_db, get_session_factory
 from src.db.models import User, UserSession
 
+
 def _unauthenticated() -> HTTPException:
     return HTTPException(status_code=401, detail="Not authenticated.")
 
@@ -52,9 +53,7 @@ async def _live_user(db: AsyncSession, session: UserSession | None) -> User | No
     return user
 
 
-async def current_user(
-    request: Request, db: AsyncSession = Depends(get_db)
-) -> User:
+async def current_user(request: Request, db: AsyncSession = Depends(get_db)) -> User:
     """sid cookie → live session → enabled user, else 401."""
     sid = cookie_session_id(request)
     user = await _live_user(db, await db.get(UserSession, sid) if sid else None)

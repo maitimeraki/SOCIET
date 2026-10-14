@@ -3,6 +3,7 @@ from dataclasses import dataclass
 
 from src.llm.config_llm import LLMConfig
 
+
 @dataclass
 class GraphConfig:
     # Graph stages are the analysis tier — cheap but capable. Single source:
@@ -11,7 +12,9 @@ class GraphConfig:
     extraction_model: str = LLMConfig.analysis_model
     # Explicit per-attempt bound for the extraction LLM call: a hung request
     # must fail inside the caller's window instead of riding the library default.
-    extraction_timeout_seconds: int = int(os.getenv("GRAPH_EXTRACTION_TIMEOUT_SECONDS", "300"))
+    extraction_timeout_seconds: int = int(
+        os.getenv("GRAPH_EXTRACTION_TIMEOUT_SECONDS", "300")
+    )
     temperature: float = float(os.getenv("GRAPH_TEMPERATURE", "0.0"))
     discovery_sample_size: int = int(os.getenv("GRAPH_DISCOVERY_SAMPLE_SIZE", "12"))
     # One vocabulary per dataset: a single discovery call over a spread sample,
@@ -31,7 +34,9 @@ class GraphConfig:
     # times (total attempts = extraction_chunk_retries + 1, exponential backoff
     # between them) before it is SKIPPED — logged, published as an error frame,
     # and the window refilled. A run is fatal only when EVERY chunk failed.
-    extraction_chunk_retries: int = int(os.getenv("GRAPH_EXTRACTION_CHUNK_RETRIES", "2"))
+    extraction_chunk_retries: int = int(
+        os.getenv("GRAPH_EXTRACTION_CHUNK_RETRIES", "2")
+    )
     extraction_chunk_retry_backoff_seconds: float = float(
         os.getenv("GRAPH_EXTRACTION_CHUNK_RETRY_BACKOFF_SECONDS", "1.0")
     )
@@ -45,8 +50,12 @@ class GraphConfig:
     # would need per-label occurrence counting, which the extraction loop does
     # not keep — the field documents the policy, it does not gate `promote`.
     promotion_min_chunks: int = int(os.getenv("GRAPH_PROMOTION_MIN_CHUNKS", "1"))
-    discovery_timeout_seconds: int = int(os.getenv("GRAPH_DISCOVERY_TIMEOUT_SECONDS", "90"))
-    discovery_retry_attempts: int = int(os.getenv("GRAPH_DISCOVERY_RETRY_ATTEMPTS", "3"))
+    discovery_timeout_seconds: int = int(
+        os.getenv("GRAPH_DISCOVERY_TIMEOUT_SECONDS", "90")
+    )
+    discovery_retry_attempts: int = int(
+        os.getenv("GRAPH_DISCOVERY_RETRY_ATTEMPTS", "3")
+    )
     discovery_retry_backoff_seconds: float = float(
         os.getenv("GRAPH_DISCOVERY_RETRY_BACKOFF_SECONDS", "1.0")
     )
@@ -68,7 +77,9 @@ class GraphConfig:
     # Aggregate in-flight extraction LLM calls = this × each extractor's
     # num_workers (pinned to 1 in graph_build.py — raise one only by lowering
     # the other).
-    ontology_max_concurrency: int = int(os.getenv("GRAPH_ONTOLOGY_MAX_CONCURRENCY", "8"))
+    ontology_max_concurrency: int = int(
+        os.getenv("GRAPH_ONTOLOGY_MAX_CONCURRENCY", "8")
+    )
 
     neo4j_uri: str = os.getenv("NEO4J_URI", "bolt://localhost:7687")
     neo4j_username: str = os.getenv("NEO4J_USERNAME", "neo4j")

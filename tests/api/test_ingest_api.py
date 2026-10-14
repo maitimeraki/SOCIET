@@ -1,4 +1,5 @@
 """Ingest API tests: extraction shapes, per-file failures, url fetch."""
+
 import io
 import uuid
 from types import SimpleNamespace
@@ -71,7 +72,16 @@ def test_pdf_document_shape(client):
 def test_docx_document_shape(client):
     response = client.post(
         "/api/ingest/files",
-        files=[("files", ("steel-tariffs.docx", _docx_bytes(), "application/vnd.openxmlformats-officedocument.wordprocessingml.document"))],
+        files=[
+            (
+                "files",
+                (
+                    "steel-tariffs.docx",
+                    _docx_bytes(),
+                    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                ),
+            )
+        ],
     )
     document = response.json()["documents"][0]
     assert document["word_count"] > 0
@@ -140,8 +150,12 @@ def test_mixed_batch_keeps_good_files(client):
 
 def test_url_document_shape(client, monkeypatch):
     html = "<html><head><title>Steel report</title></head><body><p>Body text here.</p></body></html>"
-    monkeypatch.setattr("requests.get", lambda *args, **kwargs: _FakeResponse(200, html))
-    response = client.post("/api/ingest/url", json={"url": "https://example.com/report"})
+    monkeypatch.setattr(
+        "requests.get", lambda *args, **kwargs: _FakeResponse(200, html)
+    )
+    response = client.post(
+        "/api/ingest/url", json={"url": "https://example.com/report"}
+    )
     document = response.json()["document"]
     assert response.status_code == 200
     assert document["source_type"] == "url"
@@ -161,7 +175,9 @@ def test_url_fetch_failure_is_502(client, monkeypatch):
 
 def test_url_http_error_is_502_with_code(client, monkeypatch):
     monkeypatch.setattr("requests.get", lambda *args, **kwargs: _FakeResponse(403, ""))
-    response = client.post("/api/ingest/url", json={"url": "https://example.com/secret"})
+    response = client.post(
+        "/api/ingest/url", json={"url": "https://example.com/secret"}
+    )
     error = response.json()["error"]
     assert error["message"] == "Download failed: HTTP 403"
     # 502 is outside the status→code map, so it keeps the generic code.

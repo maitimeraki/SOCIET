@@ -1,4 +1,5 @@
 """VerdictSynthesizer: cluster-weighted CIOR synthesis for debate verdicts."""
+
 from __future__ import annotations
 
 import logging
@@ -7,7 +8,7 @@ from typing import TYPE_CHECKING, List
 from pydantic import BaseModel
 
 from src.llm.config_llm import get_llm_config
-from src.persona.agent import Agent, SYNTHETIC_PROVENANCE_PREFIX, Stance
+from src.persona.agent import SYNTHETIC_PROVENANCE_PREFIX, Agent, Stance
 from src.simulation.pair_turn import (
     AgentTurn,
     ClusterSummary,
@@ -55,6 +56,7 @@ VERDICT_SYSTEM = (
 
 class Verdict(BaseModel):
     """Structured analyst answer, validated at the boundary (spec §8.1, §8.6)."""
+
     answer: str
     reasoning: str
     constraints_and_risks: str
@@ -154,7 +156,9 @@ class VerdictSynthesizer:
         verdict = self.synthesize(rounds=rounds, profiles=profiles, llm_client=None)
         parsed = None
         if llm_client is not None:
-            parsed = await self._allm_verdict(llm_client, verdict, rounds, query, scenario)
+            parsed = await self._allm_verdict(
+                llm_client, verdict, rounds, query, scenario
+            )
         if parsed is not None:
             verdict.dissenting_views = parsed.dissenting_views
             verdict.evidence = parsed.evidence
@@ -166,8 +170,11 @@ class VerdictSynthesizer:
             "verdict narrative degraded to the summary (run=%s, query=%r): %s",
             run_id or "(none)",
             query[:120],
-            "no LLM client given" if llm_client is None
-            else "answer-writer produced no parseable JSON after retries",
+            (
+                "no LLM client given"
+                if llm_client is None
+                else "answer-writer produced no parseable JSON after retries"
+            ),
         )
         return verdict
 
@@ -201,7 +208,11 @@ class VerdictSynthesizer:
         )
         cfg = get_llm_config()
         for attempt in range(1, VERDICT_MAX_ATTEMPTS + 1):
-            prompt = user_prompt if attempt == 1 else user_prompt + VERDICT_JSON_REINFORCEMENT
+            prompt = (
+                user_prompt
+                if attempt == 1
+                else user_prompt + VERDICT_JSON_REINFORCEMENT
+            )
             try:
                 raw = await llm_client.generate(
                     system_prompt=VERDICT_SYSTEM,
@@ -213,7 +224,8 @@ class VerdictSynthesizer:
             except Exception:
                 logger.exception(
                     "verdict answer-writer attempt %d/%d raised",
-                    attempt, VERDICT_MAX_ATTEMPTS,
+                    attempt,
+                    VERDICT_MAX_ATTEMPTS,
                 )
                 continue
             parsed = _parse_verdict(raw)
@@ -221,7 +233,8 @@ class VerdictSynthesizer:
                 return parsed
             logger.warning(
                 "verdict answer-writer attempt %d/%d returned no parseable JSON",
-                attempt, VERDICT_MAX_ATTEMPTS,
+                attempt,
+                VERDICT_MAX_ATTEMPTS,
             )
         return None
 
@@ -236,7 +249,9 @@ class VerdictSynthesizer:
         for turn in reversed(turns[-SUMMARY_TRANSCRIPT_MAX_TURNS:]):
             line = f"[{turn.stance}] {turn.agent_name}: {turn.content}"
             if turn.reasoning:
-                line += f"\n  (reasoning: {turn.reasoning[:SUMMARY_TURN_REASONING_CHARS]})"
+                line += (
+                    f"\n  (reasoning: {turn.reasoning[:SUMMARY_TURN_REASONING_CHARS]})"
+                )
             if len(line) > budget:
                 break
             lines.append(line)
@@ -317,7 +332,9 @@ class VerdictSynthesizer:
         provenance_by_claim: dict[str, list] = {}
         for turn in all_turns:
             try:
-                turn_stance = Stance(turn.stance) if isinstance(turn.stance, str) else turn.stance
+                turn_stance = (
+                    Stance(turn.stance) if isinstance(turn.stance, str) else turn.stance
+                )
             except ValueError:
                 turn_stance = Stance.NEUTRAL
             if turn_stance == overall_stance:
@@ -341,8 +358,12 @@ class VerdictSynthesizer:
         dominant_count = cluster_details.get(
             overall_stance,
             ClusterSummary(
-                stance=overall_stance, count=0, total_weight=0.0,
-                avg_confidence=0.0, avg_conviction=0.0, agents=[],
+                stance=overall_stance,
+                count=0,
+                total_weight=0.0,
+                avg_confidence=0.0,
+                avg_conviction=0.0,
+                agents=[],
             ),
         ).count
         dominant_pct = (dominant_count / len(all_turns) * 100) if all_turns else 0
@@ -365,7 +386,9 @@ class VerdictSynthesizer:
             contested=contested,
         )
 
-    def _cluster_opinions(self, turns: list[AgentTurn]) -> dict[Stance, list[AgentTurn]]:
+    def _cluster_opinions(
+        self, turns: list[AgentTurn]
+    ) -> dict[Stance, list[AgentTurn]]:
         clusters: dict[Stance, list[AgentTurn]] = {
             Stance.POSITIVE: [],
             Stance.NEGATIVE: [],
@@ -374,7 +397,9 @@ class VerdictSynthesizer:
         }
         for turn in turns:
             try:
-                stance = Stance(turn.stance) if isinstance(turn.stance, str) else turn.stance
+                stance = (
+                    Stance(turn.stance) if isinstance(turn.stance, str) else turn.stance
+                )
             except ValueError:
                 stance = Stance.NEUTRAL
             clusters[stance].append(turn)

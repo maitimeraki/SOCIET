@@ -4,6 +4,7 @@ Status/list/get answer from Postgres — an in-process dict never does — and a
 restart's "interrupted" state is derived from the boot sweep, not guessed from
 dict membership.
 """
+
 import asyncio
 import os
 import sys
@@ -28,7 +29,9 @@ from src.db.models import Run, User
 if sys.platform == "win32":
     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
-requires_db = pytest.mark.skipif(not os.getenv("DATABASE_URL"), reason="DATABASE_URL is not set")
+requires_db = pytest.mark.skipif(
+    not os.getenv("DATABASE_URL"), reason="DATABASE_URL is not set"
+)
 
 pytestmark = [requires_db, pytest.mark.asyncio]
 
@@ -58,7 +61,9 @@ def _app_for(account, *routers_with_prefixes) -> FastAPI:
     app = FastAPI()
     for router, prefix in routers_with_prefixes:
         app.include_router(router, prefix=prefix)
-    app.dependency_overrides[current_user] = lambda: SimpleNamespace(id=uuid.UUID(account.id))
+    app.dependency_overrides[current_user] = lambda: SimpleNamespace(
+        id=uuid.UUID(account.id)
+    )
     return app
 
 
@@ -170,7 +175,9 @@ async def test_restart_sweep_marks_running_rows_interrupted(client, accounts):
     assert status["status"] == "failed"
     assert status["error"] == "interrupted"
     listing = (await client.get("/simulate/debates")).json()
-    assert [item for item in listing if item["run_id"] == run["run_id"]][0]["status"] == "interrupted"
+    assert [item for item in listing if item["run_id"] == run["run_id"]][0][
+        "status"
+    ] == "interrupted"
     read_back = await run_doc.read_job_doc(job["job_id"])
     assert (read_back["status"], read_back["error"]) == ("failed", "interrupted")
 
@@ -190,7 +197,9 @@ async def test_completion_lands_verdict_and_confidence_on_the_runs_row(accounts)
     assert row.finished_at is not None
 
 
-async def test_create_debate_persists_a_queued_row_at_accept(client, accounts, monkeypatch):
+async def test_create_debate_persists_a_queued_row_at_accept(
+    client, accounts, monkeypatch
+):
     owner, _ = accounts
     monkeypatch.setattr(debate_api, "_run_debate_async", AsyncMock())
 

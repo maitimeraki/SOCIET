@@ -3,6 +3,7 @@
 `?limit&cursor` over `(created_at, id)` DESC — stable while new runs arrive —
 and the legacy alias keeps today's array shape (R15).
 """
+
 import asyncio
 import os
 import sys
@@ -25,7 +26,9 @@ from src.db.models import User
 if sys.platform == "win32":
     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
-requires_db = pytest.mark.skipif(not os.getenv("DATABASE_URL"), reason="DATABASE_URL is not set")
+requires_db = pytest.mark.skipif(
+    not os.getenv("DATABASE_URL"), reason="DATABASE_URL is not set"
+)
 
 pytestmark = [requires_db, pytest.mark.asyncio]
 
@@ -57,7 +60,9 @@ async def client(accounts):
     install_error_handlers(app)  # the uniform error contract, as on the real app
     app.include_router(router)
     app.include_router(router, prefix="/api/v1")
-    app.dependency_overrides[current_user] = lambda: SimpleNamespace(id=uuid.UUID(owner.id))
+    app.dependency_overrides[current_user] = lambda: SimpleNamespace(
+        id=uuid.UUID(owner.id)
+    )
     transport = ASGITransport(app=app, client=("10.99.9.1", 5000))
     async with AsyncClient(transport=transport, base_url="http://testserver") as http:
         yield http
@@ -106,7 +111,9 @@ async def test_walk_with_limit_one_visits_every_run_newest_first(client, account
 
     items = await _walk(client, limit=1)
 
-    assert [item["run_id"] for item in items] == [doc["run_id"] for doc in reversed(docs)]
+    assert [item["run_id"] for item in items] == [
+        doc["run_id"] for doc in reversed(docs)
+    ]
 
 
 async def test_last_page_has_a_null_cursor_and_no_extras(client, accounts):
@@ -118,7 +125,9 @@ async def test_last_page_has_a_null_cursor_and_no_extras(client, accounts):
     assert first["next_cursor"] is not None
 
     second = (
-        await client.get(f"/api/v1/simulate/debates?limit=2&cursor={first['next_cursor']}")
+        await client.get(
+            f"/api/v1/simulate/debates?limit=2&cursor={first['next_cursor']}"
+        )
     ).json()
     assert [item["run_id"] for item in second["items"]] == [docs[0]["run_id"]]
     assert second["next_cursor"] is None
@@ -133,11 +142,17 @@ async def test_a_new_run_mid_walk_does_not_corrupt_paging(client, accounts):
     first = (await client.get("/api/v1/simulate/debates?limit=2")).json()
     seen = [item["run_id"] for item in first["items"]]
 
-    newer = {**docs[-1], "run_id": str(uuid.uuid4()), "created_at": "2026-11-01T10:00:00+00:00"}
+    newer = {
+        **docs[-1],
+        "run_id": str(uuid.uuid4()),
+        "created_at": "2026-11-01T10:00:00+00:00",
+    }
     await run_doc.write_run_doc(newer)
 
     rest = (
-        await client.get(f"/api/v1/simulate/debates?limit=2&cursor={first['next_cursor']}")
+        await client.get(
+            f"/api/v1/simulate/debates?limit=2&cursor={first['next_cursor']}"
+        )
     ).json()
     seen.extend(item["run_id"] for item in rest["items"])
     assert rest["next_cursor"] is None
@@ -185,8 +200,12 @@ async def test_legacy_alias_keeps_the_array_shape(client, accounts):
 
     legacy = (await client.get("/simulate/debates")).json()
     assert isinstance(legacy, list)
-    assert [item["run_id"] for item in legacy] == [doc["run_id"] for doc in reversed(docs)]
+    assert [item["run_id"] for item in legacy] == [
+        doc["run_id"] for doc in reversed(docs)
+    ]
 
     canonical = (await client.get("/api/v1/simulate/debates")).json()
     assert set(canonical) == {"items", "next_cursor"}
-    assert [item["run_id"] for item in canonical["items"]] == [doc["run_id"] for doc in reversed(docs)]
+    assert [item["run_id"] for item in canonical["items"]] == [
+        doc["run_id"] for doc in reversed(docs)
+    ]

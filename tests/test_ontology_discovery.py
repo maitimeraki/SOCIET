@@ -1,14 +1,17 @@
 """Tests for ontology discovery module."""
+
+from unittest.mock import AsyncMock, MagicMock, patch
+
 import pytest
-from unittest.mock import AsyncMock, patch, MagicMock
+
+from src.graph.models_graph import LocalOntology, ProcessedChunk
 from src.graph.ontology import (
-    discover_ontology,
-    discover_ontology_sync,
     OntologyDiscoveryStage,
     _strip_json_fences,
     _structured_properties,
+    discover_ontology,
+    discover_ontology_sync,
 )
-from src.graph.models_graph import ProcessedChunk, LocalOntology
 from src.llm.config_llm import LLMConfig
 
 
@@ -76,18 +79,22 @@ class TestStructuredProperties:
             "entity_types": [
                 {
                     "type_name": "Person",
-                    "properties": ["name: The person's name", "age: How old they are"]
+                    "properties": ["name: The person's name", "age: How old they are"],
                 }
             ],
-            "relation_types": []
+            "relation_types": [],
         }
         result = _structured_properties(llm_data)
 
         assert len(result["entity_types"]) == 1
         assert result["entity_types"][0]["type_name"] == "Person"
         assert result["entity_types"][0]["properties"] == [
-            {"name": "name", "value_type": "string", "description": "The person's name"},
-            {"name": "age", "value_type": "string", "description": "How old they are"}
+            {
+                "name": "name",
+                "value_type": "string",
+                "description": "The person's name",
+            },
+            {"name": "age", "value_type": "string", "description": "How old they are"},
         ]
 
     def test_transforms_relation_properties(self):
@@ -96,21 +103,25 @@ class TestStructuredProperties:
             "relation_types": [
                 {
                     "type_name": "WORKS_AT",
-                    "properties": ["since: When employment started"]
+                    "properties": ["since: When employment started"],
                 }
-            ]
+            ],
         }
         result = _structured_properties(llm_data)
 
         assert len(result["relation_types"]) == 1
         assert result["relation_types"][0]["properties"] == [
-            {"name": "since", "value_type": "string", "description": "When employment started"}
+            {
+                "name": "since",
+                "value_type": "string",
+                "description": "When employment started",
+            }
         ]
 
     def test_handles_missing_properties(self):
         llm_data = {
             "entity_types": [{"type_name": "Thing"}],
-            "relation_types": [{"type_name": "RELATES_TO"}]
+            "relation_types": [{"type_name": "RELATES_TO"}],
         }
         result = _structured_properties(llm_data)
 
@@ -120,22 +131,47 @@ class TestStructuredProperties:
 
 def test_structured_properties_parses_value_type():
     from src.graph.ontology import _structured_properties
-    out = _structured_properties({
-        "entity_types": [{"type_name": "Company", "properties": ["revenue: money: annual revenue"]}],
-        "relation_types": [{"type_name": "ACQUIRES", "properties": ["price: money: deal value"]}],
-    })
+
+    out = _structured_properties(
+        {
+            "entity_types": [
+                {
+                    "type_name": "Company",
+                    "properties": ["revenue: money: annual revenue"],
+                }
+            ],
+            "relation_types": [
+                {"type_name": "ACQUIRES", "properties": ["price: money: deal value"]}
+            ],
+        }
+    )
     p = out["entity_types"][0]["properties"][0]
-    assert p == {"name": "revenue", "value_type": "money", "description": "annual revenue"}
+    assert p == {
+        "name": "revenue",
+        "value_type": "money",
+        "description": "annual revenue",
+    }
 
 
 def test_structured_properties_back_compat_two_part():
     from src.graph.ontology import _structured_properties
-    out = _structured_properties({"entity_types": [{"type_name": "X", "properties": ["founded: year"]}], "relation_types": []})
-    assert out["entity_types"][0]["properties"][0] == {"name": "founded", "value_type": "string", "description": "year"}
+
+    out = _structured_properties(
+        {
+            "entity_types": [{"type_name": "X", "properties": ["founded: year"]}],
+            "relation_types": [],
+        }
+    )
+    assert out["entity_types"][0]["properties"][0] == {
+        "name": "founded",
+        "value_type": "string",
+        "description": "year",
+    }
 
 
 def test_structured_properties_keeps_full_description_with_extra_colons():
     from src.graph.ontology import _parse_prop
+
     assert _parse_prop("opening_hours: Mon-Fri 9:00-17:00") == {
         "name": "opening_hours",
         "value_type": "string",
@@ -150,7 +186,9 @@ class TestDiscoverOntology:
     async def test_returns_local_ontology(self, sample_chunks):
         """Verify discover_ontology returns a LocalOntology instance."""
         mock_response = MagicMock()
-        mock_response.__str__ = lambda self: '{"entity_types": [], "relation_types": []}'
+        mock_response.__str__ = (
+            lambda self: '{"entity_types": [], "relation_types": []}'
+        )
 
         with patch("src.graph.ontology.OpenAILike") as mock_llm:
             mock_instance = AsyncMock()
@@ -168,7 +206,9 @@ class TestDiscoverOntology:
     async def test_sample_size_respected(self, sample_chunks):
         """Verify sample_size parameter limits chunks used."""
         mock_response = MagicMock()
-        mock_response.__str__ = lambda self: '{"entity_types": [], "relation_types": []}'
+        mock_response.__str__ = (
+            lambda self: '{"entity_types": [], "relation_types": []}'
+        )
 
         with patch("src.graph.ontology.OpenAILike") as mock_llm:
             mock_instance = AsyncMock()
@@ -184,7 +224,7 @@ class TestDiscoverOntology:
     async def test_entity_types_discovered(self, sample_chunks):
         """Verify entity types are properly discovered from LLM response."""
         mock_response = MagicMock()
-        mock_response.__str__ = lambda self: '''{
+        mock_response.__str__ = lambda self: """{
             "entity_types": [
                 {
                     "type_name": "Microservice",
@@ -193,7 +233,7 @@ class TestDiscoverOntology:
                 }
             ],
             "relation_types": []
-        }'''
+        }"""
 
         with patch("src.graph.ontology.OpenAILike") as mock_llm:
             mock_instance = AsyncMock()
@@ -211,7 +251,7 @@ class TestDiscoverOntology:
     async def test_relation_types_discovered(self, sample_chunks):
         """Verify relation types are properly discovered from LLM response."""
         mock_response = MagicMock()
-        mock_response.__str__ = lambda self: '''{
+        mock_response.__str__ = lambda self: """{
             "entity_types": [],
             "relation_types": [
                 {
@@ -222,7 +262,7 @@ class TestDiscoverOntology:
                     "properties": ["protocol: Communication protocol used"]
                 }
             ]
-        }'''
+        }"""
 
         with patch("src.graph.ontology.OpenAILike") as mock_llm:
             mock_instance = AsyncMock()
@@ -242,7 +282,9 @@ class TestDiscoverOntologySync:
     def test_sync_wrapper_returns_ontology(self, sample_chunks):
         """Verify sync wrapper returns LocalOntology."""
         mock_response = MagicMock()
-        mock_response.__str__ = lambda self: '{"entity_types": [], "relation_types": []}'
+        mock_response.__str__ = (
+            lambda self: '{"entity_types": [], "relation_types": []}'
+        )
 
         with patch("src.graph.ontology.OpenAILike") as mock_llm:
             mock_instance = AsyncMock()
@@ -261,13 +303,13 @@ class TestOntologyProperties:
     async def test_entity_labels_property(self, sample_chunks):
         """Verify entity_labels returns type names."""
         mock_response = MagicMock()
-        mock_response.__str__ = lambda self: '''{
+        mock_response.__str__ = lambda self: """{
             "entity_types": [
                 {"type_name": "Person", "description": "A human"},
                 {"type_name": "Organization", "description": "A company or group"}
             ],
             "relation_types": []
-        }'''
+        }"""
 
         with patch("src.graph.ontology.OpenAILike") as mock_llm:
             mock_instance = AsyncMock()
@@ -282,13 +324,13 @@ class TestOntologyProperties:
     async def test_relation_labels_property(self, sample_chunks):
         """Verify relation_labels returns type names."""
         mock_response = MagicMock()
-        mock_response.__str__ = lambda self: '''{
+        mock_response.__str__ = lambda self: """{
             "entity_types": [],
             "relation_types": [
                 {"type_name": "WORKS_AT", "description": "Employment relation"},
                 {"type_name": "KNOWS", "description": "Social connection"}
             ]
-        }'''
+        }"""
 
         with patch("src.graph.ontology.OpenAILike") as mock_llm:
             mock_instance = AsyncMock()
@@ -325,7 +367,9 @@ class TestStageConfigWiring:
     async def test_discover_ontology_defaults_to_analysis_model(self, sample_chunks):
         """Wrapper default model is the central analysis-tier model."""
         mock_response = MagicMock()
-        mock_response.__str__ = lambda self: '{"entity_types": [], "relation_types": []}'
+        mock_response.__str__ = (
+            lambda self: '{"entity_types": [], "relation_types": []}'
+        )
 
         with patch("src.graph.ontology.OpenAILike") as mock_llm:
             mock_instance = AsyncMock()
@@ -339,7 +383,9 @@ class TestStageConfigWiring:
     def test_discover_ontology_sync_defaults_to_analysis_model(self, sample_chunks):
         """Sync wrapper default model is the central analysis-tier model."""
         mock_response = MagicMock()
-        mock_response.__str__ = lambda self: '{"entity_types": [], "relation_types": []}'
+        mock_response.__str__ = (
+            lambda self: '{"entity_types": [], "relation_types": []}'
+        )
 
         with patch("src.graph.ontology.OpenAILike") as mock_llm:
             mock_instance = AsyncMock()

@@ -15,7 +15,16 @@ from sqlalchemy import delete, select
 from sqlalchemy.exc import IntegrityError
 
 from src.db.engine import get_engine, get_session_factory
-from src.db.models import AuditLog, Dataset, Job, Run, RunEvent, Upload, User, UserSession
+from src.db.models import (
+    AuditLog,
+    Dataset,
+    Job,
+    Run,
+    RunEvent,
+    Upload,
+    User,
+    UserSession,
+)
 
 pytestmark = pytest.mark.skipif(
     not os.getenv("DATABASE_URL"), reason="DATABASE_URL is not set"
@@ -44,12 +53,16 @@ async def test_schema_roundtrip_and_fk_behavior():
 
             session_row = UserSession(
                 user_id=user.id,
-                expires_at=datetime.datetime.now(datetime.UTC) + datetime.timedelta(hours=1),
+                expires_at=datetime.datetime.now(datetime.UTC)
+                + datetime.timedelta(hours=1),
                 user_agent="pytest/1.0",
                 ip="127.0.0.1",
             )
             dataset = Dataset(
-                id=uuid.uuid4(), user_id=user.id, name="roundtrip dataset", graph_id="graph-1"
+                id=uuid.uuid4(),
+                user_id=user.id,
+                name="roundtrip dataset",
+                graph_id="graph-1",
             )
             db.add_all([session_row, dataset])
             await db.flush()
@@ -66,7 +79,13 @@ async def test_schema_roundtrip_and_fk_behavior():
             await db.flush()
             ids["run"] = run.id
 
-            job = Job(id=uuid.uuid4(), user_id=user.id, run_id=run.id, kind="debate", status="queued")
+            job = Job(
+                id=uuid.uuid4(),
+                user_id=user.id,
+                run_id=run.id,
+                kind="debate",
+                status="queued",
+            )
             upload = Upload(
                 id=uuid.uuid4(),
                 user_id=user.id,
@@ -76,7 +95,13 @@ async def test_schema_roundtrip_and_fk_behavior():
                 mime="application/pdf",
                 sha256="a" * 64,
             )
-            event = RunEvent(id=uuid.uuid4(), run_id=run.id, seq=1, type="started", payload={"round": 1})
+            event = RunEvent(
+                id=uuid.uuid4(),
+                run_id=run.id,
+                seq=1,
+                type="started",
+                payload={"round": 1},
+            )
             db.add_all([job, upload, event])
             await db.commit()
             ids["job"], ids["upload"], ids["event"] = job.id, upload.id, event.id
@@ -89,17 +114,28 @@ async def test_schema_roundtrip_and_fk_behavior():
             assert (user.email, user.password_hash) == (TEST_EMAIL, "$2b$12$roundtrip")
             assert user.disabled_at is None
             # timestamptz comes back tz-aware; a plain timestamp would not.
-            assert user.created_at.tzinfo is not None and user.updated_at.tzinfo is not None
+            assert (
+                user.created_at.tzinfo is not None
+                and user.updated_at.tzinfo is not None
+            )
 
             session_row = (
-                await db.execute(select(UserSession).where(UserSession.id == ids["session"]))
+                await db.execute(
+                    select(UserSession).where(UserSession.id == ids["session"])
+                )
             ).scalar_one()
-            assert (session_row.user_id, session_row.user_agent, session_row.revoked_at) == (
+            assert (
+                session_row.user_id,
+                session_row.user_agent,
+                session_row.revoked_at,
+            ) == (
                 ids["user"],
                 "pytest/1.0",
                 None,
             )
-            assert ipaddress.ip_interface(str(session_row.ip)).ip == ipaddress.ip_address("127.0.0.1")
+            assert ipaddress.ip_interface(
+                str(session_row.ip)
+            ).ip == ipaddress.ip_address("127.0.0.1")
 
             dataset = (
                 await db.execute(select(Dataset).where(Dataset.id == ids["dataset"]))
@@ -110,8 +146,16 @@ async def test_schema_roundtrip_and_fk_behavior():
                 "graph-1",
             )
 
-            run = (await db.execute(select(Run).where(Run.id == ids["run"]))).scalar_one()
-            assert (run.user_id, run.dataset_id, run.query, run.status, run.verdict) == (
+            run = (
+                await db.execute(select(Run).where(Run.id == ids["run"]))
+            ).scalar_one()
+            assert (
+                run.user_id,
+                run.dataset_id,
+                run.query,
+                run.status,
+                run.verdict,
+            ) == (
                 ids["user"],
                 ids["dataset"],
                 "Should we expand into Europe?",
@@ -119,8 +163,17 @@ async def test_schema_roundtrip_and_fk_behavior():
                 None,
             )
 
-            job = (await db.execute(select(Job).where(Job.id == ids["job"]))).scalar_one()
-            assert (job.user_id, job.run_id, job.kind, job.status, job.attempts, job.error) == (
+            job = (
+                await db.execute(select(Job).where(Job.id == ids["job"]))
+            ).scalar_one()
+            assert (
+                job.user_id,
+                job.run_id,
+                job.kind,
+                job.status,
+                job.attempts,
+                job.error,
+            ) == (
                 ids["user"],
                 ids["run"],
                 "debate",
@@ -151,7 +204,9 @@ async def test_schema_roundtrip_and_fk_behavior():
 
         # --- (run_id, seq) is unique ------------------------------------------
         async with factory() as db:
-            db.add(RunEvent(id=uuid.uuid4(), run_id=ids["run"], seq=1, type="duplicate"))
+            db.add(
+                RunEvent(id=uuid.uuid4(), run_id=ids["run"], seq=1, type="duplicate")
+            )
             with pytest.raises(IntegrityError):
                 await db.commit()
             await db.rollback()
@@ -171,7 +226,9 @@ async def test_schema_roundtrip_and_fk_behavior():
 
         # --- deleting the user cascades; audit_log is orphaned, not deleted ----
         async with factory() as db:
-            user = (await db.execute(select(User).where(User.id == ids["user"]))).scalar_one()
+            user = (
+                await db.execute(select(User).where(User.id == ids["user"]))
+            ).scalar_one()
             await db.delete(user)
             await db.commit()
 
@@ -188,7 +245,9 @@ async def test_schema_roundtrip_and_fk_behavior():
                 surviving = (
                     await db.execute(select(model).where(model.id == ids[key]))
                 ).scalar_one_or_none()
-                assert surviving is None, f"{model.__tablename__} row survived the user delete"
+                assert (
+                    surviving is None
+                ), f"{model.__tablename__} row survived the user delete"
 
             audit = (
                 await db.execute(select(AuditLog).where(AuditLog.id == ids["audit"]))

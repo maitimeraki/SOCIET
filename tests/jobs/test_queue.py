@@ -1,5 +1,5 @@
 """Queue helpers: cancel flags, dispatch-mode selection, the per-user cap."""
-import asyncio
+
 import os
 import uuid
 
@@ -12,7 +12,9 @@ from src.db.engine import get_session_factory
 from src.db.models import User
 from src.jobs import queue as jobs_queue
 
-requires_db = pytest.mark.skipif(not os.getenv("DATABASE_URL"), reason="DATABASE_URL is not set")
+requires_db = pytest.mark.skipif(
+    not os.getenv("DATABASE_URL"), reason="DATABASE_URL is not set"
+)
 
 
 @pytest_asyncio.fixture
@@ -78,16 +80,25 @@ async def test_a_payload_without_an_owner_is_a_validation_error():
 
 @requires_db
 @pytest.mark.asyncio
-async def test_the_cap_counts_every_kind_and_releases_on_a_terminal_state(owner, monkeypatch):
+async def test_the_cap_counts_every_kind_and_releases_on_a_terminal_state(
+    owner, monkeypatch
+):
     monkeypatch.setenv("MAX_JOBS_PER_USER", "2")
     get_settings.cache_clear()
     try:
-        first = await jobs_queue.enqueue("ontology", {"user_id": owner, "dataset_id": "ds1"})
+        first = await jobs_queue.enqueue(
+            "ontology", {"user_id": owner, "dataset_id": "ds1"}
+        )
         await run_doc.write_job_doc(
             {
-                "job_id": str(uuid.uuid4()), "user_id": owner, "mode": "build_graph",
-                "status": "queued", "progress": 0.0, "stage": "queued",
-                "error": None, "result": None,
+                "job_id": str(uuid.uuid4()),
+                "user_id": owner,
+                "mode": "build_graph",
+                "status": "queued",
+                "progress": 0.0,
+                "stage": "queued",
+                "error": None,
+                "result": None,
             }
         )
 
@@ -118,9 +129,10 @@ async def test_a_dispatch_failure_marks_the_row_failed_not_queued(owner, monkeyp
     monkeypatch.setattr(jobs_queue, "_dispatch", boom)
 
     with pytest.raises(RuntimeError, match="redis down"):
-        await jobs_queue.enqueue("normalize_graph", {"user_id": owner, "dataset_id": "ds1"})
+        await jobs_queue.enqueue(
+            "normalize_graph", {"user_id": owner, "dataset_id": "ds1"}
+        )
 
     doc = await run_doc.read_job_doc(seen["job_id"])
     assert (doc["status"], doc["error"]) == ("failed", "redis down")
     assert await run_doc.count_active_jobs(owner) == 0
-

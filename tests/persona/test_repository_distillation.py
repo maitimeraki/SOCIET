@@ -3,6 +3,7 @@
 The repository is built with `__new__` (the existing no-database seam) so these
 tests never touch Neo4j or the embedding model.
 """
+
 import pytest
 
 from src.persona.agent import Stance
@@ -64,10 +65,12 @@ async def test_one_batch_call_carries_every_persona():
     assert "PERSONA: Alice" in call["user_prompt"]
     assert "PERSONA: Bob" in call["user_prompt"]
     assert (out["Alice"].description, out["Alice"].perspective) == (
-        "Alice's one-liner.", "I am Alice. I weigh the evidence.",
+        "Alice's one-liner.",
+        "I am Alice. I weigh the evidence.",
     )
     assert (out["Bob"].description, out["Bob"].perspective) == (
-        "Bob's one-liner.", "I am Bob. I follow the grid.",
+        "Bob's one-liner.",
+        "I am Bob. I follow the grid.",
     )
 
 
@@ -78,12 +81,17 @@ async def test_prompt_carries_question_context_anchors_and_grounding():
     repo = _repo(client)
 
     await repo.distill_profiles(
-        personas=[_entry(
-            "Alice",
-            summary="carbon tax evidence",
-            tags=["economics"],
-            anchors=[{"kind": "node", "id": "n1", "name": "Alice"}, {"kind": "chunk", "id": "c1"}],
-        )],
+        personas=[
+            _entry(
+                "Alice",
+                summary="carbon tax evidence",
+                tags=["economics"],
+                anchors=[
+                    {"kind": "node", "id": "n1", "name": "Alice"},
+                    {"kind": "chunk", "id": "c1"},
+                ],
+            )
+        ],
         query="Should we tax carbon?",
         core_question="Is a carbon tax wise?",
         stance_axis="Support = tax carbon; oppose = no tax.",
@@ -103,12 +111,16 @@ async def test_two_intents_produce_two_different_prompts():
     repo = _repo(client)
 
     await repo.distill_profiles(
-        personas=[_entry("Alice")], query="q",
-        core_question="Tax carbon?", stance_axis="Support = tax carbon.",
+        personas=[_entry("Alice")],
+        query="q",
+        core_question="Tax carbon?",
+        stance_axis="Support = tax carbon.",
     )
     await repo.distill_profiles(
-        personas=[_entry("Alice")], query="q",
-        core_question="Expand to Europe?", stance_axis="Support = expand.",
+        personas=[_entry("Alice")],
+        query="q",
+        core_question="Expand to Europe?",
+        stance_axis="Support = expand.",
     )
 
     first, second = client.calls[0]["user_prompt"], client.calls[1]["user_prompt"]
@@ -137,7 +149,10 @@ async def test_unparseable_persona_falls_back_to_template_and_warns():
         warnings=warnings,
     )
 
-    assert (out["Alice"].description, out["Alice"].perspective) == ("Alice distilled.", "I am Alice.")
+    assert (out["Alice"].description, out["Alice"].perspective) == (
+        "Alice distilled.",
+        "I am Alice.",
+    )
     assert out["Bob"].description.startswith("Bob:")  # deterministic template
     assert "energy" in out["Bob"].perspective
     assert out["Carol"].description.startswith("Carol:")
@@ -156,7 +171,9 @@ async def test_whole_call_failure_falls_back_every_persona_with_one_warning():
     warnings: list[str] = []
 
     out = await repo.distill_profiles(
-        personas=[_entry("Alice"), _entry("Bob")], query="q", warnings=warnings,
+        personas=[_entry("Alice"), _entry("Bob")],
+        query="q",
+        warnings=warnings,
     )
 
     assert set(out) == {"Alice", "Bob"}
@@ -171,7 +188,9 @@ async def test_no_client_falls_back_every_persona_with_one_warning():
     warnings: list[str] = []
 
     out = await repo.distill_profiles(
-        personas=[_entry("Alice")], query="q", warnings=warnings,
+        personas=[_entry("Alice")],
+        query="q",
+        warnings=warnings,
     )
 
     assert out["Alice"][0].startswith("Alice:")
@@ -195,7 +214,10 @@ def test_distilled_profile_carries_identity():
     from src.persona.repository import DistilledProfile
 
     d = DistilledProfile(
-        "desc", "persp", archetype="Regulator", communication_style="formal and cautious"
+        "desc",
+        "persp",
+        archetype="Regulator",
+        communication_style="formal and cautious",
     )
 
     assert d.archetype == "Regulator"
@@ -207,7 +229,11 @@ def test_identity_fields_are_appended_after_cior():
     from src.persona.repository import DistilledProfile
 
     assert DistilledProfile._fields[:5] == (
-        "description", "perspective", "stance", "conviction", "cior",
+        "description",
+        "perspective",
+        "stance",
+        "conviction",
+        "cior",
     )
     # Every identity field is defaulted, so the 2- and 5-arg positional calls survive.
     assert DistilledProfile("d", "p")[5:] == (None,) * 7
@@ -242,7 +268,8 @@ async def test_identity_fields_are_parsed_from_the_block():
     assert alice.belief == "Markets self-correct when the rules are stable."
     assert alice.opinion == "The tax is workable if phased in."
     assert (alice.description, alice.perspective) == (
-        "Alice's one-liner.", "I am Alice. I weigh the evidence.",
+        "Alice's one-liner.",
+        "I am Alice. I weigh the evidence.",
     )
     assert (alice.stance, alice.conviction, alice.cior) == (Stance.POSITIVE, 0.7, 0.4)
 
@@ -256,7 +283,9 @@ async def test_identity_lines_parse_out_of_prompt_order():
     )
     repo = _repo(client)
 
-    alice = (await repo.distill_profiles(personas=[_entry("Alice")], query="q"))["Alice"]
+    alice = (await repo.distill_profiles(personas=[_entry("Alice")], query="q"))[
+        "Alice"
+    ]
 
     assert alice.perspective == "I am Alice."
     assert alice.belief == "Rules beat discretion."
@@ -272,4 +301,3 @@ async def test_template_derives_archetype_from_the_node_type():
     out = await repo.distill_profiles(personas=[entry], query="q")
 
     assert out["Alice"].archetype == "Regulator"
-

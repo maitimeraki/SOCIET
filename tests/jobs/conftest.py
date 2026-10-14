@@ -1,4 +1,5 @@
 """psycopg refuses to run async on Windows' default ProactorEventLoop."""
+
 import asyncio
 import sys
 

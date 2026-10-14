@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from pydantic import BaseModel, ConfigDict, EmailStr, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.api.limits import limiter
 from src.auth import service
 from src.auth.cookies import (
     clear_csrf_cookie,
@@ -16,7 +17,6 @@ from src.auth.cookies import (
     verify_csrf,
 )
 from src.auth.deps import cookie_session_id, current_user, require_owner
-from src.api.limits import limiter
 from src.config.settings import get_settings
 from src.db.engine import get_db
 from src.db.models import User, UserSession

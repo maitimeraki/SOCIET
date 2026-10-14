@@ -1,4 +1,5 @@
 """The job surface: the per-user cap and cancellation (plan §5)."""
+
 import asyncio
 import os
 import sys
@@ -23,7 +24,9 @@ from src.jobs import queue as jobs_queue
 if sys.platform == "win32":
     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
-requires_db = pytest.mark.skipif(not os.getenv("DATABASE_URL"), reason="DATABASE_URL is not set")
+requires_db = pytest.mark.skipif(
+    not os.getenv("DATABASE_URL"), reason="DATABASE_URL is not set"
+)
 
 pytestmark = [requires_db, pytest.mark.asyncio]
 
@@ -66,9 +69,14 @@ async def _run_row(owner: str, status: str = "queued") -> str:
     job_id = str(uuid.uuid4())
     await run_doc.write_run_doc(
         {
-            "run_id": job_id, "user_id": owner, "status": status,
-            "query": "Should we tax carbon?", "dataset_id": "ds1",
-            "config": {}, "result": None, "error": None,
+            "run_id": job_id,
+            "user_id": owner,
+            "status": status,
+            "query": "Should we tax carbon?",
+            "dataset_id": "ds1",
+            "config": {},
+            "result": None,
+            "error": None,
         }
     )
     return job_id
@@ -78,8 +86,14 @@ async def _graph_row(owner: str, status: str = "queued") -> str:
     job_id = str(uuid.uuid4())
     await run_doc.write_job_doc(
         {
-            "job_id": job_id, "user_id": owner, "mode": "build_graph", "status": status,
-            "progress": 0.0, "stage": status, "error": None, "result": None,
+            "job_id": job_id,
+            "user_id": owner,
+            "mode": "build_graph",
+            "status": status,
+            "progress": 0.0,
+            "stage": status,
+            "error": None,
+            "result": None,
         }
     )
     return job_id
@@ -100,7 +114,9 @@ async def test_the_per_user_cap_answers_429_with_a_retry_after(accounts, monkeyp
             await _graph_row(owner)
 
         async with _client(owner, debate=True) as client:
-            response = await client.post("/api/v1/simulate/debate", json={"query": "Should we tax carbon?"})
+            response = await client.post(
+                "/api/v1/simulate/debate", json={"query": "Should we tax carbon?"}
+            )
     finally:
         get_settings.cache_clear()
 

@@ -6,6 +6,7 @@ Proves the verdict is grounded in the user's query, not a generic summary:
   - the query subject reaches the synthesis prompt (the model *sees* the question),
   - a non-JSON reply degrades to `.narrative == .summary` (never silently empty).
 """
+
 import json
 
 import pytest
@@ -20,11 +21,12 @@ from src.persona.agent import (
 from src.simulation.pair_turn import AgentTurn, RoundResult
 from src.simulation.verdict import VerdictSynthesizer
 
-
 # --- fixtures ---------------------------------------------------------------
 
 
-def make_turn(agent_name: str, stance: str, content: str, reasoning: str = "") -> AgentTurn:
+def make_turn(
+    agent_name: str, stance: str, content: str, reasoning: str = ""
+) -> AgentTurn:
     return AgentTurn(
         agent_id=f"id-{agent_name}",
         agent_name=agent_name,
@@ -74,45 +76,50 @@ _SUBJECT = "Europe"
 
 def _long_verdict_json() -> str:
     """A multi-section verdict whose fields are long enough to clear 1200 chars."""
-    return json.dumps({
-        "answer": (
-            "Recommend entering Europe through a phased pilot: begin with the "
-            "Nordics and DACH, where the demand signals are strongest, and hold "
-            "a decision gate at month nine before committing to a full rollout. "
-            "The measured approach captures the upside while keeping the downside "
-            "contained if the regulatory climate tightens. Sequence the launch as "
-            "three waves, each with its own budget envelope and success criteria, "
-            "so that an early miss in one market does not force a retreat from "
-            "the others. Staff the first wave with a small, senior team drawn from "
-            "existing market leads who already understand the product's nuances."
-        ),
-        "reasoning": (
-            "The positive cluster points to concrete traction: inbound pipeline, "
-            "channel partnerships, and a customer base that already asks for EU "
-            "coverage. The negative cluster counters that the compliance surface "
-            "(GDPR, local data residency, VAT) is heavier than the team currently "
-            "models and that a rushed launch would divert engineering from the "
-            "core product. Weighing both, the evidence supports entering Europe, "
-            "but only at a pace the operations and legal functions can absorb. "
-            "The tie-breaker is reversibility: a pilot is cheap to unwind, while "
-            "a full commitment is not, so the asymmetry favors starting now and "
-            "scaling only when the leading indicators confirm the thesis."
-        ),
-        "constraints_and_risks": (
-            "Cash burn rises while the EU entity is sub-scale; a hard regulatory "
-            "misstep in one jurisdiction could taint the brand across the bloc; "
-            "and key hires for the regional go-to-market take longer than the "
-            "revenue model assumes. Data residency obligations may force a "
-            "separate infrastructure footprint, adding fixed cost before any "
-            "revenue lands. Currency exposure and local pricing pressure could "
-            "compress margins below the plan in the first four quarters."
-        ),
-        "dissenting_views": [
-            {"stance": "NEGATIVE", "view": "Wait until the core market hits breakeven."}
-        ],
-        "evidence": [{"entity": "eu_pipeline", "claim": "inbound demand"}],
-        "confidence": 0.66,
-    })
+    return json.dumps(
+        {
+            "answer": (
+                "Recommend entering Europe through a phased pilot: begin with the "
+                "Nordics and DACH, where the demand signals are strongest, and hold "
+                "a decision gate at month nine before committing to a full rollout. "
+                "The measured approach captures the upside while keeping the downside "
+                "contained if the regulatory climate tightens. Sequence the launch as "
+                "three waves, each with its own budget envelope and success criteria, "
+                "so that an early miss in one market does not force a retreat from "
+                "the others. Staff the first wave with a small, senior team drawn from "
+                "existing market leads who already understand the product's nuances."
+            ),
+            "reasoning": (
+                "The positive cluster points to concrete traction: inbound pipeline, "
+                "channel partnerships, and a customer base that already asks for EU "
+                "coverage. The negative cluster counters that the compliance surface "
+                "(GDPR, local data residency, VAT) is heavier than the team currently "
+                "models and that a rushed launch would divert engineering from the "
+                "core product. Weighing both, the evidence supports entering Europe, "
+                "but only at a pace the operations and legal functions can absorb. "
+                "The tie-breaker is reversibility: a pilot is cheap to unwind, while "
+                "a full commitment is not, so the asymmetry favors starting now and "
+                "scaling only when the leading indicators confirm the thesis."
+            ),
+            "constraints_and_risks": (
+                "Cash burn rises while the EU entity is sub-scale; a hard regulatory "
+                "misstep in one jurisdiction could taint the brand across the bloc; "
+                "and key hires for the regional go-to-market take longer than the "
+                "revenue model assumes. Data residency obligations may force a "
+                "separate infrastructure footprint, adding fixed cost before any "
+                "revenue lands. Currency exposure and local pricing pressure could "
+                "compress margins below the plan in the first four quarters."
+            ),
+            "dissenting_views": [
+                {
+                    "stance": "NEGATIVE",
+                    "view": "Wait until the core market hits breakeven.",
+                }
+            ],
+            "evidence": [{"entity": "eu_pipeline", "claim": "inbound demand"}],
+            "confidence": 0.66,
+        }
+    )
 
 
 # --- golden path ------------------------------------------------------------
@@ -122,27 +129,40 @@ class TestGoldenPathNarrative:
     @pytest.mark.asyncio
     async def test_narrative_is_substantial_and_on_topic(self):
         rounds = [
-            make_round(1, [
-                make_turn(
-                    "Strategist", "POSITIVE",
-                    "Expanding to Europe opens a large new market.",
-                    reasoning="Europe has strong demand signals for us.",
-                ),
-                make_turn(
-                    "Controller", "NEGATIVE",
-                    "Expanding to Europe brings heavy compliance costs.",
-                    reasoning="GDPR and data residency raise our costs.",
-                ),
-            ]),
-            make_round(2, [
-                make_turn(
-                    "Operator", "POSITIVE",
-                    "A phased Europe entry balances upside and risk.",
-                    reasoning="Pilot in the Nordics first.",
-                ),
-            ]),
+            make_round(
+                1,
+                [
+                    make_turn(
+                        "Strategist",
+                        "POSITIVE",
+                        "Expanding to Europe opens a large new market.",
+                        reasoning="Europe has strong demand signals for us.",
+                    ),
+                    make_turn(
+                        "Controller",
+                        "NEGATIVE",
+                        "Expanding to Europe brings heavy compliance costs.",
+                        reasoning="GDPR and data residency raise our costs.",
+                    ),
+                ],
+            ),
+            make_round(
+                2,
+                [
+                    make_turn(
+                        "Operator",
+                        "POSITIVE",
+                        "A phased Europe entry balances upside and risk.",
+                        reasoning="Pilot in the Nordics first.",
+                    ),
+                ],
+            ),
         ]
-        profiles = [make_agent("Strategist"), make_agent("Controller"), make_agent("Operator")]
+        profiles = [
+            make_agent("Strategist"),
+            make_agent("Controller"),
+            make_agent("Operator"),
+        ]
         llm = _SpyLLM(_long_verdict_json())
 
         verdict = await VerdictSynthesizer().asynthesize(
@@ -164,10 +184,13 @@ class TestGoldenPathNarrative:
     @pytest.mark.asyncio
     async def test_query_subject_reaches_the_synthesis_prompt(self):
         rounds = [
-            make_round(1, [
-                make_turn("Strategist", "POSITIVE", "Europe is attractive."),
-                make_turn("Controller", "NEGATIVE", "Europe is costly."),
-            ]),
+            make_round(
+                1,
+                [
+                    make_turn("Strategist", "POSITIVE", "Europe is attractive."),
+                    make_turn("Controller", "NEGATIVE", "Europe is costly."),
+                ],
+            ),
         ]
         profiles = [make_agent("Strategist"), make_agent("Controller")]
         llm = _SpyLLM(_long_verdict_json())
@@ -191,10 +214,13 @@ class TestGoldenPathNarrative:
     @pytest.mark.asyncio
     async def test_non_json_reply_falls_back_to_summary(self):
         rounds = [
-            make_round(1, [
-                make_turn("Strategist", "POSITIVE", "Europe is attractive."),
-                make_turn("Controller", "NEGATIVE", "Europe is costly."),
-            ]),
+            make_round(
+                1,
+                [
+                    make_turn("Strategist", "POSITIVE", "Europe is attractive."),
+                    make_turn("Controller", "NEGATIVE", "Europe is costly."),
+                ],
+            ),
         ]
         profiles = [make_agent("Strategist"), make_agent("Controller")]
         llm = _SpyLLM(reply="The society leaned positive on Europe.")

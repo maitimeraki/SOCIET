@@ -1,15 +1,16 @@
 import asyncio
-from src.graph.models_graph import GlobalInputDocument, SourceType
+
 from src.graph.graph_pipeline import UniversalGraphPipeline
+from src.graph.models_graph import GlobalInputDocument, SourceType
 
 
 async def main():
     docs = [
-    GlobalInputDocument(
-        source_type=SourceType.TEXT,
-        document_id="tech_spec_001",
-        title="System Architecture Documentation",
-        text="""System Architecture Overview - Version 3.2
+        GlobalInputDocument(
+            source_type=SourceType.TEXT,
+            document_id="tech_spec_001",
+            title="System Architecture Documentation",
+            text="""System Architecture Overview - Version 3.2
 
         The authentication service (AuthService v2.1) depends on the User Database (PostgreSQL 14) for credential validation. 
         This service also communicates with the Session Manager (Redis cluster) to maintain user state across multiple requests.
@@ -29,19 +30,18 @@ async def main():
         Dependencies: The Reporting Engine depends on both the Data Warehouse and the Cache Layer (Redis). 
         The Cache Layer reduces query latency by 85% for frequently accessed reports. The Scheduler Service triggers 
         daily batch jobs that depend on the Task Queue (Celery with RabbitMQ broker).""",
-                metadata={
-                    "source": "technical_docs",
-                    "author": "Engineering Team",
-                    "department": "Infrastructure",
-                    "agent_id": "system_arch_001"
-                }
-            ),
-            
-            GlobalInputDocument(
-                source_type=SourceType.TEXT,
-                document_id="legal_002",
-                title="Corporate Merger Agreement",
-                text="""MERGER AGREEMENT - Acme Corp and Beta Industries
+            metadata={
+                "source": "technical_docs",
+                "author": "Engineering Team",
+                "department": "Infrastructure",
+                "agent_id": "system_arch_001",
+            },
+        ),
+        GlobalInputDocument(
+            source_type=SourceType.TEXT,
+            document_id="legal_002",
+            title="Corporate Merger Agreement",
+            text="""MERGER AGREEMENT - Acme Corp and Beta Industries
 
         This Agreement is made on January 15, 2025, between Acme Corporation (headquartered in New York, USA) 
         and Beta Industries (headquartered in London, UK).
@@ -75,19 +75,18 @@ async def main():
         - John Doe, CEO of Acme Corporation
         - Jane Smith, CEO of Beta Industries
         - Witnessed by: Sarah Johnson, Legal Counsel""",
-                metadata={
-                    "source": "legal_documents",
-                    "document_type": "contract",
-                    "jurisdiction": "international",
-                    "agent_id": "legal_doc_002"
-                }
-            ),
-            
-            GlobalInputDocument(
-                source_type=SourceType.TEXT,
-                document_id="news_003",
-                title="Healthcare AI Partnership Announcement",
-                text="""HealthTech Innovators Announce Strategic Partnership
+            metadata={
+                "source": "legal_documents",
+                "document_type": "contract",
+                "jurisdiction": "international",
+                "agent_id": "legal_doc_002",
+            },
+        ),
+        GlobalInputDocument(
+            source_type=SourceType.TEXT,
+            document_id="news_003",
+            title="Healthcare AI Partnership Announcement",
+            text="""HealthTech Innovators Announce Strategic Partnership
 
         BOSTON, MA - March 10, 2025 - MedAI Solutions (NASDAQ: MDAI) announced today a strategic partnership 
         with University Medical Center (UMC) to deploy AI-powered diagnostic tools across their 12 hospital network.
@@ -112,14 +111,14 @@ async def main():
         Regulatory compliance will be managed by MedAI's legal team (led by Jennifer Lopez) and UMC's 
         Office of Research Compliance (directed by Dr. Michael Brown). The system is expected to go live 
         in Q3 2025 after FDA approval (submission #FDA-2025-0892).""",
-                metadata={
-                    "source": "news_release",
-                    "industry": "healthcare",
-                    "publication_date": "2025-03-10",
-                    "agent_id": "news_003"
-                }
-            )
-        ]   
+            metadata={
+                "source": "news_release",
+                "industry": "healthcare",
+                "publication_date": "2025-03-10",
+                "agent_id": "news_003",
+            },
+        ),
+    ]
     pipeline = UniversalGraphPipeline()
     result = await pipeline.run(dataset_id="batch_001", documents=docs)
     print(result)

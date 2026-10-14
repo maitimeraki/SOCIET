@@ -23,7 +23,10 @@ def _request(
     raw_headers = []
     if cookies_:
         raw_headers.append(
-            (b"cookie", "; ".join(f"{k}={v}" for k, v in cookies_.items()).encode("latin-1"))
+            (
+                b"cookie",
+                "; ".join(f"{k}={v}" for k, v in cookies_.items()).encode("latin-1"),
+            )
         )
     for key, value in (headers or {}).items():
         raw_headers.append((key.lower().encode(), value.encode("latin-1")))
@@ -123,7 +126,9 @@ async def test_state_changing_request_with_no_session_passes_the_csrf_layer():
 @pytest.mark.asyncio
 async def test_missing_or_mismatched_header_is_403_once_a_csrf_cookie_exists():
     with pytest.raises(HTTPException) as missing:
-        await cookies.verify_csrf(_request("POST", "/api/v1/auth/logout", cookies_={"csrf": "tok"}))
+        await cookies.verify_csrf(
+            _request("POST", "/api/v1/auth/logout", cookies_={"csrf": "tok"})
+        )
     with pytest.raises(HTTPException) as mismatched:
         await cookies.verify_csrf(
             _request(
@@ -176,5 +181,7 @@ async def test_matching_header_passes():
 @pytest.mark.asyncio
 async def test_exempt_paths_still_need_the_header_when_a_csrf_cookie_exists():
     with pytest.raises(HTTPException) as excinfo:
-        await cookies.verify_csrf(_request("POST", "/api/v1/auth/login", cookies_={"csrf": "tok"}))
+        await cookies.verify_csrf(
+            _request("POST", "/api/v1/auth/login", cookies_={"csrf": "tok"})
+        )
     assert excinfo.value.status_code == 403

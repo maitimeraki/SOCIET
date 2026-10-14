@@ -19,14 +19,18 @@ from src.auth import service
 from src.config.settings import get_settings
 from src.db.models import UserSession
 
-requires_db = pytest.mark.skipif(not os.getenv("DATABASE_URL"), reason="DATABASE_URL is not set")
+requires_db = pytest.mark.skipif(
+    not os.getenv("DATABASE_URL"), reason="DATABASE_URL is not set"
+)
 
 
 def _redis_available() -> bool:
     try:
         import redis
 
-        client = redis.Redis.from_url(get_settings().redis_url, socket_connect_timeout=1)
+        client = redis.Redis.from_url(
+            get_settings().redis_url, socket_connect_timeout=1
+        )
         try:
             return bool(client.ping())
         finally:
@@ -35,7 +39,9 @@ def _redis_available() -> bool:
         return False
 
 
-requires_redis = pytest.mark.skipif(not _redis_available(), reason="Redis is not reachable")
+requires_redis = pytest.mark.skipif(
+    not _redis_available(), reason="Redis is not reachable"
+)
 
 PASSWORD = "hunter2hunter2"
 
@@ -95,7 +101,11 @@ async def test_login_failures_are_indistinguishable(db):
         await service.login(db, _email(), "wrong-password")
 
     assert wrong_password.value.status_code == unknown_email.value.status_code == 401
-    assert wrong_password.value.detail == unknown_email.value.detail == service.INVALID_CREDENTIALS
+    assert (
+        wrong_password.value.detail
+        == unknown_email.value.detail
+        == service.INVALID_CREDENTIALS
+    )
 
 
 @requires_db
@@ -163,7 +173,11 @@ async def test_change_password_rejects_a_wrong_current_password(db):
 
     with pytest.raises(HTTPException) as excinfo:
         await service.change_password(
-            db, user.id, "not-the-password", "brand-new-password", keep_session_id=caller.id
+            db,
+            user.id,
+            "not-the-password",
+            "brand-new-password",
+            keep_session_id=caller.id,
         )
 
     assert excinfo.value.status_code == 401

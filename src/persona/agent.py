@@ -17,15 +17,15 @@ Field layout follows the user's "production-grade bio file" requirement:
   - Provenance: summary_provenance (chunk links), confidence_breakdown
                 (mathematical proof), graph_snapshot (tenant/version info)
 """
+
 from __future__ import annotations
 
 from datetime import datetime
 from enum import Enum
-from typing import Any, Dict, List, Optional
+from typing import Any, List, Optional
 from uuid import UUID, uuid4
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
-
 
 # ---------------------------------------------------------------------------
 # Source evidence bounds
@@ -97,9 +97,7 @@ class ConfidenceBreakdown(BaseModel):
     source_breadth: int = Field(
         description="Number of unique documents supporting this agent"
     )
-    node_density: int = Field(
-        description="Total nodes linked to this agent"
-    )
+    node_density: int = Field(description="Total nodes linked to this agent")
     relationship_connectivity: float = Field(
         description="Graph centrality score of the agent's cluster"
     )
@@ -215,7 +213,13 @@ class Agent(BaseModel):
                 return Stance.NEUTRAL
         return v
 
-    @field_validator("domain_tags", "entity_affinity", "instinct_tags", "expertise_areas", mode="before")
+    @field_validator(
+        "domain_tags",
+        "entity_affinity",
+        "instinct_tags",
+        "expertise_areas",
+        mode="before",
+    )
     @classmethod
     def _coerce_tag_list(cls, v: Any) -> List[str]:
         if v is None:
@@ -236,11 +240,6 @@ class Agent(BaseModel):
 
 from src.persona.models_persona import (  # noqa: E402  (intentional late import)
     AgentProfile as _AgentProfileShim,
-    ConfidenceBreakdown as _ConfidenceBreakdownShim,
-    PersonaIdentity as _PersonaIdentityShim,
-    ProvenanceLink as _ProvenanceLinkShim,
-    DiscoveryType as _DiscoveryTypeShim,
-    ExpertiseLevel as _ExpertiseLevelShim,
 )
 
 
@@ -258,7 +257,9 @@ def agent_profile_to_agent(profile: _AgentProfileShim, dataset_id: str) -> Agent
     if isinstance(identity_obj, PersonaIdentity):
         identity_data = identity_obj.model_dump()
     else:
-        identity_data = dict(identity_obj) if not isinstance(identity_obj, dict) else identity_obj
+        identity_data = (
+            dict(identity_obj) if not isinstance(identity_obj, dict) else identity_obj
+        )
     identity = PersonaIdentity.model_validate(identity_data)
 
     cb_obj = profile.confidence_breakdown

@@ -13,6 +13,7 @@ directly — RQ workers are fork-based and cannot run here, and the process's DB
 engine is bound to its loop. Only the trampoline differs; the lifecycle and row
 writes are the same code.
 """
+
 import asyncio
 import logging
 from typing import Any
@@ -64,13 +65,18 @@ async def _debate_core(job_id: str, payload: dict[str, Any]) -> None:
 def _documents(payload: dict[str, Any]):
     from src.graph.models_graph import GlobalInputDocument
 
-    return [GlobalInputDocument.model_validate(doc) for doc in payload.get("documents") or []]
+    return [
+        GlobalInputDocument.model_validate(doc)
+        for doc in payload.get("documents") or []
+    ]
 
 
 async def _ontology_core(job_id: str, payload: dict[str, Any]) -> None:
     from src.api import api_server
 
-    await api_server.run_graph_job(job_id, "ontology", payload["dataset_id"], _documents(payload))
+    await api_server.run_graph_job(
+        job_id, "ontology", payload["dataset_id"], _documents(payload)
+    )
 
 
 async def _build_graph_core(job_id: str, payload: dict[str, Any]) -> None:
@@ -107,7 +113,9 @@ async def _set_status(
     from src.api import run_doc
 
     try:
-        await run_doc.set_job_status(job_id, status, error=error, only_if_active=only_if_active)
+        await run_doc.set_job_status(
+            job_id, status, error=error, only_if_active=only_if_active
+        )
     except Exception as exc:
         # Never swallow, but never let a bookkeeping failure mask the job's own
         # error: the raise below is what the caller (RQ) must see.

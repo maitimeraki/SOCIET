@@ -1,4 +1,5 @@
 """PairTurn types shared across simulation modules."""
+
 from dataclasses import dataclass, field
 from typing import Dict, List
 
@@ -9,6 +10,7 @@ from src.persona.models_persona import ProvenanceLink
 @dataclass
 class CommPair:
     """A communication pair between two agents (uses agent names)."""
+
     agent_a: str  # agent name
     agent_b: str  # agent name
     shared_entities: List[str] = field(default_factory=list)
@@ -19,6 +21,7 @@ class CommPair:
 @dataclass
 class ActivationCandidate:
     """A non-participating agent that should join the debate."""
+
     agent_name: str
     shared_entities: List[str] = field(default_factory=list)
     reason: str = ""
@@ -27,6 +30,7 @@ class ActivationCandidate:
 @dataclass
 class AgentTurn:
     """Single agent turn in the debate."""
+
     agent_id: str
     agent_name: str
     content: str
@@ -41,6 +45,7 @@ class AgentTurn:
 @dataclass
 class RoundResult:
     """Result of a single debate round."""
+
     round_num: int
     turns: List[AgentTurn]
     pairs: List[CommPair]
@@ -49,6 +54,7 @@ class RoundResult:
 @dataclass
 class DebateResult:
     """Final result of a complete debate."""
+
     query: str
     rounds: List[RoundResult]
     converged: bool
@@ -60,6 +66,7 @@ class DebateResult:
 @dataclass
 class ClusterSummary:
     """Summary of an opinion cluster."""
+
     stance: Stance
     count: int
     total_weight: float
@@ -71,6 +78,7 @@ class ClusterSummary:
 @dataclass
 class DebateVerdict:
     """Final verdict with weighted synthesis."""
+
     overall_stance: Stance
     confidence_score: float
     supporting_entities: List[str]

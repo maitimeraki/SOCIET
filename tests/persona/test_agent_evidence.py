@@ -3,6 +3,7 @@
 The field grounds an agent's debate prompt in its own real source text. It is
 synthesis-time only — it must never be written into the graph.
 """
+
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -91,11 +92,13 @@ async def test_fetch_source_evidence_is_capped():
 @pytest.mark.asyncio
 async def test_fetch_by_chunk_groups_snippets_under_their_chunk_id():
     """R17: the id rides the RETURN so a caller can attribute snippets."""
-    repo = _repo_returning([
-        {"chunk_id": "c1", "text": "first"},
-        {"chunk_id": "c1", "text": "second"},
-        {"chunk_id": "c2", "text": "third"},
-    ])
+    repo = _repo_returning(
+        [
+            {"chunk_id": "c1", "text": "first"},
+            {"chunk_id": "c1", "text": "second"},
+            {"chunk_id": "c2", "text": "third"},
+        ]
+    )
 
     out = await repo.fetch_source_evidence_by_chunk(["c1", "c2"])
 

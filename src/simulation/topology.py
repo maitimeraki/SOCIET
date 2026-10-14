@@ -1,6 +1,7 @@
 """
 CommunicationTopology: Cypher-based pair scoring using Neo4j graph.
 """
+
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, List
@@ -9,6 +10,7 @@ from src.simulation.pair_turn import ActivationCandidate, CommPair
 
 if TYPE_CHECKING:
     from neo4j import AsyncGraphDatabase
+
     from src.persona.agent import Agent
     from src.simulation.debate_config import DebateConfig
 
@@ -238,15 +240,24 @@ class CommunicationTopology:
             return []
 
         async with self._driver.session(database=self._db) as session:
-            rows_m = await (await session.run(
-                self._ACTIVATION_MENTIONS_CYPHER,
-                ds=dataset_id, qh=query_hash, last_round=last_round,
-                participants=participants, limit=max_new,
-            )).data()
-            rows_a = await (await session.run(
-                self._ACTIVATION_ADJACENCY_CYPHER,
-                ds=dataset_id, participants=participants, limit=max_new,
-            )).data()
+            rows_m = await (
+                await session.run(
+                    self._ACTIVATION_MENTIONS_CYPHER,
+                    ds=dataset_id,
+                    qh=query_hash,
+                    last_round=last_round,
+                    participants=participants,
+                    limit=max_new,
+                )
+            ).data()
+            rows_a = await (
+                await session.run(
+                    self._ACTIVATION_ADJACENCY_CYPHER,
+                    ds=dataset_id,
+                    participants=participants,
+                    limit=max_new,
+                )
+            ).data()
 
         merged: dict[str, ActivationCandidate] = {}
         for r in rows_m:
@@ -262,7 +273,9 @@ class CommunicationTopology:
                     shared_entities=list(r.get("shared_entities") or []),
                     reason="shares entities with the active debate",
                 )
-        ranked = sorted(merged.values(), key=lambda c: len(c.shared_entities), reverse=True)
+        ranked = sorted(
+            merged.values(), key=lambda c: len(c.shared_entities), reverse=True
+        )
         return ranked[:max_new]
 
     def _parse_comm_pairs(self, records: list) -> List[CommPair]:
@@ -277,4 +290,3 @@ class CommunicationTopology:
             )
             pairs.append(pair)
         return pairs
-

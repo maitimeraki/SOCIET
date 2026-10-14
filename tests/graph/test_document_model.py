@@ -6,6 +6,7 @@ DERIVED_FROM edge to its source Document afterwards. No live Neo4j: the
 llama-index imports are stubbed (as in test_graph_build.py) and the stage's
 `graph_store` is a call recorder.
 """
+
 import sys
 import types
 from unittest.mock import MagicMock, patch
@@ -14,7 +15,9 @@ import pytest
 
 from src.graph.models_graph import LocalOntology, OntologyMetadata, ProcessedChunk
 
-_DOCUMENT_MERGE = "MERGE (d:Document {document_id: row.document_id, dataset_id: row.dataset_id})"
+_DOCUMENT_MERGE = (
+    "MERGE (d:Document {document_id: row.document_id, dataset_id: row.dataset_id})"
+)
 
 
 class _RecorderStore:
@@ -98,11 +101,13 @@ def graph_env():
         "llama_index.core.graph_stores": MagicMock(),
         "llama_index.core.graph_stores.types": MagicMock(),
     }
-    with patch.dict(sys.modules, modules), \
-            patch("src.graph.graph_build.OpenAILike"), \
-            patch("src.graph.graph_build.OllamaEmbedding"), \
-            patch("src.graph.graph_build.Neo4jPropertyGraphStore"), \
-            patch("src.graph.graph_build.SentenceSplitter"):
+    with (
+        patch.dict(sys.modules, modules),
+        patch("src.graph.graph_build.OpenAILike"),
+        patch("src.graph.graph_build.OllamaEmbedding"),
+        patch("src.graph.graph_build.Neo4jPropertyGraphStore"),
+        patch("src.graph.graph_build.SentenceSplitter"),
+    ):
         from src.graph.config_graph import GraphConfig
         from src.graph.graph_build import GraphExtractionStage
 
@@ -110,7 +115,9 @@ def graph_env():
         stage.graph_store = store
         # This module tests the store seam, not extraction: a pass-through
         # extractor keeps each built chunk document reaching `insert_nodes` 1:1.
-        with patch.object(GraphExtractionStage, "_build_extractors", return_value=[_pass_extractor]):
+        with patch.object(
+            GraphExtractionStage, "_build_extractors", return_value=[_pass_extractor]
+        ):
             yield stage, store, events
 
 
@@ -143,11 +150,14 @@ async def _run(stage, chunks, dataset_id="ds-1"):
 @pytest.mark.asyncio
 async def test_one_document_row_per_parent_doc_id_with_deduped_tags(graph_env):
     stage, store, _ = graph_env
-    await _run(stage, [
-        _chunk("c1", "doc-1", ["a", "b"]),
-        _chunk("c2", "doc-1", ["b", "c"], index=1),
-        _chunk("c3", "doc-2", ["d"]),
-    ])
+    await _run(
+        stage,
+        [
+            _chunk("c1", "doc-1", ["a", "b"]),
+            _chunk("c2", "doc-1", ["b", "c"], index=1),
+            _chunk("c3", "doc-2", ["d"]),
+        ],
+    )
 
     query, params = store.calls[0]
     assert params["docs"] == [
@@ -179,12 +189,18 @@ async def test_repeat_calls_accumulate_to_the_document_wide_union(graph_env):
     await _run(stage, [_chunk("c1", "doc-1", ["a", "b"])])
     await _run(stage, [_chunk("c2", "doc-1", ["b", "c"], index=1)])
 
-    merges = [params["docs"][0] for query, params in store.calls if _DOCUMENT_MERGE in query]
+    merges = [
+        params["docs"][0] for query, params in store.calls if _DOCUMENT_MERGE in query
+    ]
     assert [row["domain_tags"] for row in merges] == [["a", "b"], ["b", "c"]]
 
     query = store.calls[0][0]
-    assert "d.domain_tags = coalesce(d.domain_tags, [])" in query  # reads the existing value
-    assert "+ [t IN row.domain_tags WHERE NOT t IN coalesce(d.domain_tags, [])]" in query
+    assert (
+        "d.domain_tags = coalesce(d.domain_tags, [])" in query
+    )  # reads the existing value
+    assert (
+        "+ [t IN row.domain_tags WHERE NOT t IN coalesce(d.domain_tags, [])]" in query
+    )
 
     # those two writes, under that expression, converge to the union
     accumulated: list[str] = []
@@ -204,7 +220,9 @@ async def test_empty_batch_writes_nothing(graph_env):
 @pytest.mark.asyncio
 async def test_documents_merge_before_the_build_and_derived_from_after(graph_env):
     stage, store, events = graph_env
-    _FakePropertyGraphIndex.index = _FakeIndex({"node-1": _FakeNode({"document_anchor": "doc-1"})})
+    _FakePropertyGraphIndex.index = _FakeIndex(
+        {"node-1": _FakeNode({"document_anchor": "doc-1"})}
+    )
 
     assert await _run(stage, [_chunk("c1", "doc-1", ["a"])]) == 1
     assert events == ["documents", "build", "derived_from"]
@@ -225,12 +243,16 @@ async def test_llama_document_metadata_carries_the_document_first_keys(graph_env
 @pytest.mark.asyncio
 async def test_derived_from_rows_and_cypher_match_the_contract(graph_env):
     stage, store, _ = graph_env
-    _FakePropertyGraphIndex.index = _FakeIndex({
-        "node-1": _FakeNode({"document_anchor": "doc-1"}),
-        "node-2": _FakeNode({"document_anchor": "doc-2"}),
-        "node-3": _FakeNode({}),  # no anchor → never invented
-    })
-    await _run(stage, [_chunk("c1", "doc-1", ["a"]), _chunk("c2", "doc-2", ["b"], index=1)])
+    _FakePropertyGraphIndex.index = _FakeIndex(
+        {
+            "node-1": _FakeNode({"document_anchor": "doc-1"}),
+            "node-2": _FakeNode({"document_anchor": "doc-2"}),
+            "node-3": _FakeNode({}),  # no anchor → never invented
+        }
+    )
+    await _run(
+        stage, [_chunk("c1", "doc-1", ["a"]), _chunk("c2", "doc-2", ["b"], index=1)]
+    )
 
     query, params = store.calls[-1]
     assert params["rows"] == [
@@ -242,7 +264,10 @@ async def test_derived_from_rows_and_cypher_match_the_contract(graph_env):
     assert "MATCH (c:__Node__ {id: row.chunk_id})-[:MENTIONS]->(e:__Entity__)" in query
     # both Document writes are dataset-scoped: one dataset's document_id can
     # never merge into another dataset's Document node
-    assert "MATCH (d:Document {document_id: row.document_id, dataset_id: $dataset_id})" in query
+    assert (
+        "MATCH (d:Document {document_id: row.document_id, dataset_id: $dataset_id})"
+        in query
+    )
     assert "MERGE (e)-[:DERIVED_FROM]->(d)" in query
 
 
@@ -254,8 +279,13 @@ async def test_document_writes_are_dataset_scoped(graph_env):
 
     merge_query, merge_params = store.calls[0]
     assert merge_params["docs"][0]["dataset_id"] == "ds-2"
-    assert "MERGE (d:Document {document_id: row.document_id, dataset_id: row.dataset_id})" in merge_query
-    assert "SET d.dataset_id = row.dataset_id" not in merge_query  # keyed, not last-writer-wins
+    assert (
+        "MERGE (d:Document {document_id: row.document_id, dataset_id: row.dataset_id})"
+        in merge_query
+    )
+    assert (
+        "SET d.dataset_id = row.dataset_id" not in merge_query
+    )  # keyed, not last-writer-wins
 
 
 @pytest.mark.asyncio
@@ -266,7 +296,10 @@ async def test_llama_document_title_falls_back_to_the_source_document(graph_env)
     named.metadata = {"source_document": "carbon-report.pdf"}
     await _run(stage, [named])
 
-    assert _FakePropertyGraphIndex.received_docs[0].metadata["title"] == "carbon-report.pdf"
+    assert (
+        _FakePropertyGraphIndex.received_docs[0].metadata["title"]
+        == "carbon-report.pdf"
+    )
 
 
 @pytest.mark.asyncio
@@ -274,7 +307,10 @@ async def test_llama_document_title_prefers_an_explicit_title(graph_env):
     """An explicit `title` wins over the filename; a bare chunk stays "Untitled Document"."""
     stage, store, _ = graph_env
     titled = _chunk("c1", "doc-1", ["a"])
-    titled.metadata = {"title": "Executive Summary", "source_document": "carbon-report.pdf"}
+    titled.metadata = {
+        "title": "Executive Summary",
+        "source_document": "carbon-report.pdf",
+    }
     bare = _chunk("c2", "doc-2", ["b"], index=1)
     await _run(stage, [titled, bare])
 
@@ -286,7 +322,9 @@ async def test_llama_document_title_prefers_an_explicit_title(graph_env):
 @pytest.mark.asyncio
 async def test_no_chunk_anchor_skips_the_derived_from_call(graph_env):
     stage, store, events = graph_env
-    _FakePropertyGraphIndex.index = _FakeIndex({"node-1": _FakeNode({"title": "untitled"})})
+    _FakePropertyGraphIndex.index = _FakeIndex(
+        {"node-1": _FakeNode({"title": "untitled"})}
+    )
 
     await _run(stage, [_chunk("c1", "doc-1", ["a"])])
 

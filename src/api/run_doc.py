@@ -25,6 +25,7 @@ Row mapping (no column was added for this):
 The legacy JSON mirrors under ``src/api/runtime/`` are no longer written or
 read — they are read-only history for ``scripts/migrate_runtime_json.py``.
 """
+
 import base64
 import datetime
 import logging
@@ -91,7 +92,9 @@ def _decode_cursor(cursor: str) -> tuple[datetime.datetime, uuid.UUID]:
     return created_at, run_id
 
 
-def _job_values(doc: dict[str, Any], job_id: uuid.UUID, user_id: uuid.UUID, kind: str) -> dict[str, Any]:
+def _job_values(
+    doc: dict[str, Any], job_id: uuid.UUID, user_id: uuid.UUID, kind: str
+) -> dict[str, Any]:
     status = doc.get("status") or "queued"
     return {
         "id": job_id,
@@ -115,8 +118,12 @@ def _upsert_job(session, values: dict[str, Any]):
                 "status": statement.excluded.status,
                 "error": statement.excluded.error,
                 # First transition wins; a later write never un-stamps a timestamp.
-                "started_at": func.coalesce(Job.started_at, statement.excluded.started_at),
-                "finished_at": func.coalesce(Job.finished_at, statement.excluded.finished_at),
+                "started_at": func.coalesce(
+                    Job.started_at, statement.excluded.started_at
+                ),
+                "finished_at": func.coalesce(
+                    Job.finished_at, statement.excluded.finished_at
+                ),
             },
         )
     )
@@ -151,7 +158,9 @@ def _upsert_run(
                 "status": statement.excluded.status,
                 "verdict": statement.excluded.verdict,
                 "confidence": statement.excluded.confidence,
-                "finished_at": func.coalesce(Run.finished_at, statement.excluded.finished_at),
+                "finished_at": func.coalesce(
+                    Run.finished_at, statement.excluded.finished_at
+                ),
             },
         )
     )
@@ -185,7 +194,9 @@ async def write_job_doc(doc: dict[str, Any]) -> None:
             created_at=_parse_dt(doc.get("created_at")) or _now(),
             finished_at=_now() if (doc.get("status") in TERMINAL_STATUSES) else None,
         )
-        await _upsert_job(session, _job_values(doc, job_id, user_id, str(doc.get("mode") or "job")))
+        await _upsert_job(
+            session, _job_values(doc, job_id, user_id, str(doc.get("mode") or "job"))
+        )
         await session.commit()
 
 
@@ -248,7 +259,10 @@ async def write_run_doc(doc: dict[str, Any]) -> None:
                 run_id=run_id,
                 seq=0,
                 type=RUN_META,
-                payload={"dataset_id": doc.get("dataset_id"), "config": doc.get("config")},
+                payload={
+                    "dataset_id": doc.get("dataset_id"),
+                    "config": doc.get("config"),
+                },
             )
             .on_conflict_do_nothing(index_elements=["run_id", "seq"])
         )
@@ -305,10 +319,16 @@ async def read_run_doc(run_id: str) -> Optional[dict[str, Any]]:
     key = _as_uuid(run_id)
     async with get_session_factory()() as session:
         rows = (
-            await session.execute(
-                select(RunEvent).where(RunEvent.run_id == key).order_by(RunEvent.seq)
+            (
+                await session.execute(
+                    select(RunEvent)
+                    .where(RunEvent.run_id == key)
+                    .order_by(RunEvent.seq)
+                )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
     meta = next((row.payload for row in rows if row.type == RUN_META), None) or {}
     head.update(
         {
@@ -320,12 +340,16 @@ async def read_run_doc(run_id: str) -> Optional[dict[str, Any]]:
     return head
 
 
-def _summarize(run: Run, error: Optional[str], meta: dict, rounds_from_events: int) -> dict[str, Any]:
+def _summarize(
+    run: Run, error: Optional[str], meta: dict, rounds_from_events: int
+) -> dict[str, Any]:
     result = run.verdict or {}
     clusters = result.get("cluster_details") or {}
     verdict_stance = None
     if clusters:
-        dominant = max(clusters.values(), key=lambda cluster: cluster.get("total_weight", 0.0))
+        dominant = max(
+            clusters.values(), key=lambda cluster: cluster.get("total_weight", 0.0)
+        )
         verdict_stance = dominant.get("stance")
     status = run.status
     if status == "failed" and error == "interrupted":
@@ -366,7 +390,9 @@ async def list_run_summaries(
         if key is not None:
             statement = statement.where(tuple_(Run.created_at, Run.id) < key)
         if limit is not None:
-            statement = statement.limit(limit + 1)  # one extra tells us there is a next page
+            statement = statement.limit(
+                limit + 1
+            )  # one extra tells us there is a next page
         rows = (await session.execute(statement)).all()
         has_more = limit is not None and len(rows) > limit
         page = rows[:limit] if limit is not None else rows
@@ -392,11 +418,14 @@ async def list_run_summaries(
         _summarize(run, error, metas.get(run.id) or {}, rounds.get(run.id, 0))
         for run, error in page
     ]
-    next_cursor = _encode_cursor(page[-1][0].created_at, page[-1][0].id) if has_more else None
+    next_cursor = (
+        _encode_cursor(page[-1][0].created_at, page[-1][0].id) if has_more else None
+    )
     return {"items": items, "next_cursor": next_cursor}
 
 
 # --- job lifecycle (the queue's running/terminal transitions) ----------------
+
 
 async def set_job_status(
     job_id: str,
@@ -428,7 +457,9 @@ async def set_job_status(
             match.values(
                 status=status,
                 error=error,
-                started_at=func.coalesce(Job.started_at, now if status == "running" else None),
+                started_at=func.coalesce(
+                    Job.started_at, now if status == "running" else None
+                ),
                 finished_at=func.coalesce(Job.finished_at, now if terminal else None),
             )
         )
@@ -481,7 +512,9 @@ async def sweep_interrupted() -> int:
             .values(status="failed", error="interrupted", finished_at=now)
         )
         await session.execute(
-            update(Run).where(Run.status == "running").values(status="failed", finished_at=now)
+            update(Run)
+            .where(Run.status == "running")
+            .values(status="failed", finished_at=now)
         )
         await session.commit()
     return jobs.rowcount or 0

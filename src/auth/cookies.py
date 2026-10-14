@@ -92,7 +92,9 @@ async def verify_csrf(request: Request) -> None:
         if request.url.path in CSRF_EXEMPT_PATHS:
             return
         if request.cookies.get(SESSION_COOKIE):
-            raise HTTPException(status_code=403, detail="CSRF token missing or invalid.")
+            raise HTTPException(
+                status_code=403, detail="CSRF token missing or invalid."
+            )
         return
 
     header_token = request.headers.get(CSRF_HEADER)

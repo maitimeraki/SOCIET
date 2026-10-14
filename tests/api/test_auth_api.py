@@ -29,7 +29,9 @@ if sys.platform == "win32":
     # guard as tests/db/conftest.py).
     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
-requires_db = pytest.mark.skipif(not os.getenv("DATABASE_URL"), reason="DATABASE_URL is not set")
+requires_db = pytest.mark.skipif(
+    not os.getenv("DATABASE_URL"), reason="DATABASE_URL is not set"
+)
 
 PASSWORD = "hunter2hunter2"
 
@@ -249,7 +251,9 @@ async def test_me_rejects_expired_and_revoked_sessions(db):
     async with _client() as client:
         await _signup(client, _email())
         row = await db.get(UserSession, uuid.UUID(client.cookies.get("sid")))
-        row.expires_at = datetime.datetime.now(datetime.UTC) - datetime.timedelta(seconds=1)
+        row.expires_at = datetime.datetime.now(datetime.UTC) - datetime.timedelta(
+            seconds=1
+        )
         await db.commit()
         expired = await client.get("/api/v1/auth/me")
 
@@ -303,7 +307,8 @@ async def test_sessions_list_and_revoke(db):
             other_device.cookies.get("sid"),
         }
         assert all(
-            set(r) == {"id", "created_at", "last_seen_at", "user_agent", "ip"} for r in rows
+            set(r) == {"id", "created_at", "last_seen_at", "user_agent", "ip"}
+            for r in rows
         )
         assert all(r["ip"] == "127.0.0.1" for r in rows)
 

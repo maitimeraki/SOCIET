@@ -49,7 +49,9 @@ def setup_logging():
     # Create fresh handler
     console_handler = logging.StreamHandler(sys.stdout)
     console_handler.setFormatter(
-        logging.Formatter('%(asctime)s - %(levelname)s - [%(correlation_id)s] %(message)s')
+        logging.Formatter(
+            "%(asctime)s - %(levelname)s - [%(correlation_id)s] %(message)s"
+        )
     )
     console_handler.addFilter(CorrelationIdFilter())
 

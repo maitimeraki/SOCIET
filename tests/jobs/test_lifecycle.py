@@ -1,4 +1,5 @@
 """Lifecycle: queued → running → complete|failed|cancelled, written to the rows."""
+
 import asyncio
 import os
 import uuid
@@ -12,7 +13,9 @@ from src.db.models import User
 from src.jobs import queue as jobs_queue
 from src.jobs import tasks
 
-requires_db = pytest.mark.skipif(not os.getenv("DATABASE_URL"), reason="DATABASE_URL is not set")
+requires_db = pytest.mark.skipif(
+    not os.getenv("DATABASE_URL"), reason="DATABASE_URL is not set"
+)
 
 pytestmark = [requires_db, pytest.mark.asyncio]
 
@@ -34,9 +37,14 @@ async def _queued_job(owner: str) -> str:
     job_id = str(uuid.uuid4())
     await run_doc.write_job_doc(
         {
-            "job_id": job_id, "user_id": owner, "mode": "normalize_graph",
-            "status": "queued", "progress": 0.0, "stage": "queued",
-            "error": None, "result": None,
+            "job_id": job_id,
+            "user_id": owner,
+            "mode": "normalize_graph",
+            "status": "queued",
+            "progress": 0.0,
+            "stage": "queued",
+            "error": None,
+            "result": None,
         }
     )
     return job_id

@@ -1,23 +1,31 @@
 """Tests for VerdictSynthesizer."""
-import logging
 
-import pytest
+import logging
 from unittest.mock import MagicMock
 
-from src.simulation.verdict import VerdictSynthesizer
-from src.simulation.pair_turn import RoundResult, AgentTurn, DebateVerdict
+import pytest
+
 from src.persona.agent import Stance
+from src.simulation.pair_turn import AgentTurn, DebateVerdict, RoundResult
+from src.simulation.verdict import VerdictSynthesizer
 
 
 def test_debate_verdict_has_narrative():
-    v = DebateVerdict(overall_stance=Stance.NEUTRAL, confidence_score=0.0,
-                      supporting_entities=[], opposing_entities=[], summary="s",
-                      cluster_details={}, narrative="## Recommendation\nYes.")
+    v = DebateVerdict(
+        overall_stance=Stance.NEUTRAL,
+        confidence_score=0.0,
+        supporting_entities=[],
+        opposing_entities=[],
+        summary="s",
+        cluster_details={},
+        narrative="## Recommendation\nYes.",
+    )
     assert v.narrative.startswith("## Recommendation")
 
 
 class MockProfile:
     """Minimal stand-in for AgentProfile, compatible with _calibrate_cior lookups."""
+
     def __init__(self, name: str, conviction: float, cior: float):
         identity = MagicMock()
         identity.name = name
@@ -31,7 +39,13 @@ def make_profile(name: str, conviction: float = 0.5, cior: float = 0.0) -> MockP
     return MockProfile(name=name, conviction=conviction, cior=cior)
 
 
-def make_turn(agent_id: str, agent_name: str, stance: str, confidence: float, refs: list[str] | None = None) -> AgentTurn:
+def make_turn(
+    agent_id: str,
+    agent_name: str,
+    stance: str,
+    confidence: float,
+    refs: list[str] | None = None,
+) -> AgentTurn:
     return AgentTurn(
         agent_id=agent_id,
         agent_name=agent_name,
@@ -52,8 +66,12 @@ class TestRenderTranscript:
     def test_transcript_includes_reasoning_and_answer(self):
         synth = VerdictSynthesizer()
         turn = AgentTurn(
-            agent_id="a1", agent_name="Alice", content="I support it.",
-            stance="POSITIVE", confidence=0.8, reasoning="Because markets self-correct.",
+            agent_id="a1",
+            agent_name="Alice",
+            content="I support it.",
+            stance="POSITIVE",
+            confidence=0.8,
+            reasoning="Because markets self-correct.",
         )
         text, _ = synth._render_transcript([make_round(1, [turn])])
         assert "Because markets self-correct." in text
@@ -62,8 +80,12 @@ class TestRenderTranscript:
     def test_transcript_bounds_long_reasoning(self):
         synth = VerdictSynthesizer()
         turn = AgentTurn(
-            agent_id="a1", agent_name="Alice", content="answer",
-            stance="POSITIVE", confidence=0.8, reasoning="r" * 100_000,
+            agent_id="a1",
+            agent_name="Alice",
+            content="answer",
+            stance="POSITIVE",
+            confidence=0.8,
+            reasoning="r" * 100_000,
         )
         text, _ = synth._render_transcript([make_round(1, [turn])])
         # The subordinate reasoning line is capped, so the whole transcript stays bounded.
@@ -143,18 +165,33 @@ class TestSynthesize:
     def fixture_rounds(self):
         """3 rounds, 6 turns, mixed stances."""
         return [
-            make_round(1, [
-                make_turn("a1", "Alice", "POSITIVE", 0.9, refs=["entity_alpha"]),
-                make_turn("a2", "Bob", "NEGATIVE", 0.7, refs=["entity_beta"]),
-            ]),
-            make_round(2, [
-                make_turn("a3", "Carol", "POSITIVE", 0.8, refs=["entity_alpha", "entity_gamma"]),
-                make_turn("a4", "Dave", "NEUTRAL", 0.5, refs=["entity_delta"]),
-            ]),
-            make_round(3, [
-                make_turn("a5", "Eve", "POSITIVE", 0.6, refs=["entity_gamma"]),
-                make_turn("a6", "Frank", "NEGATIVE", 0.4, refs=["entity_epsilon"]),
-            ]),
+            make_round(
+                1,
+                [
+                    make_turn("a1", "Alice", "POSITIVE", 0.9, refs=["entity_alpha"]),
+                    make_turn("a2", "Bob", "NEGATIVE", 0.7, refs=["entity_beta"]),
+                ],
+            ),
+            make_round(
+                2,
+                [
+                    make_turn(
+                        "a3",
+                        "Carol",
+                        "POSITIVE",
+                        0.8,
+                        refs=["entity_alpha", "entity_gamma"],
+                    ),
+                    make_turn("a4", "Dave", "NEUTRAL", 0.5, refs=["entity_delta"]),
+                ],
+            ),
+            make_round(
+                3,
+                [
+                    make_turn("a5", "Eve", "POSITIVE", 0.6, refs=["entity_gamma"]),
+                    make_turn("a6", "Frank", "NEGATIVE", 0.4, refs=["entity_epsilon"]),
+                ],
+            ),
         ]
 
     @pytest.fixture
@@ -162,10 +199,10 @@ class TestSynthesize:
         """AgentProfiles matching fixture_rounds (cior=1.0 => cior_factor=1.0)."""
         return [
             make_profile("Alice", conviction=0.9, cior=1.0),
-            make_profile("Bob",   conviction=0.7, cior=1.0),
+            make_profile("Bob", conviction=0.7, cior=1.0),
             make_profile("Carol", conviction=0.8, cior=1.0),
-            make_profile("Dave",  conviction=0.5, cior=1.0),
-            make_profile("Eve",   conviction=0.6, cior=1.0),
+            make_profile("Dave", conviction=0.5, cior=1.0),
+            make_profile("Eve", conviction=0.6, cior=1.0),
             make_profile("Frank", conviction=0.4, cior=1.0),
         ]
 
@@ -180,7 +217,9 @@ class TestSynthesize:
         verdict = synthesizer.synthesize([make_round(1, [])], [])
         assert verdict.overall_stance == Stance.NEUTRAL
 
-    def test_overall_stance_is_max_weight_cluster(self, fixture_rounds, fixture_profiles):
+    def test_overall_stance_is_max_weight_cluster(
+        self, fixture_rounds, fixture_profiles
+    ):
         synthesizer = VerdictSynthesizer()
         # POSITIVE: Alice(0.9*0.9) + Carol(0.8*0.8) + Eve(0.6*0.6) = 0.81 + 0.64 + 0.36 = 1.81
         # NEGATIVE: Bob(0.7*0.7) + Frank(0.4*0.4) = 0.49 + 0.16 = 0.65
@@ -222,7 +261,9 @@ class TestSynthesize:
         assert "entity_epsilon" in verdict.opposing_entities
         assert "entity_delta" in verdict.opposing_entities
 
-    def test_cluster_details_has_all_stances_with_turns(self, fixture_rounds, fixture_profiles):
+    def test_cluster_details_has_all_stances_with_turns(
+        self, fixture_rounds, fixture_profiles
+    ):
         synthesizer = VerdictSynthesizer()
         verdict = synthesizer.synthesize(fixture_rounds, fixture_profiles)
         assert Stance.POSITIVE in verdict.cluster_details
@@ -242,16 +283,22 @@ class TestMissingProfileWarning:
 
     @staticmethod
     def _missing_records(caplog):
-        return [r for r in caplog.records
-                if "absent from profile_map" in r.getMessage()]
+        return [
+            r for r in caplog.records if "absent from profile_map" in r.getMessage()
+        ]
 
     def test_missing_profile_warns_once_per_synthesis(self, caplog):
         synthesizer = VerdictSynthesizer()
         # Same absent speaker twice in one cluster: one warning, not one per turn.
-        rounds = [make_round(1, [
-            make_turn("a1", "Ghost", "POSITIVE", 0.8),
-            make_turn("a1", "Ghost", "POSITIVE", 0.6),
-        ])]
+        rounds = [
+            make_round(
+                1,
+                [
+                    make_turn("a1", "Ghost", "POSITIVE", 0.8),
+                    make_turn("a1", "Ghost", "POSITIVE", 0.6),
+                ],
+            )
+        ]
         with caplog.at_level(logging.WARNING, logger="src.simulation.verdict"):
             verdict = synthesizer.synthesize(rounds, [make_profile("Alice")])
 
@@ -260,15 +307,20 @@ class TestMissingProfileWarning:
         assert records[0].levelno == logging.WARNING
         assert "Ghost" in records[0].getMessage()
         # no behavior change: fallback weight is confidence * 0.5 per turn
-        assert pytest.approx(
-            verdict.cluster_details[Stance.POSITIVE].total_weight, rel=1e-6
-        ) == 0.4 + 0.3
+        assert (
+            pytest.approx(
+                verdict.cluster_details[Stance.POSITIVE].total_weight, rel=1e-6
+            )
+            == 0.4 + 0.3
+        )
 
     def test_all_profiles_present_logs_no_warning(self, caplog):
         synthesizer = VerdictSynthesizer()
         rounds = [make_round(1, [make_turn("a1", "Alice", "POSITIVE", 0.8)])]
         with caplog.at_level(logging.WARNING, logger="src.simulation.verdict"):
-            synthesizer.synthesize(rounds, [make_profile("Alice", conviction=0.9, cior=1.0)])
+            synthesizer.synthesize(
+                rounds, [make_profile("Alice", conviction=0.9, cior=1.0)]
+            )
         assert self._missing_records(caplog) == []
 
     def test_calibrate_cior_direct_call_warns(self, caplog):

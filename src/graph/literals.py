@@ -6,14 +6,31 @@ ponytail: whole-string match only. Known true-positives on names that look like
 measures ("3M", "7-Eleven") are accepted for now; add a proper-noun allowlist
 when they measurably matter.
 """
+
 import re
 
-_MONEY = re.compile(r"^(?:[$€£¥]\s?|(?:usd|eur|gbp|jpy|inr|cad|aud)\s?)?\d[\d,]*(?:\.\d+)?\s*(?:k|m|bn?|billion|million|thousand|trillion)?$", re.I)
-_DATE  = re.compile(r"^(?:\d{4}(?:-\d{2}(?:-\d{2})?)?|\d{1,2}[/-]\d{1,2}[/-]\d{2,4}|(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?\s+\d{1,2}(?:st|nd|rd|th)?,?\s+\d{4})$", re.I)
-_PCT   = re.compile(r"^\d[\d,]*(?:\.\d+)?\s?%$")
-_QTY   = re.compile(r"^\d[\d,]*(?:\.\d+)?\s?[a-z]{1,12}$", re.I)
+_MONEY = re.compile(
+    r"^(?:[$€£¥]\s?|(?:usd|eur|gbp|jpy|inr|cad|aud)\s?)?\d[\d,]*(?:\.\d+)?\s*(?:k|m|bn?|billion|million|thousand|trillion)?$",
+    re.I,
+)
+_DATE = re.compile(
+    r"^(?:\d{4}(?:-\d{2}(?:-\d{2})?)?|\d{1,2}[/-]\d{1,2}[/-]\d{2,4}|(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?\s+\d{1,2}(?:st|nd|rd|th)?,?\s+\d{4})$",
+    re.I,
+)
+_PCT = re.compile(r"^\d[\d,]*(?:\.\d+)?\s?%$")
+_QTY = re.compile(r"^\d[\d,]*(?:\.\d+)?\s?[a-z]{1,12}$", re.I)
 
-_MAGNITUDE = {"k": 1e3, "m": 1e6, "mn": 1e6, "bn": 1e9, "b": 1e9, "billion": 1e9, "million": 1e6, "thousand": 1e3, "trillion": 1e12}
+_MAGNITUDE = {
+    "k": 1e3,
+    "m": 1e6,
+    "mn": 1e6,
+    "bn": 1e9,
+    "b": 1e9,
+    "billion": 1e9,
+    "million": 1e6,
+    "thousand": 1e3,
+    "trillion": 1e12,
+}
 _SYMBOL_CUR = {"$": "USD", "€": "EUR", "£": "GBP", "¥": "JPY"}
 _NUMBER = re.compile(r"\d[\d,]*(?:\.\d+)?")
 
@@ -24,7 +41,12 @@ def is_literal_value(name: str) -> bool:
         return False
     # A capitalized multi-word proper noun ("2024 Paris Olympics") has an
     # internal space the quantity pattern forbids — it is not a pure measure.
-    return bool(_MONEY.fullmatch(s) or _DATE.fullmatch(s) or _PCT.fullmatch(s) or _QTY.fullmatch(s))
+    return bool(
+        _MONEY.fullmatch(s)
+        or _DATE.fullmatch(s)
+        or _PCT.fullmatch(s)
+        or _QTY.fullmatch(s)
+    )
 
 
 def coerce_value(name: str) -> tuple[str, object]:
@@ -46,7 +68,7 @@ def _money_amount(s: str) -> float:
     if not m:
         return 0.0
     amount = float(m.group().replace(",", ""))
-    return amount * _MAGNITUDE.get(s[m.end():].strip().lower(), 1.0)
+    return amount * _MAGNITUDE.get(s[m.end() :].strip().lower(), 1.0)
 
 
 def _money_currency(s: str) -> str:

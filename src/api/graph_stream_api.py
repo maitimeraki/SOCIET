@@ -15,6 +15,7 @@ completion ends the stream even with no sentinel. It subscribes (priming one
 snapshot, so a delta published while the snapshot is built is queued rather than
 lost in the read→subscribe gap; the snapshot stays the FIRST frame sent.
 """
+
 import asyncio
 import logging
 from dataclasses import replace
@@ -75,25 +76,31 @@ async def _send_delta(websocket: WebSocket, delta) -> None:
     if delta.error:
         # A terminal chunk failure (Task 16): an error is not a delta, so it
         # replaces the delta frame rather than decorating one.
-        await websocket.send_json({
-            "type": "error",
-            "chunk_id": delta.chunk_id,
-            "message": delta.error,
-        })
+        await websocket.send_json(
+            {
+                "type": "error",
+                "chunk_id": delta.chunk_id,
+                "message": delta.error,
+            }
+        )
         return
-    await websocket.send_json({
-        "type": "delta",
-        "nodes": delta.nodes,
-        "edges": delta.edges,
-        "chunk_id": delta.chunk_id,
-        "progress": delta.progress,
-    })
-    if delta.new_labels:
-        await websocket.send_json({
-            "type": "vocabulary",
-            "labels": delta.new_labels,
+    await websocket.send_json(
+        {
+            "type": "delta",
+            "nodes": delta.nodes,
+            "edges": delta.edges,
             "chunk_id": delta.chunk_id,
-        })
+            "progress": delta.progress,
+        }
+    )
+    if delta.new_labels:
+        await websocket.send_json(
+            {
+                "type": "vocabulary",
+                "labels": delta.new_labels,
+                "chunk_id": delta.chunk_id,
+            }
+        )
 
 
 def _dedupe(delta, seen_nodes, seen_edges):
@@ -106,7 +113,8 @@ def _dedupe(delta, seen_nodes, seen_edges):
         return delta
     nodes = [n for n in delta.nodes if n.get("id") not in seen_nodes]
     edges = [
-        e for e in delta.edges
+        e
+        for e in delta.edges
         if (e.get("source"), e.get("target"), e.get("label")) not in seen_edges
     ]
     if len(nodes) == len(delta.nodes) and len(edges) == len(delta.edges):
@@ -183,7 +191,9 @@ async def _stream(
                 continue
             # terminator: the job reached completed/failed. Drain deltas already
             # queued so one published on the terminal tick is still delivered.
-            next_delta = await _drain_queued(websocket, subscription, next_delta, seen_nodes, seen_edges)
+            next_delta = await _drain_queued(
+                websocket, subscription, next_delta, seen_nodes, seen_edges
+            )
             break
     finally:
         # An abandoned `async for` over the generator is only finalised at GC;
@@ -242,12 +252,14 @@ async def stream_graph(websocket: WebSocket, job_id: str):
     next_delta = asyncio.create_task(subscription.__anext__())
     try:
         snapshot = await graph_snapshot.read_snapshot(dataset_id)
-        await websocket.send_json({
-            "type": "snapshot",
-            "nodes": snapshot.nodes,
-            "edges": snapshot.edges,
-            "labels": snapshot.new_labels,
-        })
+        await websocket.send_json(
+            {
+                "type": "snapshot",
+                "nodes": snapshot.nodes,
+                "edges": snapshot.edges,
+                "labels": snapshot.new_labels,
+            }
+        )
 
         if status in _TERMINAL:
             # Already finished: the snapshot is the whole story. Say so and leave.
@@ -275,9 +287,13 @@ async def stream_graph(websocket: WebSocket, job_id: str):
         # reading the snapshot) would otherwise escape the ASGI app — the HTTP
         # global handler does not cover WebSockets. Report it on the wire, where
         # the client already renders `error` frames, then close with `done`.
-        logger.exception("graph_stream: snapshot read failed for dataset %s", dataset_id)
+        logger.exception(
+            "graph_stream: snapshot read failed for dataset %s", dataset_id
+        )
         try:
-            await websocket.send_json({"type": "error", "message": f"snapshot read failed: {exc}"})
+            await websocket.send_json(
+                {"type": "error", "message": f"snapshot read failed: {exc}"}
+            )
             await websocket.send_json({"type": "done"})
         except (WebSocketDisconnect, RuntimeError):
             pass  # client also gone; nothing left to send

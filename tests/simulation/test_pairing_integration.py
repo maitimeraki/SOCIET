@@ -7,6 +7,7 @@ MENTIONS, llama-index's direction), runs the real `write_persona_entity_links`,
 and lets the real round-1 pairing Cypher decide. Skipped when Neo4j is
 unreachable; everything seeded is cleaned up by its unique dataset id.
 """
+
 import os
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
@@ -33,7 +34,10 @@ async def live():
     db = os.getenv("NEO4J_DATABASE", "neo4j")
 
     repo = PersonaRepository(
-        neo4j_uri=uri, neo4j_user=user, neo4j_password=pwd, neo4j_database=db,
+        neo4j_uri=uri,
+        neo4j_user=user,
+        neo4j_password=pwd,
+        neo4j_database=db,
     )
     try:
         async with repo._driver.session(database=db) as session:
@@ -58,8 +62,12 @@ async def test_synthesis_written_entity_links_produce_round1_pairs(live):
 
     def roster():
         return [
-            SimpleNamespace(identity=SimpleNamespace(name=agent_a), communication_radius=1),
-            SimpleNamespace(identity=SimpleNamespace(name=agent_b), communication_radius=1),
+            SimpleNamespace(
+                identity=SimpleNamespace(name=agent_a), communication_radius=1
+            ),
+            SimpleNamespace(
+                identity=SimpleNamespace(name=agent_b), communication_radius=1
+            ),
         ]
 
     try:
@@ -74,12 +82,18 @@ async def test_synthesis_written_entity_links_produce_round1_pairs(live):
                         triplet_source_id: $chunk_id, _test: true})
                 CREATE (c)-[:MENTIONS]->(e)
                 """,
-                chunk_id=chunk_id, doc_id=doc_id, ds=ds, names=entity_names,
+                chunk_id=chunk_id,
+                doc_id=doc_id,
+                ds=ds,
+                names=entity_names,
             )
 
         # No persona edges yet: round 1 can pair nobody.
         before = await topology.compute_round_pairs(
-            roster(), dataset_id=ds, round_num=1, config=DebateConfig(),
+            roster(),
+            dataset_id=ds,
+            round_num=1,
+            config=DebateConfig(),
         )
         assert before == []
 
@@ -91,7 +105,8 @@ async def test_synthesis_written_entity_links_produce_round1_pairs(live):
             result = await session.run(
                 "MATCH (p:Persona {name: $name, dataset_id: $ds}) "
                 "RETURN p.domain_tags AS tags, p.entity_affinity AS affinity",
-                name=agent_a, ds=ds,
+                name=agent_a,
+                ds=ds,
             )
             row = await result.single()
         assert row is not None
@@ -99,7 +114,10 @@ async def test_synthesis_written_entity_links_produce_round1_pairs(live):
         assert sorted(row["affinity"]) == sorted(entity_names)
 
         pairs = await topology.compute_round_pairs(
-            roster(), dataset_id=ds, round_num=1, config=DebateConfig(),
+            roster(),
+            dataset_id=ds,
+            round_num=1,
+            config=DebateConfig(),
         )
         assert len(pairs) == 1
         assert {pairs[0].agent_a, pairs[0].agent_b} == {agent_a, agent_b}
@@ -108,7 +126,8 @@ async def test_synthesis_written_entity_links_produce_round1_pairs(live):
     finally:
         async with driver.session(database=db) as session:
             await session.run(
-                "MATCH (n) WHERE n.dataset_id = $ds DETACH DELETE n", ds=ds,
+                "MATCH (n) WHERE n.dataset_id = $ds DETACH DELETE n",
+                ds=ds,
             )
 
 
@@ -138,7 +157,10 @@ async def test_single_cell_graph_synthesizes_a_debatable_roster(live):
                         triplet_source_id: $chunk_id, _test: true})
                 CREATE (c)-[:MENTIONS]->(e)
                 """,
-                chunk_id=chunk_id, doc_id=doc_id, ds=ds, names=names,
+                chunk_id=chunk_id,
+                doc_id=doc_id,
+                ds=ds,
+                names=names,
             )
 
         # The vector entry is stubbed (no embeddings in a unit run); everything
@@ -148,7 +170,9 @@ async def test_single_cell_graph_synthesizes_a_debatable_roster(live):
             async def find_relevant_entities(self, query, limit=10):
                 return [
                     EntityNode(
-                        id=name, name=name, label="Entity",
+                        id=name,
+                        name=name,
+                        label="Entity",
                         properties={"name": name, "triplet_source_id": chunk_id},
                         relevance_score=0.9 - index * 0.1,
                     )
@@ -167,14 +191,21 @@ async def test_single_cell_graph_synthesizes_a_debatable_roster(live):
         assert sorted(p.identity.name for p in profiles) == sorted(names)
 
         roster = [
-            SimpleNamespace(identity=SimpleNamespace(name=p.identity.name), communication_radius=1)
+            SimpleNamespace(
+                identity=SimpleNamespace(name=p.identity.name), communication_radius=1
+            )
             for p in profiles
         ]
         pairs = await topology.compute_round_pairs(
-            roster, dataset_id=ds, round_num=1, config=DebateConfig(),
+            roster,
+            dataset_id=ds,
+            round_num=1,
+            config=DebateConfig(),
         )
         assert len(pairs) == 3  # every unordered pair of the three personas
         assert all(p.score >= DebateConfig().topology_score_threshold for p in pairs)
     finally:
         async with driver.session(database=db) as session:
-            await session.run("MATCH (n) WHERE n.dataset_id = $ds DETACH DELETE n", ds=ds)
+            await session.run(
+                "MATCH (n) WHERE n.dataset_id = $ds DETACH DELETE n", ds=ds
+            )

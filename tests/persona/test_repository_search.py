@@ -1,12 +1,12 @@
 import os
+
 import pytest
-import asyncio
 from dotenv import load_dotenv
+
 load_dotenv()
 import pytest_asyncio
 
 from src.persona.repository import PersonaRepository
-
 
 
 @pytest_asyncio.fixture
@@ -16,7 +16,9 @@ async def repo():
     pwd = os.getenv("NEO4J_PASSWORD", "password")
     db = os.getenv("NEO4J_DATABASE", "neo4j")
 
-    repo = PersonaRepository(neo4j_uri=uri, neo4j_user=user, neo4j_password=pwd, neo4j_database=db)
+    repo = PersonaRepository(
+        neo4j_uri=uri, neo4j_user=user, neo4j_password=pwd, neo4j_database=db
+    )
 
     # quick healthcheck; if it fails, skip the tests
     try:
@@ -64,7 +66,9 @@ async def test_search_agents_by_query_matches_properties(repo):
 
     # test token matching across title / summary / tags
     tokens = ["cloud", "resilient"]
-    rows = await repo.search_agents_by_query(archetype_label="Persona", query_tokens=tokens, limit=50)
+    rows = await repo.search_agents_by_query(
+        archetype_label="Persona", query_tokens=tokens, limit=50
+    )
     names = [r.get("name") for r in rows if r.get("name")]
 
     assert "Infra Strategist" in names

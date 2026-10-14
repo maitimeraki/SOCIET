@@ -6,20 +6,20 @@ Pins four properties the final report must have:
   - a near-tie reads as a share, flagged contested,
   - `provenance_by_claim` is populated from reachable provenance, never faked.
 """
-from uuid import uuid4
 
 import json
+from unittest.mock import AsyncMock, MagicMock
+from uuid import uuid4
 
 import pytest
-from unittest.mock import AsyncMock, MagicMock
 
 from src.persona.agent import (
+    SYNTHETIC_PROVENANCE_PREFIX,
     Agent,
     DiscoveryType,
     ExpertiseLevel,
     PersonaIdentity,
     ProvenanceLink,
-    SYNTHETIC_PROVENANCE_PREFIX,
     Stance,
 )
 from src.simulation.pair_turn import AgentTurn, RoundResult
@@ -29,7 +29,6 @@ from src.simulation.verdict import (
     SUMMARY_TRANSCRIPT_MAX_TURNS,
     VerdictSynthesizer,
 )
-
 
 # --- fixtures ---------------------------------------------------------------
 
@@ -106,14 +105,16 @@ class _FakeLLM:
 
 
 def _valid_verdict_json(answer: str = "Expand slowly.") -> str:
-    return json.dumps({
-        "answer": answer,
-        "reasoning": "The metrics are strong but the cash burn argues for pacing.",
-        "constraints_and_risks": "Cash burn.",
-        "dissenting_views": [{"stance": "NEGATIVE", "view": "Wait until Q3."}],
-        "evidence": [{"entity": "entity_alpha", "claim": "strong metrics"}],
-        "confidence": 0.7,
-    })
+    return json.dumps(
+        {
+            "answer": answer,
+            "reasoning": "The metrics are strong but the cash burn argues for pacing.",
+            "constraints_and_risks": "Cash burn.",
+            "dissenting_views": [{"stance": "NEGATIVE", "view": "Wait until Q3."}],
+            "evidence": [{"entity": "entity_alpha", "claim": "strong metrics"}],
+            "confidence": 0.7,
+        }
+    )
 
 
 # --- Step 1/2/3: the summary is grounded in the debate text -----------------
@@ -130,7 +131,9 @@ class TestGroundedSummary:
         llm = _FakeLLM(_valid_verdict_json("Expand slowly."))
 
         verdict = await VerdictSynthesizer().asynthesize(
-            rounds=rounds, profiles=profiles, llm_client=llm,
+            rounds=rounds,
+            profiles=profiles,
+            llm_client=llm,
             query="Should we expand to Europe?",
         )
 
@@ -157,8 +160,12 @@ class TestGroundedSummary:
         assert "POSITIVE" in verdict.summary
         assert "Confidence score" in verdict.summary
         # structured fields are carried through from the parsed verdict.
-        assert verdict.dissenting_views == [{"stance": "NEGATIVE", "view": "Wait until Q3."}]
-        assert verdict.evidence == [{"entity": "entity_alpha", "claim": "strong metrics"}]
+        assert verdict.dissenting_views == [
+            {"stance": "NEGATIVE", "view": "Wait until Q3."}
+        ]
+        assert verdict.evidence == [
+            {"entity": "entity_alpha", "claim": "strong metrics"}
+        ]
 
     @pytest.mark.asyncio
     async def test_non_json_reply_falls_back_to_template_summary(self):
@@ -179,8 +186,21 @@ class TestGroundedSummary:
     @pytest.mark.asyncio
     async def test_summary_prompt_carries_the_debate_text(self):
         rounds = [
-            make_round(1, [make_turn("Alice", "POSITIVE", 0.8, content="Expand now, the metrics are strong.")]),
-            make_round(2, [make_turn("Bob", "NEGATIVE", 0.7, content="The cash burn says wait.")]),
+            make_round(
+                1,
+                [
+                    make_turn(
+                        "Alice",
+                        "POSITIVE",
+                        0.8,
+                        content="Expand now, the metrics are strong.",
+                    )
+                ],
+            ),
+            make_round(
+                2,
+                [make_turn("Bob", "NEGATIVE", 0.7, content="The cash burn says wait.")],
+            ),
         ]
         profiles = [make_agent("Alice"), make_agent("Bob")]
         llm = _SpyLLM()
@@ -291,10 +311,13 @@ class TestCiorFloor:
     def test_hostile_cluster_can_win(self):
         synthesizer = VerdictSynthesizer()
         rounds = [
-            make_round(1, [
-                make_turn("Milquetoast", "POSITIVE", 0.4),
-                make_turn("Gut", "NEGATIVE", 1.0),
-            ])
+            make_round(
+                1,
+                [
+                    make_turn("Milquetoast", "POSITIVE", 0.4),
+                    make_turn("Gut", "NEGATIVE", 1.0),
+                ],
+            )
         ]
         profiles = [
             make_agent("Milquetoast", conviction=1.0, cior=1.0),
@@ -310,10 +333,13 @@ class TestCiorFloor:
 class TestWeightShare:
     def _near_tie(self) -> tuple[list[RoundResult], list[Agent]]:
         rounds = [
-            make_round(1, [
-                make_turn("Alice", "POSITIVE", 0.51),
-                make_turn("Bob", "NEGATIVE", 0.49),
-            ])
+            make_round(
+                1,
+                [
+                    make_turn("Alice", "POSITIVE", 0.51),
+                    make_turn("Bob", "NEGATIVE", 0.49),
+                ],
+            )
         ]
         profiles = [make_agent("Alice"), make_agent("Bob")]
         return rounds, profiles
@@ -337,10 +363,13 @@ class TestWeightShare:
 
     def test_clear_majority_is_not_contested(self):
         rounds = [
-            make_round(1, [
-                make_turn("Alice", "POSITIVE", 0.9),
-                make_turn("Bob", "NEGATIVE", 0.1),
-            ])
+            make_round(
+                1,
+                [
+                    make_turn("Alice", "POSITIVE", 0.9),
+                    make_turn("Bob", "NEGATIVE", 0.1),
+                ],
+            )
         ]
         profiles = [make_agent("Alice"), make_agent("Bob")]
         verdict = VerdictSynthesizer().synthesize(rounds, profiles)
@@ -355,9 +384,12 @@ class TestProvenanceByClaim:
     def test_claims_map_to_reachable_provenance(self):
         link_a = provenance_of("Market Report")
         rounds = [
-            make_round(1, [
-                make_turn("Alice", "POSITIVE", 0.8, refs=["entity_alpha"]),
-            ])
+            make_round(
+                1,
+                [
+                    make_turn("Alice", "POSITIVE", 0.8, refs=["entity_alpha"]),
+                ],
+            )
         ]
         profiles = [make_agent("Alice", provenance=[link_a])]
 
@@ -385,7 +417,9 @@ class TestProvenanceByClaim:
     def _synthetic(domain: str = "finance") -> ProvenanceLink:
         return ProvenanceLink(
             doc_id=f"{SYNTHETIC_PROVENANCE_PREFIX}{domain}@ds1",
-            title=domain, breadcrumb="", chunk_id=uuid4(),
+            title=domain,
+            breadcrumb="",
+            chunk_id=uuid4(),
         )
 
     def test_synthetic_sector_links_are_never_attributed(self):

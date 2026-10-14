@@ -26,7 +26,9 @@ if sys.platform == "win32":
 @pytest.fixture
 def app_state():
     """`app` is a module singleton; restore the probe flags after each test."""
-    saved = {key: getattr(app.state, key, None) for key in ("degraded", "last_llm_probe_at")}
+    saved = {
+        key: getattr(app.state, key, None) for key in ("degraded", "last_llm_probe_at")
+    }
     yield app
     for key, value in saved.items():
         setattr(app.state, key, value)

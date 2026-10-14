@@ -1,10 +1,11 @@
 """Tests for bounded vocabulary discovery from a spread sample."""
+
 import pytest
 
 from src.graph.models_graph import (
     EntityTypeDefinition,
-    OntologyMetadata,
     LocalOntology,
+    OntologyMetadata,
     ProcessedChunk,
     RelationTypeDefinition,
 )
@@ -74,7 +75,9 @@ class TestDiscoverVocabularySpread:
         docs = [_chunk(i) for i in range(30)]
         stage = _CapturingStage(_ontology_with_labels(300))
 
-        result = await discover_vocabulary(docs, sample_size=6, max_labels=200, stage=stage)
+        result = await discover_vocabulary(
+            docs, sample_size=6, max_labels=200, stage=stage
+        )
 
         # Exactly sample_size chunks reach the single discovery call.
         assert len(stage.seen) == 6
@@ -102,7 +105,9 @@ class TestDiscoverVocabularySpread:
         docs = [_chunk(i) for i in range(10)]
         stage = _CapturingStage(_ontology_with_labels(3))
 
-        result = await discover_vocabulary(docs, sample_size=4, max_labels=200, stage=stage)
+        result = await discover_vocabulary(
+            docs, sample_size=4, max_labels=200, stage=stage
+        )
 
         assert len(result.entity_types) == 3
 
@@ -210,9 +215,9 @@ class TestPromote:
 class TestProposedLabels:
     def test_collector_splits_kinds_and_drops_default_entity_label(self):
         from llama_index.core.graph_stores.types import (
-            EntityNode,
             KG_NODES_KEY,
             KG_RELATIONS_KEY,
+            EntityNode,
             Relation,
         )
         from llama_index.core.schema import TextNode
@@ -224,7 +229,9 @@ class TestProposedLabels:
             metadata={
                 KG_NODES_KEY: [
                     EntityNode(name="ACME", label="Organization"),
-                    EntityNode(name="Beta"),  # simple extractor: label defaults to "entity"
+                    EntityNode(
+                        name="Beta"
+                    ),  # simple extractor: label defaults to "entity"
                 ],
                 KG_RELATIONS_KEY: [
                     Relation(label="ACQUIRED", source_id="a", target_id="b"),

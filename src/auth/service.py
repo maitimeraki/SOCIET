@@ -47,7 +47,9 @@ def verify_password(password: str, password_hash: str) -> bool:
         return False
     except InvalidHashError:
         # A corrupt stored hash is a failed login, not a 500.
-        logger.warning("Stored password hash is not a valid argon2 hash; treating as mismatch")
+        logger.warning(
+            "Stored password hash is not a valid argon2 hash; treating as mismatch"
+        )
         return False
 
 
@@ -98,9 +100,13 @@ async def signup(
         await db.execute(select(User.id).where(User.email == email))
     ).scalar_one_or_none()
     if existing is not None:
-        raise HTTPException(status_code=409, detail="An account with this email already exists.")
+        raise HTTPException(
+            status_code=409, detail="An account with this email already exists."
+        )
 
-    user = User(email=email, password_hash=await asyncio.to_thread(hash_password, password))
+    user = User(
+        email=email, password_hash=await asyncio.to_thread(hash_password, password)
+    )
     db.add(user)
     try:
         await db.flush()  # pulls the server-generated uuid; a concurrent duplicate lands here
@@ -130,7 +136,9 @@ async def login(
     same 401 with the same message — never reveal which one it was.
     """
     email = normalize_email(email)
-    user = (await db.execute(select(User).where(User.email == email))).scalar_one_or_none()
+    user = (
+        await db.execute(select(User).where(User.email == email))
+    ).scalar_one_or_none()
 
     if user is None:
         # Burn the same argon2 work as a real verify so response time does not
@@ -175,7 +183,9 @@ async def change_password(
     user = await db.get(User, user_id)
     if user is None:
         raise HTTPException(status_code=401, detail="Not authenticated.")
-    if not await asyncio.to_thread(verify_password, current_password, user.password_hash):
+    if not await asyncio.to_thread(
+        verify_password, current_password, user.password_hash
+    ):
         raise HTTPException(status_code=401, detail="Current password is incorrect.")
 
     now = datetime.datetime.now(datetime.UTC)
@@ -230,7 +240,9 @@ async def close_redis() -> None:
 
 async def issue_ws_ticket(user_id: uuid.UUID, ttl_seconds: int | None = None) -> str:
     """Single-use, short-lived ticket for the WebSocket auth fallback (R4)."""
-    ttl = ttl_seconds if ttl_seconds is not None else get_settings().ws_ticket_ttl_seconds
+    ttl = (
+        ttl_seconds if ttl_seconds is not None else get_settings().ws_ticket_ttl_seconds
+    )
     ticket = secrets.token_urlsafe(32)
     await _get_redis().setex(f"ws_ticket:{ticket}", ttl, str(user_id))
     return ticket

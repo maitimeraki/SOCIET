@@ -3,6 +3,7 @@
 The legacy files are read-only history; the script writes through the same
 store the API uses and is re-run safe.
 """
+
 import asyncio
 import json
 import os
@@ -22,7 +23,9 @@ from src.db.models import RunEvent, User
 if sys.platform == "win32":
     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
-requires_db = pytest.mark.skipif(not os.getenv("DATABASE_URL"), reason="DATABASE_URL is not set")
+requires_db = pytest.mark.skipif(
+    not os.getenv("DATABASE_URL"), reason="DATABASE_URL is not set"
+)
 
 pytestmark = [requires_db, pytest.mark.asyncio]
 
@@ -93,7 +96,9 @@ def legacy_tree(tmp_path, monkeypatch):
     debates.mkdir()
     (jobs / f"{JOB_ID}.json").write_text(json.dumps(JOB_DOC), encoding="utf-8")
     (debates / f"{RUN_ID}.json").write_text(json.dumps(DEBATE_DOC), encoding="utf-8")
-    (debates / f"{FAILED_RUN_ID}.json").write_text(json.dumps(FAILED_DEBATE_DOC), encoding="utf-8")
+    (debates / f"{FAILED_RUN_ID}.json").write_text(
+        json.dumps(FAILED_DEBATE_DOC), encoding="utf-8"
+    )
     monkeypatch.setattr(migrate, "JOBS_DIR", jobs)
     monkeypatch.setattr(migrate, "DEBATES_DIR", debates)
     return tmp_path
@@ -102,10 +107,16 @@ def legacy_tree(tmp_path, monkeypatch):
 async def _event_rows(run_id: str) -> list[RunEvent]:
     async with get_session_factory()() as session:
         return (
-            await session.execute(
-                select(RunEvent).where(RunEvent.run_id == uuid.UUID(run_id)).order_by(RunEvent.seq)
+            (
+                await session.execute(
+                    select(RunEvent)
+                    .where(RunEvent.run_id == uuid.UUID(run_id))
+                    .order_by(RunEvent.seq)
+                )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
 
 
 async def test_migrate_writes_rows_matching_the_files(legacy_tree, owner):
@@ -113,11 +124,17 @@ async def test_migrate_writes_rows_matching_the_files(legacy_tree, owner):
 
     job = await run_doc.read_job_doc(JOB_ID)
     assert job["user_id"] == str(owner.id)
-    assert (job["mode"], job["status"], job["result"]) == ("build_graph", "completed", JOB_DOC["result"])
+    assert (job["mode"], job["status"], job["result"]) == (
+        "build_graph",
+        "completed",
+        JOB_DOC["result"],
+    )
 
     run = await run_doc.read_run_doc(RUN_ID)
     assert (run["query"], run["dataset_id"], run["config"]) == (
-        DEBATE_DOC["query"], "ds-1", {"max_rounds": 2},
+        DEBATE_DOC["query"],
+        "ds-1",
+        {"max_rounds": 2},
     )
     assert run["result"] == DEBATE_DOC["result"]
     assert [event["type"] for event in run["events"]] == ["stage", "stage", "complete"]
@@ -128,7 +145,7 @@ async def test_migrate_writes_rows_matching_the_files(legacy_tree, owner):
     failed = await run_doc.read_run_doc(FAILED_RUN_ID)
     assert failed["status"] == "failed"
     # The stream's error event is lifted onto the jobs row (runs have no error).
-    async with get_session_factory()() as session:
+    async with get_session_factory()():
         head = await run_doc.read_run_head(FAILED_RUN_ID)
     assert head["error"] == "orchestrator exploded"
 
@@ -137,7 +154,9 @@ async def test_rerun_is_safe_and_never_clobbers(legacy_tree, owner):
     await migrate._migrate(owner.id, dry_run=False)
 
     # A live run moves on after the first migration; the stale file must not win.
-    await run_doc.write_run_doc({**DEBATE_DOC, "user_id": str(owner.id), "status": "failed"})
+    await run_doc.write_run_doc(
+        {**DEBATE_DOC, "user_id": str(owner.id), "status": "failed"}
+    )
 
     assert await migrate._migrate(owner.id, dry_run=False) == 0
 
@@ -146,7 +165,9 @@ async def test_rerun_is_safe_and_never_clobbers(legacy_tree, owner):
     async with get_session_factory()() as session:
         meta_rows = (
             await session.execute(
-                select(func.count()).select_from(RunEvent).where(
+                select(func.count())
+                .select_from(RunEvent)
+                .where(
                     RunEvent.run_id == uuid.UUID(RUN_ID), RunEvent.type == "run_meta"
                 )
             )
@@ -181,7 +202,9 @@ async def test_verify_passes_and_checks_verdicts(legacy_tree, owner, capsys):
 async def test_verify_flags_a_missing_row(legacy_tree, owner, capsys):
     await migrate._migrate(owner.id, dry_run=False)
     async with get_session_factory()() as session:
-        await session.execute(delete(RunEvent).where(RunEvent.run_id == uuid.UUID(RUN_ID)))
+        await session.execute(
+            delete(RunEvent).where(RunEvent.run_id == uuid.UUID(RUN_ID))
+        )
         await session.commit()
     capsys.readouterr()
 

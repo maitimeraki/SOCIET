@@ -1,18 +1,18 @@
 """Tests for GraphContext."""
+
 import os
-import pytest
-import asyncio
 from unittest.mock import patch
 from uuid import UUID
 
+import pytest
 import pytest_asyncio
 from dotenv import load_dotenv
 
 load_dotenv()
 
-from src.persona.graph_context import GraphContext, EntityNode, EntityContext
-from src.persona.models_persona import ProvenanceLink
 from src.graph.config_graph import GraphConfig
+from src.persona.graph_context import EntityContext, EntityNode, GraphContext
+from src.persona.models_persona import ProvenanceLink
 
 
 @pytest_asyncio.fixture
@@ -153,7 +153,9 @@ async def test_get_provenance_traces_to_source(seeded_node, graph_ctx):
     """Test that provenance traces back to source chunks."""
     provenance = await graph_ctx.get_provenance(seeded_node)
     assert isinstance(provenance, list)
-    assert any(link.doc_id == "doc:test_doc" for link in provenance)  # seeded chunk found
+    assert any(
+        link.doc_id == "doc:test_doc" for link in provenance
+    )  # seeded chunk found
     # Check that provenance entries have required fields
     for link in provenance:
         assert link.doc_id is not None
@@ -218,6 +220,7 @@ async def test_async_context_manager(graph_ctx):
 # These run against a query-counting fake driver (no live Neo4j), so the
 # query count is deterministic and independent of the seeded graph.
 
+
 class _FakeResult:
     def __init__(self, rows):
         self._rows = rows
@@ -264,8 +267,12 @@ def _batch_ctx(responder):
 
 def _chunk_row(node_id, node_name, doc_id, chunk_id, title="T", breadcrumb="b"):
     return {
-        "node_id": node_id, "node_name": node_name, "doc_id": doc_id,
-        "title": title, "breadcrumb": breadcrumb, "chunk_id": chunk_id,
+        "node_id": node_id,
+        "node_name": node_name,
+        "doc_id": doc_id,
+        "title": title,
+        "breadcrumb": breadcrumb,
+        "chunk_id": chunk_id,
     }
 
 
@@ -283,7 +290,7 @@ async def test_get_provenance_reads_the_writer_shape():
 
     cypher = driver.queries[0][0]
     assert "chunk.document_anchor AS doc_id" in cypher
-    assert "chunk.doc_id" not in cypher           # never the sentinel property
+    assert "chunk.doc_id" not in cypher  # never the sentinel property
     assert "chunk.document_anchor IS NOT NULL" in cypher  # real chunks only
 
 
@@ -328,7 +335,9 @@ async def test_get_provenance_batch_serves_the_whole_roster_with_one_query():
 async def test_get_provenance_batch_attributes_rows_by_id_and_name():
     """A row reaches every requested key that its id or name matches."""
     rows = [
-        _chunk_row("not-requested", "Alpha", "doc:1", "44444444-4444-4444-4444-444444444444"),
+        _chunk_row(
+            "not-requested", "Alpha", "doc:1", "44444444-4444-4444-4444-444444444444"
+        ),
         _chunk_row("e2", "Alpha", "doc:2", "55555555-5555-5555-5555-555555555555"),
     ]
     ctx, _ = _batch_ctx(lambda cypher, params: rows)
@@ -343,7 +352,9 @@ async def test_get_provenance_batch_attributes_rows_by_id_and_name():
 
 @pytest.mark.asyncio
 async def test_get_provenance_batch_empty_roster_runs_no_query():
-    ctx, driver = _batch_ctx(lambda cypher, params: pytest.fail("query executed for an empty roster"))
+    ctx, driver = _batch_ctx(
+        lambda cypher, params: pytest.fail("query executed for an empty roster")
+    )
 
     assert await ctx.get_provenance_batch([]) == {}
     assert driver.queries == []
@@ -352,7 +363,9 @@ async def test_get_provenance_batch_empty_roster_runs_no_query():
 @pytest.mark.asyncio
 async def test_get_provenance_batch_serves_a_live_roster(seeded_node, graph_ctx):
     """The batch Cypher itself executes against live Neo4j with single-fetch parity."""
-    result = await graph_ctx.get_provenance_batch([seeded_node, "nonexistent_entity_id_12345"])
+    result = await graph_ctx.get_provenance_batch(
+        [seeded_node, "nonexistent_entity_id_12345"]
+    )
 
     assert result["nonexistent_entity_id_12345"] == []
     docs = [link.doc_id for link in result[seeded_node]]
@@ -367,14 +380,17 @@ async def test_get_provenance_batch_serves_a_live_roster(seeded_node, graph_ctx)
 
 # ---- Bounded embed calls: env-backed base URL + timeout (Task 11) ----
 
+
 def test_embed_model_is_bounded_and_env_addressed(monkeypatch):
     """OllamaEmbedding gets LLMConfig's Ollama base URL plus a request timeout."""
     from src.llm.config_llm import LLMConfig
 
     monkeypatch.setattr(LLMConfig, "ollama_base_url", "http://sentinel-ollama:1234")
 
-    with patch('src.persona.graph_context.AsyncGraphDatabase'), \
-         patch('src.persona.graph_context.OllamaEmbedding') as mock_embed:
+    with (
+        patch("src.persona.graph_context.AsyncGraphDatabase"),
+        patch("src.persona.graph_context.OllamaEmbedding") as mock_embed,
+    ):
         GraphContext(GraphConfig())
 
     kwargs = mock_embed.call_args.kwargs
@@ -384,10 +400,15 @@ def test_embed_model_is_bounded_and_env_addressed(monkeypatch):
 
 # ---- Required-node traversal: one-hop entity neighbours ----
 
+
 def _traversal_row(node_id, node_name, seed_degree=1):
     return {
-        "n": {"id": node_id, "name": node_name,
-              "domain_tags": ["x"], "summary_context": f"{node_name} summary"},
+        "n": {
+            "id": node_id,
+            "name": node_name,
+            "domain_tags": ["x"],
+            "summary_context": f"{node_name} summary",
+        },
         "seed_degree": seed_degree,
     }
 
@@ -415,7 +436,9 @@ async def test_find_connected_nodes_walks_one_hop_and_parses_entities():
 
 @pytest.mark.asyncio
 async def test_find_connected_nodes_empty_seeds_run_no_query():
-    ctx, driver = _batch_ctx(lambda cypher, params: pytest.fail("query executed for empty seeds"))
+    ctx, driver = _batch_ctx(
+        lambda cypher, params: pytest.fail("query executed for empty seeds")
+    )
 
     assert await ctx.find_connected_nodes([]) == []
     assert driver.queries == []
@@ -445,7 +468,9 @@ def test_entity_from_node_reads_real_label():
 def test_entity_from_node_falls_back_to_props_labels_then_entity():
     ctx = GraphContext.__new__(GraphContext)
 
-    from_props = ctx._entity_from_node({"id": "e1", "name": "X", "labels": ["Regulator"]}, 0.0)
+    from_props = ctx._entity_from_node(
+        {"id": "e1", "name": "X", "labels": ["Regulator"]}, 0.0
+    )
     assert from_props.label == "Regulator"
 
     bare = ctx._entity_from_node({"id": "e2", "name": "Y"}, 0.0)
@@ -455,7 +480,13 @@ def test_entity_from_node_falls_back_to_props_labels_then_entity():
 @pytest.mark.asyncio
 async def test_get_neighbors_reads_real_labels():
     """The neighbour walk keys `label` on the same real type, not property keys."""
-    rows = [{"m": _FakeNode("WholeFoods", "Company"), "rel_type": "ACQUIRED", "rel_summary": ""}]
+    rows = [
+        {
+            "m": _FakeNode("WholeFoods", "Company"),
+            "rel_type": "ACQUIRED",
+            "rel_summary": "",
+        }
+    ]
     ctx, _ = _batch_ctx(lambda cypher, params: rows)
 
     neighbours = await ctx._get_neighbors("seed")
@@ -470,8 +501,18 @@ async def test_get_neighbors_reads_real_labels():
 async def test_find_connected_nodes_by_seed_groups_per_seed():
     """One query groups each seed's 1-hop entity neighbours under its id and name."""
     rows = [
-        {"seed_id": "s1", "seed_name": "Amazon", "n": _FakeNode("WholeFoods", "Company"), "rel_type": "ACQUIRED"},
-        {"seed_id": "s2", "seed_name": "EU", "n": _FakeNode("GDPR", "Regulation"), "rel_type": "MANDATES"},
+        {
+            "seed_id": "s1",
+            "seed_name": "Amazon",
+            "n": _FakeNode("WholeFoods", "Company"),
+            "rel_type": "ACQUIRED",
+        },
+        {
+            "seed_id": "s2",
+            "seed_name": "EU",
+            "n": _FakeNode("GDPR", "Regulation"),
+            "rel_type": "MANDATES",
+        },
     ]
     ctx, driver = _batch_ctx(lambda cypher, params: rows)
 
@@ -483,14 +524,16 @@ async def test_find_connected_nodes_by_seed_groups_per_seed():
     assert params["node_ids"] == ["s1", "s2"]
     assert {e.name for e in out["s1"]} == {"WholeFoods"}
     assert {e.name for e in out["s2"]} == {"GDPR"}
-    assert out["s1"][0].label == "Company"      # real type label, not property keys
+    assert out["s1"][0].label == "Company"  # real type label, not property keys
     assert out["s1"][0].relevance_score == 0.0  # walked nodes carry no vector score
-    assert out["Amazon"] == out["s1"]           # reachable under the seed name too
+    assert out["Amazon"] == out["s1"]  # reachable under the seed name too
 
 
 @pytest.mark.asyncio
 async def test_find_connected_nodes_by_seed_empty_ids_run_no_query():
-    ctx, driver = _batch_ctx(lambda cypher, params: pytest.fail("query executed for empty ids"))
+    ctx, driver = _batch_ctx(
+        lambda cypher, params: pytest.fail("query executed for empty ids")
+    )
 
     assert await ctx.find_connected_nodes_by_seed([]) == {}
     assert driver.queries == []

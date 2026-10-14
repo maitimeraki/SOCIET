@@ -1,15 +1,17 @@
 """Tests for normalization module."""
+
 import asyncio
 import itertools
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from unittest.mock import AsyncMock, patch, MagicMock
+
 from src.graph.normalization import (
     EntityNode,
-    RelationEdge,
-    normalize_and_write,
     GraphNormalizationStage,
     MergeCandidate,
+    RelationEdge,
+    normalize_and_write,
 )
 
 
@@ -44,9 +46,7 @@ class TestRelationEdge:
     def test_requires_source_and_target(self):
         """Verify source_id and target_id are required."""
         rel = RelationEdge(
-            source_id="entity-1",
-            target_id="entity-2",
-            relation_type="KNOWS"
+            source_id="entity-1", target_id="entity-2", relation_type="KNOWS"
         )
         assert rel.source_id == "entity-1"
         assert rel.target_id == "entity-2"
@@ -64,16 +64,26 @@ class TestNormalizeAndWrite:
     @pytest.mark.asyncio
     async def test_returns_graph_id(self):
         """Verify function returns a valid graph_id."""
-        entities = [EntityNode(id="e1", labels=["Person"], properties={"name": "Alice"})]
+        entities = [
+            EntityNode(id="e1", labels=["Person"], properties={"name": "Alice"})
+        ]
         relations = []
 
-        with patch.object(GraphNormalizationStage, 'validate_entities', new_callable=AsyncMock) as mock_validate:
+        with patch.object(
+            GraphNormalizationStage, "validate_entities", new_callable=AsyncMock
+        ) as mock_validate:
             mock_validate.return_value = []
-            with patch.object(GraphNormalizationStage, 'validate_relations', new_callable=AsyncMock) as mock_rel_validate:
+            with patch.object(
+                GraphNormalizationStage, "validate_relations", new_callable=AsyncMock
+            ) as mock_rel_validate:
                 mock_rel_validate.return_value = []
-                with patch.object(GraphNormalizationStage, 'write_all', new_callable=AsyncMock) as mock_write:
+                with patch.object(
+                    GraphNormalizationStage, "write_all", new_callable=AsyncMock
+                ) as mock_write:
                     mock_write.return_value = ([], 0)
-                    with patch.object(GraphNormalizationStage, 'close', new_callable=AsyncMock):
+                    with patch.object(
+                        GraphNormalizationStage, "close", new_callable=AsyncMock
+                    ):
                         graph_id = await normalize_and_write(entities, relations)
 
         assert graph_id is not None
@@ -83,25 +93,37 @@ class TestNormalizeAndWrite:
     async def test_merges_duplicate_entities(self):
         """Verify duplicate entities are merged by id via normalize_and_write."""
         entities = [
-            EntityNode(id="e1", labels=["Person"], properties={"name": "Alice", "age": 30}),
+            EntityNode(
+                id="e1", labels=["Person"], properties={"name": "Alice", "age": 30}
+            ),
             EntityNode(id="e1", labels=["Person"], properties={"age": 31}),  # duplicate
         ]
         relations = []
 
-        with patch.object(GraphNormalizationStage, 'validate_entities', new_callable=AsyncMock) as mock_validate:
+        with patch.object(
+            GraphNormalizationStage, "validate_entities", new_callable=AsyncMock
+        ) as mock_validate:
             mock_validate.return_value = []
-            with patch.object(GraphNormalizationStage, 'validate_relations', new_callable=AsyncMock) as mock_rel_validate:
+            with patch.object(
+                GraphNormalizationStage, "validate_relations", new_callable=AsyncMock
+            ) as mock_rel_validate:
                 mock_rel_validate.return_value = []
-                with patch.object(GraphNormalizationStage, 'write_all', new_callable=AsyncMock) as mock_write:
+                with patch.object(
+                    GraphNormalizationStage, "write_all", new_callable=AsyncMock
+                ) as mock_write:
                     mock_write.return_value = ([], 0)
-                    with patch.object(GraphNormalizationStage, 'close', new_callable=AsyncMock):
-                        graph_id = await normalize_and_write(entities, relations)
+                    with patch.object(
+                        GraphNormalizationStage, "close", new_callable=AsyncMock
+                    ):
+                        await normalize_and_write(entities, relations)
 
         # Verify write_all was called with merged entities (should have only 1 entity)
         mock_write.assert_called_once()
         call_args = mock_write.call_args
         merged_entities_arg = call_args[0][0]  # First positional arg
-        assert len(merged_entities_arg) == 1, "Duplicate entities should be merged into 1"
+        assert (
+            len(merged_entities_arg) == 1
+        ), "Duplicate entities should be merged into 1"
         assert merged_entities_arg[0].id == "e1"
         assert merged_entities_arg[0].properties["name"] == "Alice"
         # Merge fills in missing values; existing values are preserved (age=30 from first entity)
@@ -113,13 +135,21 @@ class TestNormalizeAndWrite:
         entities = [EntityNode(id="e1", labels=["Person"])]
         relations = []
 
-        with patch.object(GraphNormalizationStage, 'validate_entities', new_callable=AsyncMock) as mock_validate:
+        with patch.object(
+            GraphNormalizationStage, "validate_entities", new_callable=AsyncMock
+        ) as mock_validate:
             mock_validate.return_value = []
-            with patch.object(GraphNormalizationStage, 'validate_relations', new_callable=AsyncMock) as mock_rel_validate:
+            with patch.object(
+                GraphNormalizationStage, "validate_relations", new_callable=AsyncMock
+            ) as mock_rel_validate:
                 mock_rel_validate.return_value = []
-                with patch.object(GraphNormalizationStage, 'write_all', new_callable=AsyncMock) as mock_write:
+                with patch.object(
+                    GraphNormalizationStage, "write_all", new_callable=AsyncMock
+                ) as mock_write:
                     mock_write.return_value = ([], 0)
-                    with patch.object(GraphNormalizationStage, 'close', new_callable=AsyncMock):
+                    with patch.object(
+                        GraphNormalizationStage, "close", new_callable=AsyncMock
+                    ):
                         await normalize_and_write(entities, relations)
 
         mock_validate.assert_called_once_with(entities)
@@ -130,7 +160,9 @@ class TestNormalizeAndWrite:
         entities = [EntityNode(id="e1", labels=["Person"])]
         relations = []
 
-        with patch.object(GraphNormalizationStage, 'validate_entities', new_callable=AsyncMock) as mock_validate:
+        with patch.object(
+            GraphNormalizationStage, "validate_entities", new_callable=AsyncMock
+        ) as mock_validate:
             mock_validate.return_value = ["Entity e1: must have at least one label"]
 
             with pytest.raises(ValueError, match="Entity validation errors"):
@@ -149,7 +181,7 @@ class TestGraphNormalizationStageValidation:
         config.neo4j_password = "password"
         config.neo4j_database = "neo4j"
 
-        with patch('src.graph.normalization.AsyncGraphDatabase'):
+        with patch("src.graph.normalization.AsyncGraphDatabase"):
             stage = GraphNormalizationStage(config)
             entities = [EntityNode(id="e1", labels=["Person"])]
             errors = await stage.validate_entities(entities)
@@ -164,7 +196,7 @@ class TestGraphNormalizationStageValidation:
         config.neo4j_password = "password"
         config.neo4j_database = "neo4j"
 
-        with patch('src.graph.normalization.AsyncGraphDatabase'):
+        with patch("src.graph.normalization.AsyncGraphDatabase"):
             stage = GraphNormalizationStage(config)
             entities = [EntityNode(id="e1", labels=[])]
             errors = await stage.validate_entities(entities)
@@ -180,9 +212,11 @@ class TestGraphNormalizationStageValidation:
         config.neo4j_password = "password"
         config.neo4j_database = "neo4j"
 
-        with patch('src.graph.normalization.AsyncGraphDatabase'):
+        with patch("src.graph.normalization.AsyncGraphDatabase"):
             stage = GraphNormalizationStage(config)
-            relations = [RelationEdge(source_id="e1", target_id="e2", relation_type="KNOWS")]
+            relations = [
+                RelationEdge(source_id="e1", target_id="e2", relation_type="KNOWS")
+            ]
             valid_ids = ["e1", "e2"]
             errors = await stage.validate_relations(relations, valid_ids)
             assert errors == []
@@ -196,9 +230,11 @@ class TestGraphNormalizationStageValidation:
         config.neo4j_password = "password"
         config.neo4j_database = "neo4j"
 
-        with patch('src.graph.normalization.AsyncGraphDatabase'):
+        with patch("src.graph.normalization.AsyncGraphDatabase"):
             stage = GraphNormalizationStage(config)
-            relations = [RelationEdge(source_id="e1", target_id="e2", relation_type="KNOWS")]
+            relations = [
+                RelationEdge(source_id="e1", target_id="e2", relation_type="KNOWS")
+            ]
             valid_ids = ["e1"]  # e2 is missing
             errors = await stage.validate_relations(relations, valid_ids)
             assert len(errors) > 0
@@ -213,7 +249,7 @@ class TestMergeCandidate:
         candidate = MergeCandidate(
             node_id=123,
             labels=["Person", "Employee"],
-            properties={"name": "Bob", "department": "Engineering"}
+            properties={"name": "Bob", "department": "Engineering"},
         )
         assert candidate.node_id == 123
         assert candidate.labels == ["Person", "Employee"]
@@ -232,16 +268,26 @@ class TestFindSurfaceDuplicates:
         config.neo4j_password = "password"
         config.neo4j_database = "neo4j"
 
-        with patch('src.graph.normalization.AsyncGraphDatabase'):
+        with patch("src.graph.normalization.AsyncGraphDatabase"):
             stage = GraphNormalizationStage(config)
 
-        records = [{
-            "key": "alice",
-            "nodes": [
-                {"id": "4:abc:123", "labels": ["Person"], "props": {"name": "Alice", "source": "doc-a"}},
-                {"id": "4:abc:456", "labels": ["Person"], "props": {"name": "Alice", "source": "doc-b"}},
-            ],
-        }]
+        records = [
+            {
+                "key": "alice",
+                "nodes": [
+                    {
+                        "id": "4:abc:123",
+                        "labels": ["Person"],
+                        "props": {"name": "Alice", "source": "doc-a"},
+                    },
+                    {
+                        "id": "4:abc:456",
+                        "labels": ["Person"],
+                        "props": {"name": "Alice", "source": "doc-b"},
+                    },
+                ],
+            }
+        ]
         stage._run = AsyncMock(return_value=records)
 
         groups = await stage.find_surface_duplicates("ds-1")
@@ -264,7 +310,7 @@ class TestAliasCanonicalLabelInterpolation:
         config.neo4j_username = "neo4j"
         config.neo4j_password = "password"
         config.neo4j_database = "neo4j"
-        with patch('src.graph.normalization.AsyncGraphDatabase'):
+        with patch("src.graph.normalization.AsyncGraphDatabase"):
             return GraphNormalizationStage(config)
 
     @pytest.mark.asyncio
@@ -277,7 +323,11 @@ class TestAliasCanonicalLabelInterpolation:
             return []
 
         stage._run = record
-        group = [MergeCandidate(node_id="4:abc:1", labels=["Person"], properties={"name": "Alice"})]
+        group = [
+            MergeCandidate(
+                node_id="4:abc:1", labels=["Person"], properties={"name": "Alice"}
+            )
+        ]
 
         await stage.create_alias_relationships(
             "CanonicalEntity", {"dataset_id": "ds-1", "created_by": "auto"}, group
@@ -338,7 +388,7 @@ class TestRunFetchesRecordsInsideTheSession:
     @pytest.mark.asyncio
     async def test_run_returns_fetched_records(self):
         records = [{"x": 1}]
-        with patch('src.graph.normalization.AsyncGraphDatabase') as mock_db:
+        with patch("src.graph.normalization.AsyncGraphDatabase") as mock_db:
             mock_db.driver.return_value = _ConsumeOnCloseDriver(records)
             stage = GraphNormalizationStage(MagicMock())
 
@@ -360,7 +410,7 @@ class TestPairScoringConcurrency:
         config.neo4j_password = "password"
         config.neo4j_database = "neo4j"
         config.ontology_max_concurrency = self.LIMIT
-        with patch('src.graph.normalization.AsyncGraphDatabase'):
+        with patch("src.graph.normalization.AsyncGraphDatabase"):
             return GraphNormalizationStage(config)
 
     def _instrument(self, stage: GraphNormalizationStage) -> dict:
@@ -381,7 +431,9 @@ class TestPairScoringConcurrency:
 
     def _group(self):
         return [
-            MergeCandidate(node_id=f"4:abc:{i}", labels=["Person"], properties={"name": f"n{i}"})
+            MergeCandidate(
+                node_id=f"4:abc:{i}", labels=["Person"], properties={"name": f"n{i}"}
+            )
             for i in range(self.GROUP_SIZE)
         ]
 

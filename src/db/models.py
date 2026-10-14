@@ -43,7 +43,9 @@ class User(Base):
     password_hash: Mapped[str] = mapped_column(Text, nullable=False)
     created_at: Mapped[datetime.datetime] = _timestamptz_default()
     updated_at: Mapped[datetime.datetime] = _timestamptz_default()
-    disabled_at: Mapped[datetime.datetime | None] = mapped_column(DateTime(timezone=True))
+    disabled_at: Mapped[datetime.datetime | None] = mapped_column(
+        DateTime(timezone=True)
+    )
 
 
 class UserSession(Base):
@@ -62,7 +64,9 @@ class UserSession(Base):
     )
     user_agent: Mapped[str | None] = mapped_column(Text)
     ip: Mapped[str | None] = mapped_column(INET)
-    revoked_at: Mapped[datetime.datetime | None] = mapped_column(DateTime(timezone=True))
+    revoked_at: Mapped[datetime.datetime | None] = mapped_column(
+        DateTime(timezone=True)
+    )
 
     __table_args__ = (
         Index(
@@ -100,7 +104,9 @@ class Run(Base):
     verdict: Mapped[dict | None] = mapped_column(JSONB)
     confidence: Mapped[float | None] = mapped_column(Double)
     created_at: Mapped[datetime.datetime] = _timestamptz_default()
-    finished_at: Mapped[datetime.datetime | None] = mapped_column(DateTime(timezone=True))
+    finished_at: Mapped[datetime.datetime | None] = mapped_column(
+        DateTime(timezone=True)
+    )
 
     # Serves the keyset-paginated history list: own runs, newest first, by
     # (created_at, id) DESC (plan §6).
@@ -126,11 +132,17 @@ class Job(Base):
     )
     kind: Mapped[str] = mapped_column(Text, nullable=False)
     status: Mapped[str] = mapped_column(Text, nullable=False)
-    attempts: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
+    attempts: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default=text("0")
+    )
     error: Mapped[str | None] = mapped_column(Text)
     queued_at: Mapped[datetime.datetime] = _timestamptz_default()
-    started_at: Mapped[datetime.datetime | None] = mapped_column(DateTime(timezone=True))
-    finished_at: Mapped[datetime.datetime | None] = mapped_column(DateTime(timezone=True))
+    started_at: Mapped[datetime.datetime | None] = mapped_column(
+        DateTime(timezone=True)
+    )
+    finished_at: Mapped[datetime.datetime | None] = mapped_column(
+        DateTime(timezone=True)
+    )
 
     __table_args__ = (Index("jobs_user_id_idx", "user_id"),)
 
@@ -178,4 +190,6 @@ class RunEvent(Base):
     payload: Mapped[dict | None] = mapped_column(JSONB)
     at: Mapped[datetime.datetime] = _timestamptz_default()
 
-    __table_args__ = (UniqueConstraint("run_id", "seq", name="uq_run_events_run_id_seq"),)
+    __table_args__ = (
+        UniqueConstraint("run_id", "seq", name="uq_run_events_run_id_seq"),
+    )

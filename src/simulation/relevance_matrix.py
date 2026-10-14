@@ -17,6 +17,7 @@ Document-first graph model (P4-T1) is read in that one body and nothing else
 reads evidence rows. Selected rows also carry the provenance `anchors` of their
 evidence, read through the same adapter.
 """
+
 import logging
 import re
 from collections.abc import Mapping, Sequence
@@ -118,7 +119,10 @@ def _evidence_row(item: Any) -> tuple[float, tuple[dict[str, str], ...]]:
         anchors = (node,) if len(node) > 1 else ()
         properties = getattr(item, "properties", None)
         if isinstance(properties, Mapping):
-            chunk_refs = [properties.get("chunk_id"), properties.get("triplet_source_id")]
+            chunk_refs = [
+                properties.get("chunk_id"),
+                properties.get("triplet_source_id"),
+            ]
             chunk_ids = properties.get("chunk_ids")
             if isinstance(chunk_ids, (list, tuple, set)):
                 chunk_refs.extend(chunk_ids)
@@ -147,9 +151,7 @@ def _document_anchors(source: Mapping) -> tuple[dict[str, str], ...]:
     if isinstance(document_ids, (list, tuple, set)):
         refs.extend(document_ids)
     return tuple(
-        {"kind": "document", "id": str(ref)}
-        for ref in refs
-        if str(ref or "").strip()
+        {"kind": "document", "id": str(ref)} for ref in refs if str(ref or "").strip()
     )
 
 
@@ -176,7 +178,11 @@ def intent_terms(intent: Any) -> list[str]:
     """
     terms: list[str] = []
     for field in ("direct_keywords", "entity_frame", "domain_tags"):
-        values = intent.get(field) if isinstance(intent, Mapping) else getattr(intent, field, None)
+        values = (
+            intent.get(field)
+            if isinstance(intent, Mapping)
+            else getattr(intent, field, None)
+        )
         terms.extend(str(value) for value in (values or []) if str(value).strip())
     return terms
 
@@ -200,7 +206,9 @@ def semantic_component(terms: Sequence[str], text: str) -> float:
             continue
         counted += 1
         term_tokens = set(_TOKEN_RE.findall(needle))
-        if re.search(rf"\b{re.escape(needle)}\b", haystack) or (term_tokens and term_tokens <= tokens):
+        if re.search(rf"\b{re.escape(needle)}\b", haystack) or (
+            term_tokens and term_tokens <= tokens
+        ):
             matched += 1
     return matched / counted if counted else 0.0
 
@@ -239,13 +247,15 @@ def rank_candidates(
     for candidate, raw in zip(candidates, raw_density):
         semantic = semantic_component(terms, candidate.text)
         density = raw / peak if peak > 0 else 0.0
-        rows.append(SelectionRow(
-            name=candidate.name,
-            semantic=semantic,
-            density=density,
-            blended=blended_score(semantic, density, config),
-            anchors=_anchors_of(candidate.evidence),
-        ))
+        rows.append(
+            SelectionRow(
+                name=candidate.name,
+                semantic=semantic,
+                density=density,
+                blended=blended_score(semantic, density, config),
+                anchors=_anchors_of(candidate.evidence),
+            )
+        )
 
     if terms and any(row.blended >= config.selection_score_threshold for row in rows):
         rows.sort(key=lambda row: row.blended, reverse=True)

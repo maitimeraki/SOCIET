@@ -4,6 +4,7 @@
 it is the real path: a real enqueue, the real ``src/jobs/tasks.py`` target, the
 real lifecycle, and the rows as the only assertion surface.
 """
+
 import asyncio
 import os
 import uuid
@@ -18,7 +19,9 @@ from src.db.models import User
 from src.jobs import queue as jobs_queue
 from src.jobs import tasks
 
-requires_db = pytest.mark.skipif(not os.getenv("DATABASE_URL"), reason="DATABASE_URL is not set")
+requires_db = pytest.mark.skipif(
+    not os.getenv("DATABASE_URL"), reason="DATABASE_URL is not set"
+)
 
 EMAIL = "auth-test-rq-%@example.com"
 
@@ -44,7 +47,8 @@ async def _make_owner() -> str:
     factory = get_session_factory()
     async with factory() as session:
         user = User(
-            email=EMAIL.replace("%", uuid.uuid4().hex[:10]), password_hash="not-a-real-hash"
+            email=EMAIL.replace("%", uuid.uuid4().hex[:10]),
+            password_hash="not-a-real-hash",
         )
         session.add(user)
         await session.commit()
@@ -69,13 +73,17 @@ def test_a_burst_worker_drives_a_job_queued_to_completed(monkeypatch):
     owner = _run(_make_owner())
     try:
         job_id = _run(
-            jobs_queue.enqueue("normalize_graph", {"user_id": owner, "dataset_id": "ds1"})
+            jobs_queue.enqueue(
+                "normalize_graph", {"user_id": owner, "dataset_id": "ds1"}
+            )
         )
         queued = _run(run_doc.read_job_doc(job_id))
         assert queued["status"] == "queued"
         assert jobs_queue.get_queue().count == 1
 
-        worker = SimpleWorker([jobs_queue.get_queue()], connection=jobs_queue.get_redis())
+        worker = SimpleWorker(
+            [jobs_queue.get_queue()], connection=jobs_queue.get_redis()
+        )
         worker.work(burst=True)
 
         done = _run(run_doc.read_job_doc(job_id))

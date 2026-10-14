@@ -4,6 +4,7 @@ Containerized in Task 8. RQ workers fork, so this is a Linux/macOS entrypoint â€
 Windows dev runs the same tasks inline (``QUEUE_MODE=inline``, see
 ``src/jobs/queue.py``).
 """
+
 import logging
 
 from rq import Worker

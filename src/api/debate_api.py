@@ -1,15 +1,23 @@
 """
 Debate API: Async debate simulation with streaming support.
 """
+
 import asyncio
 import logging
 import time
-import uuid
 from dataclasses import asdict
 from datetime import datetime, timezone
-from typing import Callable, Dict, Any, List, Literal, Optional
+from typing import Any, Callable, Dict, List, Literal, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, WebSocket, WebSocketDisconnect
+from fastapi import (
+    APIRouter,
+    Depends,
+    HTTPException,
+    Query,
+    Request,
+    WebSocket,
+    WebSocketDisconnect,
+)
 from pydantic import BaseModel, Field
 
 from src.api import run_doc
@@ -20,7 +28,6 @@ from src.config.settings import get_settings
 from src.db.models import User
 from src.simulation.debate_config import DebateConfig
 
-
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/simulate", tags=["debate"])
@@ -28,6 +35,7 @@ router = APIRouter(prefix="/simulate", tags=["debate"])
 
 class DebateConfigRequest(BaseModel):
     """Debate configuration from request."""
+
     max_agents: int = Field(default=50, ge=1, le=100)
     max_rounds: int = Field(default=5, ge=1, le=20)
     comm_radius: int = Field(default=1, ge=1, le=5)
@@ -42,10 +50,12 @@ class DebateConfigRequest(BaseModel):
 
 class DebateRequest(BaseModel):
     """Request to start a debate simulation."""
+
     graph_id: str = Field(default="simulation_runtime", description="Graph/dataset ID")
     query: str = Field(..., description="Debate topic/question")
     selected_domains: List[str] = Field(
-        default_factory=list, description="Domain filter, also carried into the intent fallback"
+        default_factory=list,
+        description="Domain filter, also carried into the intent fallback",
     )
     simulation_depth: Literal["shallow", "standard", "deep"] = Field(
         default="standard",
@@ -60,12 +70,14 @@ class DebateRequest(BaseModel):
 
 class DebateJobResponse(BaseModel):
     """Response when starting a debate job."""
+
     job_id: str
     status: str = "queued"
 
 
 class DebateStatusResponse(BaseModel):
     """Response for debate status check."""
+
     job_id: str
     status: str  # queued, running, complete, failed
     result: Optional[Dict[str, Any]] = None
@@ -74,6 +86,7 @@ class DebateStatusResponse(BaseModel):
 
 class RoundStreamEvent(BaseModel):
     """WebSocket event for a single debate round."""
+
     round: int
     pairs: list[Dict[str, Any]]
     turns: list[Dict[str, Any]]
@@ -81,6 +94,7 @@ class RoundStreamEvent(BaseModel):
 
 class DebateStreamComplete(BaseModel):
     """WebSocket event when debate is complete."""
+
     complete: bool = True
     converged: bool
     verdict: str
@@ -150,7 +164,9 @@ async def _run_debate_async(
     # Reuse the manager the job already holds: a client that connected before
     # the task started created and stored one (`stream_debate`), and replacing
     # it would silently drop that client from the S9 stage-event stream.
-    ws_manager = (_DEBATE_JOBS.get(job_id) or {}).get("ws_manager") or _DebateWSManager(job_id=job_id)
+    ws_manager = (_DEBATE_JOBS.get(job_id) or {}).get("ws_manager") or _DebateWSManager(
+        job_id=job_id
+    )
 
     # D3: the depth gate — distillation is on for standard/deep, off for shallow.
     distill = simulation_depth in {"standard", "deep"}
@@ -178,30 +194,34 @@ async def _run_debate_async(
         await ws_manager.broadcast({"type": "intent", "intent": intent.model_dump()})
 
         # Create GraphContext with proper signature
-        from src.persona.graph_context import GraphContext
         from src.graph.config_graph import GraphConfig
+        from src.persona.graph_context import GraphContext
+
         cfg = GraphConfig()
 
         async with GraphContext(cfg) as ctx:
             # Create orchestrator with all 5 dependencies
             from src.persona.repository import PersonaRepository
+            from src.simulation.llm_batch import BatchedLLMRunner
             from src.simulation.orchestrator import DebateOrchestrator
             from src.simulation.profile_synthesizer import ProfileSynthesizer
-            from src.simulation.topology import CommunicationTopology
-            from src.simulation.llm_batch import BatchedLLMRunner
-            from src.simulation.verdict import VerdictSynthesizer
             from src.simulation.society_memory import SocietyMemory
+            from src.simulation.topology import CommunicationTopology
+            from src.simulation.verdict import VerdictSynthesizer
 
             llm_runner = BatchedLLMRunner(llm, concurrency=config.llm_concurrency)
 
             orchestrator = DebateOrchestrator(
-                profile_synthesizer=ProfileSynthesizer(PersonaRepository(
-                    neo4j_uri=cfg.neo4j_uri,
-                    neo4j_user=cfg.neo4j_username,
-                    neo4j_password=cfg.neo4j_password,
-                    neo4j_database=cfg.neo4j_database,
-                    llm_client=llm,
-                ), ctx),
+                profile_synthesizer=ProfileSynthesizer(
+                    PersonaRepository(
+                        neo4j_uri=cfg.neo4j_uri,
+                        neo4j_user=cfg.neo4j_username,
+                        neo4j_password=cfg.neo4j_password,
+                        neo4j_database=cfg.neo4j_database,
+                        llm_client=llm,
+                    ),
+                    ctx,
+                ),
                 topology=CommunicationTopology(ctx._driver, ctx._db),
                 llm_runner=llm_runner,
                 verdict_synthesizer=VerdictSynthesizer(),
@@ -227,7 +247,10 @@ async def _run_debate_async(
         # degradation the run cannot see (the fallback intent is a valid
         # object — only `extraction_confidence` tells them apart). Still logged
         # by QueryIntend.fallback_intent; here it reaches the delivered payload.
-        if intent is not None and intent.extraction_confidence == FALLBACK_EXTRACTION_CONFIDENCE:
+        if (
+            intent is not None
+            and intent.extraction_confidence == FALLBACK_EXTRACTION_CONFIDENCE
+        ):
             result.warnings.append(
                 "S3 intent: extraction failed — the deterministic fallback intent "
                 f"was used (extraction_confidence={FALLBACK_EXTRACTION_CONFIDENCE})."
@@ -260,25 +283,27 @@ async def _run_debate_async(
             }
 
         # Send completion event (the verdict fields ride along — §12.3 item 5)
-        await ws_manager.broadcast({
-            "type": "complete",
-            "converged": result.converged,
-            "verdict": result.verdict,
-            "narrative": result.narrative,
-            "narrative_status": result.narrative_status,
-            "final_stances": result.final_stances,
-            "warnings": result.warnings,
-            "rounds_executed": result.rounds_executed,
-            "confidence_score": result.confidence_score,
-            "weight_share": result.weight_share,
-            "contested": result.contested,
-            "provenance_by_claim": result.provenance_by_claim,
-            "cluster_details": result.cluster_details,
-            "supporting_entities": result.supporting_entities,
-            "opposing_entities": result.opposing_entities,
-            "dissenting_views": result.dissenting_views,
-            "evidence": result.evidence,
-        })
+        await ws_manager.broadcast(
+            {
+                "type": "complete",
+                "converged": result.converged,
+                "verdict": result.verdict,
+                "narrative": result.narrative,
+                "narrative_status": result.narrative_status,
+                "final_stances": result.final_stances,
+                "warnings": result.warnings,
+                "rounds_executed": result.rounds_executed,
+                "confidence_score": result.confidence_score,
+                "weight_share": result.weight_share,
+                "contested": result.contested,
+                "provenance_by_claim": result.provenance_by_claim,
+                "cluster_details": result.cluster_details,
+                "supporting_entities": result.supporting_entities,
+                "opposing_entities": result.opposing_entities,
+                "dissenting_views": result.dissenting_views,
+                "evidence": result.evidence,
+            }
+        )
 
     except DebateCancelled as exc:
         # Cancelled is terminal, not failed: mark the live state and let the
@@ -297,11 +322,13 @@ async def _run_debate_async(
             _DEBATE_JOBS.setdefault(job_id, {})["status"] = "failed"
             _DEBATE_JOBS.setdefault(job_id, {})["error"] = str(exc)
 
-        await ws_manager.broadcast({
-            "type": "error",
-            "error": str(exc),
-            "warnings": warnings,
-        })
+        await ws_manager.broadcast(
+            {
+                "type": "error",
+                "error": str(exc),
+                "warnings": warnings,
+            }
+        )
 
 
 class _DebateWSManager:
@@ -476,7 +503,10 @@ async def list_debates(
         except run_doc.InvalidCursor:
             raise HTTPException(
                 status_code=400,
-                detail={"code": "invalid_cursor", "message": "The pagination cursor is not valid."},
+                detail={
+                    "code": "invalid_cursor",
+                    "message": "The pagination cursor is not valid.",
+                },
             )
     return (await run_doc.list_run_summaries(user.id))["items"]
 

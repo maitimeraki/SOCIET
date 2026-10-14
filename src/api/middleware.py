@@ -1,7 +1,7 @@
 import json
+import logging
 import time
 import uuid
-import logging
 from datetime import datetime, timezone
 
 from fastapi import Request
@@ -27,8 +27,10 @@ class LoggingMiddleware(BaseHTTPMiddleware):
         start = time.perf_counter()
         try:
             response = await call_next(request)
-        except Exception as exc:
-            self._log(request, correlation_id, 500, start, level=logging.ERROR, exc_info=True)
+        except Exception:
+            self._log(
+                request, correlation_id, 500, start, level=logging.ERROR, exc_info=True
+            )
             raise
         self._log(request, correlation_id, response.status_code, start)
         response.headers["X-Correlation-ID"] = correlation_id

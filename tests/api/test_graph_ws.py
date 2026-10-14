@@ -11,6 +11,7 @@ job finished must still be served (snapshot then done) without hanging. These
 tests drive `publish` on the app's own loop (via a `call_later` timer inside the
 stubbed `read_snapshot`) so no cross-thread queue access is involved.
 """
+
 import asyncio
 import threading
 import uuid
@@ -53,7 +54,11 @@ def _job_run_from_the_seeded_dict(monkeypatch):
 
 
 def _register_run(job_id: str, status: str, result: dict) -> None:
-    api_server.RUNS[job_id] = {"user_id": str(_WS_USER.id), "status": status, "result": result}
+    api_server.RUNS[job_id] = {
+        "user_id": str(_WS_USER.id),
+        "status": status,
+        "result": result,
+    }
 
 
 def _app() -> FastAPI:
@@ -62,7 +67,9 @@ def _app() -> FastAPI:
     return app
 
 
-def _collect(client: TestClient, url: str, count: int, timeout: float = 5.0) -> list[dict]:
+def _collect(
+    client: TestClient, url: str, count: int, timeout: float = 5.0
+) -> list[dict]:
     """Read `count` WS frames, but fail loudly instead of hanging if the route
     never produces them (an R14 regression would otherwise block forever)."""
     box: dict = {}
@@ -98,15 +105,32 @@ def test_first_frame_is_snapshot_then_deltas_vocabulary_and_done(monkeypatch):
     def _emit_after_subscribe() -> None:
         # Runs on the app loop 50ms after the snapshot is read, i.e. after the
         # route has subscribed — same loop, so `publish` is thread-safe.
-        graph_stream.publish(job_id, GraphDelta(
-            nodes=[{"id": "Person:Alice", "label": "Alice", "type": "PERSON"}],
-            edges=[{"source": "Person:Alice", "target": "Person:Alice", "label": "RELATED_TO"}],
-            new_labels=["PERSON"], chunk_id="c0", progress=0.5,
-        ))
-        graph_stream.publish(job_id, GraphDelta(
-            nodes=[{"id": "Org:Acme", "label": "Acme", "type": "ORG"}],
-            edges=[], new_labels=[], chunk_id="c1", progress=1.0,
-        ))
+        graph_stream.publish(
+            job_id,
+            GraphDelta(
+                nodes=[{"id": "Person:Alice", "label": "Alice", "type": "PERSON"}],
+                edges=[
+                    {
+                        "source": "Person:Alice",
+                        "target": "Person:Alice",
+                        "label": "RELATED_TO",
+                    }
+                ],
+                new_labels=["PERSON"],
+                chunk_id="c0",
+                progress=0.5,
+            ),
+        )
+        graph_stream.publish(
+            job_id,
+            GraphDelta(
+                nodes=[{"id": "Org:Acme", "label": "Acme", "type": "ORG"}],
+                edges=[],
+                new_labels=[],
+                chunk_id="c1",
+                progress=1.0,
+            ),
+        )
         api_server.RUNS[job_id]["status"] = "completed"
 
     async def fake_snapshot(dataset_id: str) -> GraphDelta:
@@ -114,14 +138,21 @@ def test_first_frame_is_snapshot_then_deltas_vocabulary_and_done(monkeypatch):
         asyncio.get_running_loop().call_later(0.05, _emit_after_subscribe)
         return GraphDelta(
             nodes=[{"id": "Person:Seed", "label": "Seed", "type": "PERSON"}],
-            edges=[], new_labels=["PERSON", "ORG"],
+            edges=[],
+            new_labels=["PERSON", "ORG"],
         )
 
     monkeypatch.setattr(graph_snapshot, "read_snapshot", fake_snapshot)
 
     frames = _collect(TestClient(_app()), f"/simulate/{job_id}/graph_stream", count=5)
 
-    assert [f["type"] for f in frames] == ["snapshot", "delta", "vocabulary", "delta", "done"]
+    assert [f["type"] for f in frames] == [
+        "snapshot",
+        "delta",
+        "vocabulary",
+        "delta",
+        "done",
+    ]
     assert frames[0] == {
         "type": "snapshot",
         "nodes": [{"id": "Person:Seed", "label": "Seed", "type": "PERSON"}],
@@ -129,7 +160,9 @@ def test_first_frame_is_snapshot_then_deltas_vocabulary_and_done(monkeypatch):
         "labels": ["PERSON", "ORG"],  # labels field rebuilds the legend on reconnect
     }
     assert frames[1]["chunk_id"] == "c0"
-    assert frames[1]["nodes"] == [{"id": "Person:Alice", "label": "Alice", "type": "PERSON"}]
+    assert frames[1]["nodes"] == [
+        {"id": "Person:Alice", "label": "Alice", "type": "PERSON"}
+    ]
     assert frames[1]["progress"] == 0.5
     assert frames[2] == {"type": "vocabulary", "labels": ["PERSON"], "chunk_id": "c0"}
     assert frames[3]["chunk_id"] == "c1"
@@ -145,7 +178,8 @@ def test_late_client_after_completion_gets_snapshot_then_done(monkeypatch):
         assert dataset_id == "ds-done"
         return GraphDelta(
             nodes=[{"id": "Person:Alice", "label": "Alice", "type": "PERSON"}],
-            edges=[], new_labels=["PERSON"],
+            edges=[],
+            new_labels=["PERSON"],
         )
 
     monkeypatch.setattr(graph_snapshot, "read_snapshot", fake_snapshot)
@@ -173,7 +207,11 @@ async def test_drain_queued_delivers_a_delta_ready_on_the_terminal_tick():
         """Yields one delta, then behaves like an exhausted subscription."""
 
         def __init__(self) -> None:
-            self._items = [GraphDelta(nodes=[{"id": "P", "label": "P", "type": "T"}], chunk_id="c-term")]
+            self._items = [
+                GraphDelta(
+                    nodes=[{"id": "P", "label": "P", "type": "T"}], chunk_id="c-term"
+                )
+            ]
 
         async def __anext__(self) -> GraphDelta:
             if self._items:
@@ -189,7 +227,9 @@ async def test_drain_queued_delivers_a_delta_ready_on_the_terminal_tick():
 
     assert [f["type"] for f in ws.frames] == ["delta"]
     assert ws.frames[0]["chunk_id"] == "c-term"
-    await asyncio.gather(pending, return_exceptions=True)  # exhausted successor, retrieve it
+    await asyncio.gather(
+        pending, return_exceptions=True
+    )  # exhausted successor, retrieve it
 
 
 def test_delta_published_during_the_snapshot_window_is_delivered_once(monkeypatch):
@@ -205,18 +245,34 @@ def test_delta_published_during_the_snapshot_window_is_delivered_once(monkeypatc
         # Stands in for the real read's thread hop: yield once so the route's primed
         # `__anext__` registers the queue before this publish lands on it.
         await asyncio.sleep(0)
-        graph_stream.publish(job_id, GraphDelta(
-            nodes=[
-                {"id": "Person:Seed", "label": "Seed", "type": "PERSON"},  # snapshot already carries it
-                {"id": "Org:New", "label": "New", "type": "ORG"},          # written after the read began
-            ],
-            edges=[{"source": "Person:Seed", "target": "Org:New", "label": "WORKS_AT"}],
-            new_labels=["ORG"], chunk_id="c-gap", progress=0.4,
-        ))
+        graph_stream.publish(
+            job_id,
+            GraphDelta(
+                nodes=[
+                    {
+                        "id": "Person:Seed",
+                        "label": "Seed",
+                        "type": "PERSON",
+                    },  # snapshot already carries it
+                    {
+                        "id": "Org:New",
+                        "label": "New",
+                        "type": "ORG",
+                    },  # written after the read began
+                ],
+                edges=[
+                    {"source": "Person:Seed", "target": "Org:New", "label": "WORKS_AT"}
+                ],
+                new_labels=["ORG"],
+                chunk_id="c-gap",
+                progress=0.4,
+            ),
+        )
         api_server.RUNS[job_id]["status"] = "completed"  # let the stream terminate
         return GraphDelta(
             nodes=[{"id": "Person:Seed", "label": "Seed", "type": "PERSON"}],
-            edges=[], new_labels=["PERSON"],
+            edges=[],
+            new_labels=["PERSON"],
         )
 
     monkeypatch.setattr(graph_snapshot, "read_snapshot", fake_snapshot)
@@ -225,11 +281,15 @@ def test_delta_published_during_the_snapshot_window_is_delivered_once(monkeypatc
 
     assert [f["type"] for f in frames] == ["snapshot", "delta", "vocabulary", "done"]
     # The snapshot is still the FIRST frame, and unchanged.
-    assert frames[0]["nodes"] == [{"id": "Person:Seed", "label": "Seed", "type": "PERSON"}]
+    assert frames[0]["nodes"] == [
+        {"id": "Person:Seed", "label": "Seed", "type": "PERSON"}
+    ]
     # The gap delta arrives after it; the node the snapshot already had is dropped,
     # the node written after the read began is kept.
     assert frames[1]["nodes"] == [{"id": "Org:New", "label": "New", "type": "ORG"}]
-    assert frames[1]["edges"] == [{"source": "Person:Seed", "target": "Org:New", "label": "WORKS_AT"}]
+    assert frames[1]["edges"] == [
+        {"source": "Person:Seed", "target": "Org:New", "label": "WORKS_AT"}
+    ]
     assert frames[1]["progress"] == 0.4
     assert frames[2] == {"type": "vocabulary", "labels": ["ORG"], "chunk_id": "c-gap"}
     # Exactly once: Person:Seed is delivered by the snapshot alone, never twice.

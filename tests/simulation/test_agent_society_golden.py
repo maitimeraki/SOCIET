@@ -12,6 +12,7 @@ by a stub driver) with only the external I/O stubbed. So the whole path is
 exercised: roster selection → label bridging → the build's identity precedence →
 per-persona distillation reaching its own `bio`.
 """
+
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -26,7 +27,11 @@ def _entity(name: str, label: str, score: float, chunk_id: str, tag: str) -> Mag
     node.id = name
     node.name = name
     node.label = label
-    node.properties = {"name": name, "triplet_source_id": chunk_id, "domain_tags": [tag]}
+    node.properties = {
+        "name": name,
+        "triplet_source_id": chunk_id,
+        "domain_tags": [tag],
+    }
     node.relevance_score = score
     node.domain_tags = [tag]
     node.summary = f"{name} summary"
@@ -100,7 +105,10 @@ async def test_distinct_archetypes_and_grounded_bio():
     synth = ProfileSynthesizer(repo, _RosterContext([_COMPANY, _REGULATOR]))
 
     profiles = await synth.synthesize(
-        query="Should we expand into Europe?", dataset_id="ds", max_agents=2, distill=True,
+        query="Should we expand into Europe?",
+        dataset_id="ds",
+        max_agents=2,
+        distill=True,
     )
 
     assert [p.identity.name for p in profiles] == ["Acme Bank", "Bank Authority"]

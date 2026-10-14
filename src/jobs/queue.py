@@ -13,6 +13,7 @@ behind one interface (R16), settings-driven by ``QUEUE_MODE``:
 The rows/lifecycle code is identical in both modes; only the dispatch call
 differs.
 """
+
 import asyncio
 import logging
 import uuid
@@ -86,7 +87,10 @@ def timeout_for(kind: str) -> int:
 def cancel_ttl_seconds() -> int:
     """Longer than any job's timeout, so a cancel flag outlives the job."""
     settings = get_settings()
-    return max(settings.job_timeout_debate_seconds, settings.job_timeout_graph_seconds) + 60
+    return (
+        max(settings.job_timeout_debate_seconds, settings.job_timeout_graph_seconds)
+        + 60
+    )
 
 
 def _cancel_key(job_id: str) -> str:
@@ -128,7 +132,10 @@ def _note_inline_result(task: asyncio.Task) -> None:
         # Inline mode never retries (R16 dev fallback), so say so — a failure
         # here is final, unlike the same failure on the RQ path.
         logger.warning(
-            "inline job %s failed and will not be retried: %s", job_id, exc, exc_info=exc
+            "inline job %s failed and will not be retried: %s",
+            job_id,
+            exc,
+            exc_info=exc,
         )
 
 
@@ -205,7 +212,10 @@ async def enqueue(kind: str, payload: dict[str, Any]) -> str:
     tasks = _tasks()
     if not payload.get("user_id") or kind not in tasks.TASKS:
         raise JobValidationError(f"{kind!r} is not a job kind this build can run.")
-    if await run_doc.count_active_jobs(payload["user_id"]) >= get_settings().max_jobs_per_user:
+    if (
+        await run_doc.count_active_jobs(payload["user_id"])
+        >= get_settings().max_jobs_per_user
+    ):
         raise JobLimitExceeded(get_settings().max_jobs_per_user)
     job_id = str(uuid.uuid4())
     await _write_queued_rows(kind, job_id, payload)
@@ -216,7 +226,9 @@ async def enqueue(kind: str, payload: dict[str, Any]) -> str:
         # RQ error) would otherwise orphan it `queued` forever — unswept (only
         # `running` rows are reconciled) and counted by the cap, permanently
         # 429-ing the owner for a job that never ran. Mark it terminal first.
-        logger.error("could not dispatch %s job %s: %s", kind, job_id, exc, exc_info=exc)
+        logger.error(
+            "could not dispatch %s job %s: %s", kind, job_id, exc, exc_info=exc
+        )
         await run_doc.set_job_status(job_id, "failed", error=str(exc))
         raise
     logger.info("enqueued %s job %s", kind, job_id)

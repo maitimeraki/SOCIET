@@ -1,4 +1,5 @@
 """Ingest API: upload documents and fetch URLs into GlobalInputDocument payloads."""
+
 import asyncio
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
@@ -26,7 +27,10 @@ async def ingest_files(
 ):
     """Extract one batch of uploads. Per-file failures ride beside the documents."""
     if len(files) > MAX_FILES:
-        raise HTTPException(status_code=413, detail=f"Too many files ({len(files)}) — {MAX_FILES} max per batch")
+        raise HTTPException(
+            status_code=413,
+            detail=f"Too many files ({len(files)}) — {MAX_FILES} max per batch",
+        )
 
     documents: list[dict] = []
     failures: list[dict] = []
@@ -34,12 +38,16 @@ async def ingest_files(
         name = upload.filename or "untitled"
         data = await upload.read()
         if len(data) > MAX_BYTES:
-            failures.append({"filename": name, "status_code": 413, "detail": "File is over 20 MB"})
+            failures.append(
+                {"filename": name, "status_code": 413, "detail": "File is over 20 MB"}
+            )
             continue
         try:
             documents.append(await asyncio.to_thread(extract_document, name, data))
         except ExtractionError as exc:
-            failures.append({"filename": name, "status_code": exc.status_code, "detail": exc.detail})
+            failures.append(
+                {"filename": name, "status_code": exc.status_code, "detail": exc.detail}
+            )
     return {"documents": documents, "failures": failures}
 
 

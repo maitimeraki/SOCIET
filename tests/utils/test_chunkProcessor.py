@@ -1,21 +1,20 @@
 """Tests for chunkProcessor module."""
-import pytest
+
 from io import BytesIO
-from unittest.mock import MagicMock
+
+import pytest
 from fastapi import UploadFile
 
+from src.graph.models_graph import ProcessedChunk
 from src.utils.chunkProcessor import (
     ChunkProcessor,
-    process_documents,
-    split_text_sentences,
-    _read_upload_file,
-    _read_csv,
-    _read_json,
     _compute_hash,
     _create_processed_chunk,
+    _read_csv,
+    _read_json,
+    process_documents,
+    split_text_sentences,
 )
-from src.graph.models_graph import ProcessedChunk
-
 
 # --- Sentence-aware chunking fixtures -------------------------------------
 # Ten uniform sentences; chunk_size/overlap are SentenceSplitter token budgets
@@ -39,7 +38,7 @@ def sentences_of(chunk: str) -> list:
         if found == -1:
             parts.append(chunk[start:].strip())
             break
-        parts.append(chunk[start:found + 1].strip())
+        parts.append(chunk[start : found + 1].strip())
         start = found + 2
     return [part for part in parts if part]
 
@@ -53,7 +52,7 @@ def fixed_window_chunks(text: str, chunk_size: int, overlap: int) -> list:
     step = max(1, chunk_size - overlap)
     chunks = []
     for start in range(0, len(cleaned), step):
-        chunk = cleaned[start:start + chunk_size].strip()
+        chunk = cleaned[start : start + chunk_size].strip()
         if chunk:
             chunks.append(chunk)
     return chunks
@@ -204,7 +203,9 @@ class TestProcessDocuments:
         chunks = process_documents([file])
 
         indices = [c.chunk_index for c in chunks]
-        assert indices == list(range(len(indices))), "Chunk indices should be sequential"
+        assert indices == list(
+            range(len(indices))
+        ), "Chunk indices should be sequential"
 
     def test_overlapping_chunks(self):
         """Verify chunks overlap when chunk_overlap is set."""
@@ -219,8 +220,7 @@ class TestProcessDocuments:
             for i in range(len(chunks) - 1):
                 # Look for the last few chars of chunk i in chunk i+1
                 last_chars = chunks[i].content[-10:].strip()
-                found = any(last_chars in c.content for c in chunks[i + 1 : i + 2])
-                # This is a soft check - overlap should exist but may not be exact
+                assert any(last_chars in c.content for c in chunks[i + 1 : i + 2])
 
     def test_multiple_files(self):
         files = [
@@ -273,7 +273,9 @@ class TestProcessDocuments:
         chunks = process_documents([file])
 
         parent_ids = set(c.parent_doc_id for c in chunks)
-        assert len(parent_ids) == 1, "All chunks from same file should have same parent_doc_id"
+        assert (
+            len(parent_ids) == 1
+        ), "All chunks from same file should have same parent_doc_id"
 
     def test_parent_doc_id_differs_for_different_files(self):
         files = [
@@ -284,7 +286,9 @@ class TestProcessDocuments:
         chunks = process_documents(files)
 
         parent_ids = set(c.parent_doc_id for c in chunks)
-        assert len(parent_ids) == 2, "Different files should have different parent_doc_ids"
+        assert (
+            len(parent_ids) == 2
+        ), "Different files should have different parent_doc_ids"
 
     def test_splits_through_the_sentence_splitter(self):
         file = MockUploadFile("sentences.txt", QUALITY_TEXT.encode("utf-8"))
@@ -295,7 +299,9 @@ class TestProcessDocuments:
 
         assert len(chunks) > 2
         for chunk in chunks[:-1]:
-            assert chunk.content.endswith("."), f"cut mid-sentence: ...{chunk.content[-40:]!r}"
+            assert chunk.content.endswith(
+                "."
+            ), f"cut mid-sentence: ...{chunk.content[-40:]!r}"
 
 
 class TestChunkProcessor:
@@ -349,7 +355,9 @@ class TestSplitTextSentences:
 
     def test_blank_text_returns_no_chunks(self):
         assert split_text_sentences("", QUALITY_CHUNK_SIZE, QUALITY_OVERLAP) == []
-        assert split_text_sentences("   \n\t ", QUALITY_CHUNK_SIZE, QUALITY_OVERLAP) == []
+        assert (
+            split_text_sentences("   \n\t ", QUALITY_CHUNK_SIZE, QUALITY_OVERLAP) == []
+        )
 
     def test_every_chunk_ends_at_a_sentence_boundary(self):
         chunks = split_text_sentences(QUALITY_TEXT, QUALITY_CHUNK_SIZE, QUALITY_OVERLAP)

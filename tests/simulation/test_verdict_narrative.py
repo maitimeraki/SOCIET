@@ -10,6 +10,7 @@ Covers the answer-writer contract added on top of the golden path:
 
 The LLM is mocked at the client seam (repository rule: never hit a real LLM).
 """
+
 import os
 
 import pytest
@@ -27,7 +28,6 @@ from src.simulation.verdict import (
     VERDICT_MAX_ATTEMPTS,
     VerdictSynthesizer,
 )
-
 
 # --- fixtures ---------------------------------------------------------------
 
@@ -62,10 +62,13 @@ def make_agent(name: str) -> Agent:
 
 def two_agent_debate() -> tuple[list[RoundResult], list[Agent]]:
     rounds = [
-        make_round(1, [
-            make_turn("Strategist", "POSITIVE", "Europe is attractive."),
-            make_turn("Controller", "NEGATIVE", "Europe is costly."),
-        ]),
+        make_round(
+            1,
+            [
+                make_turn("Strategist", "POSITIVE", "Europe is attractive."),
+                make_turn("Controller", "NEGATIVE", "Europe is costly."),
+            ],
+        ),
     ]
     return rounds, [make_agent("Strategist"), make_agent("Controller")]
 
@@ -92,7 +95,9 @@ class _ScriptedLLM:
         self.calls: list[dict] = []
 
     async def generate(self, system_prompt, user_prompt, **kwargs):
-        self.calls.append({"system": system_prompt, "user": user_prompt, "kwargs": kwargs})
+        self.calls.append(
+            {"system": system_prompt, "user": user_prompt, "kwargs": kwargs}
+        )
         idx = min(len(self.calls) - 1, len(self.replies) - 1)
         reply = self.replies[idx]
         if isinstance(reply, Exception):
@@ -110,8 +115,11 @@ class TestBoundedRetryAndFlag:
         llm = _ScriptedLLM("not json at all", "still no object here", "{unclosed")
 
         verdict = await VerdictSynthesizer().asynthesize(
-            rounds=rounds, profiles=profiles, llm_client=llm,
-            query="Should we expand to Europe?", run_id="run-42",
+            rounds=rounds,
+            profiles=profiles,
+            llm_client=llm,
+            query="Should we expand to Europe?",
+            run_id="run-42",
         )
 
         # the fallback happened and is flagged, not silent.
@@ -127,7 +135,9 @@ class TestBoundedRetryAndFlag:
         llm = _ScriptedLLM(*[RuntimeError("provider down")] * VERDICT_MAX_ATTEMPTS)
 
         verdict = await VerdictSynthesizer().asynthesize(
-            rounds=rounds, profiles=profiles, llm_client=llm,
+            rounds=rounds,
+            profiles=profiles,
+            llm_client=llm,
         )
 
         assert verdict.narrative_status == "fallback"
@@ -140,7 +150,9 @@ class TestBoundedRetryAndFlag:
         llm = _ScriptedLLM("no object in this reply", valid_json("Expand now."))
 
         verdict = await VerdictSynthesizer().asynthesize(
-            rounds=rounds, profiles=profiles, llm_client=llm,
+            rounds=rounds,
+            profiles=profiles,
+            llm_client=llm,
             query="Should we expand to Europe?",
         )
 
@@ -156,7 +168,9 @@ class TestBoundedRetryAndFlag:
         llm = _ScriptedLLM("no object", valid_json())
 
         await VerdictSynthesizer().asynthesize(
-            rounds=rounds, profiles=profiles, llm_client=llm,
+            rounds=rounds,
+            profiles=profiles,
+            llm_client=llm,
         )
 
         # first attempt: unmodified prompt; retry: reinforced.
@@ -174,7 +188,9 @@ class TestBoundedRetryAndFlag:
         llm = _ScriptedLLM(raw)
 
         verdict = await VerdictSynthesizer().asynthesize(
-            rounds=rounds, profiles=profiles, llm_client=llm,
+            rounds=rounds,
+            profiles=profiles,
+            llm_client=llm,
         )
 
         assert verdict.narrative_status == "ok"
@@ -189,7 +205,9 @@ class TestBoundedRetryAndFlag:
         llm = _ScriptedLLM("Here you go: " + valid_json("Answer A.") + " — done.")
 
         verdict = await VerdictSynthesizer().asynthesize(
-            rounds=rounds, profiles=profiles, llm_client=llm,
+            rounds=rounds,
+            profiles=profiles,
+            llm_client=llm,
         )
 
         assert verdict.narrative_status == "ok"
@@ -207,7 +225,9 @@ class TestVerdictConfig:
         try:
             cfg = get_llm_config()
             assert cfg.verdict_max_tokens == 3000
-            assert cfg.verdict_model == os.getenv("ANALYSIS_LLM_MODEL", "claude-sonnet-5")
+            assert cfg.verdict_model == os.getenv(
+                "ANALYSIS_LLM_MODEL", "claude-sonnet-5"
+            )
         finally:
             get_llm_config.cache_clear()
 
@@ -223,7 +243,9 @@ class TestVerdictConfig:
             get_llm_config.cache_clear()
 
     @pytest.mark.asyncio
-    async def test_answer_writer_uses_the_configured_model_and_tokens(self, monkeypatch):
+    async def test_answer_writer_uses_the_configured_model_and_tokens(
+        self, monkeypatch
+    ):
         monkeypatch.setenv("VERDICT_MAX_TOKENS", "2345")
         monkeypatch.setenv("VERDICT_LLM_MODEL", "sentinel-model")
         get_llm_config.cache_clear()
@@ -232,7 +254,9 @@ class TestVerdictConfig:
             llm = _ScriptedLLM(valid_json())
 
             await VerdictSynthesizer().asynthesize(
-                rounds=rounds, profiles=profiles, llm_client=llm,
+                rounds=rounds,
+                profiles=profiles,
+                llm_client=llm,
             )
 
             assert llm.calls[0]["kwargs"]["max_tokens"] == 2345

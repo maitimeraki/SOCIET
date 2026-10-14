@@ -5,6 +5,7 @@ the cap and validation failures leave as the one error shape (plan §6), and
 cancellation lives here for the same reason the other areas have their own
 router (R15: mounted at ``/api/v1/jobs`` and the legacy ``/simulate/jobs``).
 """
+
 import logging
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -46,7 +47,8 @@ async def cancel_job(job_id: str, user: User = Depends(current_user)):
     head = await run_doc.read_run_head(job_id)
     if head is None:
         raise HTTPException(
-            status_code=404, detail={"code": "job_not_found", "message": "No job with that id."}
+            status_code=404,
+            detail={"code": "job_not_found", "message": "No job with that id."},
         )
     await require_owner(head.get("user_id"), user)
 

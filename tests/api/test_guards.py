@@ -39,7 +39,9 @@ if sys.platform == "win32":
     # as tests/api/test_auth_api.py).
     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
-requires_db = pytest.mark.skipif(not os.getenv("DATABASE_URL"), reason="DATABASE_URL is not set")
+requires_db = pytest.mark.skipif(
+    not os.getenv("DATABASE_URL"), reason="DATABASE_URL is not set"
+)
 
 
 def _v1(path: str) -> str:
@@ -130,18 +132,22 @@ def _owned_job(account, **extra) -> dict:
     return job
 
 
-async def _write_run_rows(account, job_id: str, *, status: str = "queued", result=None) -> None:
+async def _write_run_rows(
+    account, job_id: str, *, status: str = "queued", result=None
+) -> None:
     """The run's rows — what every read below now answers from."""
-    await run_doc.write_run_doc({
-        "run_id": job_id,
-        "user_id": account.id,
-        "status": status,
-        "query": "Should we tax carbon?",
-        "dataset_id": "ds-1",
-        "config": {},
-        "result": result,
-        "error": None,
-    })
+    await run_doc.write_run_doc(
+        {
+            "run_id": job_id,
+            "user_id": account.id,
+            "status": status,
+            "query": "Should we tax carbon?",
+            "dataset_id": "ds-1",
+            "config": {},
+            "result": result,
+            "error": None,
+        }
+    )
 
 
 # --- the R15 mount table (no DB needed) --------------------------------------
@@ -205,7 +211,11 @@ _GUARDED = [
     ("POST", "/simulate/normalize_graph", {"params": {"dataset_id": "ds"}}),
     ("POST", "/api/personas/hatch", {"json": {"query": "Who should decide?"}}),
     ("POST", "/api/ingest/url", {"json": {"url": "https://example.com/a.txt"}}),
-    ("POST", "/api/ingest/files", {"files": {"files": ("a.txt", b"hello", "text/plain")}}),
+    (
+        "POST",
+        "/api/ingest/files",
+        {"files": {"files": ("a.txt", b"hello", "text/plain")}},
+    ),
 ]
 
 
@@ -216,7 +226,9 @@ _GUARDED = [
     [pytest.param(m, p, kw, id=f"{m} {p}") for m, p, kw in _GUARDED]
     + [pytest.param(m, _v1(p), kw, id=f"{m} {_v1(p)}") for m, p, kw in _GUARDED],
 )
-async def test_unauthenticated_requests_get_the_uniform_401(client, method, path, kwargs):
+async def test_unauthenticated_requests_get_the_uniform_401(
+    client, method, path, kwargs
+):
     response = await client.request(method, path, **kwargs)
     assert response.status_code == 401, response.text
     assert _error(response)["code"] == "unauthorized"
@@ -258,7 +270,9 @@ async def test_a_legacy_doc_is_not_a_truth_source(client, accounts, tmp_path):
         encoding="utf-8",
     )
     try:
-        response = await client.get(f"/simulate/debates/{job_id}", cookies=_cookie(owner))
+        response = await client.get(
+            f"/simulate/debates/{job_id}", cookies=_cookie(owner)
+        )
     finally:
         legacy_file.unlink()
 
@@ -270,10 +284,18 @@ async def test_a_legacy_doc_is_not_a_truth_source(client, accounts, tmp_path):
 async def test_simulate_job_status_is_owner_only(client, accounts):
     owner, other = accounts
     job_id = str(uuid.uuid4())
-    await run_doc.write_job_doc({
-        "job_id": job_id, "user_id": owner.id, "mode": "ontology", "status": "queued",
-        "progress": 0.0, "stage": "queued", "error": None, "result": None,
-    })
+    await run_doc.write_job_doc(
+        {
+            "job_id": job_id,
+            "user_id": owner.id,
+            "mode": "ontology",
+            "status": "queued",
+            "progress": 0.0,
+            "stage": "queued",
+            "error": None,
+            "result": None,
+        }
+    )
 
     mine = await client.get(f"/simulate/jobs/{job_id}", cookies=_cookie(owner))
     theirs = await client.get(f"/simulate/jobs/{job_id}", cookies=_cookie(other))
@@ -405,7 +427,9 @@ class _WS:
             self.task.cancel()
 
 
-async def _open_ws(path: str, *, ticket: str | None = None, sid: str | None = None) -> _WS:
+async def _open_ws(
+    path: str, *, ticket: str | None = None, sid: str | None = None
+) -> _WS:
     headers = [(b"host", b"testserver")]
     if sid is not None:
         headers.append((b"cookie", f"sid={sid}".encode()))
@@ -479,7 +503,9 @@ async def test_debate_stream_refuses_a_non_owners_ticket(accounts, redis_reset):
 
 @requires_db
 @pytest.mark.asyncio
-async def test_debate_stream_accepts_a_ticket_once_and_rejects_the_reuse(accounts, redis_reset):
+async def test_debate_stream_accepts_a_ticket_once_and_rejects_the_reuse(
+    accounts, redis_reset
+):
     owner, _ = accounts
     job_id = await _stream_job(owner, str(uuid.uuid4()))
     ticket = await service.issue_ws_ticket(uuid.UUID(owner.id))
@@ -533,11 +559,18 @@ async def test_graph_stream_refuses_an_unauthenticated_handshake():
 async def test_graph_stream_refuses_a_non_owners_ticket(accounts, redis_reset):
     owner, other = accounts
     job_id = str(uuid.uuid4())
-    await run_doc.write_job_doc({
-        "job_id": job_id, "user_id": owner.id, "mode": "build_graph", "status": "running",
-        "progress": 0.5, "stage": "build_graph_running", "error": None,
-        "result": {"dataset_id": "ds-1"},
-    })
+    await run_doc.write_job_doc(
+        {
+            "job_id": job_id,
+            "user_id": owner.id,
+            "mode": "build_graph",
+            "status": "running",
+            "progress": 0.5,
+            "stage": "build_graph_running",
+            "error": None,
+            "result": {"dataset_id": "ds-1"},
+        }
+    )
     ticket = await service.issue_ws_ticket(uuid.UUID(other.id))
 
     ws = await _open_ws(f"/simulate/{job_id}/graph_stream", ticket=ticket)
@@ -556,10 +589,18 @@ async def test_graph_stream_accepts_the_session_cookie(accounts, path):
     owner, _ = accounts
     job_id = str(uuid.uuid4())
     # Owned, terminal, dataset-less: after accept the route says done and leaves.
-    await run_doc.write_job_doc({
-        "job_id": job_id, "user_id": owner.id, "mode": "build_graph", "status": "failed",
-        "progress": 0.0, "stage": "failed", "error": "boom", "result": {},
-    })
+    await run_doc.write_job_doc(
+        {
+            "job_id": job_id,
+            "user_id": owner.id,
+            "mode": "build_graph",
+            "status": "failed",
+            "progress": 0.0,
+            "stage": "failed",
+            "error": "boom",
+            "result": {},
+        }
+    )
 
     ws = await _open_ws(path.format(job=job_id), sid=owner.sid)
 
@@ -581,10 +622,14 @@ async def test_debate_enqueue_is_rate_limited(client, accounts, monkeypatch):
     get_settings.cache_clear()
     try:
         first = await client.post(
-            "/simulate/debate", json={"query": "Should we tax carbon?"}, cookies=_cookie(owner)
+            "/simulate/debate",
+            json={"query": "Should we tax carbon?"},
+            cookies=_cookie(owner),
         )
         second = await client.post(
-            "/simulate/debate", json={"query": "Should we tax carbon?"}, cookies=_cookie(owner)
+            "/simulate/debate",
+            json={"query": "Should we tax carbon?"},
+            cookies=_cookie(owner),
         )
     finally:
         get_settings.cache_clear()
@@ -602,7 +647,9 @@ async def test_debate_enqueue_is_refused_while_degraded(client, accounts, monkey
     monkeypatch.setattr(app.state, "degraded", True, raising=False)
 
     response = await client.post(
-        "/simulate/debate", json={"query": "Should we tax carbon?"}, cookies=_cookie(owner)
+        "/simulate/debate",
+        json={"query": "Should we tax carbon?"},
+        cookies=_cookie(owner),
     )
 
     assert response.status_code == 503
