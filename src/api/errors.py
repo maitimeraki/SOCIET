@@ -12,6 +12,7 @@ mechanism the route layer uses for names like ``run_not_found``).
 
 import logging
 import uuid
+from collections.abc import Mapping
 
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
@@ -40,8 +41,8 @@ FALLBACK_CODE = "http_error"
 
 def correlation_id_of(request: Request | None) -> str:
     """The id the logging middleware stamped on the request, or a fresh one."""
-    return (
-        getattr(getattr(request, "state", None), "correlation_id", None) or str(uuid.uuid4())
+    return getattr(getattr(request, "state", None), "correlation_id", None) or str(
+        uuid.uuid4()
     )
 
 
@@ -50,7 +51,7 @@ def error_response(
     code: str,
     message: str,
     request: Request | None = None,
-    headers: dict[str, str] | None = None,
+    headers: Mapping[str, str] | None = None,
 ) -> JSONResponse:
     """The one response shape for failures. Middleware calls this directly:
     an exception raised in middleware never reaches the handlers below."""
@@ -95,7 +96,9 @@ async def validation_exception_handler(
         details,
         extra={"correlation_id": correlation_id_of(request)},
     )
-    return error_response(422, "validation_error", "Request validation failed.", request)
+    return error_response(
+        422, "validation_error", "Request validation failed.", request
+    )
 
 
 async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONResponse:
@@ -118,6 +121,10 @@ async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONR
 def install_error_handlers(app: FastAPI) -> None:
     # Registered on Starlette's HTTPException — the base of FastAPI's, and the
     # class the router raises for an unmatched path.
-    app.add_exception_handler(HTTPException, http_exception_handler)
-    app.add_exception_handler(RequestValidationError, validation_exception_handler)
+    # Starlette types the handler against the base `Exception`, so the narrower
+    # handler signatures above are rejected by mypy's contravariance check.
+    app.add_exception_handler(HTTPException, http_exception_handler)  # type: ignore[arg-type]
+    app.add_exception_handler(
+        RequestValidationError, validation_exception_handler  # type: ignore[arg-type]
+    )
     app.add_exception_handler(Exception, unhandled_exception_handler)

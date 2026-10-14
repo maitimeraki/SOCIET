@@ -1,0 +1,246 @@
+name: CI
+
+# Ordered, fail-fast pipeline: cheap checks gate the expensive ones, and every
+# job needs the one before it so the first failure stops the run.
+#   lint -> typecheck -> test -> frontend -> build -> deploy
+# `security` is deliberately outside that chain (see its comment).
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PYTHON_VERSION: "3.11"
+  NODE_VERSION: "24"
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # 1. lint — ruff (correctness + import order) and black (formatting).
+  #    The ruleset is intentionally narrow for this first pass; see the
+  #    [tool.ruff.lint] comment in pyproject.toml for what is deferred and why.
+  # ---------------------------------------------------------------------------
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - name: Install linters
+        run: python -m pip install --upgrade pip ruff black
+      - name: ruff check
+        run: ruff check .
+      - name: black --check
+        run: black --check .
+
+  # ---------------------------------------------------------------------------
+  # 2. typecheck — mypy, SCOPED to the modules added by the production work.
+  #
+  #    Typing the whole pre-existing src/ tree is out of scope for this task
+  #    (controller ruling R25): the legacy modules predate typing and would
+  #    need semantic edits. `follow_imports = "silent"` in pyproject.toml keeps
+  #    the imported-but-unlisted legacy modules parsed yet un-reported, so
+  #    widening the path list below is all that is needed later.
+  # ---------------------------------------------------------------------------
+  typecheck:
+    needs: lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - name: Install application + type-checker
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install mypy
+      - name: mypy (new modules only — widen this list once legacy is triaged)
+        run: |
+          mypy \
+            src/config \
+            src/db \
+            src/auth \
+            src/jobs \
+            src/api/errors.py \
+            src/api/limits.py
+
+  # ---------------------------------------------------------------------------
+  # 3. test — pytest against real Postgres / Redis / Neo4j service containers,
+  #    with the same migration step the deploy job runs.
+  # ---------------------------------------------------------------------------
+  test:
+    needs: typecheck
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: societas
+          POSTGRES_PASSWORD: societas
+          POSTGRES_DB: societas
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U societas"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+      redis:
+        image: redis:7
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+      neo4j:
+        image: neo4j:5
+        env:
+          # Auth disabled: the container only lives for this job.
+          NEO4J_AUTH: none
+        ports:
+          - 7687:7687
+        options: >-
+          --health-cmd "wget --no-verbose --tries=1 --spider localhost:7474 || exit 1"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql+psycopg://societas:societas@localhost:5432/societas
+      REDIS_URL: redis://localhost:6379/0
+      NEO4J_URI: bolt://localhost:7687
+      QUEUE_MODE: inline
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      - name: Apply migrations
+        run: python -m alembic upgrade head
+      - name: pytest
+        run: python -m pytest -q
+
+  # ---------------------------------------------------------------------------
+  # 4. frontend — type-check, unit tests, production build.
+  # ---------------------------------------------------------------------------
+  frontend:
+    needs: test
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install dependencies
+        run: npm ci
+      - name: Type-check
+        run: npx tsc --noEmit
+      - name: Unit tests
+        run: npm run test
+      - name: Build
+        run: npm run build
+
+  # ---------------------------------------------------------------------------
+  # 5. security — dependency + static analysis. Non-blocking for now:
+  #    flip to blocking once legacy findings triaged.
+  # ---------------------------------------------------------------------------
+  security:
+    needs: lint
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - name: Install scanners
+        run: python -m pip install --upgrade pip pip-audit bandit
+      - name: pip-audit (known-vulnerable dependencies)
+        run: pip-audit -r requirements.txt
+      - name: bandit (static analysis, medium severity and up)
+        run: bandit -r src -ll
+
+  # ---------------------------------------------------------------------------
+  # 6. build — both image targets. Push only on tags, and only when a registry
+  #    is actually configured (no registry is assumed here).
+  # ---------------------------------------------------------------------------
+  build:
+    needs: frontend
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - name: Build api image
+        run: docker build --target api -t societas-api:${{ github.sha }} .
+      - name: Build worker image
+        run: docker build --target worker -t societas-worker:${{ github.sha }} .
+      # --- push (tags only, and only when configured) ------------------------
+      # Set the repository variable DOCKER_REGISTRY (e.g. ghcr.io/<owner>) plus
+      # secrets REGISTRY_USERNAME / REGISTRY_PASSWORD to enable this.
+      - name: Log in to the container registry
+        if: >-
+          github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
+          && vars.DOCKER_REGISTRY != '' && secrets.REGISTRY_USERNAME != ''
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ vars.DOCKER_REGISTRY }}
+          username: ${{ secrets.REGISTRY_USERNAME }}
+          password: ${{ secrets.REGISTRY_PASSWORD }}
+      - name: Tag and push
+        if: >-
+          github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
+          && vars.DOCKER_REGISTRY != '' && secrets.REGISTRY_USERNAME != ''
+        run: |
+          for target in api worker; do
+            image="${{ vars.DOCKER_REGISTRY }}/${{ github.repository }}/societas-${target}"
+            docker tag "societas-${target}:${{ github.sha }}" "${image}:${GITHUB_REF_NAME}"
+            docker push "${image}:${GITHUB_REF_NAME}"
+          done
+
+  # ---------------------------------------------------------------------------
+  # 7. deploy — stub, inert until a deploy target is configured (R6/R10 leave
+  #    the hosting choice open). Gated on the repository variable
+  #    DEPLOY_ENABLED == 'true', so an unconfigured repo skips the job entirely
+  #    and the pipeline still goes green.
+  # ---------------------------------------------------------------------------
+  deploy:
+    needs: build
+    if: >-
+      github.event_name == 'push' && github.ref == 'refs/heads/main'
+      && vars.DEPLOY_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    env:
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      # -----------------------------------------------------------------------
+      # CONFIGURE THE DEPLOY TARGET HERE.
+      # Nothing below ships the image anywhere yet — add the host-specific step
+      # (ssh + docker compose pull/up, a PaaS CLI, a Kubernetes rollout, …) and
+      # the credentials it needs. Migrations run first, against secrets.DATABASE_URL.
+      # -----------------------------------------------------------------------
+      - name: Apply migrations to the deploy database
+        run: python -m alembic upgrade head

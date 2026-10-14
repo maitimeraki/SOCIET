@@ -27,7 +27,9 @@ class JSONBodySizeLimitMiddleware(BaseHTTPMiddleware):
     body is parsed. Multipart keeps its own per-file gate (ingest_api)."""
 
     async def dispatch(self, request: Request, call_next):
-        content_type = request.headers.get("content-type", "").split(";")[0].strip().lower()
+        content_type = (
+            request.headers.get("content-type", "").split(";")[0].strip().lower()
+        )
         declared = request.headers.get("content-length", "")
         if content_type == "application/json" and declared.isdigit():
             max_bytes = get_settings().max_json_bytes
@@ -75,4 +77,6 @@ async def rate_limit_exceeded_handler(
 
 def install_rate_limiter(app: FastAPI) -> None:
     app.state.limiter = limiter
-    app.add_exception_handler(RateLimitExceeded, rate_limit_exceeded_handler)
+    # Starlette types the handler against the base `Exception`; this handler is
+    # deliberately narrowed to RateLimitExceeded.
+    app.add_exception_handler(RateLimitExceeded, rate_limit_exceeded_handler)  # type: ignore[arg-type]
