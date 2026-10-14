@@ -12,12 +12,15 @@ from rq import Worker
 from src.jobs import tasks  # noqa: F401 — the module RQ resolves targets from
 from src.jobs.queue import QUEUE_NAME, get_queue, get_redis
 from src.logging.setup_logging import setup_logging
+from src.observability import setup_worker_metrics
 
 logger = logging.getLogger(__name__)
 
 
 def main() -> None:
     setup_logging()
+    # Env-gated: serves this process's registry on METRICS_PORT when enabled.
+    setup_worker_metrics()
     # The retry policy rides on each enqueued job (`queue._dispatch`); the worker
     # only needs the queue it drains. One job at a time per worker, so the
     # per-user cap and the row lifecycle stay readable in the logs.

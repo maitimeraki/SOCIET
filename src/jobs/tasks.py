@@ -18,6 +18,7 @@ import asyncio
 import base64
 import json
 import logging
+import time
 import uuid
 from typing import Any
 
@@ -27,6 +28,7 @@ from src.jobs.queue import (
     timeout_for,
 )
 from src.logging.setup_logging import reset_correlation_id, set_correlation_id
+from src.observability import JOB_DURATION
 
 logger = logging.getLogger(__name__)
 
@@ -413,10 +415,15 @@ async def execute(kind: str, job_id: str, payload: dict[str, Any]) -> None:
     """Run one job end to end, leaving its rows terminal on every exit path."""
     token = set_correlation_id(payload.get("correlation_id"))
     logger.info("job %s (%s) starting", job_id, kind)
+    started = time.monotonic()
+    # Every exit path that does not name its status is a failure, so the metric
+    # stays correct even on the paths that raise.
+    status = "failed"
     try:
         if is_cancelled(job_id):
             logger.info("job %s (%s) cancelled before it started", job_id, kind)
             await _set_status(job_id, "cancelled")
+            status = "cancelled"
             return
 
         await _set_status(job_id, "running")
@@ -431,6 +438,7 @@ async def execute(kind: str, job_id: str, payload: dict[str, Any]) -> None:
         except JobCancelled as exc:
             logger.info("job %s (%s) cancelled: %s", job_id, kind, exc)
             await _set_status(job_id, "cancelled")
+            status = "cancelled"
             return
         except Exception as exc:
             logger.error("job %s (%s) failed: %s", job_id, kind, exc, exc_info=exc)
@@ -440,8 +448,12 @@ async def execute(kind: str, job_id: str, payload: dict[str, Any]) -> None:
         # body that failed before any write (or a bare test core) still lands
         # terminal here. `only_if_active` keeps a body's own `failed` standing.
         await _set_status(job_id, _SUCCESS_STATUS[kind], only_if_active=True)
+        status = _SUCCESS_STATUS[kind]
         logger.info("job %s (%s) finished", job_id, kind)
     finally:
+        JOB_DURATION.labels(kind=kind, status=status).observe(
+            time.monotonic() - started
+        )
         reset_correlation_id(token)
 
 

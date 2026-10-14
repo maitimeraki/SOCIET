@@ -73,6 +73,12 @@ class Settings(BaseSettings):
     # URL stays valid. Short by design — the URL is minted per read.
     export_url_ttl_seconds: int = 900
 
+    # --- Observability (plan §10). Off by default locally; compose sets
+    # METRICS_ENABLED=true. Tracing (OTEL_EXPORTER_OTLP_ENDPOINT) and error
+    # reporting (SENTRY_DSN) are read from the environment by src/observability.
+    metrics_enabled: bool = False
+    metrics_port: int = 9100
+
     @field_validator(
         "cors_allowed_origins", "allowed_hosts", "job_retry_intervals", mode="before"
     )

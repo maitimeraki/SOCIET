@@ -41,6 +41,7 @@ from src.graph.vocabulary import discover_vocabulary
 from src.llm.client import global_llm_client
 from src.llm.config_llm import get_llm_config
 from src.logging.setup_logging import setup_logging
+from src.observability import init_sentry, init_tracing, setup_metrics
 from src.utils.chunkProcessor import ChunkProcessor, split_text_sentences
 
 if TYPE_CHECKING:
@@ -220,6 +221,12 @@ app.add_middleware(LoggingMiddleware)  # outermost: stamps the correlation ID fi
 
 install_error_handlers(app)
 install_rate_limiter(app)
+
+# Observability (plan §10): each is env-gated and a no-op when unconfigured —
+# metrics off locally, tracing/Sentry off unless the operator sets their env.
+setup_metrics(app)
+init_tracing(app)
+init_sentry()
 
 
 # R15: each router is mounted twice — the legacy alias keeps today's exact

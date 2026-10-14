@@ -34,6 +34,11 @@ x-app-service: &app-service
     NEO4J_DATABASE: neo4j
     ENV: ${ENV:-prod}
     QUEUE_MODE: rq
+    # Observability (plan §10): the api serves /metrics and the worker serves its
+    # registry on METRICS_PORT (default 9100); both scrapeable over the compose
+    # network. Tracing/Sentry stay off until OTEL_EXPORTER_OTLP_ENDPOINT /
+    # SENTRY_DSN are supplied (secrets — set them in `.env`).
+    METRICS_ENABLED: ${METRICS_ENABLED:-true}
     # In-network MinIO endpoint (the app default 127.0.0.1:9000 resolves inside
     # the container). Credentials/bucket track the minio service's own vars.
     S3_ENDPOINT_URL: http://minio:9000
