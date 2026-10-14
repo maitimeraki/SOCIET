@@ -161,6 +161,7 @@ class Upload(Base):
     bytes: Mapped[int] = mapped_column(BigInteger, nullable=False)
     mime: Mapped[str] = mapped_column(Text, nullable=False)
     sha256: Mapped[str] = mapped_column(Text, nullable=False)
+    extracted_text: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime.datetime] = _timestamptz_default()
 
 

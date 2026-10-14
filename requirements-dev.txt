@@ -170,3 +170,6 @@ zstandard==0.25.0
 black==26.10.1
 mypy==2.4.0
 ruff==0.17.0
+
+# --- S3 mocking for the storage tests (Task 9b) ------------------------------
+moto[s3]>=5

@@ -48,6 +48,22 @@ class Settings(BaseSettings):
     job_retry_max: int = 2
     job_retry_intervals: Annotated[list[int], NoDecode] = [30, 120]
 
+    # --- Object storage (MinIO in dev, plan §7). Lazy by design: importing
+    # settings never touches S3 — only a real storage call fails when the
+    # bucket is unreachable. The access/secret defaults are the MinIO dev
+    # defaults matching compose's `minio` service — dev-only; production
+    # overrides them via the environment.
+    s3_endpoint_url: str = "http://127.0.0.1:9000"
+    s3_access_key: str = "minioadmin"
+    s3_secret_key: str = "minioadmin"
+    s3_bucket: str = "societas-uploads"
+    s3_region: str = "us-east-1"
+
+    # --- Per-user upload quota (plan §7): usage is SUM(bytes)/COUNT(*) over
+    # the user's `uploads` rows for the current calendar month.
+    upload_quota_bytes_month: int = 104_857_600  # 100 MB
+    upload_quota_files_month: int = 200
+
     @field_validator(
         "cors_allowed_origins", "allowed_hosts", "job_retry_intervals", mode="before"
     )

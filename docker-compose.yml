@@ -83,6 +83,38 @@ services:
       retries: 12
       start_period: 40s
 
+  minio:
+    image: minio/minio
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
+    volumes:
+      - minio_data:/data
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # One-shot: create the uploads bucket, then exit. Idempotent via
+  # --ignore-existing, so restarts are safe.
+  minio-init:
+    image: minio/mc
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: >
+      /bin/sh -c "
+      mc alias set local http://minio:9000
+      ${MINIO_ROOT_USER:-minioadmin} ${MINIO_ROOT_PASSWORD:-minioadmin};
+      mc mb --ignore-existing local/${S3_BUCKET:-societas-uploads};
+      "
+
   api:
     <<: *app-service
     build:
@@ -116,5 +148,6 @@ services:
 volumes:
   pg_data:
   neo4j_data:
+  minio_data:
   caddy_data:
   caddy_config:
