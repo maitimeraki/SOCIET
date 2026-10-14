@@ -209,6 +209,15 @@ async def enqueue(kind: str, payload: dict[str, Any]) -> str:
         raise JobLimitExceeded(get_settings().max_jobs_per_user)
     job_id = str(uuid.uuid4())
     await _write_queued_rows(kind, job_id, payload)
-    _dispatch(kind, job_id, payload)
+    try:
+        _dispatch(kind, job_id, payload)
+    except Exception as exc:
+        # The queued row is already written, so a dispatch failure (Redis down,
+        # RQ error) would otherwise orphan it `queued` forever — unswept (only
+        # `running` rows are reconciled) and counted by the cap, permanently
+        # 429-ing the owner for a job that never ran. Mark it terminal first.
+        logger.error("could not dispatch %s job %s: %s", kind, job_id, exc, exc_info=exc)
+        await run_doc.set_job_status(job_id, "failed", error=str(exc))
+        raise
     logger.info("enqueued %s job %s", kind, job_id)
     return job_id

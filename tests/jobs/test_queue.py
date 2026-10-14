@@ -102,3 +102,25 @@ async def test_the_cap_counts_every_kind_and_releases_on_a_terminal_state(owner,
     finally:
         get_settings.cache_clear()
         await jobs_queue.drain_inline()
+
+
+@requires_db
+@pytest.mark.asyncio
+async def test_a_dispatch_failure_marks_the_row_failed_not_queued(owner, monkeypatch):
+    """Redis down at dispatch must not orphan a `queued` row that burns a cap
+    slot forever (nothing sweeps queued rows, and the cap counts them)."""
+    seen: dict = {}
+
+    def boom(kind, job_id, payload):
+        seen["job_id"] = job_id
+        raise RuntimeError("redis down")
+
+    monkeypatch.setattr(jobs_queue, "_dispatch", boom)
+
+    with pytest.raises(RuntimeError, match="redis down"):
+        await jobs_queue.enqueue("normalize_graph", {"user_id": owner, "dataset_id": "ds1"})
+
+    doc = await run_doc.read_job_doc(seen["job_id"])
+    assert (doc["status"], doc["error"]) == ("failed", "redis down")
+    assert await run_doc.count_active_jobs(owner) == 0
+
