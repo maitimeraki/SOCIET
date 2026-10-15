@@ -10,6 +10,9 @@ export default defineConfig({
   server: {
     proxy: {
       '/api': { target: 'http://127.0.0.1:8000', changeOrigin: true, ws: true },
+      // `/health` is a top-level backend route (not under `/api`), so it needs its own proxy entry —
+      // otherwise the SPA fallback answers it with index.html and HealthDot always reads "offline".
+      '/health': { target: 'http://127.0.0.1:8000', changeOrigin: true },
     },
   },
   // The rest client reads VITE_API_BASE once at import time and fails closed when it is unset, so
