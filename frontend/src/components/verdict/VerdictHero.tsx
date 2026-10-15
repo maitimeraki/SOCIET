@@ -4,13 +4,6 @@ import type { DissentingView, EvidenceItem, Stance } from '../../run/events'
 import { splitSections } from './narrative'
 import Button from '../ui/Button'
 
-const UNDERLINE: Record<Stance, string> = {
-  POSITIVE: 'border-stance-pos',
-  NEUTRAL: 'border-stance-neu',
-  AMBIVALENT: 'border-stance-amb',
-  NEGATIVE: 'border-stance-neg',
-}
-
 export default function VerdictHero({
   stance,
   confidence,
@@ -53,7 +46,10 @@ export default function VerdictHero({
   return (
     <section>
       <p className="text-label uppercase text-ink-3">{converged ? 'The verdict' : 'No convergence'}</p>
-      <h1 className={`mt-3 inline-block border-b-[3px] pb-1 font-titling text-display text-ink ${UNDERLINE[stance]}`}>
+      {/* The rule under the verdict word is ink, not a stance hue: DSPEC §6/§7.3 mandate no
+          stance-coloured rule here, so §3's legend law governs — the stance meaning is the word
+          itself (and the StanceChip symbol elsewhere), never a decorative hue. */}
+      <h1 className="mt-3 inline-block border-b-[3px] border-ink pb-1 font-titling text-display text-ink">
         {stance}
       </h1>
       <div className="mt-5 flex items-baseline gap-3">

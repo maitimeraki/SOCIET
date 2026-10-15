@@ -53,37 +53,47 @@ interface GraphStoreState {
 }
 
 /**
- * The territory's categorical legend palette — one hue per entity type, hand-picked and mutually
- * distinct, in a format Sigma's WebGL colour path parses (hex; it draws black on anything it cannot
- * read). This is a data encoding the graph module owns, not styling: it feeds Sigma's parser and the
- * legend swatches directly, so it stays literal here rather than becoming a CSS custom property —
- * the store also loads under Vitest's Node environment, where there is no document to resolve a
- * `var()` against, and a palette that resolved to empty strings there would make the
- * arrival-order-invariance test below pass vacuously.
+ * The territory's categorical legend palette — one NAMED hue per entity type. R33: the graph's
+ * categorical palette is data encoding, not theme colour, so it stays literal rather than becoming a
+ * CSS custom property. It feeds Sigma's WebGL colour path and the legend swatches directly, in a
+ * format Sigma parses (hex; it draws black on anything it cannot read). It stays literal because the
+ * store also loads under Vitest's Node environment, where there is no document to resolve a `var()`
+ * against, and a palette that resolved to empty strings there would make the arrival-order-invariance
+ * test below pass vacuously.
+ *
+ * The table's KEYS are the legend entries — every hue has a name, so none is an anonymous hex (DSPEC
+ * §3: a hue with no legend entry does not exist). `Legend` (components/common/Legend.tsx) renders this
+ * same table, so the palette and its legend share one source.
  *
  * Repainted for the Survey sheet (addendum §5). The incumbent set was validated against the dark
  * Chamber surface; every one of those hues measured 1.44–2.14:1 on the light sheet `--survey-paper`
- * and failed SC 1.4.11's 3:1 non-text floor. These clear it, measured on the sheet:
- * 5.57 · 5.11 · 5.30 · 4.86 · 4.21 · 4.47 · 4.87. The map's *meaning* hues (the four stance tokens,
+ * and failed SC 1.4.11's 3:1 non-text floor. These clear it on the sheet:
+ * 5.57 · 5.11 · 5.30 · 4.86 · 4.21 · 4.47 · 4.87. On the plotting table (`--plot-ground` #14150F)
+ * only coral (3.46) and gold (3.25) clear 3:1 — teal 2.61 · azure 2.85 · violet 2.74 · rose 2.99 ·
+ * green 2.99 do not, so a node of those hues cannot carry a mark on the dark plot without a
+ * non-colour cue (its legend symbol and label). The map's *meaning* hues (the four stance tokens,
  * datum, route, brass) are deliberately not reused: an entity type is not a stance.
  *
  * Colours are keyed off the label SET (labels taken in sorted order), so a given set maps to the same
  * colours whatever order it arrives in — a reconnect or reload that replays the labels differently
  * cannot recolour the graph.
  */
-export const LABEL_PALETTE = [
-  '#17635f', // teal
-  '#2b5ea6', // azure
-  '#6e4a9e', // violet
-  '#a83a5b', // rose
-  '#a8541f', // coral
-  '#7e6410', // gold
-  '#4a6b22', // green
-] as const
+export const GRAPH_PALETTE = {
+  teal: '#17635f',
+  azure: '#2b5ea6',
+  violet: '#6e4a9e',
+  rose: '#a83a5b',
+  coral: '#a8541f',
+  gold: '#7e6410',
+  green: '#4a6b22',
+} as const
 
-// ponytail: a 7-colour palette wraps past the 7th label (two types can share a hue); extend the array if a corpus ever promotes more.
+/** The palette in slot order — `Object.values` preserves insertion order, so slots are stable. */
+const PALETTE_SLOTS = Object.values(GRAPH_PALETTE)
+
+// ponytail: a 7-colour palette wraps past the 7th label (two types can share a hue); extend the table if a corpus ever promotes more.
 /** The palette colour for a label at `index` (its slot in the sorted label set). */
-export const labelColor = (index: number): string => LABEL_PALETTE[index % LABEL_PALETTE.length]
+export const labelColor = (index: number): string => PALETTE_SLOTS[index % PALETTE_SLOTS.length]
 
 const edgeKey = (edge: GraphEdge): string => `${edge.source}|${edge.target}|${edge.label}`
 
