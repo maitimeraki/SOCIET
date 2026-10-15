@@ -57,7 +57,6 @@ export default function IngestPage() {
       return
     }
     setFailure(outcome.reason)
-    toast('error', `Upload failed: ${outcome.reason}. Nothing was saved — try again.`)
   }
 
   const handleFiles = async (files: File[]) => {
@@ -89,7 +88,6 @@ export default function IngestPage() {
         return
       }
       setFailure(outcome.reason)
-      toast('error', outcome.reason)
     } finally {
       setFetchingUrl(false)
     }
@@ -144,8 +142,12 @@ export default function IngestPage() {
         </div>
       )}
 
+      {/* R46 m4: the failure surfaces *after* an action, so it is an assertive error — `role="alert"`
+          (the quota banner is an informational, recoverable notice, so it stays `role="status"`). It is
+          the single announcement: the duplicate error toasts below were removed so the same string is
+          not read twice. */}
       {failure && (
-        <div className="rounded-[6px] border border-route/40 bg-survey-paper-2 px-4 py-3">
+        <div role="alert" className="rounded-[6px] border border-route/40 bg-survey-paper-2 px-4 py-3">
           <p className="text-body text-ink">Extraction failed: {failure}. Nothing was saved — try again.</p>
         </div>
       )}

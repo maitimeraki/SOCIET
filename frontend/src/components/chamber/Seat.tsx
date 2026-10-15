@@ -64,7 +64,7 @@ export default function Seat({ seat, tabIndex, onKeyNav }: { seat: SeatSpec; tab
         height={SEAT_H + 4}
         rx={4}
         fill="none"
-        stroke="var(--color-datum)"
+        stroke="var(--focus-ring)"
         strokeWidth={1.5}
       />
       <rect

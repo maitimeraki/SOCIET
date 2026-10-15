@@ -52,7 +52,7 @@ describe('DashboardPage — the traverse log (plan §3.3)', () => {
     // Timestamp cell = `fmtDate(created_at)`, asserted as the exact local-time literal — `TZ` is
     // pinned to UTC in `vite.config.ts`, so this is deterministic and still catches a formatter
     // bug (e.g. an off-by-one day) that comparing against `fmtDate` itself would not (R48 m2).
-    expect(html).toContain('1 Oct 2026')
+    expect(html).toContain('1 Oct 2026 10:00')
     expect(html).toContain('Should we expand into Europe?') // question → query
     expect(html).toContain('ds-1') // documents used → dataset_id (the corpus id)
     expect(html).toContain('Complete') // status → StateChip

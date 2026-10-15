@@ -70,8 +70,10 @@ export default function SocietyPage() {
       </div>
 
       <div>
-        <p className="mb-2 text-label uppercase text-ink-3">What should the society deliberate?</p>
-        <QueryComposer value={query} onChange={setQuery} onSubmit={convene} />
+        <label htmlFor="society-question" className="mb-2 block text-label uppercase text-ink-3">
+          What should the society deliberate?
+        </label>
+        <QueryComposer id="society-question" value={query} onChange={setQuery} onSubmit={convene} />
         <p className="mt-2 max-w-[60ch] text-micro text-ink-3">
           The question picks which parts of the graph speak. Broader questions convene more of the society.
         </p>

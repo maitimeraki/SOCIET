@@ -160,9 +160,9 @@ export default function RunPage() {
                 onOpenProfile={() => navigate(`/runs/${runId}/agents`)}
               />
               <div className="mt-3 flex items-center justify-center gap-3 text-micro text-ink-3">
-                <button type="button" disabled={activeRound === null || activeRound <= 1} onClick={() => setScrubbed(Math.max(1, (activeRound ?? 1) - 1))} className="rounded-[4px] px-2 py-0.5 hover:bg-survey-paper-2 disabled:opacity-40">◀</button>
+                <button type="button" aria-label="Previous round" disabled={activeRound === null || activeRound <= 1} onClick={() => setScrubbed(Math.max(1, (activeRound ?? 1) - 1))} className="inline-flex min-h-6 min-w-6 items-center justify-center rounded-[4px] px-2 py-0.5 hover:bg-survey-paper-2 disabled:opacity-40">◀</button>
                 <span className="tnum font-measurement">{activeRound === null ? 'live' : `round ${activeRound}`}</span>
-                <button type="button" disabled={scrubbed === null} onClick={() => setScrubbed((current) => (current === null ? current : current >= (latestRound ?? 1) ? null : current + 1))} className="rounded-[4px] px-2 py-0.5 hover:bg-survey-paper-2 disabled:opacity-40">▶</button>
+                <button type="button" aria-label="Next round" disabled={scrubbed === null} onClick={() => setScrubbed((current) => (current === null ? current : current >= (latestRound ?? 1) ? null : current + 1))} className="inline-flex min-h-6 min-w-6 items-center justify-center rounded-[4px] px-2 py-0.5 hover:bg-survey-paper-2 disabled:opacity-40">▶</button>
                 <button type="button" onClick={() => setScrubbed(null)} className="rounded-[4px] px-2 py-0.5 text-datum hover:bg-survey-paper-2">End — back to live</button>
               </div>
             </div>
