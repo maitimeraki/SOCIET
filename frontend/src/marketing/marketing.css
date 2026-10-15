@@ -1,0 +1,51 @@
+/*
+ * Marketing — layout and scale ONLY. Tokens, colour, type and the motion grammar all live in
+ * Task 13's block in `index.css`; nothing here redefines a token or a hue.
+ *
+ * Imported by `LandingPage.tsx`, so it travels with the marketing chunk and leaves the app shell
+ * (and the entry chunk) untouched.
+ */
+
+/* The sheet is full-bleed: it IS the page, not a card inside one (DSPEC §7.1). It supplies its own
+   gutters, which the marketing frame deliberately does not. */
+.sheet {
+  --sheet-gutter: 1.25rem;
+  padding: 0 var(--sheet-gutter) var(--sheet-gutter);
+}
+
+@media (min-width: 640px) {
+  .sheet {
+    --sheet-gutter: 2rem;
+  }
+}
+
+@media (min-width: 1024px) {
+  .sheet {
+    --sheet-gutter: 3rem;
+  }
+}
+
+/* The plotted territory scales to the sheet's width and never below a legible minimum (DSPEC §9:
+   the plot keeps its minimum size rather than shrinking to illegibility). */
+.hero-plot svg {
+  display: block;
+  width: 100%;
+  height: auto;
+  min-width: 0;
+}
+
+/*
+ * Reduced motion: the sheet renders COMPLETE and STATIC. The plotting hand's moves (`draw`, `fix`)
+ * animate to their finished figure, so killing the animation leaves that figure on screen — a
+ * sightline fully drawn, the fix plotted — never a blank or half-drawn sheet. The delay is zeroed
+ * too, because `index.css` suppresses only the duration and a staggered delay would otherwise hold
+ * a sightline invisible before it snaps in.
+ */
+@media (prefers-reduced-motion: reduce) {
+  .hero-plot [data-plot] {
+    animation: none !important;
+    animation-delay: 0ms !important;
+    stroke-dasharray: none !important;
+    stroke-dashoffset: 0 !important;
+  }
+}

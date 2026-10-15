@@ -4,14 +4,15 @@ import { Outlet } from 'react-router-dom'
  * The public frame (plan §1): `/` renders WITHOUT the app shell's chrome, so a visitor who has not
  * signed in gets no app navigation.
  *
- * Today it supplies only what `HomePage` already relied on inside `AppShell` — the sheet and a
- * `<main>` landmark. TODO(Task 17): give it the marketing header/footer and swap the HomePage
- * placeholder for `LandingPage`.
+ * It is deliberately bare — the sheet's own title block and title-block close are part of the
+ * document (`marketing/Hero.tsx`, `marketing/LandingPage.tsx`), not chrome wrapped around it. The
+ * frame supplies the ground and the `<main>` landmark and nothing that would box the sheet in: a
+ * max-width container here would make the full-bleed sheet a card, which the Survey refuses.
  */
 export default function MarketingLayout() {
   return (
     <div className="min-h-screen bg-survey-paper font-record text-body text-ink">
-      <main id="content" className="mx-auto w-full max-w-[1200px] px-6 pb-24 pt-8">
+      <main id="content">
         <Outlet />
       </main>
     </div>

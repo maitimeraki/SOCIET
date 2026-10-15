@@ -10,7 +10,7 @@ import NotFoundPage from './pages/NotFoundPage'
 // Sigma/graphology/framer-motion leave the entry chunk entirely. Specifiers stay static literals: a
 // computed path would defeat Vite's deterministic split. NotFoundPage stays eager (12 lines, no heavy
 // imports) so a mistyped URL never waits on a chunk fetch to say "not found".
-const HomePage = lazy(() => import('./pages/HomePage'))
+const LandingPage = lazy(() => import('./marketing/LandingPage'))
 const IngestPage = lazy(() => import('./pages/IngestPage'))
 const GraphPage = lazy(() => import('./pages/GraphPage'))
 const SocietyPage = lazy(() => import('./pages/SocietyPage'))
@@ -24,7 +24,7 @@ const SignUpPage = lazy(() => import('./pages/SignUpPage'))
 /**
  * The route tree (plan §1). Three layout routes, so `/` and `/auth/*` render without shell chrome:
  *
- *   MarketingLayout  — public; `/` keeps rendering HomePage for now (Task 17 → LandingPage).
+ *   MarketingLayout  — public; `/` renders the survey sheet (LandingPage).
  *   AuthLayout       — public; the sign-in/up surfaces.
  *   RequireAuth      — the guard; wraps AppShell (the chrome) around the authed pages.
  *
@@ -38,8 +38,7 @@ export default function App() {
       <Suspense fallback={<RouteFallback />}>
         <Routes>
           <Route element={<MarketingLayout />}>
-            {/* TODO(Task 17): replace HomePage with LandingPage. */}
-            <Route path="/" element={<HomePage />} />
+            <Route path="/" element={<LandingPage />} />
           </Route>
 
           <Route path="/auth" element={<AuthLayout />}>
