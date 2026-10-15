@@ -32,6 +32,13 @@ export default function ComparisonTable() {
               ))}
             </tr>
           }
+          foot={
+            <tr>
+              <td colSpan={columns.length + 1} className="px-3 py-2 text-ink-3">
+                {reconciliation}
+              </td>
+            </tr>
+          }
         >
           {rows.map((row) => (
             <tr key={row.label}>
@@ -45,13 +52,6 @@ export default function ComparisonTable() {
               ))}
             </tr>
           ))}
-          <tfoot>
-            <tr>
-              <td colSpan={columns.length + 1} className="px-3 py-2 text-ink-3">
-                {reconciliation}
-              </td>
-            </tr>
-          </tfoot>
         </Table>
       </div>
     </section>

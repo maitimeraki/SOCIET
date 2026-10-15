@@ -13,11 +13,12 @@ import type { ReactNode } from 'react'
 const RULED =
   '[&_td]:border-b [&_td]:border-ink-4 [&_td+_td]:border-l [&_td+_td]:border-l-ink-4 [&_th]:border-b [&_th]:border-ink-4 [&_th+_th]:border-l [&_th+_th]:border-l-ink-4 [&_tfoot_td]:border-t-2 [&_tfoot_td]:border-t-ink [&_tfoot_th]:border-t-2 [&_tfoot_th]:border-t-ink'
 
-export default function Table({ head, children, className = '' }: { head: ReactNode; children: ReactNode; className?: string }) {
+export default function Table({ head, children, foot, className = '' }: { head: ReactNode; children: ReactNode; foot?: ReactNode; className?: string }) {
   return (
     <table className={`tnum w-full border-collapse text-body ${RULED} ${className}`}>
       <thead className="sticky top-0 bg-survey-paper-2 text-label uppercase text-ink-3">{head}</thead>
       <tbody className="text-ink-2">{children}</tbody>
+      {foot ? <tfoot>{foot}</tfoot> : null}
     </table>
   )
 }
