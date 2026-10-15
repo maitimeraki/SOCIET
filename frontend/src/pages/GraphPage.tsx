@@ -49,7 +49,10 @@ export default function GraphPage() {
         setJobs({ ontologyJobId: ontologyId })
       }
       const ontologyJob = await pollJob(ontologyId, applyTick, pollOptions)
-      if (ontologyJob.status === 'failed') {
+      // R42: `poll.ts` now treats `cancelled` as terminal, so a cancelled job must fail this branch —
+      // testing only for `failed` would let it fall through as a success. Graph jobs settle at
+      // `completed` (src/jobs/tasks.py), never the debate's `complete`.
+      if (ontologyJob.status !== 'completed') {
         setPhase('failed')
         setError(ontologyJob.error ?? 'unknown error')
         return
@@ -63,7 +66,7 @@ export default function GraphPage() {
         setJobs({ graphJobId: buildId })
       }
       const buildJob = await pollJob(buildId, applyTick, pollOptions)
-      if (buildJob.status === 'failed') {
+      if (buildJob.status !== 'completed') {
         setPhase('failed')
         setError(buildJob.error ?? 'unknown error')
         return
