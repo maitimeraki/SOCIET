@@ -53,6 +53,10 @@
   --font-record: "Spectral", Spectral, Georgia, serif;
   --font-measurement: "JetBrains Mono Variable", "JetBrains Mono", ui-monospace, monospace;
 
+  /* Addendum §4 — the record face is the default. Nothing in `src/` uses `.font-sans` / `.font-mono`,
+     so this changes no live class: it only stops unstyled text landing in Tailwind's system sans. */
+  --default-font-family: var(--font-record);
+
   /* §4.1 Scale — the dense instrument base is kept (14px body / 21px leading) and the
         display ceiling is raised for a real B2B hero: the 44px ops-console hero is gone.
         --text-marketing-hero is fluid: 40px on the narrowest phone, 96px (6rem) at the
@@ -208,8 +212,9 @@
   animation: plot-traverse 720ms var(--ease-plot) both;
 }
 
-/* §6/§9 The registration mark — a datum corner tick that appears on focus. Prepared here
-   as a CSS affordance; the field wiring lands in Task 14. */
+/* §6/§9 The registration mark — a corner tick that appears when the field takes focus. It reads
+   `--focus-ring`, not `--datum` directly, so it follows the ground it sits on (the plotting-table
+   container rebinds the ring to --datum-dim, R29/F2). */
 @utility corner-tick {
   position: relative;
 
@@ -220,8 +225,8 @@
     right: -2px;
     width: 7px;
     height: 7px;
-    border-top: 2px solid var(--color-datum);
-    border-right: 2px solid var(--color-datum);
+    border-top: 2px solid var(--focus-ring);
+    border-right: 2px solid var(--focus-ring);
     opacity: 0;
     transition: opacity 160ms var(--ease-plot);
     pointer-events: none;
@@ -230,6 +235,24 @@
   &:focus-within::after,
   &:focus-visible::after {
     opacity: 1;
+  }
+}
+
+/* §6/§7.2 Invalid — a vermilion hatched margin note, never a red box. `Field` applies this to the
+   control row whenever `error` is set, so Task 15's auth forms inherit it with no new prop. The
+   message itself stays Field's `role="alert"` line in ink; the hue is the mark, never the text. */
+@utility field-invalid {
+  position: relative;
+  padding-left: 10px;
+
+  &::before {
+    content: "";
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: 0;
+    width: 3px;
+    background: repeating-linear-gradient(-45deg, var(--color-route) 0 1px, transparent 1px 3px);
   }
 }
 

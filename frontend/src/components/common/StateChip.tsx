@@ -3,7 +3,7 @@ import { CheckCircle, Circle, CircleNotch, Warning, WarningOctagon } from '@phos
 export type RunStateWord = 'queued' | 'running' | 'complete' | 'converged' | 'failed' | 'interrupted'
 
 export default function StateChip({ state }: { state: RunStateWord }) {
-  const base = 'inline-flex items-center gap-1.5 rounded-[4px] border border-ink-4 bg-survey-paper-2 px-2 py-1 text-label'
+  const base = 'inline-flex items-center gap-1.5 rounded-[4px] border border-ink-3 bg-survey-paper-2 px-2 py-1 text-label'
   switch (state) {
     case 'queued':
       return (
@@ -19,25 +19,25 @@ export default function StateChip({ state }: { state: RunStateWord }) {
       )
     case 'converged':
       return (
-        <span className={`${base} text-stance-pos`}>
+        <span className={`${base} text-ink-2`}>
           <CheckCircle size={14} aria-hidden="true" /> Converged
         </span>
       )
     case 'complete':
       return (
-        <span className={`${base} text-stance-pos`}>
+        <span className={`${base} text-ink-2`}>
           <CheckCircle size={14} aria-hidden="true" /> Complete
         </span>
       )
     case 'failed':
       return (
-        <span className={`${base} text-route`}>
+        <span className={`${base} text-ink-2`}>
           <WarningOctagon size={14} aria-hidden="true" /> Failed
         </span>
       )
     case 'interrupted':
       return (
-        <span className={`${base} text-brass`}>
+        <span className={`${base} text-ink-2`}>
           <Warning size={14} aria-hidden="true" /> Interrupted
         </span>
       )

@@ -9,13 +9,13 @@ import StanceChip from './StanceChip'
 function OutcomeCell({ run }: { run: RunSummary }) {
   if (run.status === 'failed')
     return (
-      <span className="inline-flex items-center gap-1.5 text-route">
+      <span className="inline-flex items-center gap-1.5 text-ink-2">
         <XCircle size={14} aria-hidden="true" /> failed
       </span>
     )
   if (run.status === 'interrupted')
     return (
-      <span className="inline-flex items-center gap-1.5 text-brass">
+      <span className="inline-flex items-center gap-1.5 text-ink-2">
         <Warning size={14} aria-hidden="true" /> interrupted
       </span>
     )
@@ -25,7 +25,7 @@ function OutcomeCell({ run }: { run: RunSummary }) {
     <span className="inline-flex items-center gap-2">
       {run.verdict_stance && <StanceChip stance={asStance(run.verdict_stance)} size="sm" />}
       {run.converged ? (
-        <span className="inline-flex items-center gap-1 text-stance-pos">
+        <span className="inline-flex items-center gap-1 text-ink-2">
           <CheckCircle size={14} aria-hidden="true" /> converged
         </span>
       ) : (

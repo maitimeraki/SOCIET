@@ -28,7 +28,7 @@ export default function Dialog({ open, onClose, title, children }: { open: boole
             animate={{ y: 0, opacity: 1 }}
             exit={{ y: 12, opacity: 0 }}
             transition={{ duration: 0.2, ease: [0.2, 0, 0, 1] }}
-            className="w-full max-w-[520px] rounded-[12px] border border-ink-4 bg-survey-paper-2 p-6"
+            className="w-full max-w-[520px] rounded-[12px] border border-ink-3 bg-survey-paper-2 p-6"
           >
             <h2 className="mb-4 font-titling text-title text-ink">{title}</h2>
             {children}
