@@ -1,11 +1,12 @@
 import { lazy, Suspense } from 'react'
-import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom'
-import AppShell from './components/shell/AppShell'
-import AppErrorBoundary from './components/AppErrorBoundary'
-import Skeleton from './components/ui/Skeleton'
+import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
+import AuthLayout from './auth/AuthLayout'
+import RequireAuth from './auth/RequireAuth'
+import AppShell, { RouteFallback } from './components/shell/AppShell'
+import MarketingLayout from './components/shell/MarketingLayout'
 import NotFoundPage from './pages/NotFoundPage'
 
-// Each page is its own chunk, so the initial bundle carries only the shell, the router and the 404 —
+// Each page is its own chunk, so the initial bundle carries only the layouts, the router and the 404 —
 // Sigma/graphology/framer-motion leave the entry chunk entirely. Specifiers stay static literals: a
 // computed path would defeat Vite's deterministic split. NotFoundPage stays eager (12 lines, no heavy
 // imports) so a mistyped URL never waits on a chunk fetch to say "not found".
@@ -16,49 +17,53 @@ const SocietyPage = lazy(() => import('./pages/SocietyPage'))
 const RunPage = lazy(() => import('./pages/RunPage'))
 const RunsPage = lazy(() => import('./pages/RunsPage'))
 const AgentsPage = lazy(() => import('./pages/AgentsPage'))
+const DashboardPage = lazy(() => import('./pages/DashboardPage'))
+const SignInPage = lazy(() => import('./pages/SignInPage'))
+const SignUpPage = lazy(() => import('./pages/SignUpPage'))
 
-/** The page-chunk loading state — the same pulse skeleton the pages use, so the swap is seamless. */
-function RouteFallback() {
-  return (
-    <div role="status" aria-live="polite" className="flex flex-col gap-3">
-      <span className="sr-only">Loading…</span>
-      <Skeleton className="h-7 w-52" />
-      <Skeleton className="h-4 w-full" />
-      <Skeleton className="h-4 w-3/4" />
-    </div>
-  )
-}
-
-// Route-level boundary: a crash in one page keeps the shell (masthead, nav, health) alive. Keyed on
-// the path so navigating elsewhere via the shell clears the fallback without a full reload.
-function RoutedContent() {
-  const { pathname } = useLocation()
-  return (
-    <AppErrorBoundary key={pathname}>
-      <Suspense fallback={<RouteFallback />}>
-        <Routes>
-          <Route path="/" element={<HomePage />} />
-          <Route path="/new" element={<Navigate to="/new/ingest" replace />} />
-          <Route path="/new/ingest" element={<IngestPage />} />
-          <Route path="/new/graph" element={<GraphPage />} />
-          <Route path="/new/society" element={<SocietyPage />} />
-          <Route path="/runs" element={<RunsPage />} />
-          <Route path="/runs/:runId" element={<RunPage />} />
-          <Route path="/runs/:runId/:tab" element={<RunPage />} />
-          <Route path="/agents" element={<AgentsPage />} />
-          <Route path="*" element={<NotFoundPage />} />
-        </Routes>
-      </Suspense>
-    </AppErrorBoundary>
-  )
-}
-
+/**
+ * The route tree (plan §1). Three layout routes, so `/` and `/auth/*` render without shell chrome:
+ *
+ *   MarketingLayout  — public; `/` keeps rendering HomePage for now (Task 17 → LandingPage).
+ *   AuthLayout       — public; the sign-in/up surfaces.
+ *   RequireAuth      — the guard; wraps AppShell (the chrome) around the authed pages.
+ *
+ * The top-level `<Suspense>` covers the public layouts' lazy pages. The authed tree carries its own
+ * Suspense INSIDE AppShell (see AppShell.tsx), which is what keeps the shell mounted while a page
+ * chunk loads — a page swap must not blink the masthead away.
+ */
 export default function App() {
   return (
     <BrowserRouter>
-      <AppShell>
-        <RoutedContent />
-      </AppShell>
+      <Suspense fallback={<RouteFallback />}>
+        <Routes>
+          <Route element={<MarketingLayout />}>
+            {/* TODO(Task 17): replace HomePage with LandingPage. */}
+            <Route path="/" element={<HomePage />} />
+          </Route>
+
+          <Route path="/auth" element={<AuthLayout />}>
+            <Route index element={<Navigate to="/auth/signin" replace />} />
+            <Route path="signin" element={<SignInPage />} />
+            <Route path="signup" element={<SignUpPage />} />
+          </Route>
+
+          <Route element={<RequireAuth />}>
+            <Route element={<AppShell />}>
+              <Route path="/dashboard" element={<DashboardPage />} />
+              <Route path="/runs" element={<RunsPage />} />
+              <Route path="/runs/:runId" element={<RunPage />} />
+              <Route path="/runs/:runId/:tab" element={<RunPage />} />
+              <Route path="/new" element={<Navigate to="/new/ingest" replace />} />
+              <Route path="/new/ingest" element={<IngestPage />} />
+              <Route path="/new/graph" element={<GraphPage />} />
+              <Route path="/new/society" element={<SocietyPage />} />
+              <Route path="/agents" element={<AgentsPage />} />
+              <Route path="*" element={<NotFoundPage />} />
+            </Route>
+          </Route>
+        </Routes>
+      </Suspense>
     </BrowserRouter>
   )
 }

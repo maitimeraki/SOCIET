@@ -1,10 +1,34 @@
-import type { ReactNode } from 'react'
-import Masthead from './Masthead'
+import { Suspense } from 'react'
+import { Outlet, useLocation } from 'react-router-dom'
+import AppErrorBoundary from '../AppErrorBoundary'
 // Imported by path, not through the `../ui` barrel: the barrel also re-exports Dialog/Drawer, whose
 // framer-motion import would otherwise ride into the eagerly-loaded shell and the initial chunk.
+import Skeleton from '../ui/Skeleton'
 import { ToastHost } from '../ui/Toast'
+import Masthead from './Masthead'
 
-export default function AppShell({ children }: { children: ReactNode }) {
+/** The page-chunk loading state — the same pulse skeleton the pages use, so the swap is seamless. */
+export function RouteFallback() {
+  return (
+    <div role="status" aria-live="polite" className="flex flex-col gap-3">
+      <span className="sr-only">Loading…</span>
+      <Skeleton className="h-7 w-52" />
+      <Skeleton className="h-4 w-full" />
+      <Skeleton className="h-4 w-3/4" />
+    </div>
+  )
+}
+
+/**
+ * §6 The app shell — the chrome around the routed content. As a layout route it renders `<Outlet/>`
+ * instead of `children`, so the chrome stays mounted across navigation.
+ *
+ * The route-level boundary and the page-chunk Suspense both live INSIDE the shell, wrapping the
+ * Outlet: a crash or a slow chunk swaps only the content area, never the masthead. The boundary is
+ * keyed on the path so navigating elsewhere via the shell clears a stale fallback without a reload.
+ */
+export default function AppShell() {
+  const { pathname } = useLocation()
   return (
     <div className="min-h-screen bg-survey-paper font-record text-body text-ink">
       <a
@@ -15,7 +39,11 @@ export default function AppShell({ children }: { children: ReactNode }) {
       </a>
       <Masthead />
       <main id="content" className="mx-auto w-full max-w-[1200px] px-6 pb-24 pt-8">
-        {children}
+        <AppErrorBoundary key={pathname}>
+          <Suspense fallback={<RouteFallback />}>
+            <Outlet />
+          </Suspense>
+        </AppErrorBoundary>
       </main>
       <ToastHost />
     </div>
