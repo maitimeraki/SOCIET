@@ -16,10 +16,12 @@ describe('RuledBlock', () => {
     expect(html).toContain('nine stations fixed')
   })
 
-  it('is ruled by a hairline and is not an enclosed box', () => {
+  it('is bounded top and bottom by hairlines, and is not an enclosed box', () => {
     const html = renderToStaticMarkup(<RuledBlock>body</RuledBlock>)
-    expect(html).toContain('border-t border-ink-4')
+    expect(html).toContain('border-y border-ink-4')
     expect(html).not.toContain('rounded-')
+    expect(html).not.toContain('border-l')
+    expect(html).not.toContain('border-r')
   })
 
   it('renders the children alone when there is no legend key and no title', () => {

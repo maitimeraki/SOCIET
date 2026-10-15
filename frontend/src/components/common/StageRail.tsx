@@ -29,7 +29,7 @@ export default function StageRail({
           ) : stage.state === 'failed' ? (
             <XCircle size={16} className="text-route" aria-hidden="true" />
           ) : (
-            <span aria-hidden="true" className="h-2.5 w-2.5 rounded-full border border-ink-4" />
+            <span aria-hidden="true" className="h-2.5 w-2.5 rounded-full border border-ink-3" />
           )
         const current = stage.key === activeKey
         const inner = (

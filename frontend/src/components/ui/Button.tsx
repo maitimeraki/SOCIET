@@ -12,9 +12,11 @@ const VARIANT: Record<ButtonVariant, string> = {
   primary: 'border border-ink-3 border-b-2 border-b-route text-ink hover:bg-route/10',
   // secondary — the ink outline. --ink-3 measures 4.54:1 on the sheet, clearing SC 1.4.11 (addendum §1).
   secondary: 'border border-ink-3 text-ink hover:border-ink hover:bg-survey-paper-2',
-  // tertiary — the underlined measurement link: mono, ruled beneath, no box and so no registration mark.
+  // tertiary — the underlined measurement link: mono, ruled beneath, no box and so no registration
+  // mark. The underline is the only cue separating it from body prose, so it is a control affordance
+  // and takes --ink-3 (4.54:1) — --ink-4 is for separators and rules, never a control's affordance.
   ghost:
-    'font-measurement text-mono text-ink-2 underline underline-offset-4 decoration-ink-4 hover:text-ink hover:decoration-datum',
+    'font-measurement text-mono text-ink-2 underline underline-offset-4 decoration-ink-3 hover:text-ink hover:decoration-datum',
   // danger — the warning stamp: a route rule, ink label.
   danger: 'border border-route text-ink hover:bg-route/10',
 }
