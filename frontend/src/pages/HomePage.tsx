@@ -91,10 +91,10 @@ export default function HomePage() {
     <div className="space-y-16">
       <section>
         <p className="text-label uppercase text-brass">Multi-agent deliberation</p>
-        <h1 className="mt-3 max-w-[20ch] font-serif text-display-xl text-paper">
+        <h1 className="mt-3 max-w-[20ch] font-titling text-marketing-hero text-ink">
           Convene a society of experts. Watch it deliberate.
         </h1>
-        <p className="mt-5 max-w-[60ch] text-body text-paper-dim">
+        <p className="mt-5 max-w-[60ch] text-body text-ink-2">
           Simulation World reads the documents your experts would have read, grows a panel from your knowledge graph,
           and debates your question to a weighted verdict — every round, every voice, visible.
         </p>
@@ -112,17 +112,17 @@ export default function HomePage() {
       </section>
 
       <section id="how-it-works">
-        <h2 className="mb-4 text-heading text-paper">What happens when you convene</h2>
+        <h2 className="mb-4 text-heading text-ink">What happens when you convene</h2>
         <ol className="grid grid-cols-2 gap-4 md:grid-cols-3 lg:grid-cols-6">
           {STEPS.map((step, index) => (
             <li key={step.label}>
               <Link
                 to={step.to}
-                className="block h-full rounded-[6px] border border-ink-700 bg-ink-900 p-4 transition-colors hover:border-ink-600"
+                className="block h-full rounded-[6px] border border-ink-4 bg-survey-paper-2 p-4 transition-colors hover:border-ink-4"
               >
-                <span className="tnum font-mono text-mono text-paper-mute">{String(index + 1).padStart(2, '0')}</span>
-                <span className="mt-2 block text-label uppercase text-paper">{step.label}</span>
-                <span className="mt-1 block text-micro text-paper-dim">{step.line}</span>
+                <span className="tnum font-measurement text-mono text-ink-3">{String(index + 1).padStart(2, '0')}</span>
+                <span className="mt-2 block text-label uppercase text-ink">{step.label}</span>
+                <span className="mt-1 block text-micro text-ink-2">{step.line}</span>
               </Link>
             </li>
           ))}
@@ -130,23 +130,23 @@ export default function HomePage() {
       </section>
 
       <section>
-        <h2 className="mb-4 text-heading text-paper">Why run it</h2>
+        <h2 className="mb-4 text-heading text-ink">Why run it</h2>
         <div className="grid gap-4 md:grid-cols-3">
           {WHY.map((tile) => (
-            <div key={tile.title} className="rounded-[6px] border border-ink-700 bg-ink-900 p-4">
-              <span className="block text-heading text-paper">{tile.title}</span>
-              <p className="mt-2 text-body text-paper-dim">{tile.line}</p>
+            <div key={tile.title} className="rounded-[6px] border border-ink-4 bg-survey-paper-2 p-4">
+              <span className="block text-heading text-ink">{tile.title}</span>
+              <p className="mt-2 text-body text-ink-2">{tile.line}</p>
             </div>
           ))}
         </div>
       </section>
 
       <section id="faq">
-        <h2 className="mb-4 text-heading text-paper">Questions people ask</h2>
+        <h2 className="mb-4 text-heading text-ink">Questions people ask</h2>
         <div>
           {FAQ.map((item) => (
             <Disclosure key={item.q} summary={item.q}>
-              <p className="text-body text-paper-dim">{item.a}</p>
+              <p className="text-body text-ink-2">{item.a}</p>
             </Disclosure>
           ))}
         </div>
@@ -154,30 +154,30 @@ export default function HomePage() {
 
       <section>
         <div className="mb-4 flex items-baseline justify-between">
-          <h2 className="text-heading text-paper">Recent runs</h2>
-          <Link to="/runs" className="text-body text-paper-dim hover:text-accent">
+          <h2 className="text-heading text-ink">Recent runs</h2>
+          <Link to="/runs" className="text-body text-ink-2 hover:text-datum">
             All runs →
           </Link>
         </div>
         {recent.length === 0 && !loading ? (
-          <p className="text-body text-paper-mute">No runs yet. Your conventions will be kept here.</p>
+          <p className="text-body text-ink-3">No runs yet. Your conventions will be kept here.</p>
         ) : (
           <RunTable runs={recent} loading={loading} />
         )}
       </section>
 
-      <footer className="flex flex-wrap items-center gap-x-5 gap-y-2 text-micro text-paper-mute">
+      <footer className="flex flex-wrap items-center gap-x-5 gap-y-2 text-micro text-ink-3">
         <span>◠ Simulation World</span>
-        <a href="#how-it-works" className="transition-colors hover:text-paper">
+        <a href="#how-it-works" className="transition-colors hover:text-ink">
           How it works
         </a>
-        <a href="#faq" className="transition-colors hover:text-paper">
+        <a href="#faq" className="transition-colors hover:text-ink">
           FAQ
         </a>
-        <Link to="/runs" className="transition-colors hover:text-paper">
+        <Link to="/runs" className="transition-colors hover:text-ink">
           Runs
         </Link>
-        <Link to="/agents" className="transition-colors hover:text-paper">
+        <Link to="/agents" className="transition-colors hover:text-ink">
           Agents
         </Link>
       </footer>

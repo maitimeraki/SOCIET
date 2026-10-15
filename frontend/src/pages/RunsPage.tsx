@@ -38,8 +38,8 @@ export default function RunsPage() {
   return (
     <div className="space-y-6">
       <div className="flex items-baseline justify-between">
-        <h1 className="font-serif text-display text-paper">Runs</h1>
-        <Link to="/new/ingest" className="text-body text-accent hover:text-accent-strong">
+        <h1 className="font-titling text-display text-ink">Runs</h1>
+        <Link to="/new/ingest" className="text-body text-datum hover:text-datum">
           Convene a society →
         </Link>
       </div>
@@ -64,7 +64,7 @@ export default function RunsPage() {
       {loading ? (
         <RunTable runs={[]} loading />
       ) : failed ? (
-        <p className="text-body text-paper-dim">Couldn't reach the server — the run history loads when it's back.</p>
+        <p className="text-body text-ink-2">Couldn't reach the server — the run history loads when it's back.</p>
       ) : filtered.length === 0 ? (
         <EmptyState line={runs.length === 0 ? 'No runs yet. Convene your first society →' : 'No runs match this filter.'} />
       ) : (

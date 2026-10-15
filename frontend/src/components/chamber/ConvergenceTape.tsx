@@ -22,25 +22,25 @@ export default function ConvergenceTape({
   const active = ticks.find((tick) => tick.round === (activeRound ?? ticks[ticks.length - 1]?.round))
 
   return (
-    <div className="rounded-[6px] border border-ink-700 bg-ink-900 p-4">
+    <div className="rounded-[6px] border border-ink-4 bg-survey-paper-2 p-4">
       <div className="mb-3 flex items-center justify-between">
-        <h3 className="text-label uppercase text-paper-mute">The Tape</h3>
-        <span className="text-micro text-paper-mute">weighted share per round vs {threshold.toFixed(2)}</span>
+        <h3 className="text-label uppercase text-ink-3">The Tape</h3>
+        <span className="text-micro text-ink-3">weighted share per round vs {threshold.toFixed(2)}</span>
       </div>
 
       <div className="relative">
         {/* brass threshold line across all tracks — only meaningful once a tick exists */}
         {ticks.length > 0 && (
           <div aria-hidden="true" className="pointer-events-none absolute inset-y-0 z-10 w-px border-l-2 border-dashed border-brass" style={{ left: `calc(2.25rem + ${threshold} * (100% - 2.25rem))` }}>
-            <span className="absolute -top-1 left-1.5 rounded-[4px] bg-ink-900 px-1 font-mono text-micro text-brass">{threshold.toFixed(2)}</span>
+            <span className="absolute -top-1 left-1.5 rounded-[4px] bg-survey-paper-2 px-1 font-measurement text-micro text-brass">{threshold.toFixed(2)}</span>
           </div>
         )}
 
         <div className="space-y-2">
-          {ticks.length === 0 && <p className="text-body text-paper-mute">Waiting for round 1…</p>}
+          {ticks.length === 0 && <p className="text-body text-ink-3">Waiting for round 1…</p>}
           {ticks.map((tick) => (
             <div key={tick.round} className="flex items-center gap-3">
-              <span className="tnum w-6 font-mono text-micro text-paper-mute">R{tick.round}</span>
+              <span className="tnum w-6 font-measurement text-micro text-ink-3">R{tick.round}</span>
               <div className="flex h-3 flex-1 overflow-hidden rounded-[4px]">
                 {STANCE_ORDER.map((stance, index) => {
                   const share = tick.weights[stance] ?? 0
@@ -63,7 +63,7 @@ export default function ConvergenceTape({
       </div>
 
       {active && (
-        <p className="tnum mt-3 font-mono text-mono text-paper-dim">
+        <p className="tnum mt-3 font-measurement text-mono text-ink-2">
           round {active.round}{active.dominant ? ` · ${active.dominant.stance} ${fmtPct(active.dominant.weightShare)} weighted share` : ''}
         </p>
       )}

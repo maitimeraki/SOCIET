@@ -19,7 +19,7 @@ const FIELD_LABELS: Record<keyof DebateConfig, string> = {
 
 export default function ConfigPanel({ value, onChange }: { value: DebateConfig; onChange: (next: DebateConfig) => void }) {
   return (
-    <Disclosure summary={<span className="text-body text-paper-dim">Deliberation settings</span>}>
+    <Disclosure summary={<span className="text-body text-ink-2">Deliberation settings</span>}>
       <div className="grid grid-cols-2 gap-x-8 gap-y-4">
         {(Object.keys(DEBATE_CONFIG_RANGES) as (keyof DebateConfig)[]).map((key) => {
           const range = DEBATE_CONFIG_RANGES[key]

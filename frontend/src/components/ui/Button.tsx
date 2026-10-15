@@ -5,10 +5,10 @@ export type ButtonVariant = 'primary' | 'secondary' | 'ghost' | 'danger'
 export type ButtonSize = 32 | 40
 
 const VARIANT: Record<ButtonVariant, string> = {
-  primary: 'bg-accent text-ink-1000 hover:bg-accent-strong active:bg-accent-dim',
-  secondary: 'border border-ink-600 text-paper hover:border-accent hover:text-accent',
-  ghost: 'text-paper-dim hover:bg-ink-800 hover:text-paper',
-  danger: 'border border-critical text-critical hover:bg-critical/10',
+  primary: 'bg-datum text-survey-paper hover:bg-datum active:bg-datum',
+  secondary: 'border border-ink-4 text-ink hover:border-datum hover:text-datum',
+  ghost: 'text-ink-2 hover:bg-survey-paper-2 hover:text-ink',
+  danger: 'border border-route text-route hover:bg-route/10',
 }
 
 // eslint-disable-next-line react-refresh/only-export-components -- buttonClasses is the shared Link-as-button styling API (HomePage, ui barrel)

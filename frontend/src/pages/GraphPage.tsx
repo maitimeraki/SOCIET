@@ -122,8 +122,8 @@ export default function GraphPage() {
     <div className="mx-auto max-w-[760px] space-y-8">
       <StageRail stages={railStages} />
       <div>
-        <p className="text-label uppercase text-paper-mute">Step 2 · Graph</p>
-        <h1 className="mt-2 font-serif text-display text-paper">Grow the knowledge graph</h1>
+        <p className="text-label uppercase text-ink-3">Step 2 · Graph</p>
+        <h1 className="mt-2 font-titling text-display text-ink">Grow the knowledge graph</h1>
       </div>
 
       {reconnecting && (
@@ -133,7 +133,7 @@ export default function GraphPage() {
       )}
 
       {phase !== 'done' && phase !== 'failed' && (
-        <div className="space-y-4 rounded-[6px] border border-ink-700 bg-ink-900 p-5">
+        <div className="space-y-4 rounded-[6px] border border-ink-4 bg-survey-paper-2 p-5">
           <StageLine
             label="Discovering the ontology"
             state={phase === 'ontology' ? 'active' : 'done'}
@@ -143,10 +143,10 @@ export default function GraphPage() {
           {phase === 'build' && (
             <div className="space-y-4">
               <ProgressBar value={progress} label={`${fmtInt(completed)} / ${fmtInt(total)} chunks`} />
-              <p className="tnum font-mono text-mono text-paper-dim">
+              <p className="tnum font-measurement text-mono text-ink-2">
                 graph so far · {fmtInt(result?.entity_types.length ?? 0)} entity types · {fmtInt(result?.relation_types.length ?? 0)} relation types
               </p>
-              <p className="text-micro text-paper-mute">Each chunk is written as it finishes — the graph grows while the build runs.</p>
+              <p className="text-micro text-ink-3">Each chunk is written as it finishes — the graph grows while the build runs.</p>
               {datasetId && graphJobId && <GraphCanvas datasetId={datasetId} jobId={graphJobId} />}
             </div>
           )}
@@ -167,7 +167,7 @@ export default function GraphPage() {
               reads one full snapshot, which now carries every DERIVED_FROM-linked entity. */}
           {datasetId && graphJobId && <GraphCanvas datasetId={datasetId} jobId={graphJobId} />}
           <div>
-            <p className="text-heading text-paper">Graph built</p>
+            <p className="text-heading text-ink">Graph built</p>
             <StatRow
               items={[
                 { label: 'Chunks', value: fmtInt(result?.chunks_total ?? 0) },

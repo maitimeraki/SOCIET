@@ -103,7 +103,7 @@ export default function ChamberFloor({ roster, rounds, activeRound, livePairs, o
               height={10}
               rx={3}
               fill="none"
-              stroke="var(--color-ink-700)"
+              stroke="var(--color-ink-4)"
             />
           )),
         )}
@@ -115,7 +115,7 @@ export default function ChamberFloor({ roster, rounds, activeRound, livePairs, o
               x={caption.x}
               y={caption.y}
               textAnchor="middle"
-              className="fill-[color:var(--color-paper-faint)] text-[11px] uppercase tracking-[0.08em]"
+              className="fill-[color:var(--color-ink-3)] text-[11px] uppercase tracking-[0.08em]"
             >
               {sector.label}
             </text>
@@ -141,20 +141,20 @@ export default function ChamberFloor({ roster, rounds, activeRound, livePairs, o
       </svg>
 
       {seated && (
-        <div className="absolute right-3 top-3 w-[240px] rounded-[6px] border border-ink-600 bg-ink-800 p-3">
+        <div className="absolute right-3 top-3 w-[240px] rounded-[6px] border border-ink-4 bg-survey-paper-2 p-3">
           <div className="flex items-start justify-between gap-2">
-            <p className="text-body text-paper">{seated.profile.identity.name}</p>
-            <button type="button" aria-label="Close popover" onClick={closePopover} className="text-paper-mute hover:text-paper">
+            <p className="text-body text-ink">{seated.profile.identity.name}</p>
+            <button type="button" aria-label="Close popover" onClick={closePopover} className="text-ink-3 hover:text-ink">
               <X size={12} aria-hidden="true" />
             </button>
           </div>
-          <p className="text-micro text-paper-mute">{seated.profile.identity.archetype}</p>
+          <p className="text-micro text-ink-3">{seated.profile.identity.archetype}</p>
           <div className="mt-2">
             <StanceChip stance={seated.profile.stance} size="sm" />
           </div>
-          <p className="tnum mt-2 font-mono text-micro text-paper-dim">conf {seated.profile.confidence.toFixed(2)}</p>
+          <p className="tnum mt-2 font-measurement text-micro text-ink-2">conf {seated.profile.confidence.toFixed(2)}</p>
           {onOpenProfile && (
-            <button type="button" onClick={onOpenProfile} className="mt-2 inline-block text-micro text-accent hover:text-accent-strong">
+            <button type="button" onClick={onOpenProfile} className="mt-2 inline-block text-micro text-datum hover:text-datum">
               Open profile →
             </button>
           )}
@@ -164,7 +164,7 @@ export default function ChamberFloor({ roster, rounds, activeRound, livePairs, o
       {/* <640px: the floor degrades to the seats list (§17) */}
       <ul className="space-y-1 sm:hidden">
         {roster.map((profile) => (
-          <li key={profile.agent_id} className="flex items-center gap-2 text-body text-paper-dim">
+          <li key={profile.agent_id} className="flex items-center gap-2 text-body text-ink-2">
             <StanceChip stance={profile.stance} size="sm" />
             {profile.identity.name}
           </li>

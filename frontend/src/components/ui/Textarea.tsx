@@ -4,7 +4,7 @@ export default function Textarea({ className = '', ...rest }: TextareaHTMLAttrib
   return (
     <textarea
       {...rest}
-      className={`w-full resize-none rounded-[4px] border border-ink-700 bg-ink-800 p-3 text-body-lg text-paper placeholder:text-paper-mute focus:border-accent ${className}`}
+      className={`w-full resize-none rounded-[4px] border border-ink-4 bg-survey-paper-2 p-3 text-body-lg text-ink placeholder:text-ink-3 focus:border-datum ${className}`}
     />
   )
 }

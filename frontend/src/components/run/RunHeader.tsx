@@ -40,22 +40,22 @@ export default function RunHeader({
 
   return (
     <div className="space-y-2">
-      <p className="font-serif text-title text-paper">{run.query || 'Waiting for the floor…'}</p>
+      <p className="font-titling text-title text-ink">{run.query || 'Waiting for the floor…'}</p>
       {run.intent?.core_question && (
-        <p className="tnum font-mono text-mono text-paper-mute">reading as: {run.intent.core_question}</p>
+        <p className="tnum font-measurement text-mono text-ink-3">reading as: {run.intent.core_question}</p>
       )}
       <div className="flex flex-wrap items-center gap-3">
         <StateChip state={chip} />
         {round > 0 && (
-          <span className="tnum font-mono text-mono text-paper-dim">
+          <span className="tnum font-measurement text-mono text-ink-2">
             ROUND {round}
             {maxRounds ? `/${maxRounds}` : ''}
           </span>
         )}
-        {elapsed && <span className="tnum font-mono text-mono text-paper-dim">{elapsed} elapsed</span>}
+        {elapsed && <span className="tnum font-measurement text-mono text-ink-2">{elapsed} elapsed</span>}
         {run.runId && (
           <span className="flex items-center gap-1">
-            <span className="tnum font-mono text-mono text-paper-mute">run {truncateId(run.runId)}</span>
+            <span className="tnum font-measurement text-mono text-ink-3">run {truncateId(run.runId)}</span>
             <IconButton
               label="Copy run id"
               onClick={() => {

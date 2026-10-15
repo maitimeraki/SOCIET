@@ -10,7 +10,7 @@ export default function Dialog({ open, onClose, title, children }: { open: boole
     <AnimatePresence>
       {open && (
         <motion.div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-ink-1000/60 p-6"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-survey-paper/60 p-6"
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
@@ -28,9 +28,9 @@ export default function Dialog({ open, onClose, title, children }: { open: boole
             animate={{ y: 0, opacity: 1 }}
             exit={{ y: 12, opacity: 0 }}
             transition={{ duration: 0.2, ease: [0.2, 0, 0, 1] }}
-            className="w-full max-w-[520px] rounded-[12px] border border-ink-600 bg-ink-900 p-6"
+            className="w-full max-w-[520px] rounded-[12px] border border-ink-4 bg-survey-paper-2 p-6"
           >
-            <h2 className="mb-4 font-serif text-title text-paper">{title}</h2>
+            <h2 className="mb-4 font-titling text-title text-ink">{title}</h2>
             {children}
           </motion.div>
         </motion.div>

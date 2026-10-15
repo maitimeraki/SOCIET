@@ -8,7 +8,7 @@ export default function IdleFloor() {
   return (
     <motion.svg
       viewBox={`0 0 ${FLOOR_VIEWBOX.width} ${FLOOR_VIEWBOX.height}`}
-      className="w-full rounded-[12px] border border-ink-700 bg-ink-900"
+      className="w-full rounded-[12px] border border-ink-4 bg-survey-paper-2"
       role="img"
       aria-label="The chamber floor, waiting for a society"
       initial="idle"
@@ -18,7 +18,7 @@ export default function IdleFloor() {
         x={FLOOR_VIEWBOX.width / 2}
         y={36}
         textAnchor="middle"
-        className="fill-[color:var(--color-paper-faint)] text-[13px] uppercase tracking-[0.3em]"
+        className="fill-[color:var(--color-ink-3)] text-[13px] uppercase tracking-[0.3em]"
       >
         The Chamber Floor
       </text>
@@ -33,7 +33,7 @@ export default function IdleFloor() {
             height={10}
             rx={3}
             fill="none"
-            stroke="var(--color-ink-700)"
+            stroke="var(--color-ink-4)"
           />
         )),
       )}
@@ -47,7 +47,7 @@ export default function IdleFloor() {
             x={p.x}
             y={p.y}
             textAnchor="middle"
-            className="fill-[color:var(--color-paper-faint)] text-[11px] uppercase tracking-[0.08em]"
+            className="fill-[color:var(--color-ink-3)] text-[11px] uppercase tracking-[0.08em]"
           >
             {sector.label}
           </text>
@@ -59,7 +59,7 @@ export default function IdleFloor() {
           key={radius}
           d={arcPath(180, 360, radius)}
           fill="none"
-          stroke="var(--color-accent)"
+          stroke="var(--color-datum)"
           strokeWidth={1.5}
           variants={reduced ? { idle: { opacity: 0 }, trace: { opacity: 0.4 } } : { idle: { pathLength: 0, opacity: 0 }, trace: { pathLength: 1, opacity: 0.5 } }}
           transition={reduced ? { duration: 0 } : { duration: 0.6, ease: [0.2, 0, 0, 1] }}

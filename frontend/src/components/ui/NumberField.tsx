@@ -26,7 +26,7 @@ export default function NumberField({
         const next = Number(event.target.value)
         if (!Number.isNaN(next)) onChange(clamp(next))
       }}
-      className="tnum h-9 w-24 rounded-[4px] border border-ink-700 bg-ink-800 px-2 text-mono text-paper focus:border-accent"
+      className="tnum h-9 w-24 rounded-[4px] border border-ink-4 bg-survey-paper-2 px-2 text-mono text-ink focus:border-datum"
     />
   )
 }

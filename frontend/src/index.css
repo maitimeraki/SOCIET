@@ -1,47 +1,57 @@
 @import "tailwindcss";
 
 @theme {
-  /* §3.1 ink — structure only, never text */
-  --color-ink-1000: #100e09;
-  --color-ink-900: #181510;
-  --color-ink-800: #211d16;
-  --color-ink-700: #2c2720;
-  --color-ink-600: #3a342b;
+  /* ── §3.1 THE SURVEY MAP — colour is map meaning; a hue with no legend entry does not exist.
+        This block replaces the incumbent "Chamber" token names wholesale (the rename map is
+        recorded in .superpowers/sdd/societas-production/task-13-report.md). */
 
-  /* §3.2 parchment — text only, never fills */
-  --color-paper: #f2ebdd;
-  --color-paper-dim: #c9bfa9;
-  --color-paper-mute: #9a917e;
-  --color-paper-faint: #6e6757;
+  /* Sheet — the light ground. Everything but the plotting table sits on this. */
+  --color-survey-paper: #e7e5db;   /* page ground — cool linen, deliberately not warm cream */
+  --color-survey-paper-2: #f1efe7; /* raised — the lamp-lit table, panels */
+  --color-survey-paper-3: #dad8cd; /* folded — recesses, folded reveals */
 
-  /* §3.3 verdigris accent — interactive/live only */
-  --color-accent: #43a98b;
-  --color-accent-strong: #4fb897;
-  --color-accent-dim: #2e7a64;
-  --color-accent-soft: rgba(67, 169, 139, 0.12);
+  /* Ink — all text and weighed lines */
+  --color-ink: #1a1814;
+  --color-ink-2: #4a463d; /* body, hachure base */
+  --color-ink-3: #7c7768; /* labels, captions */
+  --color-ink-4: #b4b0a3; /* hairlines, graticule (fine) */
 
-  /* §3.4 brass — annotations/warnings only */
-  --color-brass: #d9a741;
+  /* Datum — interactive and "live" only */
+  --color-datum: #1e5aa8;
+  --color-datum-dim: #6e93c4;                  /* graticule, inactive live */
+  --color-datum-soft: rgba(30, 90, 168, 0.12); /* derived tint of datum — the interactive wash */
 
-  /* §3.5 stance — frozen canonical order POS → NEU → AMB → NEG */
-  --color-stance-pos: #7ca03f;
-  --color-stance-neu: #4e7cc0;
-  --color-stance-amb: #c4832f;
-  --color-stance-neg: #ae4a3d;
+  /* Route — the plotted fix, and warnings */
+  --color-route: #c0392b;
 
-  /* §3.6 status — reserved, icon+word always */
-  --color-good: #4c9f70;
-  --color-critical: #ce4f42;
+  /* Brass — the field-pencil: annotation and caution. The one reserved mark. */
+  --color-brass: #c99a38;
 
-  /* §4 typefaces */
-  --font-serif: "Newsreader Variable", Newsreader, Georgia, serif;
-  --font-sans: "Public Sans Variable", "Public Sans", system-ui, sans-serif;
-  --font-mono: "IBM Plex Mono", ui-monospace, monospace;
+  /* Stance legend — the frozen canonical order POS → NEU → AMB → NEG */
+  --color-stance-pos: #55702f; /* vegetation green */
+  --color-stance-neu: #5d6b70; /* unwooded slate */
+  --color-stance-amb: #b07a2e; /* marsh amber */
+  --color-stance-neg: #b23b2e; /* route vermilion */
 
-  /* §4.1 scale */
-  --text-display-xl: 44px;
-  --text-display-xl--line-height: 48px;
-  --text-display-xl--letter-spacing: -0.01em;
+  /* §3.2 The plotting table — the ONE dark surface in the product. A live traced plot
+        reads luminous; everything else is the light sheet. */
+  --color-plot-ground: #14150f;
+
+  /* ── §4 Registers. Titling names the sheet, the record says what was found, the
+        measurement counts it. Cardinal rule: any figure that is a measurement is set in
+        the mono, in the sheet's coordinate grammar. */
+  --font-titling: "Archivo Variable", Archivo, system-ui, sans-serif;
+  --font-record: "Spectral", Spectral, Georgia, serif;
+  --font-measurement: "JetBrains Mono Variable", "JetBrains Mono", ui-monospace, monospace;
+
+  /* §4.1 Scale — the dense instrument base is kept (14px body / 21px leading) and the
+        display ceiling is raised for a real B2B hero: the 44px ops-console hero is gone.
+        --text-marketing-hero is fluid: 40px on the narrowest phone, 96px (6rem) at the
+        widest desktop, scaling on viewport width so the question reads as the sheet title. */
+  --text-marketing-hero: clamp(2.5rem, 1.25rem + 5.5vw, 6rem);
+  --text-marketing-hero--line-height: 1.02;
+  --text-marketing-hero--letter-spacing: 0.02em;
+  --text-marketing-hero--font-weight: 600;
   --text-display: 32px;
   --text-display--line-height: 38px;
   --text-display--letter-spacing: -0.01em;
@@ -74,30 +84,35 @@
   --radius-md: 6px;
   --radius-lg: 12px;
 
-  /* §5 motion — bare `transition-*` utilities run on the spec's curve */
+  /* §5 motion — the plotting hand's curve. Bare `transition-*` utilities and the
+     motion primitives below both run on it. */
+  --ease-plot: cubic-bezier(0.2, 0, 0, 1);
   --default-transition-timing-function: cubic-bezier(0.2, 0, 0, 1);
 }
 
 @layer base {
   html {
-    color-scheme: dark;
+    color-scheme: light;
   }
   body {
-    background: var(--color-ink-1000);
-    color: var(--color-paper);
-    font-family: var(--font-sans);
+    background: var(--color-survey-paper);
+    color: var(--color-ink);
+    font-family: var(--font-record);
     font-size: 14px;
     line-height: 21px;
     -webkit-font-smoothing: antialiased;
   }
+  /* §9 Focus — the datum ring, 2px, offset, on both grounds. */
   :focus-visible {
-    outline: 2px solid var(--color-accent);
+    outline: 2px solid var(--color-datum);
     outline-offset: 2px;
   }
   ::selection {
-    background: var(--color-accent-dim);
-    color: var(--color-paper);
+    background: var(--color-datum-dim);
+    color: var(--color-ink);
   }
+  /* §9/§5 Motion is fully suppressed: the sheet renders complete and static, and no
+     figure depends on motion to be understood. */
   @media (prefers-reduced-motion: reduce) {
     *,
     *::before,
@@ -105,7 +120,101 @@
       animation-duration: 0.01ms !important;
       animation-iteration-count: 1 !important;
       transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
     }
+  }
+}
+
+/* ── §5 The plotting hand — motion is drawn, not snapped. One grammar, four moves,
+      keyframes + utilities only, no JS. Each move settles to a complete figure so a
+      reduced-motion user sees the finished sheet, not a blank one. */
+
+/* draw — lines and sightlines stroke on; they never fade in. */
+@keyframes plot-draw {
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
+/* fix — a reading is taken: an ink dot blooms once and settles. */
+@keyframes plot-fix {
+  0% {
+    transform: scale(0);
+    opacity: 0;
+  }
+  60% {
+    transform: scale(1.28);
+    opacity: 1;
+  }
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
+/* overlay — the translucent tracing sheet slides over the base to reveal a layer. */
+@keyframes plot-overlay {
+  from {
+    transform: translateY(-100%);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+/* traverse — the party advances along the line. */
+@keyframes plot-traverse {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(var(--traverse-to, 100%));
+  }
+}
+
+/* draw: set --draw-length to the path length (or use pathLength="1" on the SVG path). */
+@utility draw {
+  stroke-dasharray: var(--draw-length, 1200);
+  stroke-dashoffset: var(--draw-length, 1200);
+  animation: plot-draw var(--draw-duration, 900ms) var(--ease-plot) forwards;
+}
+
+@utility fix {
+  animation: plot-fix 560ms var(--ease-plot) both;
+}
+
+@utility overlay {
+  animation: plot-overlay 380ms var(--ease-plot) both;
+}
+
+@utility traverse {
+  animation: plot-traverse 720ms var(--ease-plot) both;
+}
+
+/* §6/§9 The registration mark — a datum corner tick that appears on focus. Prepared here
+   as a CSS affordance; the field wiring lands in Task 14. */
+@utility corner-tick {
+  position: relative;
+
+  &::after {
+    content: "";
+    position: absolute;
+    top: -2px;
+    right: -2px;
+    width: 7px;
+    height: 7px;
+    border-top: 2px solid var(--color-datum);
+    border-right: 2px solid var(--color-datum);
+    opacity: 0;
+    transition: opacity 160ms var(--ease-plot);
+    pointer-events: none;
+  }
+
+  &:focus-within::after,
+  &:focus-visible::after {
+    opacity: 1;
   }
 }
 

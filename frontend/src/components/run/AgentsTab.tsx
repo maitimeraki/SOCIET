@@ -14,8 +14,8 @@ export default function AgentsTab({ run }: { run: RunState }) {
   return (
     <div className="space-y-8">
       <div className="flex items-baseline gap-3">
-        <h2 className="text-heading text-paper">The society of this run</h2>
-        <span className="tnum font-mono text-micro text-paper-mute">
+        <h2 className="text-heading text-ink">The society of this run</h2>
+        <span className="tnum font-measurement text-micro text-ink-3">
           {run.roster.length} seated · {run.activations.reduce((sum, activation) => sum + activation.agents.length, 0)} activated
         </span>
       </div>
@@ -26,7 +26,7 @@ export default function AgentsTab({ run }: { run: RunState }) {
       </div>
       {run.activations.length > 0 && (
         <section>
-          <h2 className="mb-3 text-heading text-paper">Activated mid-run</h2>
+          <h2 className="mb-3 text-heading text-ink">Activated mid-run</h2>
           <ActivationList activations={run.activations} />
         </section>
       )}

@@ -15,14 +15,14 @@ export default function UrlFetchRow({ onFetch, busy = false }: { onFetch: (url: 
   }
 
   return (
-    <form onSubmit={submit} className="flex items-center gap-2 rounded-[6px] border border-ink-700 bg-ink-800 px-3 py-2">
-      <LinkSimple size={16} className="shrink-0 text-paper-mute" aria-hidden="true" />
+    <form onSubmit={submit} className="flex items-center gap-2 rounded-[6px] border border-ink-4 bg-survey-paper-2 px-3 py-2">
+      <LinkSimple size={16} className="shrink-0 text-ink-3" aria-hidden="true" />
       <input
         type="url"
         value={url}
         onChange={(event) => setUrl(event.target.value)}
         placeholder="https://example.com/report — paste a URL to fetch"
-        className="h-8 flex-1 bg-transparent text-body text-paper placeholder:text-paper-mute focus:outline-none"
+        className="h-8 flex-1 bg-transparent text-body text-ink placeholder:text-ink-3 focus:outline-none"
       />
       <Button type="submit" size={32} loading={busy} disabled={!url.trim()}>
         Fetch

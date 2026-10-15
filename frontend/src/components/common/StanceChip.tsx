@@ -10,7 +10,7 @@ const DOT: Record<Stance, string> = {
 export default function StanceChip({ stance, size = 'md' }: { stance: Stance; size?: 'sm' | 'md' }) {
   return (
     <span
-      className={`inline-flex items-center gap-1.5 rounded-[4px] border border-ink-700 bg-ink-800 text-paper ${
+      className={`inline-flex items-center gap-1.5 rounded-[4px] border border-ink-4 bg-survey-paper-2 text-ink ${
         size === 'sm' ? 'px-1.5 py-0.5 text-micro' : 'px-2 py-1 text-label'
       }`}
     >

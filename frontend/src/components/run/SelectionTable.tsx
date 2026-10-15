@@ -14,21 +14,21 @@ export default function SelectionTable({
 }) {
   const sorted = [...rows].sort((a, b) => b.blended - a.blended)
   return (
-    <div className="rounded-[6px] border border-ink-700 bg-ink-900 p-4">
+    <div className="rounded-[6px] border border-ink-4 bg-survey-paper-2 p-4">
       <div className="grid grid-cols-[1fr_auto_auto_minmax(0,240px)] items-center gap-x-4 gap-y-2 sm:grid-cols-[1fr_auto_auto_minmax(180px,240px)]">
-        <span className="text-label uppercase text-paper-mute">Name</span>
-        <span className="text-label uppercase text-paper-mute">semantic</span>
-        <span className="text-label uppercase text-paper-mute">density</span>
-        <span className="text-label uppercase text-paper-mute">blended</span>
+        <span className="text-label uppercase text-ink-3">Name</span>
+        <span className="text-label uppercase text-ink-3">semantic</span>
+        <span className="text-label uppercase text-ink-3">density</span>
+        <span className="text-label uppercase text-ink-3">blended</span>
         {sorted.map((row) => (
           <Fragment key={row.name}>
-            <span className="text-body text-paper">{row.name}</span>
-            <span className="tnum font-mono text-mono text-paper-dim">{fmtScore(row.semantic)}</span>
-            <span className="tnum font-mono text-mono text-paper-dim">{fmtScore(row.density)}</span>
+            <span className="text-body text-ink">{row.name}</span>
+            <span className="tnum font-measurement text-mono text-ink-2">{fmtScore(row.semantic)}</span>
+            <span className="tnum font-measurement text-mono text-ink-2">{fmtScore(row.density)}</span>
             <span className="flex items-center gap-2">
-              <span className="relative hidden h-1.5 flex-1 rounded-[4px] bg-ink-700 sm:block">
+              <span className="relative hidden h-1.5 flex-1 rounded-[4px] bg-ink-4 sm:block">
                 <span
-                  className="absolute inset-y-0 left-0 rounded-[4px] bg-accent"
+                  className="absolute inset-y-0 left-0 rounded-[4px] bg-datum"
                   style={{ width: `${Math.min(1, row.blended) * 100}%` }}
                 />
                 <span
@@ -37,12 +37,12 @@ export default function SelectionTable({
                   aria-hidden="true"
                 />
               </span>
-              <span className="tnum w-9 text-right font-mono text-mono text-paper">{fmtScore(row.blended)}</span>
+              <span className="tnum w-9 text-right font-measurement text-mono text-ink">{fmtScore(row.blended)}</span>
             </span>
           </Fragment>
         ))}
       </div>
-      <p className="mt-3 text-micro text-paper-mute">
+      <p className="mt-3 text-micro text-ink-3">
         Ranked by blended semantic + density score (weights 0.6 / 0.4). Below {threshold.toFixed(2)} the society falls
         back to density alone.
       </p>

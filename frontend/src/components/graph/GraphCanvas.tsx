@@ -20,7 +20,7 @@ export interface GraphCanvasProps {
 const NODE_SIZE = 7
 /** A node whose type has no label yet (vocabulary frame still in flight). */
 const DEFAULT_NODE_COLOR = '#5b6270'
-/** The canvas surface (ink-1000). Nodes are contrast-validated against it and the label halo paints in it. */
+/** The canvas surface. Nodes are contrast-validated against it and the label halo paints in it. */
 const STAGE_SURFACE = '#100e09'
 /** How often the layout is allowed to run, ms — coalesces a burst of deltas into one settle. */
 const LAYOUT_THROTTLE_MS = 180
@@ -296,12 +296,12 @@ function GraphSelection() {
       : `${edge?.source ?? '?'} —${edge?.label ?? '?'}→ ${edge?.target ?? '?'}`
 
   return (
-    <div className="pointer-events-none absolute bottom-2 left-2 max-w-[70%] rounded-[4px] border border-ink-700 bg-ink-1000/90 px-2.5 py-1.5">
-      <p className="truncate text-micro text-paper-dim">{title}</p>
+    <div className="pointer-events-none absolute bottom-2 left-2 max-w-[70%] rounded-[4px] border border-ink-4 bg-survey-paper/90 px-2.5 py-1.5">
+      <p className="truncate text-micro text-ink-2">{title}</p>
       <div className="mt-0.5">
         {entries.map(([key, value]) => (
-          <p key={key} className="truncate text-micro text-paper-mute">
-            <span className="text-paper-faint">{key}</span>: {formatValue(value)}
+          <p key={key} className="truncate text-micro text-ink-3">
+            <span className="text-ink-3">{key}</span>: {formatValue(value)}
           </p>
         ))}
       </div>
@@ -333,13 +333,15 @@ export const drawNodeLabel: NodeLabelDrawingFunction = (context, data, settings)
   context.fillText(data.label, x, y)
 }
 
-// The Chamber is dark: sigma defaults to a white stage, black Arial labels and a rainbow-less rainbow
-// of culled labels, so override all of it. Identity-stable (a module constant) so Sigma is never torn
-// down on a delta. Edge labels are never rendered — they scatter illegible rotated text over the field.
+// The plotting table is dark: sigma defaults to a white stage, black Arial labels and a rainbow-less
+// rainbow of culled labels, so override all of it. Identity-stable (a module constant) so Sigma is
+// never torn down on a delta. Edge labels are never rendered — they scatter illegible rotated text
+// over the field. The colours below are still legacy Chamber values; the plotting table is repainted
+// in Task 14.
 const SIGMA_SETTINGS = {
-  labelColor: { color: '#c9bfa9' }, // --color-paper-dim
-  defaultEdgeColor: '#3a342b', // --color-ink-600
-  labelFont: "'Public Sans Variable', 'Public Sans', system-ui, sans-serif",
+  labelColor: { color: '#c9bfa9' },
+  defaultEdgeColor: '#3a342b',
+  labelFont: "'Archivo Variable', Archivo, system-ui, sans-serif",
   labelSize: 12,
   labelWeight: '500',
   labelRenderedSizeThreshold: 4,
@@ -354,9 +356,9 @@ const CANVAS_STYLE = { '--sigma-background-color': 'transparent' } as CSSPropert
 function GraphLegend({ labels }: { labels: GraphLabel[] }) {
   if (labels.length === 0) return null
   return (
-    <ul className="pointer-events-none absolute left-2 top-2 inline-flex max-w-[60%] flex-wrap gap-x-3 gap-y-1 rounded-[4px] border border-ink-700 bg-ink-1000/85 px-2.5 py-1.5">
+    <ul className="pointer-events-none absolute left-2 top-2 inline-flex max-w-[60%] flex-wrap gap-x-3 gap-y-1 rounded-[4px] border border-ink-4 bg-survey-paper/85 px-2.5 py-1.5">
       {labels.map((entry) => (
-        <li key={entry.label} className="flex items-center gap-1.5 text-micro text-paper-dim">
+        <li key={entry.label} className="flex items-center gap-1.5 text-micro text-ink-2">
           <span aria-hidden="true" className="inline-block size-2.5 rounded-[2px]" style={{ backgroundColor: entry.color }} />
           {entry.label}
         </li>
@@ -371,8 +373,8 @@ function GraphOverlay({ phase, message }: { phase: GraphStreamPhase; message: st
   if (phase === 'waiting') {
     return (
       <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center gap-3">
-        <CircleNotch size={22} className="animate-spin text-paper-faint" aria-hidden="true" />
-        <p role="status" className="text-micro text-paper-mute">
+        <CircleNotch size={22} className="animate-spin text-ink-3" aria-hidden="true" />
+        <p role="status" className="text-micro text-ink-3">
           {message}
         </p>
         <div className="flex items-end gap-1.5" aria-hidden="true">
@@ -387,16 +389,16 @@ function GraphOverlay({ phase, message }: { phase: GraphStreamPhase; message: st
   return (
     <div
       role="status"
-      className={`pointer-events-none absolute inset-x-0 bottom-0 flex items-center gap-2 border-t bg-ink-1000/90 px-3 py-2 ${
-        failed ? 'border-critical/40' : 'border-ink-700'
+      className={`pointer-events-none absolute inset-x-0 bottom-0 flex items-center gap-2 border-t bg-survey-paper/90 px-3 py-2 ${
+        failed ? 'border-route/40' : 'border-ink-4'
       }`}
     >
       {failed ? (
-        <XCircle size={16} className="shrink-0 text-critical" aria-hidden="true" />
+        <XCircle size={16} className="shrink-0 text-route" aria-hidden="true" />
       ) : (
-        <CheckCircle size={16} className="shrink-0 text-paper-dim" aria-hidden="true" />
+        <CheckCircle size={16} className="shrink-0 text-ink-2" aria-hidden="true" />
       )}
-      <p className={`text-micro ${failed ? 'text-critical' : 'text-paper-dim'}`}>{message}</p>
+      <p className={`text-micro ${failed ? 'text-route' : 'text-ink-2'}`}>{message}</p>
     </div>
   )
 }
@@ -430,7 +432,7 @@ export default function GraphCanvas({ datasetId, jobId }: GraphCanvasProps) {
   )
 
   return (
-    <div className="relative h-[360px] overflow-hidden rounded-[6px] border border-ink-700 bg-ink-1000" style={CANVAS_STYLE}>
+    <div className="relative h-[360px] overflow-hidden rounded-[6px] border border-ink-4 bg-survey-paper" style={CANVAS_STYLE}>
       <div role="img" aria-label={canvasLabel} className="h-full w-full">
         {/* The height chain is explicit here: the wrapper is a fixed box, this is full-height, and Sigma's
             own `.sigma-container` fills it — its sizing rule ships in @react-sigma/core/lib/style.css (imported in main.tsx). */}
@@ -462,7 +464,7 @@ export default function GraphCanvas({ datasetId, jobId }: GraphCanvasProps) {
       {notice && (
         <p
           role="status"
-          className="pointer-events-none absolute right-2 top-2 flex items-center gap-1.5 rounded-[4px] border border-brass/40 bg-ink-1000/85 px-2 py-1 text-micro text-brass"
+          className="pointer-events-none absolute right-2 top-2 flex items-center gap-1.5 rounded-[4px] border border-brass/40 bg-survey-paper/85 px-2 py-1 text-micro text-brass"
         >
           <Warning size={13} aria-hidden="true" />
           {notice}

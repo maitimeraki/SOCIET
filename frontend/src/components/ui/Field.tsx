@@ -13,12 +13,12 @@ export default function Field({
 }) {
   return (
     <label className="block">
-      <span className="mb-1 block text-label uppercase text-paper-mute">{label}</span>
+      <span className="mb-1 block text-label uppercase text-ink-3">{label}</span>
       {children}
       {error ? (
-        <span className="mt-1 block text-micro text-critical">{error}</span>
+        <span className="mt-1 block text-micro text-route">{error}</span>
       ) : hint ? (
-        <span className="mt-1 block text-micro text-paper-mute">{hint}</span>
+        <span className="mt-1 block text-micro text-ink-3">{hint}</span>
       ) : null}
     </label>
   )

@@ -9,7 +9,7 @@ import StanceChip from './StanceChip'
 function OutcomeCell({ run }: { run: RunSummary }) {
   if (run.status === 'failed')
     return (
-      <span className="inline-flex items-center gap-1.5 text-critical">
+      <span className="inline-flex items-center gap-1.5 text-route">
         <XCircle size={14} aria-hidden="true" /> failed
       </span>
     )
@@ -20,16 +20,16 @@ function OutcomeCell({ run }: { run: RunSummary }) {
       </span>
     )
   if (run.status === 'running' || run.status === 'queued')
-    return <span className="text-paper-mute">{run.status === 'running' ? 'deliberating…' : 'queued'}</span>
+    return <span className="text-ink-3">{run.status === 'running' ? 'deliberating…' : 'queued'}</span>
   return (
     <span className="inline-flex items-center gap-2">
       {run.verdict_stance && <StanceChip stance={asStance(run.verdict_stance)} size="sm" />}
       {run.converged ? (
-        <span className="inline-flex items-center gap-1 text-good">
+        <span className="inline-flex items-center gap-1 text-stance-pos">
           <CheckCircle size={14} aria-hidden="true" /> converged
         </span>
       ) : (
-        <span className="text-paper-mute">plurality</span>
+        <span className="text-ink-3">plurality</span>
       )}
     </span>
   )
@@ -50,7 +50,7 @@ export default function RunTable({ runs, loading = false }: { runs: RunSummary[]
     <div className="overflow-x-auto">
       <table className="w-full border-collapse text-body">
         <thead>
-          <tr className="text-label uppercase text-paper-mute">
+          <tr className="text-label uppercase text-ink-3">
             <th className="py-2 pr-4 text-left font-medium">Question</th>
             <th className="py-2 pr-4 text-left font-medium">Corpus</th>
             <th className="tnum py-2 pr-4 text-right font-medium">Rounds</th>
@@ -58,20 +58,20 @@ export default function RunTable({ runs, loading = false }: { runs: RunSummary[]
             <th className="py-2 text-right font-medium">Created</th>
           </tr>
         </thead>
-        <tbody className="text-paper-dim">
+        <tbody className="text-ink-2">
           {runs.map((run) => (
-            <tr key={run.run_id} className="border-t border-ink-700 transition-colors hover:bg-ink-800">
+            <tr key={run.run_id} className="border-t border-ink-4 transition-colors hover:bg-survey-paper-2">
               <td className="max-w-[360px] py-2.5 pr-4">
-                <Link to={`/runs/${run.run_id}`} className="block truncate text-paper hover:text-accent">
+                <Link to={`/runs/${run.run_id}`} className="block truncate text-ink hover:text-datum">
                   {run.query}
                 </Link>
               </td>
-              <td className="tnum py-2.5 pr-4 font-mono text-mono text-paper-mute">{run.dataset_id}</td>
+              <td className="tnum py-2.5 pr-4 font-measurement text-mono text-ink-3">{run.dataset_id}</td>
               <td className="tnum py-2.5 pr-4 text-right">{run.rounds_executed}</td>
               <td className="py-2.5 pr-4">
                 <OutcomeCell run={run} />
               </td>
-              <td className="tnum py-2.5 text-right font-mono text-mono text-paper-mute">{fmtDate(run.created_at)}</td>
+              <td className="tnum py-2.5 text-right font-measurement text-mono text-ink-3">{fmtDate(run.created_at)}</td>
             </tr>
           ))}
         </tbody>

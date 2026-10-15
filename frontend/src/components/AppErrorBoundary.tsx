@@ -25,13 +25,13 @@ export function AppErrorFallback({
       ref={containerRef}
       role="alert"
       tabIndex={-1}
-      className="mx-auto max-w-[720px] rounded-[6px] border border-ink-600 bg-ink-900 p-8 outline-none"
+      className="mx-auto max-w-[720px] rounded-[6px] border border-ink-4 bg-survey-paper-2 p-8 outline-none"
     >
-      <p className="text-heading text-paper">Something went wrong</p>
-      <p className="mt-2 max-w-[60ch] text-body text-paper-dim">
+      <p className="text-heading text-ink">Something went wrong</p>
+      <p className="mt-2 max-w-[60ch] text-body text-ink-2">
         This view failed to render. Reload to pick your work back up, or head back to the dashboard.
       </p>
-      <p className="mt-4 font-mono text-mono text-paper-mute">{errorDigest(error)}</p>
+      <p className="mt-4 font-measurement text-mono text-ink-3">{errorDigest(error)}</p>
       <div className="mt-6 flex flex-wrap items-center gap-3">
         <button type="button" className={buttonClasses('primary')} onClick={onReload}>
           Reload

@@ -99,24 +99,24 @@ export default function IngestPage() {
         ]}
       />
       <div>
-        <p className="text-label uppercase text-paper-mute">Step 1 · Ingest</p>
-        <h1 className="mt-2 font-serif text-display text-paper">Build the corpus</h1>
-        <p className="mt-3 max-w-[60ch] text-body text-paper-dim">
+        <p className="text-label uppercase text-ink-3">Step 1 · Ingest</p>
+        <h1 className="mt-2 font-titling text-display text-ink">Build the corpus</h1>
+        <p className="mt-3 max-w-[60ch] text-body text-ink-2">
           Add the documents your experts would have read — PDFs, Word files, Markdown, plain text, or a web page.
         </p>
       </div>
 
       {note && (
-        <p className="rounded-[6px] border border-brass/40 bg-ink-800 px-4 py-3 text-body text-paper-dim">{note}</p>
+        <p className="rounded-[6px] border border-brass/40 bg-survey-paper-2 px-4 py-3 text-body text-ink-2">{note}</p>
       )}
 
       <FileDrop onFiles={handleFiles} />
       <UrlFetchRow onFetch={handleUrl} busy={fetchingUrl} />
 
       <section className="space-y-3">
-        <h2 className="text-heading text-paper">Documents</h2>
+        <h2 className="text-heading text-ink">Documents</h2>
         {docs.length === 0 ? (
-          <p className="text-body text-paper-mute">Nothing yet. PDFs, Word files, Markdown, or text.</p>
+          <p className="text-body text-ink-3">Nothing yet. PDFs, Word files, Markdown, or text.</p>
         ) : (
           <div className="space-y-2">
             {docs.map((doc) => (
@@ -135,7 +135,7 @@ export default function IngestPage() {
             Build the graph
             <ArrowRight size={16} aria-hidden="true" />
           </Button>
-          {!canContinue && <p className="mt-2 text-micro text-paper-mute">Add at least one document to continue</p>}
+          {!canContinue && <p className="mt-2 text-micro text-ink-3">Add at least one document to continue</p>}
         </div>
       </div>
     </div>

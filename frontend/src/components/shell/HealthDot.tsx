@@ -19,7 +19,7 @@ export default function HealthDot() {
   }, [check])
 
   const dot =
-    state === 'online' ? 'bg-good' : state === 'offline' ? 'bg-critical' : 'bg-paper-faint'
+    state === 'online' ? 'bg-stance-pos' : state === 'offline' ? 'bg-route' : 'bg-ink-4'
   const label =
     state === 'online'
       ? 'API online'
@@ -32,7 +32,7 @@ export default function HealthDot() {
   return (
     <span className="inline-flex items-center gap-2" title={`Checked ${API_BASE}/health`}>
       <span aria-hidden="true" className={`h-2 w-2 rounded-full ${dot}`} />
-      <span className="tnum font-mono text-mono text-paper-mute">{label}</span>
+      <span className="tnum font-measurement text-mono text-ink-3">{label}</span>
     </span>
   )
 }

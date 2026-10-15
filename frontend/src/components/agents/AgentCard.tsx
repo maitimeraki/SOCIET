@@ -8,15 +8,15 @@ export default function AgentCard({ profile, onOpen }: { profile: AgentProfile; 
     <button
       type="button"
       onClick={onOpen}
-      className="w-full rounded-[6px] border border-ink-700 bg-ink-900 p-4 text-left transition-colors hover:border-ink-600"
+      className="w-full rounded-[6px] border border-ink-4 bg-survey-paper-2 p-4 text-left transition-colors hover:border-ink-4"
     >
       <span className="flex items-center justify-between gap-2">
-        <span className="text-body text-paper">
+        <span className="text-body text-ink">
           {profile.identity.name} · {profile.identity.archetype.toLowerCase()}
         </span>
         <StanceChip stance={profile.stance} size="sm" />
       </span>
-      <span className="mt-2 line-clamp-2 block text-body text-paper-dim">{profile.bio}</span>
+      <span className="mt-2 line-clamp-2 block text-body text-ink-2">{profile.bio}</span>
       <span className="mt-3 flex flex-wrap gap-x-4 gap-y-1">
         <MeterBar label="conf" value={profile.confidence} display={profile.confidence.toFixed(2)} />
         <MeterBar label="conv" value={profile.conviction} display={profile.conviction.toFixed(2)} />

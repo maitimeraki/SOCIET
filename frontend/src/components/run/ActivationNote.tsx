@@ -11,7 +11,7 @@ export default function ActivationNote({
 }) {
   const reason = agents.map((agent) => reasons[agent]).find(Boolean)
   return (
-    <p className="flex items-center gap-2 text-micro text-accent">
+    <p className="flex items-center gap-2 text-micro text-datum">
       <Lightning size={14} aria-hidden="true" />
       {agents.length} {agents.length === 1 ? 'voice' : 'voices'} joined for round {round + 1}
       {reason ? ` — ${reason}` : ''}.

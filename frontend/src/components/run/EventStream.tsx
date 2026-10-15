@@ -42,16 +42,16 @@ export default function EventStream({ items, live }: { items: StreamItem[]; live
           switch (item.kind) {
             case 'round-header':
               return (
-                <h3 key={index} className="pt-2 text-heading text-paper">
+                <h3 key={index} className="pt-2 text-heading text-ink">
                   Round {item.round}{' '}
-                  <span className="tnum font-mono text-micro text-paper-mute">{item.pairs} pairs</span>
+                  <span className="tnum font-measurement text-micro text-ink-3">{item.pairs} pairs</span>
                 </h3>
               )
             case 'turn':
               return <TurnCard key={index} turn={item.turn} round={item.round} />
             case 'pending':
               return (
-                <p key={item.pairId} className="animate-pulse text-micro text-paper-mute">
+                <p key={item.pairId} className="animate-pulse text-micro text-ink-3">
                   {item.a} is preparing a reply…
                 </p>
               )
@@ -67,9 +67,9 @@ export default function EventStream({ items, live }: { items: StreamItem[]; live
               )
           }
         })}
-        {items.length === 0 && <p className="text-body text-paper-mute">Waiting for the floor…</p>}
+        {items.length === 0 && <p className="text-body text-ink-3">Waiting for the floor…</p>}
         {items.length > MAX_ROWS && (
-          <p className="text-micro text-paper-mute">Showing the last {MAX_ROWS} rows — the full record is in Artifacts.</p>
+          <p className="text-micro text-ink-3">Showing the last {MAX_ROWS} rows — the full record is in Artifacts.</p>
         )}
       </div>
       {paused && live && (
@@ -79,7 +79,7 @@ export default function EventStream({ items, live }: { items: StreamItem[]; live
             setPaused(false)
             container.current?.scrollTo({ top: container.current.scrollHeight })
           }}
-          className="sticky bottom-2 left-1/2 mt-2 -translate-x-1/2 rounded-[4px] border border-ink-600 bg-ink-800 px-3 py-1.5 text-micro text-paper"
+          className="sticky bottom-2 left-1/2 mt-2 -translate-x-1/2 rounded-[4px] border border-ink-4 bg-survey-paper-2 px-3 py-1.5 text-micro text-ink"
         >
           Jump to live ↓
         </button>

@@ -7,29 +7,29 @@ import StanceChip from '../common/StanceChip'
 export default function FinalStanceTable({ run }: { run: RunState }) {
   const byName = rosterById(run)
   const rows = Object.entries(run.verdict?.finalStances ?? {})
-  if (rows.length === 0) return <p className="text-body text-paper-mute">No final stances recorded.</p>
+  if (rows.length === 0) return <p className="text-body text-ink-3">No final stances recorded.</p>
   return (
     <table className="w-full border-collapse text-body">
       <thead>
-        <tr className="text-label uppercase text-paper-mute">
+        <tr className="text-label uppercase text-ink-3">
           <th className="py-2 pr-4 text-left font-medium">Agent</th>
           <th className="py-2 pr-4 text-left font-medium">Archetype</th>
           <th className="py-2 pr-4 text-left font-medium">Final</th>
           <th className="tnum py-2 text-right font-medium">Confidence</th>
         </tr>
       </thead>
-      <tbody className="text-paper-dim">
+      <tbody className="text-ink-2">
         {rows.map(([agent, stance]) => {
           const profile = byName.get(agent)
           const lastConfidence = lastTurnConfidence(run, agent)
           return (
-            <tr key={agent} className="border-t border-ink-700">
-              <td className="py-2.5 pr-4 text-paper">{agent}</td>
+            <tr key={agent} className="border-t border-ink-4">
+              <td className="py-2.5 pr-4 text-ink">{agent}</td>
               <td className="py-2.5 pr-4">{profile?.identity.archetype ?? '—'}</td>
               <td className="py-2.5 pr-4">
                 <StanceChip stance={asStance(stance)} size="sm" />
               </td>
-              <td className="tnum py-2.5 text-right font-mono text-mono">
+              <td className="tnum py-2.5 text-right font-measurement text-mono">
                 {lastConfidence === null ? '—' : fmtScore(lastConfidence)}
               </td>
             </tr>
