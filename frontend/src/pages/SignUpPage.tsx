@@ -11,7 +11,7 @@ import {
   emailError,
   passwordError,
   safeNext,
-} from '../auth/AuthLayout'
+} from '../auth/authForm'
 import { useAuthStore } from '../auth/authStore'
 import Button from '../components/ui/Button'
 import Field from '../components/ui/Field'
