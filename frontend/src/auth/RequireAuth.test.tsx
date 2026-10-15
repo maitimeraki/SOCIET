@@ -5,7 +5,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { useAuthStore, type AuthStatus } from './authStore'
-import { AuthSplash, GuardView, bootstrapSession, resolveGuard, signInTarget } from './RequireAuth'
+import { bootstrapSession, resolveGuard, signInTarget } from './guard'
+import { AuthSplash, GuardView } from './RequireAuth'
 
 const USER = { id: 'u1', email: 'a@b.c', created_at: '2026-01-01T00:00:00Z' }
 

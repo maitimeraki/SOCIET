@@ -3,7 +3,8 @@ import { describe, expect, it } from 'vitest'
 // directly and the components are rendered to static markup in Node.
 import { renderToStaticMarkup } from 'react-dom/server'
 import { ApiError, NetworkError } from '../api/rest'
-import { CautionLine, IntakeStamp, authErrorCopy, confirmError, emailError, passwordError, safeNext } from './authForm'
+import { CautionLine, IntakeStamp } from './authForm'
+import { authErrorCopy, confirmError, emailError, passwordError, safeNext } from './authRules'
 
 describe('authForm — validation on blur and submit', () => {
   it('rejects a blank or malformed email and accepts a shaped one', () => {

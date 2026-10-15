@@ -3,8 +3,9 @@ import { describe, expect, it } from 'vitest'
 // markup in Node instead.
 import { renderToStaticMarkup } from 'react-dom/server'
 import type { Stance } from '../../run/events'
+import { STANCE_ORDER } from '../../run/selectors'
 import StanceChip from './StanceChip'
-import StanceSymbol, { STANCE_ORDER } from './StanceSymbol'
+import StanceSymbol from './StanceSymbol'
 import Legend from './Legend'
 
 /** The map-legend hue each stance's symbol owns (DSPEC §3.1) — the symbol colour, never the word's. */

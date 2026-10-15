@@ -1,8 +1,7 @@
 import { useEffect, useState, type FormEvent } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
+import { CautionLine, IntakeStamp } from '../auth/authForm'
 import {
-  CautionLine,
-  IntakeStamp,
   MIN_PASSWORD,
   STAMP_MS,
   type AuthError,
@@ -11,7 +10,7 @@ import {
   emailError,
   passwordError,
   safeNext,
-} from '../auth/authForm'
+} from '../auth/authRules'
 import { useAuthStore } from '../auth/authStore'
 import Button from '../components/ui/Button'
 import Field from '../components/ui/Field'

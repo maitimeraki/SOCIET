@@ -1,5 +1,4 @@
 import type { ReactNode } from 'react'
-import { GRAPH_PALETTE } from '../../graph/graphStore'
 
 export interface LegendEntry {
   /** Optional key matching a `RuledBlock`'s legend key, so a block and its legend entry are linkable. */
@@ -50,14 +49,3 @@ export default function Legend({
   )
 }
 
-/**
- * The map palette as legend entries — the single source bridging `GRAPH_PALETTE` (the graph's data
- * encoding, R33) and this legend. §3's law is that a hue with no legend entry does not exist, so the
- * seven categorical hues are keyed by name: the table's **keys are these entries**. The swatch is the
- * drawn mark (aria-hidden via `Legend`), the name is the word, so the hue is never the only carrier.
- * Consumers render it with `<Legend entries={paletteEntries} title="Map palette" />`.
- */
-export const paletteEntries: LegendEntry[] = Object.entries(GRAPH_PALETTE).map(([label, color]) => ({
-  label,
-  symbol: <span className="inline-block size-2.5 rounded-[2px]" style={{ backgroundColor: color }} />,
-}))

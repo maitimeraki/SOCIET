@@ -1,9 +1,6 @@
 import type { ReactElement } from 'react'
 import type { Stance } from '../../run/events'
 
-/** The frozen canonical order (DSPEC §3.1): POS → NEU → AMB → NEG. */
-export const STANCE_ORDER: readonly Stance[] = ['POSITIVE', 'NEUTRAL', 'AMBIVALENT', 'NEGATIVE']
-
 /**
  * §6/§9 The legend law's glyphs — one drawn form per stance, so stance survives CVD, greyscale and
  * a monochrome print. Form is what carries the meaning; the hue is the map legend's own convention

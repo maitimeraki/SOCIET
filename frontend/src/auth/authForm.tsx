@@ -1,102 +1,11 @@
-import { ApiError, ConfigError, NetworkError } from '../api/rest'
 import Button from '../components/ui/Button'
+import type { AuthError } from './authRules'
 
-/* ── the auth form's shared concerns ──────────────────────────────────────────────────────────────
-   Sign-in and sign-up are one surface, so the security boundary (`safeNext`), the field validators,
-   the error copy and the §7.2 state marks live here, in their own module — not in `AuthLayout`, which
-   owns the frame and must not own a security boundary or the form's business rules (R38). A layout is
-   structure; these are the surface's rules. */
-
-/** How long the intake stamp holds before the page routes on. The `plot-fix` move it rides runs 560 ms
- *  and only reaches full opacity at 60% (~336 ms), so a shorter hold was a blink on a normal-motion
- *  machine. 640 ms lets the mark complete (560 ms) and settle for a beat before the office opens. */
-export const STAMP_MS = 640
-
-const DEFAULT_NEXT = '/dashboard'
-
-/** Tab, newline, CR and the rest of the C0/C1 controls. The WHATWG URL parser *strips* these anywhere
- *  in the input, so `/\n/evil.example` would otherwise normalise to `//evil.example` → an off-site
- *  origin. Rejecting them outright closes that class before any parsing happens. */
-const CONTROL_CHARS = /[\u0000-\u001f\u007f]/
-
-/**
- * `next` is a security boundary. Only a same-origin, relative path is honoured: an absolute URL
- * (`https://evil`), a protocol-relative host (`//evil`), a bare relative (`runs`), a backslash trick
- * (`/\evil`, which some engines normalise to `//`) or a value carrying a stripped control character
- * (`/\n/evil.example`) all fall back to the dashboard — a crafted `?next=` can never walk a
- * freshly-authenticated user off-site.
- *
- * Two layers: the syntactic guards above reject the known shapes, then the value is resolved against
- * the app origin and must stay on it (defence in depth against an unforeseen normalisation). `location`
- * does not exist under the node test runner, so the fallback base is required.
- */
-export function safeNext(raw: string | null | undefined): string {
-  if (!raw) return DEFAULT_NEXT
-  if (CONTROL_CHARS.test(raw)) return DEFAULT_NEXT
-  if (!raw.startsWith('/')) return DEFAULT_NEXT
-  if (raw.startsWith('//')) return DEFAULT_NEXT
-  if (raw.includes('\\')) return DEFAULT_NEXT
-  const base = globalThis.location?.origin ?? 'http://localhost'
-  try {
-    if (new URL(raw, base).origin !== base) return DEFAULT_NEXT
-  } catch {
-    return DEFAULT_NEXT
-  }
-  return raw
-}
-
-export interface AuthError {
-  /** The sentence shown to the user. It is honest about the failure and never reveals which field. */
-  message: string
-  /** A transient failure the user can retry in place (the network). A credentials failure cannot. */
-  retry: boolean
-}
-
-/**
- * Map a thrown transport error to user-facing copy. Sign-in's 401 is one sentence for both fields —
- * naming the bad field would hand an attacker a username oracle — and sign-up's 409 names the taken
- * address, which the user already typed and already knows.
- */
-export function authErrorCopy(error: unknown, mode: 'signin' | 'signup'): AuthError {
-  if (error instanceof NetworkError) {
-    return { message: "Couldn't reach the server. Check your connection and try again.", retry: true }
-  }
-  if (error instanceof ConfigError) {
-    return { message: "This build isn't pointed at a server. Ask whoever deployed it to set it up.", retry: false }
-  }
-  if (error instanceof ApiError) {
-    if (mode === 'signup' && error.status === 409) {
-      return { message: 'That email is already registered.', retry: false }
-    }
-    if (error.status === 401) {
-      return { message: 'Email or password is incorrect.', retry: false }
-    }
-    return { message: 'Something went wrong. Please try again.', retry: true }
-  }
-  return { message: 'Something went wrong. Please try again.', retry: true }
-}
-
-const EMAIL_SHAPE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
-
-export function emailError(value: string): string | null {
-  if (value.trim() === '') return 'Enter your email address.'
-  if (!EMAIL_SHAPE.test(value.trim())) return 'Enter a valid email address.'
-  return null
-}
-
-export const MIN_PASSWORD = 8
-
-export function passwordError(value: string): string | null {
-  if (value === '') return 'Enter a password.'
-  if (value.length < MIN_PASSWORD) return `Use at least ${MIN_PASSWORD} characters.`
-  return null
-}
-
-export function confirmError(password: string, confirm: string): string | null {
-  if (confirm === '') return 'Re-enter your password.'
-  if (confirm !== password) return 'Passwords do not match.'
-  return null
-}
+/* ── the auth form's state marks ──────────────────────────────────────────────────────────────────
+   The two §7.2 marks the forms render. The surface's *rules* — the security boundary (`safeNext`),
+   the validators, the error copy and the stamp timing — live in `authRules.ts`; a module that exports
+   components alongside plain values is exactly what `react-refresh/only-export-components` refuses,
+   and these files are the first real consumers of that split. */
 
 /**
  * §7.2 error state — a **brass caution line**, the mark in brass and the words in ink (R35). The rule
