@@ -74,7 +74,7 @@ export default function DashboardView({
         {failed ? (
           <ErrorState
             title="Couldn't reach the server"
-            detail={failDetail ?? 'The traverse log loads when the server is back.'}
+            detail={failDetail || 'The traverse log loads when the server is back.'}
           />
         ) : empty ? (
           <EmptyState

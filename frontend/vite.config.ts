@@ -16,7 +16,10 @@ export default defineConfig({
   // the suite runs same-origin like dev does through the proxy. Tests that need the unset case
   // stub it away with vi.stubEnv + vi.resetModules.
   test: {
-    env: { VITE_API_BASE: "" },
+    // Pin TZ so `fmtDate`'s local-time output is deterministic. Verified on this Windows host: Node
+    // honours the literal `TZ=UTC` (offset 0, at startup and at runtime) but ignores IANA zone names
+    // like `America/New_York` (offset stays −330) — so a named-zone pin would silently do nothing.
+    env: { VITE_API_BASE: "", TZ: "UTC" },
   },
   // Split the vendors a route only needs off the entry chunk: the graph stack (Sigma + graphology)
   // and framer-motion are heavy and route-local, and react/router is the stable shared core. The
