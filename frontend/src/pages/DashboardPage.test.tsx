@@ -3,6 +3,7 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import { MemoryRouter } from 'react-router-dom'
 import { listRunsPage } from '../api/rest'
 import type { RunSummary } from '../api/types'
+import { fmtDate } from '../utils/format'
 import DashboardView from './dashboardView'
 import type { DashboardViewProps } from './dashboardView'
 
@@ -49,7 +50,11 @@ describe('DashboardPage — the traverse log (plan §3.3)', () => {
     for (const header of ['Timestamp', 'Question', 'Documents used', 'Status', 'Agents']) {
       expect(html).toContain(header)
     }
-    expect(html).toContain('1 Oct 2026') // timestamp → created_at
+    // Timestamp cell = `fmtDate(created_at)`. Asserted against the same formatter (not a pinned
+    // literal) so the check is TZ-stable — Node ignores `TZ` on Windows, so a pinned date would
+    // flake on a host outside IST (R48 m2). The shape guard keeps the formatter honest.
+    expect(html).toContain(fmtDate(run().created_at))
+    expect(fmtDate(run().created_at)).toMatch(/^\d{1,2} [A-Z][a-z]{2} \d{4} \d{2}:\d{2}$/)
     expect(html).toContain('Should we expand into Europe?') // question → query
     expect(html).toContain('ds-1') // documents used → dataset_id (the corpus id)
     expect(html).toContain('Complete') // status → StateChip
@@ -64,6 +69,14 @@ describe('DashboardPage — the traverse log (plan §3.3)', () => {
     expect(render({ runs: [], loading: true })).not.toContain('Run your first society')
     // The rendered apostrophe is entity-escaped by `renderToStaticMarkup`, so assert an unescaped span.
     expect(render({ runs: [], failed: true })).toContain('reach the server')
+  })
+
+  it('carries the server message into the failure detail, standing copy when there is none', () => {
+    expect(render({ runs: [], failed: true, failDetail: 'API 500: the log is unavailable' })).toContain(
+      'API 500: the log is unavailable',
+    )
+    // No message forwarded → the view's own copy, never an empty detail.
+    expect(render({ runs: [], failed: true })).toContain('loads when the server is back')
   })
 
   it('walks next_cursor on Load more, stopping at the end', async () => {

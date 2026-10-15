@@ -130,7 +130,7 @@ export default function GraphPage() {
       </div>
 
       {reconnecting && (
-        <p className="rounded-[4px] border border-brass/40 px-3 py-2 text-micro text-brass">
+        <p className="rounded-[4px] border border-brass/40 px-3 py-2 text-micro text-ink">
           Can't reach the server. The job continues on the server — we'll reconnect.
         </p>
       )}

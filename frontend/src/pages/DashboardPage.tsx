@@ -66,6 +66,9 @@ export default function DashboardPage() {
   const [loading, setLoading] = useState(true)
   const [loadingMore, setLoadingMore] = useState(false)
   const [failed, setFailed] = useState(false)
+  // The server's own message, forwarded so the failure state is never silent (CLAUDE.md: never
+  // swallow exceptions). Absent (a non-Error throw) the view falls back to its standing copy.
+  const [failDetail, setFailDetail] = useState<string>()
   // The client's own corpus knowledge: the wizard draft (sessionStorage). Absent in a fresh session,
   // so the primary action defaults to the ingest step.
   const datasetId = useDraftStore((s) => s.datasetId)
@@ -76,7 +79,10 @@ export default function DashboardPage() {
         setRuns(page.items)
         setCursor(page.next_cursor)
       })
-      .catch(() => setFailed(true))
+      .catch((error: unknown) => {
+        setFailed(true)
+        setFailDetail(error instanceof Error ? error.message : undefined)
+      })
       .finally(() => setLoading(false))
   }, [])
 
@@ -101,6 +107,7 @@ export default function DashboardPage() {
       runs={runs}
       loading={loading}
       failed={failed}
+      failDetail={failDetail}
       hasMore={cursor !== null}
       loadingMore={loadingMore}
       onLoadMore={loadMore}

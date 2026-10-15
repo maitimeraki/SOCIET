@@ -32,12 +32,26 @@ describe('the sheet — the first viewport', () => {
 })
 
 describe('the legend law', () => {
-  it('pairs every stance hue with a drawn symbol and an ink word', () => {
-    for (const word of ['positive', 'neutral', 'ambivalent', 'negative']) {
-      expect(html).toContain(word)
+  // The hue each stance's symbol owns (DSPEC §3.1) — the symbol colour, never the word's.
+  const HUE: Record<string, string> = {
+    positive: 'var(--color-stance-pos)',
+    neutral: 'var(--color-stance-neu)',
+    ambivalent: 'var(--color-stance-amb)',
+    negative: 'var(--color-stance-neg)',
+  }
+
+  it('pairs every stance hue with its own word in one legend entry', () => {
+    // The stations emit the same hues, so a bare page-level `toContain` proves nothing about the
+    // legend. Scope to the legend block and check each word against the hue in its OWN entry (R52).
+    const marker = `aria-label="${hero.legendTitle}"`
+    const start = html.indexOf(marker)
+    const legend = html.slice(start, html.indexOf('</section>', start))
+    const entries = legend.split('<li').slice(1)
+    for (const [word, hue] of Object.entries(HUE)) {
+      const entry = entries.find((chunk) => chunk.includes(word))
+      expect(entry, `a legend entry for "${word}"`).toBeDefined()
+      expect(entry).toContain(hue)
     }
-    expect(html).toContain('var(--color-stance-pos)')
-    expect(html).toContain('var(--color-stance-neg)')
   })
 })
 

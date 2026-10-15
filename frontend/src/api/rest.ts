@@ -173,7 +173,10 @@ export const listRunsPage = (options: { limit?: number; cursor?: string | null }
   return request<RunListPage>(`/api/v1/simulate/debates${query ? `?${query}` : ''}`)
 }
 
-/** The first page's items — the pre-pagination callers (HomePage, AgentsPage). */
+/**
+ * The first page's items — for callers that want only the newest runs. Capped at **25** (the v1 page
+ * size): a caller that needs the full list must walk `listRunsPage` + `next_cursor` itself.
+ */
 export const listRuns = async (): Promise<RunSummary[]> => (await listRunsPage({ limit: 25 })).items
 
 export const getRun = (runId: string) => request<RunDoc>(`/api/v1/simulate/debates/${runId}`)

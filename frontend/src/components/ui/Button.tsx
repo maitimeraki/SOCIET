@@ -25,7 +25,7 @@ const VARIANT: Record<ButtonVariant, string> = {
 const REGISTRATION =
   "relative after:pointer-events-none after:absolute after:right-0 after:top-0 after:h-1.5 after:w-1.5 after:border-r after:border-t after:border-ink-3 after:content-['']"
 
-// eslint-disable-next-line react-refresh/only-export-components -- buttonClasses is the shared Link-as-button styling API (HomePage, ui barrel)
+// eslint-disable-next-line react-refresh/only-export-components -- buttonClasses is the shared Link-as-button styling API (Masthead, marketing, dashboardView)
 export function buttonClasses(variant: ButtonVariant = 'secondary', size: ButtonSize = 40, extra = ''): string {
   const h = size === 40 ? 'h-10 px-4 text-body' : 'h-8 px-3 text-micro'
   const mark = variant === 'ghost' ? '' : REGISTRATION

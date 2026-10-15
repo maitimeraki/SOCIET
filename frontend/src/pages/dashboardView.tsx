@@ -13,6 +13,8 @@ export interface DashboardViewProps {
   runs: RunSummary[]
   loading: boolean
   failed: boolean
+  /** The server's own failure message, when the page has one; the standing copy stands in otherwise. */
+  failDetail?: string
   hasMore: boolean
   loadingMore: boolean
   onLoadMore: () => void
@@ -34,6 +36,7 @@ export default function DashboardView({
   runs,
   loading,
   failed,
+  failDetail,
   hasMore,
   loadingMore,
   onLoadMore,
@@ -71,7 +74,7 @@ export default function DashboardView({
         {failed ? (
           <ErrorState
             title="Couldn't reach the server"
-            detail="The traverse log loads when the server is back."
+            detail={failDetail ?? 'The traverse log loads when the server is back.'}
           />
         ) : empty ? (
           <EmptyState
