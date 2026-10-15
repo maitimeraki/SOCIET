@@ -32,7 +32,7 @@ export default function DemoVideo() {
         )}
         <p className="mt-3 max-w-[68ch] text-micro text-ink-3">{demo.note}</p>
         <details className="mt-2">
-          <summary className="text-micro text-ink-3">Transcript</summary>
+          <summary className="text-micro text-ink-3">{demo.transcriptLabel}</summary>
           <p className="mt-1 max-w-[68ch] text-micro text-ink-3">{demo.transcript}</p>
         </details>
       </RuledBlock>

@@ -49,7 +49,7 @@ export default function Hero() {
           {meta.wordmark}
           <span className="text-ink-3"> · {meta.descriptor}</span>
         </p>
-        <nav aria-label="Sheet sections" className="flex flex-wrap items-baseline gap-x-4 gap-y-1 text-micro text-ink-3">
+        <nav aria-label={sheet.navLabel} className="flex flex-wrap items-baseline gap-x-4 gap-y-1 text-micro text-ink-3">
           {sheet.nav.map((item) => (
             <a key={item.href} href={item.href} className="transition-colors hover:text-ink">
               {item.label}
@@ -63,10 +63,7 @@ export default function Hero() {
 
       <figure className="hero-plot mt-8">
         <svg viewBox={`0 0 ${VIEW.w} ${VIEW.h}`} role="img" aria-labelledby="territory-title">
-          <title id="territory-title">
-            A scripted sample survey: nine stations on the sheet, the lines of sight traced between them, and the
-            fix with a closure of {hero.closure}. Synthetic — not a live run.
-          </title>
+          <title id="territory-title">{hero.plotTitle(hero.closure)}</title>
 
           <defs>
             <pattern
@@ -140,7 +137,7 @@ export default function Hero() {
               data-station="true"
               transform={`translate(${station.x - STATION_SIZE / 2} ${station.y - STATION_SIZE / 2})`}
             >
-              <title>{`${station.stance.toLowerCase()} station — ${station.entity} (synthetic)`}</title>
+              <title>{hero.stationTitle(station.stance, station.entity)}</title>
               <StanceSymbol stance={station.stance} size={STATION_SIZE} />
             </g>
           ))}

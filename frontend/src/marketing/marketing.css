@@ -7,20 +7,32 @@
  */
 
 /* The sheet is full-bleed: it IS the page, not a card inside one (DSPEC §7.1). It supplies its own
-   gutters, which the marketing frame deliberately does not. */
-.sheet {
+   gutters, which the marketing frame deliberately does not. `.sheet-gutters` carries the same gutter
+   to the ruled sections and the title-block close that follow the full-bleed hero — without it those
+   sit flush against the viewport edge. */
+.sheet,
+.sheet-gutters {
   --sheet-gutter: 1.25rem;
+}
+
+.sheet {
   padding: 0 var(--sheet-gutter) var(--sheet-gutter);
 }
 
+.sheet-gutters {
+  padding-inline: var(--sheet-gutter);
+}
+
 @media (min-width: 640px) {
-  .sheet {
+  .sheet,
+  .sheet-gutters {
     --sheet-gutter: 2rem;
   }
 }
 
 @media (min-width: 1024px) {
-  .sheet {
+  .sheet,
+  .sheet-gutters {
     --sheet-gutter: 3rem;
   }
 }

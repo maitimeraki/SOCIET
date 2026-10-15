@@ -22,12 +22,11 @@ export const meta = {
    * when the version starts moving.
    */
   version: '0.0.0',
-  title: 'Societas',
-  description:
-    'Societas convenes a society of AI specialists that debate your business question and file a weighted verdict — with the confidence and the case against.',
 } as const
 
 export const sheet = {
+  /** The sheet's section nav — its accessible name. */
+  navLabel: 'Sheet sections',
   nav: [
     { label: 'how it works', href: '#how-it-works' },
     { label: 'the record', href: '#the-record' },
@@ -41,6 +40,12 @@ export const hero = {
   deck: 'A society of specialists, drawn from your own record, argues your decision and files a weighted verdict — with the confidence and the case against.',
   syntheticLabel: 'Synthetic sample survey — nine stations, scripted, not a live run',
   legendTitle: 'Legend',
+  /** The plot's accessible name — the SVG `<title>`, with the closure figure interpolated. */
+  plotTitle: (closure: number) =>
+    `A scripted sample survey: nine stations on the sheet, the lines of sight traced between them, and the fix with a closure of ${closure}. Synthetic — not a live run.`,
+  /** A station's accessible name — the hue carries the symbol; the word is ink, and lives only here. */
+  stationTitle: (stance: Stance, entity: string) =>
+    `${stance.toLowerCase()} station — ${entity} (synthetic)`,
   /** The closure figure the scripted fix settles on. */
   closure: 0.82,
   primary: { label: 'Begin a survey', to: '/auth/signup?next=/dashboard' },
@@ -92,6 +97,7 @@ export const sections = {
     heading: 'The field recording',
     note: 'The demo recording is not published yet. This frame is wired for it: a real, unedited capture of a run, with captions and a transcript.',
     poster: 'demo video coming',
+    transcriptLabel: 'Transcript',
     transcript: 'The transcript lands with the recording.',
   },
   howItWorks: {
