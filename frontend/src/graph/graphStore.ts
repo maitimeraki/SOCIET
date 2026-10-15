@@ -41,6 +41,12 @@ interface GraphStoreState {
   nodes: Record<string, GraphNode>
   edges: Record<string, GraphEdge>
   labels: GraphLabel[]
+  /**
+   * Monotonic count of node/edge merges. A cheap primitive invalidation key for derived views, so
+   * they key on "the graph changed" without deep-comparing (or holding a reference to) the maps.
+   * Labels are vocabulary, not content, so `mergeVocabulary` does not bump it.
+   */
+  version: number
   mergeDelta: (delta: GraphDelta) => void
   applySnapshot: (snapshot: GraphSnapshot) => void
   mergeVocabulary: (labels: string[]) => void
@@ -100,18 +106,21 @@ export const useGraphStore = create<GraphStoreState>((set) => ({
   nodes: {},
   edges: {},
   labels: [],
+  version: 0,
 
   mergeDelta: (delta) =>
     set((state) => ({
       nodes: upsertNodes(state.nodes, delta.nodes),
       edges: upsertEdges(state.edges, delta.edges),
+      version: state.version + 1,
     })),
 
   applySnapshot: (snapshot) =>
-    set(() => ({
+    set((state) => ({
       nodes: upsertNodes({}, snapshot.nodes),
       edges: upsertEdges({}, snapshot.edges),
       labels: mergeLabels(snapshot.labels, []),
+      version: state.version + 1,
     })),
 
   mergeVocabulary: (incoming) => set((state) => ({ labels: mergeLabels(incoming, state.labels) })),

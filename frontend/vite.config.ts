@@ -11,4 +11,28 @@ export default defineConfig({
   test: {
     env: { VITE_API_BASE: "" },
   },
+  // Split the vendors a route only needs off the entry chunk: the graph stack (Sigma + graphology)
+  // and framer-motion are heavy and route-local, and react/router is the stable shared core. The
+  // pages themselves split via React.lazy in App.tsx.
+  //
+  // Vite 8 builds with rolldown, which does not accept Rollup's `output.manualChunks` object map
+  // (only a function), so the same three groups are declared with rolldown's `codeSplitting.groups`.
+  // `react` is listed first: a group also captures its modules' dependencies, and the graph stack
+  // peers on React — claiming React first keeps it out of the sigma chunk.
+  build: {
+    chunkSizeWarningLimit: 500,
+    rolldownOptions: {
+      output: {
+        codeSplitting: {
+          groups: [
+            { name: "react", test: /node_modules[\\/](react|react-dom|react-router|react-router-dom)[\\/]/ },
+            // JS only: main.tsx eagerly imports @react-sigma/core's stylesheet, and a CSS module in
+            // this group drags the whole sigma JS chunk into the entry's modulepreload list.
+            { name: "sigma", test: /node_modules[\\/](sigma|graphology|graphology-layout-forceatlas2|@react-sigma)[\\/].*\.(?:js|mjs|cjs)$/ },
+            { name: "motion", test: /node_modules[\\/]framer-motion[\\/]/ },
+          ],
+        },
+      },
+    },
+  },
 });

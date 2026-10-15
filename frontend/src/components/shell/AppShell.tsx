@@ -1,6 +1,8 @@
 import type { ReactNode } from 'react'
 import Masthead from './Masthead'
-import { ToastHost } from '../ui'
+// Imported by path, not through the `../ui` barrel: the barrel also re-exports Dialog/Drawer, whose
+// framer-motion import would otherwise ride into the eagerly-loaded shell and the initial chunk.
+import { ToastHost } from '../ui/Toast'
 
 export default function AppShell({ children }: { children: ReactNode }) {
   return (

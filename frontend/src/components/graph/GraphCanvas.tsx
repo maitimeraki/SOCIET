@@ -406,6 +406,7 @@ export default function GraphCanvas({ datasetId, jobId }: GraphCanvasProps) {
   const nodes = useGraphStore((s) => s.nodes)
   const edges = useGraphStore((s) => s.edges)
   const labels = useGraphStore((s) => s.labels)
+  const version = useGraphStore((s) => s.version)
   const nodeCount = Object.keys(nodes).length
   const notice = simplifiedViewNotice(nodeCount)
   // A new dataset is a new graph — a fresh instance so no stale nodes survive the switch.
@@ -419,9 +420,13 @@ export default function GraphCanvas({ datasetId, jobId }: GraphCanvasProps) {
   const canvasLabel = graphAriaLabel(nodeCount, Object.keys(edges).length, labels.length)
   const phase = graphStreamPhase(nodeCount, status, done)
   const statusMessage = graphStatusMessage(nodeCount, status, done)
+  // Keyed on the store's monotonic version, not the maps themselves: the derivation is O(edges), and
+  // a re-render from any other slice (labels, selection, a whole-store re-sync) must not re-run it.
+  // `version` bumps in the same `set` that swaps `nodes`/`edges`, so the closure is never stale.
   const fallback = useMemo(
     () => graphTextFallback(Object.values(nodes), Object.values(edges), TEXT_FALLBACK_LIMIT),
-    [nodes, edges],
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- version is the invalidation key for nodes/edges
+    [version],
   )
 
   return (
