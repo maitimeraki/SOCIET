@@ -22,8 +22,9 @@ describe('the field notebook', () => {
         <Input />
       </Field>,
     )
-    const rowTag = html.slice(0, html.indexOf('>') + 1) // the <label …> opening tag
-    expect(rowTag).toContain('<label')
+    const rowTag = html.slice(0, html.indexOf('>') + 1) // the row's opening tag (F4: a <div>, the
+    // note having moved out of the <label> so it is described, not named)
+    expect(rowTag).toContain('<div')
     expect(rowTag).not.toContain('corner-tick')
     expect(html).toContain('<input class="corner-tick') // …and the control does carry it
   })
@@ -43,5 +44,20 @@ describe('the field notebook', () => {
     expect(html).toContain('That name is taken.')
     expect(html).toContain('text-ink-2')
     expect(html).not.toContain('text-route')
+  })
+
+  it('keeps the note out of the label, so it describes the control rather than naming it (F4)', () => {
+    const html = renderToStaticMarkup(<Field label="Name" error="That name is taken."><Input /></Field>)
+    const label = html.slice(html.indexOf('<label'), html.indexOf('</label>'))
+    expect(label).toContain('Name')
+    expect(label).not.toContain('That name is taken.')
+  })
+
+  it('references the note from the control by id, as a description (F4)', () => {
+    const html = renderToStaticMarkup(<Field label="Name" error="That name is taken."><Input /></Field>)
+    const noteId = html.match(/<span id="([^"]+)" role="alert"/)?.[1]
+    expect(noteId).toBeTruthy()
+    expect(html).toContain(`aria-describedby="${noteId}"`)
+    expect(html).toContain(`aria-errormessage="${noteId}"`)
   })
 })

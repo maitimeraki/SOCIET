@@ -7,23 +7,41 @@ import Button from '../components/ui/Button'
    owns the frame and must not own a security boundary or the form's business rules (R38). A layout is
    structure; these are the surface's rules. */
 
-/** How long the intake stamp holds before the page routes on. Deliberate, and short: Operate users are
- *  in a task, so the stamp lands and the office opens rather than making them watch a flourish. */
-export const STAMP_MS = 420
+/** How long the intake stamp holds before the page routes on. The `plot-fix` move it rides runs 560 ms
+ *  and only reaches full opacity at 60% (~336 ms), so a shorter hold was a blink on a normal-motion
+ *  machine. 640 ms lets the mark complete (560 ms) and settle for a beat before the office opens. */
+export const STAMP_MS = 640
 
 const DEFAULT_NEXT = '/dashboard'
 
+/** Tab, newline, CR and the rest of the C0/C1 controls. The WHATWG URL parser *strips* these anywhere
+ *  in the input, so `/\n/evil.example` would otherwise normalise to `//evil.example` → an off-site
+ *  origin. Rejecting them outright closes that class before any parsing happens. */
+const CONTROL_CHARS = /[\u0000-\u001f\u007f]/
+
 /**
  * `next` is a security boundary. Only a same-origin, relative path is honoured: an absolute URL
- * (`https://evil`), a protocol-relative host (`//evil`), a bare relative (`runs`) or a backslash trick
- * (`/\evil`, which some engines normalise to `//`) all fall back to the dashboard — a crafted `?next=`
- * can never walk a freshly-authenticated user off-site.
+ * (`https://evil`), a protocol-relative host (`//evil`), a bare relative (`runs`), a backslash trick
+ * (`/\evil`, which some engines normalise to `//`) or a value carrying a stripped control character
+ * (`/\n/evil.example`) all fall back to the dashboard — a crafted `?next=` can never walk a
+ * freshly-authenticated user off-site.
+ *
+ * Two layers: the syntactic guards above reject the known shapes, then the value is resolved against
+ * the app origin and must stay on it (defence in depth against an unforeseen normalisation). `location`
+ * does not exist under the node test runner, so the fallback base is required.
  */
 export function safeNext(raw: string | null | undefined): string {
   if (!raw) return DEFAULT_NEXT
+  if (CONTROL_CHARS.test(raw)) return DEFAULT_NEXT
   if (!raw.startsWith('/')) return DEFAULT_NEXT
   if (raw.startsWith('//')) return DEFAULT_NEXT
   if (raw.includes('\\')) return DEFAULT_NEXT
+  const base = globalThis.location?.origin ?? 'http://localhost'
+  try {
+    if (new URL(raw, base).origin !== base) return DEFAULT_NEXT
+  } catch {
+    return DEFAULT_NEXT
+  }
   return raw
 }
 

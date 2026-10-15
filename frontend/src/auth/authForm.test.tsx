@@ -67,6 +67,20 @@ describe('authForm — `next` is a same-origin boundary', () => {
     expect(safeNext('/\\evil.example')).toBe('/dashboard')
     expect(safeNext('runs/abc')).toBe('/dashboard')
   })
+
+  it('rejects control characters the URL parser would strip into an off-site host (F1)', () => {
+    // The WHATWG URL parser strips tab/newline/CR anywhere, so `/\n/evil.example` normalises to
+    // `//evil.example` → an off-site origin. Layer 1 (control chars) rejects it; layer 2 (origin
+    // equality) would catch it again as defence in depth.
+    expect(safeNext('/\n/evil.example')).toBe('/dashboard')
+    expect(safeNext('/\t/evil.example')).toBe('/dashboard')
+    // A trailing CR is stripped to a same-origin path, so only layer 1 catches this one.
+    expect(safeNext('/runs/abc\r')).toBe('/dashboard')
+    // A `?next=` percent-encoded for a protocol-relative path is decoded before it reaches here:
+    // `%2F%2Fevil.example` → `//evil.example`, and `/%2F%2Fevil.example` → `///evil.example`.
+    expect(safeNext('//evil.example')).toBe('/dashboard')
+    expect(safeNext('///evil.example')).toBe('/dashboard')
+  })
 })
 
 describe('§7.2 marks — brass is the mark, ink is the word (R35)', () => {
