@@ -1,5 +1,12 @@
 import type { ConsensusInfo, RunEvent, Stance } from '../run/events'
 
+/** `GET /api/v1/auth/me` / login / signup response — the backend's `UserOut`. */
+export interface User {
+  id: string
+  email: string
+  created_at: string
+}
+
 export interface IngestedDoc {
   document_id: string
   title: string
