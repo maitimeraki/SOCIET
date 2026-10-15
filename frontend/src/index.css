@@ -13,7 +13,10 @@
   /* Ink — all text and weighed lines */
   --color-ink: #1a1814;
   --color-ink-2: #4a463d; /* body, hachure base */
-  --color-ink-3: #7c7768; /* labels, captions */
+  /* labels, captions. R29/F1: the DSPEC §3.1 value (#7C7768) measures 3.54:1 on --survey-paper and
+     fails §9's 4.5:1 text floor, so the floor wins and a measured-passing value is substituted
+     (#6B6657 = 4.54:1). The name, the role and the three-tier ink structure are unchanged. */
+  --color-ink-3: #6b6657;
   --color-ink-4: #b4b0a3; /* hairlines, graticule (fine) */
 
   /* Datum — interactive and "live" only */
@@ -32,6 +35,12 @@
   --color-stance-neu: #5d6b70; /* unwooded slate */
   --color-stance-amb: #b07a2e; /* marsh amber */
   --color-stance-neg: #b23b2e; /* route vermilion */
+
+  /* §3.1/§9 R29/F3 — USAGE CONSTRAINTS for Tasks 14–17. These are SYMBOL and ANNOTATION colours
+     only, never text on the sheet: --route (4.31:1), --brass (2.04:1), --datum-dim (2.51:1), and
+     every stance hue (pos 4.44:1, neu 4.37:1, amb 2.93:1; only neg 4.67:1 passes). The legend law
+     makes stance colour a symbol colour: convey stance by hue PLUS form, and set the stance WORD
+     in ink. */
 
   /* §3.2 The plotting table — the ONE dark surface in the product. A live traced plot
         reads luminous; everything else is the light sheet. */
@@ -102,9 +111,15 @@
     line-height: 21px;
     -webkit-font-smoothing: antialiased;
   }
-  /* §9 Focus — the datum ring, 2px, offset, on both grounds. */
+  /* §9 Focus — the ring is 2px and offset, and its colour switches with the ground it sits on.
+     R29/F2: --datum clears 3:1 on the sheet (5.39:1) but not on --plot-ground (2.70:1), so the
+     plotting-table container rebinds --focus-ring to --datum-dim (5.80:1 there) and the ring
+     inherits the switch to every descendant. */
+  :root {
+    --focus-ring: var(--color-datum);
+  }
   :focus-visible {
-    outline: 2px solid var(--color-datum);
+    outline: 2px solid var(--focus-ring);
     outline-offset: 2px;
   }
   ::selection {
@@ -216,6 +231,13 @@
   &:focus-visible::after {
     opacity: 1;
   }
+}
+
+/* §3.2 The plotting table — the ONE dark surface. Apply to the container: it paints the ground
+   and rebinds --focus-ring to the only datum that clears 3:1 on it (R29/F2). */
+@utility plot-ground {
+  background: var(--color-plot-ground);
+  --focus-ring: var(--color-datum-dim);
 }
 
 @utility tnum {
