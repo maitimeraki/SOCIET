@@ -23,17 +23,35 @@ export function signInTarget(pathname: string, search: string): string {
   return `/auth/signin?next=${encodeURIComponent(pathname + search)}`
 }
 
+/** `rest.ts`'s fetch carries no timeout, so a proxy that accepts `/api/v1/auth/me` and never answers
+ *  would leave the guard on `unknown` forever — an infinite splash with no retry and no sign-in link.
+ *  Cap the wait so a hung check reads as a network failure instead of never settling. */
+export const SESSION_CHECK_TIMEOUT_MS = 10_000
+
+/** Race the call against the timeout; the loser is drained so a late settle never dangles. */
+function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const timedOut = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error('session check timed out')), timeoutMs)
+  })
+  promise.catch(() => {}) // a rejection after the timeout won must not be unhandled
+  return Promise.race([promise, timedOut]).finally(() => clearTimeout(timer))
+}
+
 /**
  * The session bootstrap, extracted so it can be exercised without a DOM. Three outcomes:
  *   - success   → adopt the user (`authed`);
  *   - 401       → a real anon: `clear()` so the guard redirects;
- *   - anything else (network, misconfig) → `unreachable`: the store stays `unknown` so the caller
- *     shows a retry, NEVER a bounce. A dead server must not read as "signed out".
+ *   - anything else (network, misconfig, timeout) → `unreachable`: the store stays `unknown` so the
+ *     caller shows a retry, NEVER a bounce. A dead or hung server must not read as "signed out".
+ * `timeoutMs` is injectable so the timeout path can be tested without a 10-second wait.
  */
-export async function bootstrapSession(): Promise<'authed' | 'anon' | 'unreachable'> {
+export async function bootstrapSession(
+  timeoutMs: number = SESSION_CHECK_TIMEOUT_MS,
+): Promise<'authed' | 'anon' | 'unreachable'> {
   const { setUser, clear } = useAuthStore.getState()
   try {
-    setUser(await authMe())
+    setUser(await withTimeout(authMe(), timeoutMs))
     return 'authed'
   } catch (err) {
     if (err instanceof ApiError && err.status === 401) {

@@ -90,6 +90,16 @@ describe('AuthSplash — the unknown state', () => {
     expect(html).toMatch(/<button/)
     expect(html).not.toContain('auth/signin')
   })
+
+  it('announces the failure inside the live region — the retry is inside role="status", not beside it', () => {
+    const html = renderToStaticMarkup(<AuthSplash unreachable onRetry={() => {}} />)
+    // The waiting copy is gone (so the region's text actually flips), and the failure copy + retry
+    // come after the live region opens — i.e. inside it, so both are announced.
+    expect(html).not.toContain('Checking your session')
+    expect(html).toContain('reach the server to check your session')
+    expect(html.indexOf('role="status"')).toBeLessThan(html.indexOf('Try again'))
+    expect(html.indexOf('role="status"')).toBeLessThan(html.indexOf('reach the server to check your session'))
+  })
 })
 
 describe('bootstrapSession — the three outcomes', () => {
@@ -118,5 +128,14 @@ describe('bootstrapSession — the three outcomes', () => {
     await expect(bootstrapSession()).resolves.toBe('unreachable')
 
     expect(useAuthStore.getState().status).toBe('unknown')
+  })
+
+  it('a check that never settles times out to unreachable — no infinite splash, no unhandled rejection', async () => {
+    // A proxy that accepts /auth/me and never answers: the promise never resolves OR rejects.
+    vi.stubGlobal('fetch', vi.fn().mockImplementation(() => new Promise<Response>(() => {})))
+
+    await expect(bootstrapSession(50)).resolves.toBe('unreachable')
+
+    expect(useAuthStore.getState().status).toBe('unknown') // → the splash's retry, never a bounce
   })
 })

@@ -18,22 +18,29 @@ import { bootstrapSession, resolveGuard, signInTarget } from './guard'
 export function AuthSplash({ unreachable, onRetry }: { unreachable: boolean; onRetry: () => void }) {
   return (
     <div className="flex min-h-screen flex-col items-center justify-center gap-5 bg-survey-paper px-6 text-center">
-      <div role="status" aria-live="polite" className="flex w-full max-w-sm flex-col gap-3">
-        <span className="sr-only">Checking your session…</span>
+      {/* One live region owns BOTH the waiting copy and the failure copy, so the flip to `unreachable`
+          — the failure text plus the retry — is what a screen reader announces, not just "Checking…".
+          The skeletons carry no announcement (Skeleton is aria-hidden), so they can stay put. */}
+      <div
+        role="status"
+        aria-live="polite"
+        className="flex w-full max-w-sm flex-col items-center gap-3"
+      >
+        {!unreachable && <span className="sr-only">Checking your session…</span>}
         <Skeleton className="h-7 w-52" />
         <Skeleton className="h-4 w-full" />
         <Skeleton className="h-4 w-3/4" />
+        {unreachable && (
+          <>
+            <p className="text-body text-ink-2">
+              We couldn't reach the server to check your session. Nothing is lost — try again.
+            </p>
+            <Button type="button" variant="secondary" onClick={onRetry}>
+              Try again
+            </Button>
+          </>
+        )}
       </div>
-      {unreachable && (
-        <div className="flex max-w-sm flex-col items-center gap-3">
-          <p className="text-body text-ink-2">
-            We couldn't reach the server to check your session. Nothing is lost — try again.
-          </p>
-          <Button type="button" variant="secondary" onClick={onRetry}>
-            Try again
-          </Button>
-        </div>
-      )}
     </div>
   )
 }
