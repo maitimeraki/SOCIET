@@ -60,4 +60,12 @@ describe('the field notebook', () => {
     expect(html).toContain(`aria-describedby="${noteId}"`)
     expect(html).toContain(`aria-errormessage="${noteId}"`)
   })
+
+  it('forwards ARIA description onto the number control (F5)', () => {
+    const html = renderToStaticMarkup(
+      <NumberField value={3} min={1} max={9} onChange={() => {}} aria-describedby="note" aria-invalid />,
+    )
+    expect(html).toContain('aria-describedby="note"')
+    expect(html).toContain('aria-invalid="true"')
+  })
 })
