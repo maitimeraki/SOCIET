@@ -52,7 +52,7 @@ export default function VerdictHero({
 
   return (
     <section>
-      <p className="text-label uppercase text-brass">{converged ? 'The verdict' : 'No convergence'}</p>
+      <p className="text-label uppercase text-ink-3">{converged ? 'The verdict' : 'No convergence'}</p>
       <h1 className={`mt-3 inline-block border-b-[3px] pb-1 font-titling text-display text-ink ${UNDERLINE[stance]}`}>
         {stance}
       </h1>
@@ -80,7 +80,7 @@ export default function VerdictHero({
       )}
       {dissentingViews.length > 0 && (
         <div className="mt-6 max-w-[60ch]">
-          <h2 className="text-label uppercase text-brass">Dissenting views</h2>
+          <h2 className="text-label uppercase text-ink-3">Dissenting views</h2>
           <ul className="mt-2 space-y-1">
             {dissentingViews.map((view, i) => (
               <li key={i} className="text-body text-ink-2">
@@ -92,7 +92,7 @@ export default function VerdictHero({
       )}
       {evidence.length > 0 && (
         <div className="mt-6 max-w-[60ch]">
-          <h2 className="text-label uppercase text-brass">Evidence</h2>
+          <h2 className="text-label uppercase text-ink-3">Evidence</h2>
           <ul className="mt-2 space-y-1">
             {evidence.map((item, i) => (
               <li key={i} className="text-body text-ink-2">

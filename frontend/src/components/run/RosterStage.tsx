@@ -23,7 +23,7 @@ function Beat({
 }) {
   const glyph =
     state === 'done' ? (
-      <CheckCircle size={16} className="text-stance-pos" aria-hidden="true" />
+      <CheckCircle size={16} className="text-ink-2" aria-hidden="true" />
     ) : state === 'running' ? (
       <span aria-hidden="true" className="h-2.5 w-2.5 animate-pulse rounded-full bg-datum" />
     ) : (
@@ -66,7 +66,7 @@ export default function RosterStage({
 
   return (
     <div className="space-y-8">
-      <p className="text-label uppercase text-brass">Building the society</p>
+      <p className="text-label uppercase text-ink-3">Building the society</p>
 
       <Beat number="①" title="Reading the question" meta="S3 · intent" state={intent ? 'done' : 'running'}>
         {intent ? (

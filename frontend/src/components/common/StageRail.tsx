@@ -23,7 +23,9 @@ export default function StageRail({
       {stages.map((stage, index) => {
         const glyph =
           stage.state === 'done' ? (
-            <CheckCircle size={16} className="text-stance-pos" aria-hidden="true" />
+            // Settled is ink, not a stance hue — --stance-pos is the POSITIVE legend's green and
+            // means "a station argued for the proposal", never "this stage finished" (§3.1, §7).
+            <CheckCircle size={16} className="text-ink-2" aria-hidden="true" />
           ) : stage.state === 'running' ? (
             <span aria-hidden="true" className="h-2.5 w-2.5 animate-pulse rounded-full bg-datum" />
           ) : stage.state === 'failed' ? (

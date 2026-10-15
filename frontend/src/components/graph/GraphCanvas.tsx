@@ -18,10 +18,26 @@ export interface GraphCanvasProps {
 }
 
 const NODE_SIZE = 7
-/** A node whose type has no label yet (vocabulary frame still in flight). */
-const DEFAULT_NODE_COLOR = '#5b6270'
-/** The canvas surface. Nodes are contrast-validated against it and the label halo paints in it. */
-const STAGE_SURFACE = '#100e09'
+
+/**
+ * Resolve a Survey token to a concrete colour. Sigma's WebGL colour path and the 2D label halo both
+ * take a literal colour — neither reads a `var()` — so the values are read off the document root,
+ * where `index.css` (`@theme`) defines them. The `document` guard keeps this module importable under
+ * Vitest's Node environment; no test asserts a resolved value, so an empty string there is inert.
+ */
+const surveyColor = (token: string): string =>
+  typeof document === 'undefined' ? '' : getComputedStyle(document.documentElement).getPropertyValue(token).trim()
+
+/** A node whose type has no label yet (vocabulary frame still in flight). Muted ink, not a hue. */
+const DEFAULT_NODE_COLOR = surveyColor('--color-ink-3')
+/**
+ * The sheet the graph is drawn on — the container's own fill. Node marks are contrast-validated
+ * against it, and the label halo is struck in it, so an edge cannot cut through the label text.
+ */
+const SHEET_SURFACE = surveyColor('--color-survey-paper')
+/** Node labels read in ink (14.0:1 on the sheet); edges take the muted ink so labels stay dominant. */
+const LABEL_INK = surveyColor('--color-ink')
+const EDGE_INK = surveyColor('--color-ink-3')
 /** How often the layout is allowed to run, ms — coalesces a burst of deltas into one settle. */
 const LAYOUT_THROTTLE_MS = 180
 const LAYOUT_ITERATIONS = 5
@@ -321,26 +337,26 @@ export const drawNodeLabel: NodeLabelDrawingFunction = (context, data, settings)
     typeof settings.labelColor.attribute === 'string'
       ? ((data as unknown as Record<string, unknown>)[settings.labelColor.attribute] as string | undefined) ??
         settings.labelColor.color ??
-        '#000'
-      : settings.labelColor.color ?? '#000'
+        LABEL_INK
+      : settings.labelColor.color ?? LABEL_INK
   const x = data.x + data.size + 3
   const y = data.y + labelSize / 3
   context.lineJoin = 'round'
   context.lineWidth = LABEL_HALO_WIDTH
-  context.strokeStyle = STAGE_SURFACE
+  context.strokeStyle = SHEET_SURFACE
   context.strokeText(data.label, x, y)
   context.fillStyle = color
   context.fillText(data.label, x, y)
 }
 
-// The plotting table is dark: sigma defaults to a white stage, black Arial labels and a rainbow-less
-// rainbow of culled labels, so override all of it. Identity-stable (a module constant) so Sigma is
-// never torn down on a delta. Edge labels are never rendered — they scatter illegible rotated text
-// over the field. The colours below are still legacy Chamber values; the plotting table is repainted
-// in Task 14.
+// Sigma defaults to a white stage, black Arial labels and a rainbow of culled labels, so override all
+// of it. Identity-stable (a module constant) so Sigma is never torn down on a delta. Edge labels are
+// never rendered — they scatter illegible rotated text over the field. Repainted for the Survey sheet
+// (addendum §5): the incumbent set was the dark Chamber's, and its pale label ink measured 1.44:1 on
+// this sheet — illegible. Labels are now ink (14.0:1) haloed in the sheet itself.
 const SIGMA_SETTINGS = {
-  labelColor: { color: '#c9bfa9' },
-  defaultEdgeColor: '#3a342b',
+  labelColor: { color: LABEL_INK },
+  defaultEdgeColor: EDGE_INK,
   labelFont: "'Archivo Variable', Archivo, system-ui, sans-serif",
   labelSize: 12,
   labelWeight: '500',
@@ -398,7 +414,7 @@ function GraphOverlay({ phase, message }: { phase: GraphStreamPhase; message: st
       ) : (
         <CheckCircle size={16} className="shrink-0 text-ink-2" aria-hidden="true" />
       )}
-      <p className={`text-micro ${failed ? 'text-route' : 'text-ink-2'}`}>{message}</p>
+      <p className="text-micro text-ink-2">{message}</p>
     </div>
   )
 }
@@ -432,7 +448,7 @@ export default function GraphCanvas({ datasetId, jobId }: GraphCanvasProps) {
   )
 
   return (
-    <div className="relative h-[360px] overflow-hidden rounded-[6px] border border-ink-4 bg-survey-paper" style={CANVAS_STYLE}>
+    <div className="relative h-[360px] overflow-hidden rounded-[6px] border border-ink-3 bg-survey-paper" style={CANVAS_STYLE}>
       <div role="img" aria-label={canvasLabel} className="h-full w-full">
         {/* The height chain is explicit here: the wrapper is a fixed box, this is full-height, and Sigma's
             own `.sigma-container` fills it — its sizing rule ships in @react-sigma/core/lib/style.css (imported in main.tsx). */}
@@ -464,9 +480,9 @@ export default function GraphCanvas({ datasetId, jobId }: GraphCanvasProps) {
       {notice && (
         <p
           role="status"
-          className="pointer-events-none absolute right-2 top-2 flex items-center gap-1.5 rounded-[4px] border border-brass/40 bg-survey-paper/85 px-2 py-1 text-micro text-brass"
+          className="pointer-events-none absolute right-2 top-2 flex items-center gap-1.5 rounded-[4px] border border-brass/40 bg-survey-paper/85 px-2 py-1 text-micro text-ink-2"
         >
-          <Warning size={13} aria-hidden="true" />
+          <Warning size={13} className="text-brass" aria-hidden="true" />
           {notice}
         </p>
       )}

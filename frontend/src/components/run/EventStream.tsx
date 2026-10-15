@@ -61,8 +61,8 @@ export default function EventStream({ items, live }: { items: StreamItem[]; live
               return <ActivationNote key={index} round={item.round} agents={item.agents} reasons={item.reasons} />
             case 'warning':
               return (
-                <p key={index} className="flex items-start gap-2 text-micro text-brass">
-                  <Warning size={14} className="mt-0.5 shrink-0" aria-hidden="true" /> {item.text}
+                <p key={index} className="flex items-start gap-2 text-micro text-ink-2">
+                  <Warning size={14} className="mt-0.5 shrink-0 text-brass" aria-hidden="true" /> {item.text}
                 </p>
               )
           }

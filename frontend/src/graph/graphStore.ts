@@ -53,22 +53,32 @@ interface GraphStoreState {
 }
 
 /**
- * A fixed categorical palette for entity types — hand-picked, mutually distinct, and in a format
- * Sigma's WebGL colour path parses (hex; it draws black on `hsl()`). Every entry clears the spec's
- * ≥3:1 mark floor against the canvas surface (`#100e09`); validated min pairwise ΔE 29.7 (normal) /
- * 9.8 (deuteranopia), min contrast 7.14:1 — comfortably better than the stance palette's own residual.
+ * The territory's categorical legend palette — one hue per entity type, hand-picked and mutually
+ * distinct, in a format Sigma's WebGL colour path parses (hex; it draws black on anything it cannot
+ * read). This is a data encoding the graph module owns, not styling: it feeds Sigma's parser and the
+ * legend swatches directly, so it stays literal here rather than becoming a CSS custom property —
+ * the store also loads under Vitest's Node environment, where there is no document to resolve a
+ * `var()` against, and a palette that resolved to empty strings there would make the
+ * arrival-order-invariance test below pass vacuously.
+ *
+ * Repainted for the Survey sheet (addendum §5). The incumbent set was validated against the dark
+ * Chamber surface; every one of those hues measured 1.44–2.14:1 on the light sheet `--survey-paper`
+ * and failed SC 1.4.11's 3:1 non-text floor. These clear it, measured on the sheet:
+ * 5.57 · 5.11 · 5.30 · 4.86 · 4.21 · 4.47 · 4.87. The map's *meaning* hues (the four stance tokens,
+ * datum, route, brass) are deliberately not reused: an entity type is not a stance.
+ *
  * Colours are keyed off the label SET (labels taken in sorted order), so a given set maps to the same
  * colours whatever order it arrives in — a reconnect or reload that replays the labels differently
  * cannot recolour the graph.
  */
 export const LABEL_PALETTE = [
-  '#45C2BE', // teal
-  '#7C9CE8', // azure
-  '#C88CE2', // violet
-  '#EC7F9C', // rose
-  '#EC8B52', // coral
-  '#D6C055', // gold
-  '#88CC68', // green
+  '#17635f', // teal
+  '#2b5ea6', // azure
+  '#6e4a9e', // violet
+  '#a83a5b', // rose
+  '#a8541f', // coral
+  '#7e6410', // gold
+  '#4a6b22', // green
 ] as const
 
 // ponytail: a 7-colour palette wraps past the 7th label (two types can share a hue); extend the array if a corpus ever promotes more.

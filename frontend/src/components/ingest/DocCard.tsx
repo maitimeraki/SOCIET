@@ -31,7 +31,7 @@ export default function DocCard({
           <div className="tnum mt-0.5 font-measurement text-micro text-ink-3">Ready — {fmtInt(doc.word_count)} words</div>
         )}
         {doc.status === 'failed' && (
-          <div className="mt-0.5 text-micro text-route">
+          <div className="mt-0.5 text-micro text-ink-2">
             Failed — {doc.error ?? 'unknown error'}{' '}
             <button type="button" onClick={onRetry} className="underline hover:text-ink">
               try again

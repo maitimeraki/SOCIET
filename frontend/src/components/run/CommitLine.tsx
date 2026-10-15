@@ -13,14 +13,14 @@ export default function CommitLine({
 }) {
   if (failed) {
     return (
-      <p className="flex items-center gap-2 text-micro text-route">
-        <XCircle size={14} aria-hidden="true" /> Round {round}: commit failed
+      <p className="flex items-center gap-2 text-micro text-ink-2">
+        <XCircle size={14} className="text-route" aria-hidden="true" /> Round {round}: commit failed
       </p>
     )
   }
   return (
     <p className="flex items-center gap-2 text-micro text-ink-3">
-      <CheckCircle size={14} className="text-stance-pos" aria-hidden="true" />
+      <CheckCircle size={14} className="text-ink-2" aria-hidden="true" />
       Round {round} committed — {opinions} opinions, {edges} edges
     </p>
   )

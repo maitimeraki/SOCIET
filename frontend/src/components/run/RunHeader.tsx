@@ -67,7 +67,7 @@ export default function RunHeader({
             </IconButton>
           </span>
         )}
-        {connection === 'reconnecting' && <span className="text-micro text-brass">Connection lost — reattaching…</span>}
+        {connection === 'reconnecting' && <span className="text-micro text-ink-2">Connection lost — reattaching…</span>}
       </div>
     </div>
   )

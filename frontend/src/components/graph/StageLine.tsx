@@ -11,7 +11,7 @@ export default function StageLine({
 }) {
   const glyph =
     state === 'done' ? (
-      <CheckCircle size={16} className="text-stance-pos" aria-hidden="true" />
+      <CheckCircle size={16} className="text-ink-2" aria-hidden="true" />
     ) : state === 'active' ? (
       <span aria-hidden="true" className="h-2.5 w-2.5 animate-pulse rounded-full bg-datum" />
     ) : (
