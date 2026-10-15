@@ -60,6 +60,27 @@ describe('the sections compose from copy.ts', () => {
   })
 })
 
+describe('the sheet composes in the spec order', () => {
+  it('renders the six sections in DSPEC §7.1 order', () => {
+    const order = [
+      sections.demo.heading,
+      sections.howItWorks.heading,
+      sections.comparison.heading,
+      sections.trust.heading,
+      sections.record.heading,
+      sections.faq.heading,
+    ]
+    const positions = order.map((heading) => html.indexOf(heading))
+    expect(positions.every((position) => position >= 0)).toBe(true)
+    expect([...positions].sort((a, b) => a - b)).toEqual(positions)
+  })
+
+  it('leaves no unresolved value in the markup', () => {
+    expect(html).not.toContain('undefined')
+    expect(html).not.toContain('NaN')
+  })
+})
+
 describe('the plotting hand — reduced motion', () => {
   it('renders the sheet complete: every station, the fix, and the closure figure', () => {
     expect(count('data-station')).toBe(heroStations.length)
