@@ -131,6 +131,8 @@ export type RunEvent =
       verdict: string
       /** Query-grounded markdown answer; empty when synthesis fell back to `verdict`. */
       narrative?: string
+      /** "ok" when `narrative` is the query-grounded answer; "fallback" when it degraded to `verdict`. */
+      narrative_status?: string
       dissenting_views?: DissentingView[]
       evidence?: EvidenceItem[]
       final_stances: Record<string, string>

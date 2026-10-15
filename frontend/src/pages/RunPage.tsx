@@ -207,6 +207,7 @@ export default function RunPage() {
               converged={view.converged}
               summary={view.summary}
               narrative={view.narrative}
+              narrativeStatus={view.narrativeStatus}
               dissentingViews={view.dissentingViews}
               evidence={view.evidence}
               onReplay={() => navigate(`/runs/${runId}/floor`, { state: { replayFrom: 1 } })}

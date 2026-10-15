@@ -17,15 +17,15 @@ export interface IngestedDoc {
   pages?: number
 }
 
-export interface IngestFailure {
-  filename: string
-  status_code: number
-  detail: string
+/** `GET /api/v1/ingest/documents` — one upload's extracted payload; `upload_id` is the row id. */
+export interface IngestedDocument extends IngestedDoc {
+  upload_id: string
 }
 
-export interface IngestResponse {
-  documents: IngestedDoc[]
-  failures: IngestFailure[]
+/** R17: `POST /api/v1/ingest/files|url` accept the batch and enqueue — extraction is a job. */
+export interface IngestAccepted {
+  job_id: string
+  status: string
 }
 
 export interface DebateConfig {
@@ -77,14 +77,20 @@ export interface GraphJobResult {
   relation_types: string[]
 }
 
-export interface JobStatus {
+/** The `extract_upload` job's result (R17) — the upload ids nested under `result`, not at the top. */
+export interface IngestJobResult {
+  upload_ids?: string[]
+}
+
+export interface JobStatus<TResult = GraphJobResult> {
   job_id: string
   mode?: string
-  status: 'queued' | 'running' | 'completed' | 'failed'
+  /** `run_doc.TERMINAL_STATUSES` is the truth: complete/completed/failed/cancelled all end a poll. */
+  status: 'queued' | 'running' | 'complete' | 'completed' | 'failed' | 'cancelled'
   stage: string
   progress: number
   error?: string | null
-  result?: GraphJobResult | null
+  result?: TResult | null
 }
 
 export interface DebateStartRequest {
@@ -111,6 +117,12 @@ export interface RunSummary {
   rounds_executed: number
   converged: boolean | null
   verdict_stance: Stance | null
+}
+
+/** `GET /api/v1/simulate/debates` — keyset page (plan §6): `next_cursor` null at the end. */
+export interface RunListPage {
+  items: RunSummary[]
+  next_cursor: string | null
 }
 
 export interface RunDoc {

@@ -2,10 +2,13 @@ import type {
   DebateConfig,
   DebateStartRequest,
   DebateStatus,
+  GraphJobResult,
+  IngestAccepted,
   IngestedDoc,
-  IngestResponse,
+  IngestedDocument,
   JobStatus,
   RunDoc,
+  RunListPage,
   RunSummary,
   User,
 } from './types'
@@ -24,11 +27,14 @@ export class ConfigError extends Error {
 export class ApiError extends Error {
   status: number
   detail: string
-  constructor(status: number, detail: string) {
+  /** The `Retry-After` seconds on a 429 (the quota/job-cap rejection), else null. */
+  retryAfter: number | null
+  constructor(status: number, detail: string, retryAfter: number | null = null) {
     super(detail)
     this.name = 'ApiError'
     this.status = status
     this.detail = detail
+    this.retryAfter = retryAfter
   }
 }
 
@@ -63,6 +69,26 @@ function readCsrfCookie(): string | null {
   return match ? decodeURIComponent(match[1]) : null
 }
 
+/**
+ * The backend's error `detail` is a bare string on the legacy routes and `{code, message}` on the v1
+ * ones (422 validation, 429 quota). Read the message when there is one; never stringify an object.
+ */
+function readDetail(detail: unknown): string {
+  if (typeof detail === 'string') return detail
+  if (detail !== null && typeof detail === 'object' && 'message' in detail) {
+    return String((detail as { message: unknown }).message)
+  }
+  return String(detail)
+}
+
+/** A 429's `Retry-After` is delta-seconds; an HTTP-date (or anything non-numeric) reads as null. */
+function readRetryAfter(response: Response): number | null {
+  const header = response.headers.get('Retry-After')
+  if (header === null) return null
+  const seconds = Number(header)
+  return Number.isFinite(seconds) && seconds >= 0 ? seconds : null
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   // apiBaseError is non-null exactly when apiBase is null: fail recoverably at call time rather than
   // fetching a bare path that would silently hit the static host. `''` (same-origin) passes through.
@@ -85,11 +111,11 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     let detail = response.statusText
     try {
       const body = (await response.json()) as { detail?: unknown }
-      if (body.detail !== undefined) detail = String(body.detail)
+      if (body.detail !== undefined) detail = readDetail(body.detail)
     } catch {
       // Non-JSON error body: keep statusText.
     }
-    throw new ApiError(response.status, detail)
+    throw new ApiError(response.status, detail, readRetryAfter(response))
   }
   if (response.status === 204) return undefined as T // logout etc. carry no body
   return (await response.json()) as T
@@ -108,11 +134,17 @@ export const health = () =>
 export const ingestFiles = (files: File[]) => {
   const form = new FormData()
   for (const file of files) form.append('files', file)
-  return request<IngestResponse>('/api/v1/ingest/files', { method: 'POST', body: form })
+  return request<IngestAccepted>('/api/v1/ingest/files', { method: 'POST', body: form })
 }
 
 export const ingestUrl = (url: string) =>
-  request<{ document: IngestedDoc }>('/api/v1/ingest/url', jsonInit('POST', { url }))
+  request<IngestAccepted>('/api/v1/ingest/url', jsonInit('POST', { url }))
+
+/** The extracted payloads for a completed ingest job's upload ids (R17). */
+export const getIngestDocuments = (uploadIds: string[]) =>
+  request<{ documents: IngestedDocument[] }>(
+    `/api/v1/ingest/documents?upload_ids=${encodeURIComponent(uploadIds.join(','))}`,
+  )
 
 export const startOntology = (datasetId: string, docs: IngestedDoc[]) =>
   request<{ job_id: string }>(`/api/v1/simulate/ontology?dataset_id=${encodeURIComponent(datasetId)}`, jsonInit('POST', docs))
@@ -123,14 +155,26 @@ export const startGraphBuild = (datasetId: string, docs: IngestedDoc[], ontology
     jsonInit('POST', docs),
   )
 
-export const getJob = (jobId: string) => request<JobStatus>(`/api/v1/simulate/jobs/${jobId}`)
+/** `/api/v1/jobs/{id}` is the canonical status read (R3); the result shape is the caller's to name. */
+export const getJob = <TResult = GraphJobResult>(jobId: string) =>
+  request<JobStatus<TResult>>(`/api/v1/jobs/${jobId}`)
 
 export const startDebate = (body: DebateStartRequest) =>
   request<{ job_id: string }>('/api/v1/simulate/debate', jsonInit('POST', body))
 
 export const getDebate = (jobId: string) => request<DebateStatus>(`/api/v1/simulate/${jobId}`)
 
-export const listRuns = () => request<RunSummary[]>('/api/v1/simulate/debates')
+/** One keyset page of owned runs, newest first — `{items, next_cursor}` (plan §6). */
+export const listRunsPage = (options: { limit?: number; cursor?: string | null } = {}) => {
+  const params = new URLSearchParams()
+  if (options.limit !== undefined) params.set('limit', String(options.limit))
+  if (options.cursor) params.set('cursor', options.cursor)
+  const query = params.toString()
+  return request<RunListPage>(`/api/v1/simulate/debates${query ? `?${query}` : ''}`)
+}
+
+/** The first page's items — the pre-pagination callers (HomePage, AgentsPage). */
+export const listRuns = async (): Promise<RunSummary[]> => (await listRunsPage({ limit: 25 })).items
 
 export const getRun = (runId: string) => request<RunDoc>(`/api/v1/simulate/debates/${runId}`)
 

@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { animate, useReducedMotion } from 'framer-motion'
 import type { DissentingView, EvidenceItem, Stance } from '../../run/events'
 import { splitSections } from './narrative'
+import NarrativeFallbackNotice from './NarrativeFallbackNotice'
 import Button from '../ui/Button'
 
 export default function VerdictHero({
@@ -10,6 +11,7 @@ export default function VerdictHero({
   converged,
   summary,
   narrative,
+  narrativeStatus,
   dissentingViews,
   evidence,
   onReplay,
@@ -21,6 +23,7 @@ export default function VerdictHero({
   converged: boolean
   summary: string
   narrative: string
+  narrativeStatus: string
   dissentingViews: DissentingView[]
   evidence: EvidenceItem[]
   onReplay: () => void
@@ -56,6 +59,9 @@ export default function VerdictHero({
         <span className="tnum font-titling text-numeral text-ink">{display.toFixed(2)}</span>
         <span className="text-label uppercase text-ink-3">weighted confidence</span>
       </div>
+      {/* §17.3 — the narrative degraded to `summary`: say so, so the one-line summary never
+          masquerades as the written verdict. */}
+      <NarrativeFallbackNotice status={narrativeStatus} />
       {sections.length > 0 ? (
         <div className="mt-5 max-w-[60ch] space-y-4">
           {sections.map((section, i) => (
