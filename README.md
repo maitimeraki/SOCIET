@@ -165,7 +165,9 @@ Verdict Synthesis → Society Opinion + Confidence + Dissenting Views
 2. Point `.env` at Neo4j and an LLM provider (`NEO4J_URI`, `NEO4J_USERNAME`,
    `NEO4J_PASSWORD`, plus your provider key), then bootstrap the schema:
    `python -m src.cli.bootstrap_neo4j`
-3. `uvicorn src.api.api_server:app --host 127.0.0.1 --port 8000`
+3. `uvicorn src.api.api_server:app --host 127.0.0.1 --port 8000 --reload`
+   (`--reload` is required on Windows: uvicorn 0.42 hard-codes `ProactorEventLoop` unless it runs
+   as a subprocess, which `--reload` forces — without it every DB endpoint 500s.)
 
 ### Frontend
 1. `cd frontend && npm install`
@@ -349,7 +351,7 @@ Debate stops when dominant stance reaches 80% weighted consensus.
 
 - [TECHNOLOGY_STACK.md](docs/TECHNOLOGY_STACK.md) - Complete tech stack and production architecture
 - [ARCHITECTURE.md](docs/ARCHITECTURE.md) - Detailed component architecture
-- [DESIGN.md](docs/DESIGN.md) - Frontend design specification (The Chamber)
+- [DESIGN_SPEC.md](docs/DESIGN_SPEC.md) - Frontend design specification (The Survey)
 
 ---
 
