@@ -224,8 +224,8 @@ export const sections = {
       { entity: 'demand depth', source: 'Market Sizing Workbook · Demand' },
       { entity: 'compliance risk', source: 'Data-Readiness Note · §1' },
     ],
-    /** Task 19 replaces the plate with a real capture; the slot keeps its aspect until then. */
-    captureLabel: 'Capture lands in Task 19',
+    /** The plate holds the figure's aspect until the real capture replaces it. */
+    captureLabel: 'The plotting table',
     captureNote: 'The plotting table mid-survey — a real capture, not a mock.',
   },
   faq: {

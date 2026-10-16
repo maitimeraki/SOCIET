@@ -25,7 +25,7 @@ export function AppErrorFallback({
       ref={containerRef}
       role="alert"
       tabIndex={-1}
-      className="mx-auto max-w-[720px] rounded-[6px] border border-ink-4 bg-survey-paper-2 p-8 outline-none"
+      className="mx-auto max-w-[720px] border-t border-ink-4 pt-8 outline-none"
     >
       <p className="text-heading text-ink">Something went wrong</p>
       <p className="mt-2 max-w-[60ch] text-body text-ink-2">

@@ -5,6 +5,7 @@ import AgentCard from '../components/agents/AgentCard'
 import AgentDrawer from '../components/agents/AgentDrawer'
 import Select from '../components/ui/Select'
 import EmptyState from '../components/ui/EmptyState'
+import ErrorState from '../components/ui/ErrorState'
 import Skeleton from '../components/ui/Skeleton'
 
 export default function AgentsPage() {
@@ -14,6 +15,8 @@ export default function AgentsPage() {
   const [runsLoaded, setRunsLoaded] = useState(false)
   const [loadedDatasetId, setLoadedDatasetId] = useState<string | null>(null)
   const [selected, setSelected] = useState<string | null>(null)
+  // A server failure is not an empty society: it is surfaced, never shown as "No society yet".
+  const [failed, setFailed] = useState<string>()
   /** Supersession counter: only the latest roster request may write state (runStore pattern). */
   const rosterGeneration = useRef(0)
   const loading = !runsLoaded || (datasetId !== '' && loadedDatasetId !== datasetId)
@@ -26,9 +29,13 @@ export default function AgentsPage() {
         const entries = [...seen.entries()].map(([id, runId]) => ({ id, runId }))
         setDatasets(entries)
         if (entries.length > 0) setDatasetId(entries[0].id)
+        setFailed(undefined)
         setRunsLoaded(true)
       })
-      .catch(() => setRunsLoaded(true))
+      .catch((error: unknown) => {
+        setFailed(error instanceof Error ? error.message : undefined)
+        setRunsLoaded(true)
+      })
   }, [])
 
   useEffect(() => {
@@ -40,9 +47,11 @@ export default function AgentsPage() {
         if (generation !== rosterGeneration.current) return
         const profiles = doc.events.flatMap((event) => (event.type === 'agent' ? [event.profile] : []))
         setRoster(profiles)
+        setFailed(undefined)
       })
-      .catch(() => {
+      .catch((error: unknown) => {
         if (generation !== rosterGeneration.current) return
+        setFailed(error instanceof Error ? error.message : undefined)
         setRoster([])
       })
       .finally(() => {
@@ -76,6 +85,11 @@ export default function AgentsPage() {
             <Skeleton key={i} className="h-32 w-full" />
           ))}
         </div>
+      ) : failed ? (
+        <ErrorState
+          title="Couldn't reach the server"
+          detail={failed || 'The society loads when the server is back.'}
+        />
       ) : roster.length === 0 ? (
         <EmptyState line="No society yet. Convene a run and the agents it synthesizes will be shown here." />
       ) : (

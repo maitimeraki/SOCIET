@@ -81,7 +81,7 @@ export default function SocietyPage() {
 
       <ConfigPanel value={config} onChange={setConfig} />
 
-      {error && <p className="rounded-[6px] border border-route/40 px-4 py-3 text-body text-ink-2">{error}</p>}
+      {error && <p className="border-t border-route/40 pt-3 text-body text-ink-2">{error}</p>}
 
       <div className="flex items-center gap-4">
         <Button variant="primary" loading={submitting} disabled={!query.trim()} onClick={convene}>

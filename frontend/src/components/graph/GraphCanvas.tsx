@@ -28,16 +28,17 @@ const NODE_SIZE = 7
 const surveyColor = (token: string): string =>
   typeof document === 'undefined' ? '' : getComputedStyle(document.documentElement).getPropertyValue(token).trim()
 
-/** A node whose type has no label yet (vocabulary frame still in flight). Muted ink, not a hue. */
-const DEFAULT_NODE_COLOR = surveyColor('--color-ink-3')
+/** A node whose type has no label yet (vocabulary frame still in flight). Muted plot ink, not a hue. */
+const DEFAULT_NODE_COLOR = surveyColor('--color-plot-ink-3')
 /**
- * The sheet the graph is drawn on — the container's own fill. Node marks are contrast-validated
- * against it, and the label halo is struck in it, so an edge cannot cut through the label text.
+ * The ground the graph is plotted on — the container's own fill (§3.2, the dark plotting table).
+ * Node marks are contrast-validated against it, and the label halo is struck in it, so an edge
+ * cannot cut through the label text.
  */
-const SHEET_SURFACE = surveyColor('--color-survey-paper')
-/** Node labels read in ink (14.0:1 on the sheet); edges take the muted ink so labels stay dominant. */
-const LABEL_INK = surveyColor('--color-ink')
-const EDGE_INK = surveyColor('--color-ink-3')
+const PLOT_SURFACE = surveyColor('--color-plot-ground')
+/** Node labels read luminous on the plot; edges take the muted plot ink so labels stay dominant. */
+const LABEL_INK = surveyColor('--color-plot-ink')
+const EDGE_INK = surveyColor('--color-plot-ink-3')
 /** How often the layout is allowed to run, ms — coalesces a burst of deltas into one settle. */
 const LAYOUT_THROTTLE_MS = 180
 const LAYOUT_ITERATIONS = 5
@@ -343,7 +344,7 @@ export const drawNodeLabel: NodeLabelDrawingFunction = (context, data, settings)
   const y = data.y + labelSize / 3
   context.lineJoin = 'round'
   context.lineWidth = LABEL_HALO_WIDTH
-  context.strokeStyle = SHEET_SURFACE
+  context.strokeStyle = PLOT_SURFACE
   context.strokeText(data.label, x, y)
   context.fillStyle = color
   context.fillText(data.label, x, y)
@@ -351,9 +352,8 @@ export const drawNodeLabel: NodeLabelDrawingFunction = (context, data, settings)
 
 // Sigma defaults to a white stage, black Arial labels and a rainbow of culled labels, so override all
 // of it. Identity-stable (a module constant) so Sigma is never torn down on a delta. Edge labels are
-// never rendered — they scatter illegible rotated text over the field. Repainted for the Survey sheet
-// (addendum §5): the incumbent set was the dark Chamber's, and its pale label ink measured 1.44:1 on
-// this sheet — illegible. Labels are now ink (14.0:1) haloed in the sheet itself.
+// never rendered — they scatter illegible rotated text over the field. Repainted for the plotting
+// table (§3.2): labels are luminous plot ink haloed in the dark ground, so an edge cannot cut the text.
 const SIGMA_SETTINGS = {
   labelColor: { color: LABEL_INK },
   defaultEdgeColor: EDGE_INK,
@@ -448,7 +448,7 @@ export default function GraphCanvas({ datasetId, jobId }: GraphCanvasProps) {
   )
 
   return (
-    <div className="relative h-[360px] overflow-hidden rounded-[6px] border border-ink-3 bg-survey-paper" style={CANVAS_STYLE}>
+    <div className="relative h-[360px] overflow-hidden rounded-[6px] plot-ground" style={CANVAS_STYLE}>
       <div role="img" aria-label={canvasLabel} className="h-full w-full">
         {/* The height chain is explicit here: the wrapper is a fixed box, this is full-height, and Sigma's
             own `.sigma-container` fills it — its sizing rule ships in @react-sigma/core/lib/style.css (imported in main.tsx). */}

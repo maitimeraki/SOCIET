@@ -82,7 +82,7 @@ export default function ChamberFloor({ roster, rounds, activeRound, livePairs, o
 
   return (
     <div
-      className="relative"
+      className="relative plot-ground"
       onKeyDown={(event) => {
         if (event.key === 'Escape' && selected) closePopover()
       }}
@@ -141,7 +141,7 @@ export default function ChamberFloor({ roster, rounds, activeRound, livePairs, o
       </svg>
 
       {seated && (
-        <div className="absolute right-3 top-3 w-[240px] rounded-[6px] border border-ink-4 bg-survey-paper-2 p-3">
+        <div className="absolute right-3 top-3 w-[240px] border-t border-ink-4 bg-plot-ground/90 pt-3">
           <div className="flex items-start justify-between gap-2">
             <p className="text-body text-ink">{seated.profile.identity.name}</p>
             <button type="button" aria-label="Close popover" onClick={closePopover} className="text-ink-3 hover:text-ink">

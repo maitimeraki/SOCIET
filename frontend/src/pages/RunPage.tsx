@@ -151,7 +151,7 @@ export default function RunPage() {
       {tab === 'floor' && (
         <div className="grid gap-6 min-[900px]:grid-cols-[3fr_2fr]">
           <div className="space-y-4">
-            <div className={`rounded-[12px] border border-ink-4 bg-survey-paper-2 p-4 ${run.status === 'failed' ? 'opacity-40' : ''}`}>
+            <div className={`plot-ground p-4 ${run.status === 'failed' ? 'opacity-40' : ''}`}>
               <ChamberFloor
                 roster={run.roster}
                 rounds={run.rounds}
@@ -168,7 +168,7 @@ export default function RunPage() {
             </div>
             <ConvergenceTape ticks={series} threshold={run.config?.convergence_threshold ?? 0.8} activeRound={activeRound} />
             {run.verdict && (
-              <div className="flex items-center justify-between rounded-[6px] border border-ink-4 bg-survey-paper-2 px-4 py-3">
+              <div className="flex items-center justify-between border-t border-ink-4 pt-3">
                 <p className="text-body text-ink">
                   {run.verdict.converged ? 'Converged — the verdict is ready.' : 'Verdict ready — a plurality, not a consensus.'}
                 </p>

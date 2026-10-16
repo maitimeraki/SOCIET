@@ -81,7 +81,7 @@ export default function RecordSheet() {
           <img src="/img/plotting-table.webp" width={1280} height={720} loading="lazy" decoding="async"
                alt="The plotting table mid-survey" /> */}
       <figure className="mt-4">
-        <div className="flex aspect-video items-center justify-center border border-ink-4 bg-survey-paper-2">
+        <div className="flex aspect-video items-center justify-center border-y border-ink-4">
           <p className="font-measurement text-mono text-ink-3">{record.captureLabel}</p>
         </div>
         <figcaption className="mt-2 font-measurement text-mono text-ink-3">{record.captureNote}</figcaption>

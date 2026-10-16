@@ -24,8 +24,8 @@ export default function FileDrop({ onFiles, disabled = false }: { onFiles: (file
       }}
       onDragLeave={() => setDragging(false)}
       onDrop={handleDrop}
-      className={`flex cursor-pointer flex-col items-center gap-2 rounded-[6px] border border-dashed px-6 py-10 text-center transition-colors focus-within:border-datum ${
-        dragging ? 'border-datum bg-datum-soft' : 'border-ink-4 bg-survey-paper-2 hover:border-ink-4'
+      className={`flex cursor-pointer flex-col items-center gap-2 border-y border-dashed px-6 py-10 text-center transition-colors focus-within:border-datum ${
+        dragging ? 'border-datum bg-datum-soft' : 'border-ink-4 hover:border-ink-4'
       } ${disabled ? 'cursor-not-allowed opacity-50' : ''}`}
     >
       <UploadSimple size={20} className="text-ink-2" aria-hidden="true" />

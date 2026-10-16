@@ -98,7 +98,7 @@ export default function RosterStage({
         state={progress.phase === 'seated' ? 'done' : selection.length > 0 ? 'running' : 'pending'}
       >
         {progress.phase === 'empty' ? (
-          <div className="rounded-[6px] border border-ink-4 bg-survey-paper-2 p-5">
+          <div className="border-t border-ink-4 pt-5">
             <p className="max-w-[60ch] text-body text-ink-2">
               Nothing to convene. "{question}" didn't connect to enough of the corpus. Try a broader question, or add
               documents to this corpus.

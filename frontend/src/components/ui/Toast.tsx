@@ -37,7 +37,7 @@ export function ToastHost() {
       {toasts.map((t) => {
         const IconCmp = ICON[t.kind]
         return (
-          <div key={t.id} className="flex items-center gap-2 rounded-[6px] border border-ink-3 bg-survey-paper-2 px-4 py-3 text-body text-ink">
+          <div key={t.id} className="flex items-center gap-2 border-t border-ink-3 pt-3 text-body text-ink">
             <IconCmp size={16} className="shrink-0" aria-hidden="true" />
             {t.message}
           </div>

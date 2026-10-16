@@ -136,7 +136,7 @@ export default function GraphPage() {
       )}
 
       {phase !== 'done' && phase !== 'failed' && (
-        <div className="space-y-4 rounded-[6px] border border-ink-4 bg-survey-paper-2 p-5">
+        <div className="space-y-4 border-t border-ink-4 pt-5">
           <StageLine
             label="Discovering the ontology"
             state={phase === 'ontology' ? 'active' : 'done'}

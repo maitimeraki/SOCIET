@@ -6,7 +6,7 @@ import Tag from '../ui/Tag'
 export default function ProfileCard({ profile }: { profile: AgentProfile }) {
   const sources = profile.summary_provenance ?? []
   return (
-    <article className="rounded-[6px] border border-ink-4 bg-survey-paper-2 p-4">
+    <article className="border-t border-ink-4 pt-4">
       <header className="flex items-center justify-between gap-2">
         <span className="text-body text-ink">
           {profile.identity.name} · {profile.identity.archetype.toLowerCase()}

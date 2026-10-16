@@ -5,7 +5,7 @@ import Tag from '../ui/Tag'
 export default function IntentCard({ intent, question }: { intent: QueryIntent; question: string }) {
   const reduced = useReducedMotion()
   return (
-    <div className="rounded-[6px] border border-ink-4 bg-survey-paper-2 p-4">
+    <div className="border-t border-ink-4 pt-4">
       <p className="font-titling text-[20px] leading-[28px] text-ink">{question}</p>
       <p className="tnum mt-1 font-measurement text-mono text-datum">reading as: {intent.core_question}</p>
       <motion.div

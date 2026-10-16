@@ -64,7 +64,7 @@ export default function RunTable({ runs, loading = false }: { runs: RunSummary[]
       {/* Under md the timeline collapses to stacked cards (§6 responsive). */}
       <ul className="space-y-2 md:hidden">
         {runs.map((run) => (
-          <li key={run.run_id} className="rounded-[6px] border border-ink-4 bg-survey-paper-2 p-3">
+          <li key={run.run_id} className="border-t border-ink-4 pt-3">
             <div className="flex items-start justify-between gap-3">
               <Link to={`/runs/${run.run_id}`} className="text-body text-ink hover:text-datum">
                 {run.query}

@@ -129,12 +129,12 @@ export default function IngestPage() {
       </div>
 
       {note && (
-        <p className="rounded-[6px] border border-brass/40 bg-survey-paper-2 px-4 py-3 text-body text-ink-2">{note}</p>
+        <p className="border-t border-brass/40 pt-3 text-body text-ink-2">{note}</p>
       )}
 
       {/* R35: the mark may be brass, the words are ink — a full quota is a distinct, recoverable state. */}
       {quota && (
-        <div role="status" className="flex items-start gap-2 rounded-[6px] border border-brass/40 bg-survey-paper-2 px-4 py-3">
+        <div role="status" className="flex items-start gap-2 border-t border-brass/40 pt-3">
           <Warning size={16} className="mt-0.5 shrink-0 text-brass" aria-hidden="true" />
           <p className="text-body text-ink">
             {quota.message} {retryLine(quota.retryAfterSeconds)}
@@ -147,7 +147,7 @@ export default function IngestPage() {
           the single announcement: the duplicate error toasts below were removed so the same string is
           not read twice. */}
       {failure && (
-        <div role="alert" className="rounded-[6px] border border-route/40 bg-survey-paper-2 px-4 py-3">
+        <div role="alert" className="border-t border-route/40 pt-3">
           <p className="text-body text-ink">Extraction failed: {failure}. Nothing was saved — try again.</p>
         </div>
       )}

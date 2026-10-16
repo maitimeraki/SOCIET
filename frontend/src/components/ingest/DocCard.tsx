@@ -22,7 +22,7 @@ export default function DocCard({
   onRetry: () => void
 }) {
   return (
-    <div className="flex items-center gap-3 rounded-[6px] border border-ink-4 bg-survey-paper-2 px-4 py-3">
+    <div className="flex items-center gap-3 border-t border-ink-4 pt-3">
       <DocIcon title={doc.title} />
       <div className="min-w-0 flex-1">
         <div className="truncate text-body text-ink">{doc.title}</div>

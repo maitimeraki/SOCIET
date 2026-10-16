@@ -15,7 +15,7 @@ export default function UrlFetchRow({ onFetch, busy = false }: { onFetch: (url: 
   }
 
   return (
-    <form onSubmit={submit} className="flex items-center gap-2 rounded-[6px] border border-ink-4 bg-survey-paper-2 px-3 py-2">
+    <form onSubmit={submit} className="flex items-center gap-2 border-t border-ink-4 pt-2">
       <LinkSimple size={16} className="shrink-0 text-ink-3" aria-hidden="true" />
       <input
         type="url"

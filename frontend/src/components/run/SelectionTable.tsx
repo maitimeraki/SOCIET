@@ -14,7 +14,7 @@ export default function SelectionTable({
 }) {
   const sorted = [...rows].sort((a, b) => b.blended - a.blended)
   return (
-    <div className="rounded-[6px] border border-ink-4 bg-survey-paper-2 p-4">
+    <div className="border-t border-ink-4 pt-4">
       <div className="grid grid-cols-[1fr_auto_auto_minmax(0,240px)] items-center gap-x-4 gap-y-2 sm:grid-cols-[1fr_auto_auto_minmax(180px,240px)]">
         <span className="text-label uppercase text-ink-3">Name</span>
         <span className="text-label uppercase text-ink-3">semantic</span>

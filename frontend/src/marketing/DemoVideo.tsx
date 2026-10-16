@@ -36,7 +36,7 @@ export default function DemoVideo() {
           </video>
         ) : (
           // The plate sits between the frame's rules — no enclosing card (DSPEC §6).
-          <div className="mt-3 flex aspect-video items-center justify-center border border-ink-4 bg-survey-paper-2">
+          <div className="mt-3 flex aspect-video items-center justify-center border-y border-ink-4">
             <p className="font-measurement text-mono text-ink-3">{demo.poster}</p>
           </div>
         )}

@@ -8,7 +8,7 @@ export default function AgentCard({ profile, onOpen }: { profile: AgentProfile; 
     <button
       type="button"
       onClick={onOpen}
-      className="w-full rounded-[6px] border border-ink-4 bg-survey-paper-2 p-4 text-left transition-colors hover:border-ink-4"
+      className="w-full border-t border-ink-4 pt-4 text-left transition-colors hover:border-ink-4"
     >
       <span className="flex items-center justify-between gap-2">
         <span className="text-body text-ink">

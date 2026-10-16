@@ -13,7 +13,7 @@ export default function TurnCard({ turn, round }: { turn: TurnInfo; round: numbe
   return (
     <article
       aria-label={`Round ${round} — ${turn.agent_name}, ${turn.stance}`}
-      className="rounded-[6px] border border-ink-4 bg-survey-paper-2 p-3"
+      className="border-t border-ink-4 pt-3"
     >
       <header className="flex items-center gap-2">
         <span className="text-body text-ink">{turn.agent_name}</span>

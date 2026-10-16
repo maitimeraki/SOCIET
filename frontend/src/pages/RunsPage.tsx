@@ -4,6 +4,7 @@ import { listRunsPage } from '../api/rest'
 import type { RunSummary } from '../api/types'
 import RunTable from '../components/common/RunTable'
 import EmptyState from '../components/ui/EmptyState'
+import ErrorState from '../components/ui/ErrorState'
 import Input from '../components/ui/Input'
 import Select from '../components/ui/Select'
 import Button from '../components/ui/Button'
@@ -32,6 +33,8 @@ export default function RunsPage() {
   const [loading, setLoading] = useState(true)
   const [loadingMore, setLoadingMore] = useState(false)
   const [failed, setFailed] = useState(false)
+  // The server's own message, forwarded so the failure is never silent (DashboardPage pattern).
+  const [failDetail, setFailDetail] = useState<string>()
   const [status, setStatus] = useState<StatusFilter>('all')
   const [text, setText] = useState('')
 
@@ -41,7 +44,10 @@ export default function RunsPage() {
         setRuns(page.items)
         setCursor(page.next_cursor)
       })
-      .catch(() => setFailed(true))
+      .catch((error: unknown) => {
+        setFailed(true)
+        setFailDetail(error instanceof Error ? error.message : undefined)
+      })
       .finally(() => setLoading(false))
   }, [])
 
@@ -90,7 +96,10 @@ export default function RunsPage() {
       {loading ? (
         <RunTable runs={[]} loading />
       ) : failed ? (
-        <p className="text-body text-ink-2">Couldn't reach the server — the run history loads when it's back.</p>
+        <ErrorState
+          title="Couldn't reach the server"
+          detail={failDetail || 'The run history loads when the server is back.'}
+        />
       ) : filtered.length === 0 ? (
         <EmptyState line={runs.length === 0 ? 'No runs yet. Convene your first society →' : 'No runs match this filter.'} />
       ) : (

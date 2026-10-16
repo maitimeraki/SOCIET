@@ -43,8 +43,15 @@
      in ink. */
 
   /* §3.2 The plotting table — the ONE dark surface in the product. A live traced plot
-        reads luminous; everything else is the light sheet. */
+        reads luminous; everything else is the light sheet. The `plot-ground` utility inverts
+        the sheet's ink scale to these on the plot, so text and rules stay ≥4.5:1 / visible on
+        the dark ground (§9). */
   --color-plot-ground: #14150f;
+  --color-plot-raised: #1f2018;  /* a raised panel on the plot — the sheet's survey-paper-2 inverted */
+  --color-plot-ink: #f1efe7;     /* plot text — the sheet's raised tone, luminous on the dark ground */
+  --color-plot-ink-2: #cfcbbf;   /* plot body */
+  --color-plot-ink-3: #a8a496;   /* plot labels and captions (≈7:1 on the ground) */
+  --color-plot-ink-4: #6f6c60;   /* plot hairlines, graticule, sightlines (rule tier) */
 
   /* ── §4 Registers. Titling names the sheet, the record says what was found, the
         measurement counts it. Cardinal rule: any figure that is a measurement is set in
@@ -251,11 +258,21 @@
   }
 }
 
-/* §3.2 The plotting table — the ONE dark surface. Apply to the container: it paints the ground
-   and rebinds --focus-ring to the only datum that clears 3:1 on it (R29/F2). */
+/* §3.2 The plotting table — the ONE dark surface. Apply to the container: it paints the ground,
+   rebinds --focus-ring to the only datum that clears 3:1 on it (R29/F2), and inverts the sheet's
+   ink/sheet/datum scale to the plot tokens so descendants using those tokens read correctly on the
+   dark ground (text stays ≥4.5:1, §9). */
 @utility plot-ground {
   background: var(--color-plot-ground);
+  color: var(--color-plot-ink);
   --focus-ring: var(--color-datum-dim);
+  --color-ink: var(--color-plot-ink);
+  --color-ink-2: var(--color-plot-ink-2);
+  --color-ink-3: var(--color-plot-ink-3);
+  --color-ink-4: var(--color-plot-ink-4);
+  --color-survey-paper: var(--color-plot-ground);
+  --color-survey-paper-2: var(--color-plot-raised);
+  --color-datum: var(--color-datum-dim);
 }
 
 @utility tnum {
