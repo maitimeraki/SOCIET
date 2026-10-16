@@ -180,7 +180,7 @@ export default function RunPage() {
           </div>
           <div className="space-y-3">
             {run.status === 'failed' && (
-              <div className="rounded-[6px] border border-route/40 bg-survey-paper-2 px-4 py-3">
+              <div className="border-t border-route/40 pt-3">
                 <p className="text-body text-ink">The debate stopped: {run.error ?? 'unknown error'}.</p>
                 <div className="mt-2 flex items-center gap-4">
                   <a href="#run-stream" className="text-body text-datum hover:text-datum">

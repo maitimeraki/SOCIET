@@ -36,8 +36,11 @@ export function ToastHost() {
     <div className="fixed bottom-6 right-6 z-[60] flex flex-col gap-2" aria-live="polite">
       {toasts.map((t) => {
         const IconCmp = ICON[t.kind]
+        // An overlay, not a content card: ToastHost floats over arbitrary page content (e.g. the dark
+        // plot-ground panel), so it keeps an opaque filled surface rather than the ruled-block
+        // treatment used for in-flow cards.
         return (
-          <div key={t.id} className="flex items-center gap-2 border-t border-ink-3 pt-3 text-body text-ink">
+          <div key={t.id} className="flex items-center gap-2 rounded-[6px] border border-ink-3 bg-survey-paper-2 px-4 py-3 text-body text-ink">
             <IconCmp size={16} className="shrink-0" aria-hidden="true" />
             {t.message}
           </div>

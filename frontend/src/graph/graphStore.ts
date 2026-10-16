@@ -65,27 +65,29 @@ interface GraphStoreState {
  * §3: a hue with no legend entry does not exist). `Legend` (components/common/Legend.tsx) renders this
  * same table, so the palette and its legend share one source.
  *
- * Repainted for the Survey sheet (addendum §5). The incumbent set was validated against the dark
- * Chamber surface; every one of those hues measured 1.44–2.14:1 on the light sheet `--survey-paper`
- * and failed SC 1.4.11's 3:1 non-text floor. These clear it on the sheet:
- * 5.57 · 5.11 · 5.30 · 4.86 · 4.21 · 4.47 · 4.87. On the plotting table (`--plot-ground` #14150F)
- * only coral (3.46) and gold (3.25) clear 3:1 — teal 2.61 · azure 2.85 · violet 2.74 · rose 2.99 ·
- * green 2.99 do not, so a node of those hues cannot carry a mark on the dark plot without a
- * non-colour cue (its legend symbol and label). The map's *meaning* hues (the four stance tokens,
- * datum, route, brass) are deliberately not reused: an entity type is not a stance.
+ * Repainted for the Survey sheet (addendum §5), then re-tuned for the dark plot. The graph now
+ * renders on `--plot-ground` (#14150f) as well as the light sheet `--survey-paper` (#e7e5db), and a
+ * hue must carry its mark on BOTH — the legend swatch is the non-colour cue and must match the mark,
+ * so the two grounds share one table. The hues are held near luminance 0.168, the value that
+ * equalises the two grounds' contrast, so every one clears SC 1.4.11's 3:1 non-text floor on both.
+ * Measured WCAG contrast, sheet/plot: teal 3.86/3.77 · azure 3.79/3.84 · violet 3.83/3.79 ·
+ * rose 3.81/3.81 · coral 4.21/3.46 · gold 4.47/3.25 · green 3.81/3.81. (Teal, azure, violet, rose
+ * and green were re-tuned — they measured 2.61–2.99 on the plot and failed; coral and gold already
+ * sat inside the window and are unchanged.) The map's *meaning* hues (the four stance tokens, datum,
+ * route, brass) are deliberately not reused: an entity type is not a stance.
  *
  * Colours are keyed off the label SET (labels taken in sorted order), so a given set maps to the same
  * colours whatever order it arrives in — a reconnect or reload that replays the labels differently
  * cannot recolour the graph.
  */
 export const GRAPH_PALETTE = {
-  teal: '#17635f',
-  azure: '#2b5ea6',
-  violet: '#6e4a9e',
-  rose: '#a83a5b',
+  teal: '#1d7e79',
+  azure: '#3472c8',
+  violet: '#8560b5',
+  rose: '#c0476c',
   coral: '#a8541f',
   gold: '#7e6410',
-  green: '#4a6b22',
+  green: '#567d28',
 } as const
 
 /** The palette in slot order — `Object.values` preserves insertion order, so slots are stable. */

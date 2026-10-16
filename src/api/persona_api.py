@@ -3,6 +3,7 @@ from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
+from src.auth.cookies import verify_csrf
 from src.auth.deps import current_user
 from src.db.models import User
 from src.graph.config_graph import GraphConfig
@@ -12,7 +13,9 @@ from src.persona.repository import PersonaRepository
 
 # Mounted twice by `api_server`: prefix "/api" keeps today's /api/personas/hatch
 # alias; "/api/v1" is the canonical surface (R15).
-router = APIRouter(prefix="/personas", tags=["personas"])
+router = APIRouter(
+    prefix="/personas", tags=["personas"], dependencies=[Depends(verify_csrf)]
+)
 logger = setup_logging()
 
 

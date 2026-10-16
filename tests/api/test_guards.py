@@ -245,6 +245,55 @@ async def test_unauthenticated_requests_get_the_uniform_401(
     assert _error(response)["code"] == "unauthorized"
 
 
+# --- CSRF: a write without a valid token is refused ---------------------------
+#
+# One representative state-changing request per write router (debate, ingest,
+# jobs, simulate) plus the persona hatch route. Each carries a LIVE session but
+# no valid double-submit token, so the router-level `verify_csrf` dependency must
+# refuse it (403) before the handler runs. If any router's
+# `dependencies=[Depends(verify_csrf)]` is ever dropped, the request reaches the
+# handler and this assertion flips — the test IS the guard.
+
+_CSRF_WRITE_ROUTES = [
+    ("POST", "/simulate/debate", {"json": {"query": "Should we tax carbon?"}}),
+    ("POST", "/simulate/ontology", {"params": {"dataset_id": "ds"}, "json": []}),
+    ("POST", "/api/ingest/url", {"json": {"url": "https://example.com/a.txt"}}),
+    ("DELETE", "/api/v1/jobs/some-job", {}),
+    ("POST", "/api/personas/hatch", {"json": {"query": "Who should decide?"}}),
+]
+
+_CSRF_ROUTE_IDS = [f"{m} {p}" for m, p, _ in _CSRF_WRITE_ROUTES]
+
+# `verify_csrf` runs ahead of the endpoint's own auth, so it never resolves the
+# sid against the DB — a fabricated session is enough to exercise the guard, and
+# these tests need no live Postgres.
+_SESSION_ONLY = {"sid": "csrf-guard-probe"}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("method,path,kwargs", _CSRF_WRITE_ROUTES, ids=_CSRF_ROUTE_IDS)
+async def test_a_write_without_a_csrf_token_is_refused(client, method, path, kwargs):
+    """A session cookie but no csrf cookie: `verify_csrf` refuses (403)."""
+    response = await client.request(method, path, cookies=_SESSION_ONLY, **kwargs)
+    assert response.status_code == 403, response.text
+    assert _error(response)["code"] == "forbidden"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("method,path,kwargs", _CSRF_WRITE_ROUTES, ids=_CSRF_ROUTE_IDS)
+async def test_a_write_with_a_foreign_csrf_token_is_refused(client, method, path, kwargs):
+    """A csrf cookie that does not match the header: refused (double-submit)."""
+    response = await client.request(
+        method,
+        path,
+        cookies={"sid": "csrf-guard-probe", "csrf": "the-cookie-token"},
+        headers={"X-CSRF-Token": "a-different-token"},
+        **kwargs,
+    )
+    assert response.status_code == 403, response.text
+    assert _error(response)["code"] == "forbidden"
+
+
 # --- ownership: owner normal, non-owner 404 ----------------------------------
 
 
@@ -343,7 +392,9 @@ async def test_run_docs_are_listed_and_read_for_their_owner_only(client, account
 @pytest.mark.parametrize("path", _both_mounts("/api/personas/hatch"))
 async def test_hatch_is_guarded_on_both_mounts(client, accounts, path):
     owner, _ = accounts
-    response = await client.post(path, json={"query": "   "}, cookies=_cookie(owner))
+    response = await client.post(
+        path, json={"query": "   "}, cookies=_cookie(owner), headers=_csrf(owner)
+    )
     # 400 (blank query) proves auth passed and the handler ran — no Neo4j call.
     assert response.status_code == 400
 
