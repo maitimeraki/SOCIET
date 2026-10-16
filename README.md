@@ -158,10 +158,9 @@ Verdict Synthesis → Society Opinion + Confidence + Dissenting Views
 ## Quickstart
 
 ### Backend
-1. Install the runtime dependencies — `pip install -r requirements.txt` does not resolve
-   (langchain pin conflict); install the runtime set directly:
-   `pip install "litellm>=1.40.0" fastapi uvicorn websockets pydantic python-dotenv neo4j httpx \`
-   `  python-multipart PyMuPDF python-docx beautifulsoup4 requests`
+1. Install the runtime dependencies: `pip install -r requirements.txt`
+   (the dev/test tooling — pytest, ruff, black, mypy, moto — lives in
+   `requirements-dev.txt`).
 2. Point `.env` at Neo4j and an LLM provider (`NEO4J_URI`, `NEO4J_USERNAME`,
    `NEO4J_PASSWORD`, plus your provider key), then bootstrap the schema:
    `python -m src.cli.bootstrap_neo4j`

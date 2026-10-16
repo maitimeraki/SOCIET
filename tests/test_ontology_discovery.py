@@ -204,7 +204,7 @@ class TestDiscoverOntology:
 
     @pytest.mark.asyncio
     async def test_sample_size_respected(self, sample_chunks):
-        """Verify sample_size parameter limits chunks used."""
+        """The prompt carries only `sample_size` chunks, not the whole batch."""
         mock_response = MagicMock()
         mock_response.__str__ = (
             lambda self: '{"entity_types": [], "relation_types": []}'
@@ -215,10 +215,11 @@ class TestDiscoverOntology:
             mock_instance.acomplete = AsyncMock(return_value=mock_response)
             mock_llm.return_value = mock_instance
 
+            # Two chunks available, one sampled: the prompt shows exactly one.
             await discover_ontology(sample_chunks, sample_size=1)
 
-            # Verify the LLM was called (sampling is internal to stage.run)
-            mock_instance.acomplete.assert_called_once()
+            prompt = mock_instance.acomplete.call_args.args[0]
+            assert prompt.count('"document_id"') == 1
 
     @pytest.mark.asyncio
     async def test_entity_types_discovered(self, sample_chunks):

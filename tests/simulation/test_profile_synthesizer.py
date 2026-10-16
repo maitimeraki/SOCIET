@@ -1,5 +1,6 @@
 """Tests for ProfileSynthesizer."""
 
+import math
 from datetime import datetime
 from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
@@ -159,16 +160,15 @@ async def test_synthesize_calls_repo_methods(synthesizer, mock_persona_repo):
 
 @pytest.mark.asyncio
 async def test_synthesize_adaptive_count(synthesizer, mock_graph_context):
-    """Verify adaptive count: sqrt(n) * 4, capped at max_agents."""
-    # With 10 entities, adaptive count = sqrt(10) * 4 ≈ 12.6 -> capped at 5
-    await synthesizer.synthesize(
+    """The roster size is the documented adaptive count: sqrt(n) * 4, capped."""
+    # 10 candidate entities (the fixture) → sqrt(10) * 4 ≈ 12.6 → capped at 5.
+    profiles = await synthesizer.synthesize(
         query="test query",
         dataset_id="test_dataset",
         max_agents=5,
     )
 
-    # Should have been called with limit = max_agents * 3
-    mock_graph_context.find_relevant_entities.assert_called_once()
+    assert len(profiles) == min(5, int(math.sqrt(10) * 4))
 
 
 @pytest.mark.asyncio

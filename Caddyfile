@@ -28,6 +28,16 @@
 		reverse_proxy api:8000
 	}
 
+	# Liveness/readiness probes are top-level backend routes (not under /api or
+	# /simulate), so without these handles the SPA fallback answers them with
+	# index.html and HealthDot's JSON parse throws → permanently "offline".
+	handle /health {
+		reverse_proxy api:8000
+	}
+	handle /ready {
+		reverse_proxy api:8000
+	}
+
 	# Static SPA with history fallback.
 	handle {
 		root * /srv
