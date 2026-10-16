@@ -62,7 +62,12 @@ def _error(response) -> dict:
 
 
 def _cookie(account) -> dict:
-    return {"sid": account.sid}
+    return {"sid": account.sid, "csrf": account.csrf}
+
+
+def _csrf(account) -> dict:
+    """The double-submit header matching ``_cookie``'s csrf value."""
+    return {"X-CSRF-Token": account.csrf}
 
 
 _IPS = itertools.count(11)
@@ -101,7 +106,13 @@ async def accounts(db):
             )
             session.add(user_session)
             await session.flush()
-            made.append(SimpleNamespace(id=str(user.id), sid=str(user_session.id)))
+            made.append(
+                SimpleNamespace(
+                    id=str(user.id),
+                    sid=str(user_session.id),
+                    csrf=uuid.uuid4().hex,
+                )
+            )
         await session.commit()
     return made[0], made[1]
 
@@ -342,7 +353,9 @@ async def test_hatch_is_guarded_on_both_mounts(client, accounts, path):
 @pytest.mark.parametrize("path", _both_mounts("/api/ingest/url"))
 async def test_ingest_url_is_guarded_on_both_mounts(client, accounts, path):
     owner, _ = accounts
-    response = await client.post(path, json={"url": "   "}, cookies=_cookie(owner))
+    response = await client.post(
+        path, json={"url": "   "}, cookies=_cookie(owner), headers=_csrf(owner)
+    )
     assert response.status_code == 422
 
 
@@ -358,6 +371,7 @@ async def test_ingest_files_is_guarded_on_both_mounts(client, accounts, path):
         path,
         files={"files": ("fake.txt", b"%PDF-1.7\njunk\n%%EOF\n", "text/plain")},
         cookies=_cookie(owner),
+        headers=_csrf(owner),
     )
     assert response.status_code == 422, response.text
 
@@ -372,7 +386,10 @@ async def test_debate_enqueue_records_the_owner_on_both_mounts(
     monkeypatch.setattr(debate_api, "_run_debate_async", AsyncMock(return_value=None))
 
     response = await client.post(
-        path, json={"query": "Should we tax carbon?"}, cookies=_cookie(owner)
+        path,
+        json={"query": "Should we tax carbon?"},
+        cookies=_cookie(owner),
+        headers=_csrf(owner),
     )
 
     assert response.status_code == 202, response.text
@@ -627,11 +644,13 @@ async def test_debate_enqueue_is_rate_limited(client, accounts, monkeypatch):
             "/simulate/debate",
             json={"query": "Should we tax carbon?"},
             cookies=_cookie(owner),
+            headers=_csrf(owner),
         )
         second = await client.post(
             "/simulate/debate",
             json={"query": "Should we tax carbon?"},
             cookies=_cookie(owner),
+            headers=_csrf(owner),
         )
     finally:
         get_settings.cache_clear()
@@ -652,6 +671,7 @@ async def test_debate_enqueue_is_refused_while_degraded(client, accounts, monkey
         "/simulate/debate",
         json={"query": "Should we tax carbon?"},
         cookies=_cookie(owner),
+        headers=_csrf(owner),
     )
 
     assert response.status_code == 503

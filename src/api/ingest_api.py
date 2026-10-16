@@ -21,6 +21,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.api.jobs_api import enqueue_or_http
 from src.audit import client_ip
 from src.audit import record as audit_record
+from src.auth.cookies import verify_csrf
 from src.auth.deps import current_user
 from src.config.settings import get_settings
 from src.db.engine import get_db
@@ -33,7 +34,9 @@ from src.ingest.storage import delete_upload, put_upload
 
 # Mounted twice by `api_server`: prefix "/api" keeps today's /api/ingest/* alias;
 # "/api/v1" is the canonical surface (R15).
-router = APIRouter(prefix="/ingest", tags=["ingest"])
+router = APIRouter(
+    prefix="/ingest", tags=["ingest"], dependencies=[Depends(verify_csrf)]
+)
 
 logger = logging.getLogger(__name__)
 

@@ -108,13 +108,17 @@ async def delete_account(
     return {"job_id": job_id, "status": "queued"}
 
 
-@router.get("/export", status_code=202)
+@router.post("/export", status_code=202)
 async def export_account(
     request: Request,
     user: User = Depends(current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Queue the export job; the zip's download URL comes from the job read."""
+    """Queue the export job; the zip's download URL comes from the job read.
+
+    POST, not GET: the call enqueues a job and writes a zip, so it is
+    state-changing and must carry the router's CSRF check.
+    """
     job_id = await enqueue_or_http(
         "account_export",
         {

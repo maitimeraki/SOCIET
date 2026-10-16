@@ -29,7 +29,8 @@ from src.api.config_api import (
 from src.api.errors import error_response, install_error_handlers
 from src.api.limits import JSONBodySizeLimitMiddleware, install_rate_limiter
 from src.api.middleware import LoggingMiddleware, SecurityHeadersMiddleware
-from src.auth.deps import current_user
+from src.auth.cookies import verify_csrf
+from src.auth.deps import current_user, require_owner
 from src.config.settings import get_settings
 from src.db.engine import get_engine
 from src.db.models import User
@@ -265,7 +266,9 @@ app.include_router(ws_ticket_router)
 
 # Unified graph jobs (ontology / build_graph / normalize_graph / jobs). The
 # router is populated at the bottom of this module, so it is mounted there.
-simulate_router = APIRouter(prefix="/simulate", tags=["simulate"])
+simulate_router = APIRouter(
+    prefix="/simulate", tags=["simulate"], dependencies=[Depends(verify_csrf)]
+)
 
 
 RUNS: Dict[str, Dict[str, Any]] = {}
@@ -788,6 +791,13 @@ async def build_graph_async(
     ontology_job_id: Optional[str] = None,
     user: User = Depends(current_user),
 ):
+    # Ownership guard: a caller-supplied ontology job feeds its schema into this
+    # run's graph build, so it must belong to the caller. A missing or foreign
+    # job is the same 404 — existence is never leaked.
+    if ontology_job_id:
+        doc = await run_doc.read_job_doc(ontology_job_id)
+        await require_owner((doc or {}).get("user_id"), user)
+
     job_id = await enqueue_or_http(
         "build_graph",
         {

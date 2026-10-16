@@ -225,7 +225,7 @@ async def test_export_zip_contains_the_run_json(owner, s3, inline_queue):
     seeded = await _seed(owner, query="Should we expand into Europe?")
     client, session, user = await _authed_client(owner)
     try:
-        response = await client.get("/api/v1/account/export")
+        response = await client.post("/api/v1/account/export")
         assert response.status_code == 202, response.text
         job_id = response.json()["job_id"]
         await jobs_queue.drain_inline()

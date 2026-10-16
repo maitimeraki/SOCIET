@@ -26,6 +26,7 @@ from src.api.jobs_api import enqueue_or_http
 from src.api.limits import limiter, service_available
 from src.audit import client_ip
 from src.audit import record as audit_record
+from src.auth.cookies import verify_csrf
 from src.auth.deps import current_user, require_owner, websocket_user
 from src.config.settings import get_settings
 from src.db.engine import get_db
@@ -34,7 +35,9 @@ from src.simulation.debate_config import DebateConfig
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/simulate", tags=["debate"])
+router = APIRouter(
+    prefix="/simulate", tags=["debate"], dependencies=[Depends(verify_csrf)]
+)
 
 
 class DebateConfigRequest(BaseModel):

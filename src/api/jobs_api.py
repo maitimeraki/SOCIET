@@ -15,6 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.api import run_doc
 from src.audit import client_ip
 from src.audit import record as audit_record
+from src.auth.cookies import verify_csrf
 from src.auth.deps import current_user, require_owner
 from src.db.engine import get_db
 from src.db.models import User
@@ -22,7 +23,9 @@ from src.jobs import queue as jobs_queue
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/jobs", tags=["jobs"])
+router = APIRouter(
+    prefix="/jobs", tags=["jobs"], dependencies=[Depends(verify_csrf)]
+)
 
 
 async def get_job_status(job_id: str, user: User):

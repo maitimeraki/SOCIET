@@ -8,7 +8,7 @@ enforced at the point of use (engine, alembic env) — not at import time.
 from functools import lru_cache
 from typing import Annotated, Literal
 
-from pydantic import field_validator
+from pydantic import field_validator, model_validator
 from pydantic_settings import BaseSettings, NoDecode
 
 
@@ -17,8 +17,22 @@ class Settings(BaseSettings):
     database_url: str | None = None
     redis_url: str = "redis://localhost:6379/0"
     session_ttl_days: int = 30
-    cookie_secure: bool = False  # env COOKIE_SECURE; False for plain-HTTP dev
+    # env COOKIE_SECURE; unset → Secure in prod, plain-HTTP-friendly elsewhere.
+    cookie_secure: bool = False
     ws_ticket_ttl_seconds: int = 30
+
+    @model_validator(mode="before")
+    @classmethod
+    def _secure_cookie_in_prod(cls, data: object) -> object:
+        """Default the ``Secure`` flag to True under ``ENV=prod`` unless set.
+
+        An explicit COOKIE_SECURE (env or kwarg) always wins; the default only
+        applies when the operator left it unset, so a prod deploy never ships a
+        non-Secure ``sid`` cookie.
+        """
+        if isinstance(data, dict) and data.get("cookie_secure") is None:
+            data["cookie_secure"] = data.get("env") == "prod"
+        return data
 
     # --- API edge (env CORS_ALLOWED_ORIGINS / ALLOWED_HOSTS are comma-separated;
     # NoDecode keeps pydantic-settings from JSON-decoding them).

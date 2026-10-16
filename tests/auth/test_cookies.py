@@ -71,6 +71,17 @@ def test_session_cookie_secure_flag_follows_settings(monkeypatch):
     assert "secure" in response.headers["set-cookie"].lower()
 
 
+def test_secure_cookie_defaults_true_in_prod(monkeypatch):
+    # Unset COOKIE_SECURE: the Secure flag follows ENV — True in prod only.
+    monkeypatch.delenv("COOKIE_SECURE", raising=False)
+    assert Settings(env="prod").cookie_secure is True
+    assert Settings(env="dev").cookie_secure is False
+
+
+def test_explicit_cookie_secure_beats_the_prod_default():
+    assert Settings(env="prod", cookie_secure=False).cookie_secure is False
+
+
 def test_clear_session_cookie_expires_it():
     response = _response()
     cookies.clear_session_cookie(response)
@@ -96,6 +107,19 @@ def test_csrf_cookie_is_readable_by_scripts():
 @pytest.mark.asyncio
 async def test_safe_methods_pass_without_a_token():
     await cookies.verify_csrf(_request("GET", "/api/v1/auth/me"))
+
+
+@pytest.mark.asyncio
+async def test_websocket_handshake_is_skipped_not_500():
+    # The guard sits at the router level on routers that also own a WebSocket
+    # route; a WS scope has no "method", so it must be skipped before that read.
+    from starlette.requests import HTTPConnection
+
+    await cookies.verify_csrf(
+        HTTPConnection(
+            {"type": "websocket", "path": "/simulate/x/stream", "headers": []}
+        )
+    )
 
 
 @pytest.mark.asyncio

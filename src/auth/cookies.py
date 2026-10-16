@@ -2,7 +2,8 @@
 
 import secrets
 
-from fastapi import HTTPException, Request, Response
+from fastapi import HTTPException, Response
+from starlette.requests import HTTPConnection
 
 from src.config.settings import get_settings
 
@@ -76,14 +77,21 @@ def _tokens_match(header_token: str, cookie_token: str) -> bool:
         return False
 
 
-async def verify_csrf(request: Request) -> None:
+async def verify_csrf(request: HTTPConnection) -> None:
     """Double-submit check (plan §3) for state-changing requests.
 
     With a csrf cookie present, the X-CSRF-Token header must match it. Without
     one, only the signup/login entry points pass and a request carrying a
     session cookie is 403; a request with no session at all falls through to
     the endpoint's own auth (401), since there is no session to protect.
+
+    Annotated ``HTTPConnection`` (not ``Request``) so the guard can sit at the
+    router level on a router that also owns a WebSocket route: FastAPI then
+    injects the connection for both, and the handshake — authenticated by
+    ticket/sid, not a CSRF-able HTTP request — is skipped.
     """
+    if request.scope.get("type") == "websocket":
+        return
     if request.method not in _STATE_CHANGING:
         return
 
