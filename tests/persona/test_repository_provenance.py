@@ -4,16 +4,17 @@ The read path (`get_provenance`) already exists; these tests pin the write
 statement, its bounds, and the seam where the two meet (chunk node ids in,
 real `chunk.chunk_id`s out). No live Neo4j: the driver is stubbed.
 """
-from uuid import UUID
+
 import os
 import uuid
+from unittest.mock import AsyncMock, MagicMock
+from uuid import UUID
 
 import pytest
 import pytest_asyncio
-from unittest.mock import AsyncMock, MagicMock
 
-from src.persona.repository import PersonaRepository
 from src.persona.agent import ProvenanceLink
+from src.persona.repository import PersonaRepository
 
 CHUNK_UUID = "3f1d2c9a-0000-4000-8000-000000000001"
 
@@ -50,7 +51,9 @@ async def test_writer_emits_one_idempotent_mentions_statement():
     assert "MERGE (p:Persona {name: $name, dataset_id: $dataset_id})" in cypher
     assert "MERGE (p)-[:MENTIONS]->(c)" in cypher  # idempotent: MERGE, not CREATE
     assert session.run.await_args.kwargs == {
-        "chunk_ids": ["node-7", "node-9"], "name": "Alice", "dataset_id": "ds1",
+        "chunk_ids": ["node-7", "node-9"],
+        "name": "Alice",
+        "dataset_id": "ds1",
     }
     assert written == 2
 
@@ -59,7 +62,9 @@ async def test_writer_emits_one_idempotent_mentions_statement():
 async def test_writer_strips_dedupes_and_caps_the_batch():
     repo, session = _repo_capturing()
 
-    ids = ["node-7", " node-7 ", "", "   ", "node-9"] + [f"node-{i}" for i in range(10, 40)]
+    ids = ["node-7", " node-7 ", "", "   ", "node-9"] + [
+        f"node-{i}" for i in range(10, 40)
+    ]
     await repo.write_persona_provenance("Alice", "ds1", ids)
 
     sent = session.run.await_args.kwargs["chunk_ids"]
@@ -90,12 +95,16 @@ async def test_writer_returns_the_edges_ensured_and_tolerates_unmatched_ids():
 @pytest.mark.asyncio
 async def test_get_provenance_returns_the_real_chunk_ids_the_writer_links():
     """The seam: the read path resolves the linked chunk node's own `chunk_id`."""
-    repo, session = _repo_capturing(rows=[{
-        "doc_id": "doc:report",
-        "title": "Report",
-        "breadcrumb": "a > b",
-        "chunk_id": CHUNK_UUID,
-    }])
+    repo, session = _repo_capturing(
+        rows=[
+            {
+                "doc_id": "doc:report",
+                "title": "Report",
+                "breadcrumb": "a > b",
+                "chunk_id": CHUNK_UUID,
+            }
+        ]
+    )
 
     links = await repo.get_provenance("Alice")
 
@@ -118,7 +127,7 @@ async def test_get_provenance_reads_the_writer_shape():
 
     cypher = session.run.await_args.args[0]
     assert "chunk.document_anchor AS doc_id" in cypher
-    assert "chunk.doc_id" not in cypher           # never the sentinel property
+    assert "chunk.doc_id" not in cypher  # never the sentinel property
     assert "chunk.document_anchor IS NOT NULL" in cypher  # real chunks only
     assert "a.dataset_id = $dataset_id" in cypher  # scoped to the writer's key
     assert session.run.await_args.kwargs["dataset_id"] == "ds1"
@@ -152,7 +161,9 @@ async def test_entity_writer_emits_one_idempotent_mentions_statement():
     assert "SET p.domain_tags = names, p.entity_affinity = names" in cypher
     assert "p.stance = coalesce($stance, p.stance)" in cypher
     assert session.run.await_args.kwargs == {
-        "chunk_ids": ["node-7", "node-9"], "name": "Alice", "dataset_id": "ds1",
+        "chunk_ids": ["node-7", "node-9"],
+        "name": "Alice",
+        "dataset_id": "ds1",
         "stance": None,
     }
     assert linked == 3
@@ -162,7 +173,9 @@ async def test_entity_writer_emits_one_idempotent_mentions_statement():
 async def test_entity_writer_strips_dedupes_and_caps_the_batch():
     repo, session = _repo_capturing(rows=[{"linked": 1}])
 
-    ids = ["node-7", " node-7 ", "", "   ", "node-9"] + [f"node-{i}" for i in range(10, 40)]
+    ids = ["node-7", " node-7 ", "", "   ", "node-9"] + [
+        f"node-{i}" for i in range(10, 40)
+    ]
     await repo.write_persona_entity_links("Alice", "ds1", ids)
 
     sent = session.run.await_args.kwargs["chunk_ids"]
@@ -201,10 +214,14 @@ def _build_repo(provenance):
 
 
 def _sector_results():
-    return [{
-        "domain_tag": "education", "total_relevance": 1.0,
-        "evidence_nodes": ["Lead"], "density": 1,
-    }]
+    return [
+        {
+            "domain_tag": "education",
+            "total_relevance": 1.0,
+            "evidence_nodes": ["Lead"],
+            "density": 1,
+        }
+    ]
 
 
 async def _build(repo, sector_results):
@@ -225,7 +242,7 @@ async def test_build_keeps_synthetic_links_out_of_summary_provenance():
 
     agent = await _build(repo, _sector_results())
 
-    assert agent.summary_provenance == []                      # honest: no sources
+    assert agent.summary_provenance == []  # honest: no sources
     # …but the fallback still feeds the graph snapshot (behaviour preserved).
     assert agent.graph_snapshot.chunk_count == 1
 
@@ -233,7 +250,10 @@ async def test_build_keeps_synthetic_links_out_of_summary_provenance():
 @pytest.mark.asyncio
 async def test_build_keeps_real_provenance_in_summary_provenance():
     real = ProvenanceLink(
-        doc_id="DOC-1", title="Report", breadcrumb="a > b", chunk_id=UUID(CHUNK_UUID),
+        doc_id="DOC-1",
+        title="Report",
+        breadcrumb="a > b",
+        chunk_id=UUID(CHUNK_UUID),
     )
     repo = _build_repo([real])
 
@@ -258,7 +278,10 @@ async def live_repo():
     db = os.getenv("NEO4J_DATABASE", "neo4j")
 
     repo = PersonaRepository(
-        neo4j_uri=uri, neo4j_user=user, neo4j_password=pwd, neo4j_database=db,
+        neo4j_uri=uri,
+        neo4j_user=user,
+        neo4j_password=pwd,
+        neo4j_database=db,
     )
     try:
         async with repo._driver.session(database=db) as session:
@@ -292,12 +315,15 @@ async def test_get_provenance_reads_real_document_id_on_the_live_graph(live_repo
                     c.doc_id = 'None'  // the sentinel llama-index writes
                 MERGE (p)-[:MENTIONS]->(c)
                 """,
-                ds=ds, cid=cid, anchor=doc_anchor, chunk_id=CHUNK_UUID,
+                ds=ds,
+                cid=cid,
+                anchor=doc_anchor,
+                chunk_id=CHUNK_UUID,
             )
 
         links = await repo.get_provenance("itest-Prov", dataset_id=ds)
 
-        assert [link.doc_id for link in links] == [doc_anchor]      # real, not "None"
+        assert [link.doc_id for link in links] == [doc_anchor]  # real, not "None"
         assert links[0].title == "EU Market 2027"
         assert links[0].breadcrumb == "Section 3 > Risks"
         assert links[0].chunk_id == UUID(CHUNK_UUID)
@@ -306,4 +332,6 @@ async def test_get_provenance_reads_real_document_id_on_the_live_graph(live_repo
         assert await repo.get_provenance("itest-Prov", dataset_id="other-ds") == []
     finally:
         async with driver.session(database=db) as session:
-            await session.run("MATCH (n) WHERE n.dataset_id = $ds DETACH DELETE n", ds=ds)
+            await session.run(
+                "MATCH (n) WHERE n.dataset_id = $ds DETACH DELETE n", ds=ds
+            )

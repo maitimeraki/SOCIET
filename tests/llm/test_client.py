@@ -1,8 +1,10 @@
 """Tests for the LiteLLM-backed LLMClient."""
+
 import asyncio
 from types import SimpleNamespace
-import pytest
 from unittest.mock import AsyncMock, patch
+
+import pytest
 
 from src.llm import client as llm_client
 from src.llm.client import LLMClient
@@ -10,11 +12,15 @@ from src.llm.config_llm import LLMConfig
 
 
 def _resp(content: str):
-    return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content=content))])
+    return SimpleNamespace(
+        choices=[SimpleNamespace(message=SimpleNamespace(content=content))]
+    )
 
 
 def _chunk(content):
-    return SimpleNamespace(choices=[SimpleNamespace(delta=SimpleNamespace(content=content))])
+    return SimpleNamespace(
+        choices=[SimpleNamespace(delta=SimpleNamespace(content=content))]
+    )
 
 
 async def _stream_of(chunks):
@@ -39,7 +45,10 @@ async def test_generate_falls_back_on_provider_failure():
         out = await LLMClient().generate("sys", "usr", provider="openai")
         assert out == "fallback ok"
         assert ac.await_count == 2
-        chain_first, chain_second = ac.await_args_list[0].kwargs["model"], ac.await_args_list[1].kwargs["model"]
+        chain_first, chain_second = (
+            ac.await_args_list[0].kwargs["model"],
+            ac.await_args_list[1].kwargs["model"],
+        )
         assert chain_first.startswith("openai/") and chain_second.startswith("ollama/")
 
         # litellm's ollama/ provider appends /api/chat itself — a /v1 base 404s.
@@ -98,7 +107,12 @@ async def test_stream_generate_defaults_to_configured_debate_model():
     """Streaming honours the same debate-tier default as generate()."""
     with patch("src.llm.client.litellm.acompletion", new_callable=AsyncMock) as ac:
         ac.return_value = _stream_of([_chunk("hi")])
-        out = [token async for token in LLMClient().stream_generate("sys", "usr", provider="openai")]
+        out = [
+            token
+            async for token in LLMClient().stream_generate(
+                "sys", "usr", provider="openai"
+            )
+        ]
 
         assert out == ["hi"]
         assert ac.await_args.kwargs["model"] == f"openai/{LLMConfig.debate_model}"
@@ -109,7 +123,12 @@ async def test_stream_generate_yields_deltas():
     chunks = [_chunk("he"), _chunk(None), SimpleNamespace(choices=[]), _chunk("llo")]
     with patch("src.llm.client.litellm.acompletion", new_callable=AsyncMock) as ac:
         ac.return_value = _stream_of(chunks)
-        out = [token async for token in LLMClient().stream_generate("sys", "usr", provider="openai")]
+        out = [
+            token
+            async for token in LLMClient().stream_generate(
+                "sys", "usr", provider="openai"
+            )
+        ]
         assert out == ["he", "llo"]
         assert ac.await_args.kwargs["stream"] is True
 
@@ -118,13 +137,23 @@ async def test_stream_generate_yields_deltas():
 async def test_stream_generate_falls_back_to_generate_on_failure():
     with patch("src.llm.client.litellm.acompletion", new_callable=AsyncMock) as ac:
         ac.side_effect = [RuntimeError("stream boom"), _resp("fallback text")]
-        out = [token async for token in LLMClient().stream_generate("sys", "usr", provider="openai")]
+        out = [
+            token
+            async for token in LLMClient().stream_generate(
+                "sys", "usr", provider="openai"
+            )
+        ]
         assert out == ["fallback text"]
         assert ac.await_count == 2
 
 
 def test_get_available_providers_lists_all_four():
-    assert set(LLMClient().get_available_providers()) == {"openai", "anthropic", "huggingface", "ollama"}
+    assert set(LLMClient().get_available_providers()) == {
+        "openai",
+        "anthropic",
+        "huggingface",
+        "ollama",
+    }
 
 
 @pytest.mark.asyncio
@@ -138,6 +167,7 @@ async def test_generate_raises_when_all_fail():
 def test_unknown_provider_rejected():
     with pytest.raises(ValueError, match="Unknown provider"):
         import asyncio
+
         asyncio.run(LLMClient().generate("s", "u", provider="nope"))
 
 
@@ -158,7 +188,12 @@ async def test_stream_generate_bounds_every_attempt():
     """The direct streaming call is bounded too — no unbounded network call remains."""
     with patch("src.llm.client.litellm.acompletion", new_callable=AsyncMock) as ac:
         ac.return_value = _stream_of([_chunk("hi")])
-        out = [token async for token in LLMClient().stream_generate("sys", "usr", provider="openai")]
+        out = [
+            token
+            async for token in LLMClient().stream_generate(
+                "sys", "usr", provider="openai"
+            )
+        ]
         assert out == ["hi"]
         assert ac.await_args.kwargs["timeout"] == llm_client.LLM_ATTEMPT_TIMEOUT_SECONDS
 

@@ -18,14 +18,23 @@ export default function HealthDot() {
     return () => window.clearInterval(timer)
   }, [check])
 
-  const dot =
-    state === 'online' ? 'bg-good' : state === 'offline' ? 'bg-critical' : 'bg-paper-faint'
-  const label = state === 'online' ? 'API online' : state === 'offline' ? 'API unreachable — start uvicorn' : 'checking…'
+  // The mark is the map's own reading, never a stance hue: a live reading takes --datum, a failed one
+  // the warning route, and an unread one the idle hairline ink. --stance-pos would say "an agent
+  // argued POSITIVE", which is not what a health check means (§3.1, §7).
+  const dot = state === 'online' ? 'bg-datum' : state === 'offline' ? 'bg-route' : 'bg-ink-4'
+  const label =
+    state === 'online'
+      ? 'API online'
+      : state === 'offline'
+        ? import.meta.env.DEV
+          ? 'API unreachable — start uvicorn'
+          : 'connecting…'
+        : 'checking…'
 
   return (
     <span className="inline-flex items-center gap-2" title={`Checked ${API_BASE}/health`}>
       <span aria-hidden="true" className={`h-2 w-2 rounded-full ${dot}`} />
-      <span className="tnum font-mono text-mono text-paper-mute">{label}</span>
+      <span className="tnum font-measurement text-mono text-ink-3">{label}</span>
     </span>
   )
 }

@@ -1,6 +1,7 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { RunDoc } from '../api/types'
-import { initialState } from './reducer'
+import { RUN_SAMPLE } from './__fixtures__/run-sample'
+import { fold, initialState } from './reducer'
 import { useRunStore } from './runStore'
 
 const { connectRun, getRun } = vi.hoisted(() => ({ connectRun: vi.fn(), getRun: vi.fn() }))
@@ -42,5 +43,75 @@ describe('runStore.loadAndConnect supersession', () => {
     release(doc())
     await pending
     expect(connectRun).not.toHaveBeenCalled()
+  })
+})
+
+describe('runStore rAF batching', () => {
+  const NOW = 1_700_000_000_000
+  // A controllable frame: the stub captures the pending callback so a test decides when the frame
+  // lands. No jsdom in this repo, so rAF would otherwise be missing entirely (runStore falls back
+  // to setTimeout) and the flush could never be driven deterministically.
+  let frame: FrameRequestCallback | null = null
+
+  beforeEach(() => {
+    frame = null
+    vi.spyOn(Date, 'now').mockReturnValue(NOW)
+    vi.stubGlobal('requestAnimationFrame', (cb: FrameRequestCallback) => {
+      frame = cb
+      return 1
+    })
+  })
+
+  afterEach(() => {
+    vi.restoreAllMocks()
+    vi.unstubAllGlobals()
+  })
+
+  const flushFrame = () => {
+    const cb = frame
+    frame = null
+    cb?.(0)
+  }
+
+  it('folds a whole burst in arrival order, matching the per-event fold', () => {
+    for (const event of RUN_SAMPLE) useRunStore.getState().dispatch(event)
+
+    // Nothing folded yet — the burst is buffered until the frame lands.
+    expect(useRunStore.getState().events).toHaveLength(0)
+
+    flushFrame()
+
+    expect(useRunStore.getState().events).toEqual(RUN_SAMPLE)
+    // The fold still runs through applyEvent, so batched live === per-event replay (§11.2).
+    expect(useRunStore.getState().run).toEqual(fold(RUN_SAMPLE, () => NOW))
+  })
+
+  it('folds once per frame, not once per event', () => {
+    let notifications = 0
+    const unsubscribe = useRunStore.subscribe(() => notifications++)
+
+    for (const event of RUN_SAMPLE.slice(0, 6)) useRunStore.getState().dispatch(event)
+    expect(notifications).toBe(0)
+    flushFrame()
+    expect(notifications).toBe(1)
+    expect(useRunStore.getState().events).toHaveLength(6)
+
+    // A later burst is a second fold — still one per frame, not one per event.
+    for (const event of RUN_SAMPLE.slice(6, 10)) useRunStore.getState().dispatch(event)
+    flushFrame()
+    expect(notifications).toBe(2)
+    expect(useRunStore.getState().events).toHaveLength(10)
+
+    unsubscribe()
+  })
+
+  it('keeps arrival order across frames', () => {
+    useRunStore.getState().dispatch(RUN_SAMPLE[0])
+    useRunStore.getState().dispatch(RUN_SAMPLE[1])
+    flushFrame()
+    useRunStore.getState().dispatch(RUN_SAMPLE[2])
+    flushFrame()
+
+    expect(useRunStore.getState().events).toEqual(RUN_SAMPLE.slice(0, 3))
   })
 })

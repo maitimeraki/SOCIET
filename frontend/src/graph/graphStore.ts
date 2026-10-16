@@ -41,33 +41,61 @@ interface GraphStoreState {
   nodes: Record<string, GraphNode>
   edges: Record<string, GraphEdge>
   labels: GraphLabel[]
+  /**
+   * Monotonic count of node/edge merges. A cheap primitive invalidation key for derived views, so
+   * they key on "the graph changed" without deep-comparing (or holding a reference to) the maps.
+   * Labels are vocabulary, not content, so `mergeVocabulary` does not bump it.
+   */
+  version: number
   mergeDelta: (delta: GraphDelta) => void
   applySnapshot: (snapshot: GraphSnapshot) => void
   mergeVocabulary: (labels: string[]) => void
 }
 
 /**
- * A fixed categorical palette for entity types — hand-picked, mutually distinct, and in a format
- * Sigma's WebGL colour path parses (hex; it draws black on `hsl()`). Every entry clears the spec's
- * ≥3:1 mark floor against the canvas surface (`#100e09`); validated min pairwise ΔE 29.7 (normal) /
- * 9.8 (deuteranopia), min contrast 7.14:1 — comfortably better than the stance palette's own residual.
+ * The territory's categorical legend palette — one NAMED hue per entity type. R33: the graph's
+ * categorical palette is data encoding, not theme colour, so it stays literal rather than becoming a
+ * CSS custom property. It feeds Sigma's WebGL colour path and the legend swatches directly, in a
+ * format Sigma parses (hex; it draws black on anything it cannot read). It stays literal because the
+ * store also loads under Vitest's Node environment, where there is no document to resolve a `var()`
+ * against, and a palette that resolved to empty strings there would make the arrival-order-invariance
+ * test below pass vacuously.
+ *
+ * The table's KEYS are the legend entries — every hue has a name, so none is an anonymous hex (DSPEC
+ * §3: a hue with no legend entry does not exist). `Legend` (components/common/Legend.tsx) renders this
+ * same table, so the palette and its legend share one source.
+ *
+ * Repainted for the Survey sheet (addendum §5), then re-tuned for the dark plot. The graph now
+ * renders on `--plot-ground` (#14150f) as well as the light sheet `--survey-paper` (#e7e5db), and a
+ * hue must carry its mark on BOTH — the legend swatch is the non-colour cue and must match the mark,
+ * so the two grounds share one table. The hues are held near luminance 0.168, the value that
+ * equalises the two grounds' contrast, so every one clears SC 1.4.11's 3:1 non-text floor on both.
+ * Measured WCAG contrast, sheet/plot: teal 3.86/3.77 · azure 3.79/3.84 · violet 3.83/3.79 ·
+ * rose 3.81/3.81 · coral 4.21/3.46 · gold 4.47/3.25 · green 3.81/3.81. (Teal, azure, violet, rose
+ * and green were re-tuned — they measured 2.61–2.99 on the plot and failed; coral and gold already
+ * sat inside the window and are unchanged.) The map's *meaning* hues (the four stance tokens, datum,
+ * route, brass) are deliberately not reused: an entity type is not a stance.
+ *
  * Colours are keyed off the label SET (labels taken in sorted order), so a given set maps to the same
  * colours whatever order it arrives in — a reconnect or reload that replays the labels differently
  * cannot recolour the graph.
  */
-export const LABEL_PALETTE = [
-  '#45C2BE', // teal
-  '#7C9CE8', // azure
-  '#C88CE2', // violet
-  '#EC7F9C', // rose
-  '#EC8B52', // coral
-  '#D6C055', // gold
-  '#88CC68', // green
-] as const
+export const GRAPH_PALETTE = {
+  teal: '#1d7e79',
+  azure: '#3472c8',
+  violet: '#8560b5',
+  rose: '#c0476c',
+  coral: '#a8541f',
+  gold: '#7e6410',
+  green: '#567d28',
+} as const
 
-// ponytail: a 7-colour palette wraps past the 7th label (two types can share a hue); extend the array if a corpus ever promotes more.
+/** The palette in slot order — `Object.values` preserves insertion order, so slots are stable. */
+const PALETTE_SLOTS = Object.values(GRAPH_PALETTE)
+
+// ponytail: a 7-colour palette wraps past the 7th label (two types can share a hue); extend the table if a corpus ever promotes more.
 /** The palette colour for a label at `index` (its slot in the sorted label set). */
-export const labelColor = (index: number): string => LABEL_PALETTE[index % LABEL_PALETTE.length]
+export const labelColor = (index: number): string => PALETTE_SLOTS[index % PALETTE_SLOTS.length]
 
 const edgeKey = (edge: GraphEdge): string => `${edge.source}|${edge.target}|${edge.label}`
 
@@ -100,18 +128,21 @@ export const useGraphStore = create<GraphStoreState>((set) => ({
   nodes: {},
   edges: {},
   labels: [],
+  version: 0,
 
   mergeDelta: (delta) =>
     set((state) => ({
       nodes: upsertNodes(state.nodes, delta.nodes),
       edges: upsertEdges(state.edges, delta.edges),
+      version: state.version + 1,
     })),
 
   applySnapshot: (snapshot) =>
-    set(() => ({
+    set((state) => ({
       nodes: upsertNodes({}, snapshot.nodes),
       edges: upsertEdges({}, snapshot.edges),
       labels: mergeLabels(snapshot.labels, []),
+      version: state.version + 1,
     })),
 
   mergeVocabulary: (incoming) => set((state) => ({ labels: mergeLabels(incoming, state.labels) })),

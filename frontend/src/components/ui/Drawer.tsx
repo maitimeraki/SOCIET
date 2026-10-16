@@ -48,7 +48,7 @@ export default function Drawer({ open, onClose, title, children }: { open: boole
     <AnimatePresence>
       {open && (
         <motion.div
-          className="fixed inset-0 z-50 bg-ink-1000/60"
+          className="fixed inset-0 z-50 bg-survey-paper/60"
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
@@ -66,9 +66,9 @@ export default function Drawer({ open, onClose, title, children }: { open: boole
             animate={{ x: 0, opacity: 1 }}
             exit={{ x: 32, opacity: 0 }}
             transition={{ duration: 0.2, ease: [0.2, 0, 0, 1] }}
-            className="absolute right-0 top-0 h-full w-full max-w-[560px] overflow-y-auto border-l border-ink-600 bg-ink-900 p-6"
+            className="absolute right-0 top-0 h-full w-full max-w-[560px] overflow-y-auto border-l border-ink-3 bg-survey-paper-2 p-6"
           >
-            <h2 className="mb-4 font-serif text-title text-paper">{title}</h2>
+            <h2 className="mb-4 font-titling text-title text-ink">{title}</h2>
             {children}
           </motion.section>
         </motion.div>

@@ -1,5 +1,7 @@
 import { beforeEach, describe, expect, it } from 'vitest'
-import { LABEL_PALETTE, labelColor, useGraphStore } from './graphStore'
+import { GRAPH_PALETTE, labelColor, useGraphStore } from './graphStore'
+
+const PALETTE = Object.values(GRAPH_PALETTE)
 
 // The store is a module singleton — reset it between cases so counts are absolute.
 beforeEach(() => useGraphStore.setState({ nodes: {}, edges: {}, labels: [] }))
@@ -57,12 +59,16 @@ describe('useGraphStore', () => {
 
 describe('label palette', () => {
   it('emits hex colours Sigma can parse (never hsl)', () => {
-    for (const color of LABEL_PALETTE) expect(color).toMatch(/^#[0-9a-f]{6}$/i)
+    for (const color of PALETTE) expect(color).toMatch(/^#[0-9a-f]{6}$/i)
+  })
+
+  it('names every hue, so no palette colour is an anonymous hex (R33)', () => {
+    for (const key of Object.keys(GRAPH_PALETTE)) expect(key).toMatch(/^[a-z]+$/)
   })
 
   it('assigns a distinct colour to each of the first seven labels', () => {
-    const colors = LABEL_PALETTE.map((_, index) => labelColor(index))
-    expect(new Set(colors).size).toBe(LABEL_PALETTE.length)
+    const colors = PALETTE.map((_, index) => labelColor(index))
+    expect(new Set(colors).size).toBe(PALETTE.length)
   })
 
   it('gives the same set the same colours whatever the arrival order', () => {

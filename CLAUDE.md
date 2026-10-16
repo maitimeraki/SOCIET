@@ -174,7 +174,7 @@ python -m src.cli.bootstrap_neo4j        # Initialize Neo4j schema
 
 ### Run API
 ```bash
-uvicorn src.api.api_server:app --host 127.0.0.1 --port 8000
+uvicorn src.api.api_server:app --host 127.0.0.1 --port 8000 --reload
 # Docs: http://localhost:8000/docs
 ```
 
@@ -486,4 +486,4 @@ CRITICAL RULES:
 
 - `docs/TECHNOLOGY_STACK.md` - Production tech stack and architecture (source of truth)
 - `docs/ARCHITECTURE.md` - Detailed component documentation
-- `docs/DESIGN.md` - Frontend design specification ("The Chamber", draft pending approval; supersedes the retired "Neural Observatory" demo shell)
+- `docs/DESIGN_SPEC.md` - Frontend design specification ("The Survey", draft pending approval; supersedes the retired "Neural Observatory" demo shell)

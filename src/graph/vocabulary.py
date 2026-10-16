@@ -5,6 +5,7 @@ then bloated every later prompt. Here a single discovery call runs over a
 sample spread evenly across the corpus — endpoints inclusive — and the entity
 types are trimmed to a fixed ceiling.
 """
+
 import logging
 import re
 from typing import List, Optional
@@ -113,10 +114,14 @@ def select_slice(vocabulary: LocalOntology, chunk_text: str, k: int) -> LocalOnt
     return LocalOntology(
         metadata=vocabulary.metadata,
         entity_types=[
-            e for index, e in enumerate(vocabulary.entity_types) if ("entity", index) in keep
+            e
+            for index, e in enumerate(vocabulary.entity_types)
+            if ("entity", index) in keep
         ],
         relation_types=[
-            r for index, r in enumerate(vocabulary.relation_types) if ("relation", index) in keep
+            r
+            for index, r in enumerate(vocabulary.relation_types)
+            if ("relation", index) in keep
         ],
     )
 

@@ -10,6 +10,7 @@ a real `GraphContext.find_relevant_entities` would, so nothing about the chain
 is assumed by the fixture. Skipped when Neo4j is unreachable; everything seeded
 is cleaned up by its unique dataset id.
 """
+
 import os
 from uuid import uuid4
 
@@ -21,7 +22,7 @@ from src.persona.graph_context import EntityNode
 from src.persona.repository import PersonaRepository
 from src.simulation.debate_config import DebateConfig
 from src.simulation.profile_synthesizer import ProfileSynthesizer
-from src.simulation.topology import CommunicationTopology, _STANCE_DIVERGENCE_BONUS
+from src.simulation.topology import _STANCE_DIVERGENCE_BONUS, CommunicationTopology
 
 load_dotenv()
 
@@ -54,7 +55,10 @@ async def live():
     db = os.getenv("NEO4J_DATABASE", "neo4j")
 
     repo = PersonaRepository(
-        neo4j_uri=uri, neo4j_user=user, neo4j_password=pwd, neo4j_database=db,
+        neo4j_uri=uri,
+        neo4j_user=user,
+        neo4j_password=pwd,
+        neo4j_database=db,
     )
     try:
         async with repo._driver.session(database=db) as session:
@@ -100,9 +104,14 @@ async def _seed_writer_shaped_graph(repo, db, ds):
             CREATE (c)-[:MENTIONS]->(adv)
             CREATE (c)-[:MENTIONS]->(skep)
             """,
-            chunk_id=chunk_id, text=CHUNK_TEXT, anchor=doc_anchor,
-            chunk_uuid=str(uuid4()), ds=ds,
-            adv=names[0], skep=names[1], legacy=names[2],
+            chunk_id=chunk_id,
+            text=CHUNK_TEXT,
+            anchor=doc_anchor,
+            chunk_uuid=str(uuid4()),
+            ds=ds,
+            adv=names[0],
+            skep=names[1],
+            legacy=names[2],
         )
     return chunk_id, doc_anchor, names
 
@@ -118,8 +127,13 @@ async def _entity_nodes(repo, db, names):
         )
         rows = await res.data()
     return [
-        EntityNode(id=r["id"], name=r["name"], label="Entity",
-                   properties=r["props"], relevance_score=1.0)
+        EntityNode(
+            id=r["id"],
+            name=r["name"],
+            label="Entity",
+            properties=r["props"],
+            relevance_score=1.0,
+        )
         for r in rows
     ]
 
@@ -128,22 +142,26 @@ def _score_for(pairs, a, b):
     for p in pairs:
         if {p.agent_a, p.agent_b} == {a, b}:
             return p.score
-    raise AssertionError(f"no pair for {a}/{b} in {[(p.agent_a, p.agent_b) for p in pairs]}")
+    raise AssertionError(
+        f"no pair for {a}/{b} in {[(p.agent_a, p.agent_b) for p in pairs]}"
+    )
 
 
 @pytest.mark.asyncio
 async def test_roster_chain_holds_on_writer_shaped_graph(live):
     repo, db = live
     ds = f"itest-roster-{uuid4().hex[:10]}"
-    chunk_id, doc_anchor, (adv_name, skep_name, legacy_name) = await _seed_writer_shaped_graph(
-        repo, db, ds
+    chunk_id, doc_anchor, (adv_name, skep_name, legacy_name) = (
+        await _seed_writer_shaped_graph(repo, db, ds)
     )
 
     try:
         nodes = await _entity_nodes(repo, db, (adv_name, skep_name, legacy_name))
         synth = ProfileSynthesizer(repo, _StubCtx(nodes))
         agents = await synth.synthesize(
-            query="Should we expand into the EU?", dataset_id=ds, max_agents=5,
+            query="Should we expand into the EU?",
+            dataset_id=ds,
+            max_agents=5,
         )
         by_name = {a.identity.name: a for a in agents}
         assert {adv_name, skep_name, legacy_name} <= set(by_name), by_name.keys()
@@ -162,7 +180,8 @@ async def test_roster_chain_holds_on_writer_shaped_graph(live):
             res = await session.run(
                 "MATCH (p:Persona) WHERE p.dataset_id = $ds AND p.name IN $names "
                 "RETURN p.name AS name, p.stance AS stance",
-                ds=ds, names=[adv_name, skep_name],
+                ds=ds,
+                names=[adv_name, skep_name],
             )
             persisted = {r["name"]: r["stance"] for r in await res.data()}
         assert persisted[adv_name] == "POSITIVE"
@@ -174,7 +193,10 @@ async def test_roster_chain_holds_on_writer_shaped_graph(live):
         # strictly above the bare Jaccard — the divergence term is computable.
         topology = CommunicationTopology(repo._driver, db)
         pairs = await topology.compute_round_pairs(
-            agents, dataset_id=ds, round_num=1, config=DebateConfig(comm_radius=1),
+            agents,
+            dataset_id=ds,
+            round_num=1,
+            config=DebateConfig(comm_radius=1),
         )
         assert _score_for(pairs, adv_name, skep_name) == pytest.approx(
             1.0 + _STANCE_DIVERGENCE_BONUS
@@ -188,9 +210,12 @@ async def test_roster_chain_holds_on_writer_shaped_graph(live):
             res = await session.run(
                 "MATCH (p:Persona {name: $name, dataset_id: $ds})-[:MENTIONS]->(e:__Entity__) "
                 "RETURN count(e) AS links",
-                name=legacy_name, ds=ds,
+                name=legacy_name,
+                ds=ds,
             )
             assert (await res.data())[0]["links"] == 0
     finally:
         async with repo._driver.session(database=db) as session:
-            await session.run("MATCH (n) WHERE n.dataset_id = $ds DETACH DELETE n", ds=ds)
+            await session.run(
+                "MATCH (n) WHERE n.dataset_id = $ds DETACH DELETE n", ds=ds
+            )

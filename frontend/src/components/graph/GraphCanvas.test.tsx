@@ -198,18 +198,18 @@ describe('drawNodeLabel', () => {
       strokeText: () => calls.push('stroke'),
       fillText: () => calls.push('fill'),
     }
-    const settings = { labelSize: 12, labelFont: 'X', labelWeight: '500', labelColor: { color: '#c9bfa9' } }
+    const settings = { labelSize: 12, labelFont: 'X', labelWeight: '500', labelColor: { color: '#111111' } }
 
     drawNodeLabel(context as unknown as CanvasRenderingContext2D, data as never, settings as never)
 
     expect(calls).toEqual(['stroke', 'fill'])
-    expect(context.fillStyle).toBe('#c9bfa9')
+    expect(context.fillStyle).toBe('#111111')
   })
 
   it('draws nothing for a node without a label', () => {
     const calls: string[] = []
     const context = { strokeText: () => calls.push('stroke'), fillText: () => calls.push('fill') }
-    const settings = { labelSize: 12, labelFont: 'X', labelWeight: '500', labelColor: { color: '#c9bfa9' } }
+    const settings = { labelSize: 12, labelFont: 'X', labelWeight: '500', labelColor: { color: '#111111' } }
 
     drawNodeLabel(context as unknown as CanvasRenderingContext2D, { ...data, label: undefined } as never, settings as never)
 

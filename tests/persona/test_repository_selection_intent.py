@@ -1,8 +1,9 @@
 """S4 on the /hatch surface: find_agent_sectors consumes the intent (or the llm_output dict)."""
+
 import logging
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-from unittest.mock import AsyncMock, MagicMock
 
 from src.persona.repository import PersonaRepository
 from src.simulation.debate_config import DebateConfig
@@ -11,8 +12,18 @@ from src.utils.queryIntend import QueryIntent
 _MATRIX_LOGGER = "src.simulation.relevance_matrix"
 
 SECTOR_ROWS = [
-    {"domain_tag": "AI Safety", "total_relevance": 2.5, "evidence_nodes": ["Alice", "Bob"], "density": 3},
-    {"domain_tag": "Economics", "total_relevance": 1.8, "evidence_nodes": ["Carol"], "density": 2},
+    {
+        "domain_tag": "AI Safety",
+        "total_relevance": 2.5,
+        "evidence_nodes": ["Alice", "Bob"],
+        "density": 3,
+    },
+    {
+        "domain_tag": "Economics",
+        "total_relevance": 1.8,
+        "evidence_nodes": ["Carol"],
+        "density": 2,
+    },
 ]
 
 
@@ -46,7 +57,9 @@ async def test_find_agent_sectors_ranks_by_the_intent_and_decomposes_every_row()
     repo = _repo_returning(SECTOR_ROWS)
 
     result = await repo.find_agent_sectors(
-        llm_output={}, dataset_id="ds", intent=_intent(keywords=["economics"]),
+        llm_output={},
+        dataset_id="ds",
+        intent=_intent(keywords=["economics"]),
     )
 
     # "Economics" shares nothing with the denser "AI Safety" row's text, so the
@@ -55,7 +68,8 @@ async def test_find_agent_sectors_ranks_by_the_intent_and_decomposes_every_row()
     for row in result:
         selection = row["selection"]
         assert selection["blended"] == pytest.approx(
-            DebateConfig().w1 * selection["semantic"] + DebateConfig().w2 * selection["density"]
+            DebateConfig().w1 * selection["semantic"]
+            + DebateConfig().w2 * selection["density"]
         )
     assert result[0]["selection"]["semantic"] == 1.0
     assert result[1]["selection"]["density"] == pytest.approx(1.0)
@@ -66,7 +80,11 @@ async def test_find_agent_sectors_uses_the_llm_output_frame_when_no_intent():
     repo = _repo_returning(SECTOR_ROWS)
 
     result = await repo.find_agent_sectors(
-        llm_output={"direct_keywords": ["economics"], "latent_sectors": [], "search_perspectives": []},
+        llm_output={
+            "direct_keywords": ["economics"],
+            "latent_sectors": [],
+            "search_perspectives": [],
+        },
         dataset_id="ds",
     )
 
@@ -92,8 +110,10 @@ async def test_find_agent_sectors_falls_back_to_density_order_and_warns(caplog):
 
     with caplog.at_level(logging.WARNING, logger=_MATRIX_LOGGER):
         result = await repo.find_agent_sectors(
-            llm_output={}, dataset_id="ds",
-            intent=_intent(keywords=["economics"]), config=config,
+            llm_output={},
+            dataset_id="ds",
+            intent=_intent(keywords=["economics"]),
+            config=config,
         )
 
     assert [row["domain_tag"] for row in result] == ["AI Safety", "Economics"]

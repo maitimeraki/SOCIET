@@ -1,21 +1,27 @@
-.env
-.venv
-__pycache__
+# Version control + local dev state
+.git/
+.gitignore
+.venv/
+venv/
+**/__pycache__/
 *.pyc
 *.pyo
 *.pyd
-.Python
-env/
-venv/
-ENV/
-build/
-dist/
-*.egg-info/
-*.egg
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Agent / planning scaffolding + docs (not needed to run the app)
 .claude/
-.claudeignore
-CLAUDE.md
-plan.md
-.vscode/
-.idea/
-.qodo/
+.superpowers/
+graphify-out/
+docs/
+*.md
+
+# Secrets — never bake env files into an image
+.env
+.env.*
+
+# Frontend build inputs (the SPA is served by Caddy from the host bind-mount)
+frontend/node_modules/
+frontend/.env*

@@ -6,6 +6,7 @@ the metrics shapes `calculate_agent_metrics_and_context_for_llm` actually return
 and crashed every real build whose roster had matched sectors — mocked builds
 never execute the line, so only a real call catches it.
 """
+
 from unittest.mock import AsyncMock
 
 import pytest
@@ -47,10 +48,14 @@ async def test_build_joins_list_neighbor_context_into_the_perspective():
             "neighbor_context": ["Alice (tags: school): taught — relations: R1"],
             "context_text": "Matched sectors: education. Top neighbors: Alice.",
         },
-        sector_results=[{
-            "domain_tag": "education", "total_relevance": 1.0,
-            "evidence_nodes": ["Lead"], "density": 1,
-        }],
+        sector_results=[
+            {
+                "domain_tag": "education",
+                "total_relevance": 1.0,
+                "evidence_nodes": ["Lead"],
+                "density": 1,
+            }
+        ],
         llm_output=None,
     )
 
@@ -133,7 +138,9 @@ async def test_a_silent_distillation_still_falls_back_to_the_graph():
     repo = _repo()
 
     agent = await _build(
-        repo, {"name": "Grid Co", "label": "Operator"}, distilled=DistilledProfile("d", "p")
+        repo,
+        {"name": "Grid Co", "label": "Operator"},
+        distilled=DistilledProfile("d", "p"),
     )
 
     assert agent.identity.archetype == "Operator"

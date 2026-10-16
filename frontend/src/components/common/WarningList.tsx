@@ -5,8 +5,8 @@ export default function WarningList({ warnings }: { warnings: string[] }) {
   return (
     <ul className="space-y-2">
       {warnings.map((warning) => (
-        <li key={warning} className="flex items-start gap-2 text-body text-paper-dim">
-          <Warning size={16} className="mt-0.5 shrink-0 text-brass" aria-hidden="true" />
+        <li key={warning} className="flex items-start gap-2 text-body text-ink-2">
+          <Warning size={16} className="mt-0.5 shrink-0 text-route" aria-hidden="true" />
           <span>{warning}</span>
         </li>
       ))}

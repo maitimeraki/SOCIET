@@ -2,14 +2,8 @@ import { useEffect, useState } from 'react'
 import { animate, useReducedMotion } from 'framer-motion'
 import type { DissentingView, EvidenceItem, Stance } from '../../run/events'
 import { splitSections } from './narrative'
+import NarrativeFallbackNotice from './NarrativeFallbackNotice'
 import Button from '../ui/Button'
-
-const UNDERLINE: Record<Stance, string> = {
-  POSITIVE: 'border-stance-pos',
-  NEUTRAL: 'border-stance-neu',
-  AMBIVALENT: 'border-stance-amb',
-  NEGATIVE: 'border-stance-neg',
-}
 
 export default function VerdictHero({
   stance,
@@ -17,6 +11,7 @@ export default function VerdictHero({
   converged,
   summary,
   narrative,
+  narrativeStatus,
   dissentingViews,
   evidence,
   onReplay,
@@ -28,6 +23,7 @@ export default function VerdictHero({
   converged: boolean
   summary: string
   narrative: string
+  narrativeStatus: string
   dissentingViews: DissentingView[]
   evidence: EvidenceItem[]
   onReplay: () => void
@@ -52,23 +48,29 @@ export default function VerdictHero({
 
   return (
     <section>
-      <p className="text-label uppercase text-brass">{converged ? 'The verdict' : 'No convergence'}</p>
-      <h1 className={`mt-3 inline-block border-b-[3px] pb-1 font-serif text-display text-paper ${UNDERLINE[stance]}`}>
+      <p className="text-label uppercase text-ink-3">{converged ? 'The verdict' : 'No convergence'}</p>
+      {/* The rule under the verdict word is ink, not a stance hue: DSPEC §6/§7.3 mandate no
+          stance-coloured rule here, so §3's legend law governs — the stance meaning is the word
+          itself (and the StanceChip symbol elsewhere), never a decorative hue. */}
+      <h1 className="mt-3 inline-block border-b-[3px] border-ink pb-1 font-titling text-display text-ink">
         {stance}
       </h1>
       <div className="mt-5 flex items-baseline gap-3">
-        <span className="tnum font-serif text-numeral text-paper">{display.toFixed(2)}</span>
-        <span className="text-label uppercase text-paper-mute">weighted confidence</span>
+        <span className="tnum font-titling text-numeral text-ink">{display.toFixed(2)}</span>
+        <span className="text-label uppercase text-ink-3">weighted confidence</span>
       </div>
+      {/* §17.3 — the narrative degraded to `summary`: say so, so the one-line summary never
+          masquerades as the written verdict. */}
+      <NarrativeFallbackNotice status={narrativeStatus} />
       {sections.length > 0 ? (
         <div className="mt-5 max-w-[60ch] space-y-4">
           {sections.map((section, i) => (
             <div key={i}>
               {section.heading && (
-                <h2 className="font-serif text-heading text-paper">{section.heading}</h2>
+                <h2 className="font-titling text-heading text-ink">{section.heading}</h2>
               )}
               {section.body && (
-                <p className="mt-1 whitespace-pre-line font-serif text-body text-paper-dim">
+                <p className="mt-1 whitespace-pre-line font-titling text-body text-ink-2">
                   {section.body}
                 </p>
               )}
@@ -76,15 +78,15 @@ export default function VerdictHero({
           ))}
         </div>
       ) : (
-        <p className="mt-5 max-w-[60ch] font-serif text-title text-paper">{summary}</p>
+        <p className="mt-5 max-w-[60ch] font-titling text-title text-ink">{summary}</p>
       )}
       {dissentingViews.length > 0 && (
         <div className="mt-6 max-w-[60ch]">
-          <h2 className="text-label uppercase text-brass">Dissenting views</h2>
+          <h2 className="text-label uppercase text-ink-3">Dissenting views</h2>
           <ul className="mt-2 space-y-1">
             {dissentingViews.map((view, i) => (
-              <li key={i} className="text-body text-paper-dim">
-                <span className="text-paper">{view.stance}</span> — {view.view}
+              <li key={i} className="text-body text-ink-2">
+                <span className="text-ink">{view.stance}</span> — {view.view}
               </li>
             ))}
           </ul>
@@ -92,18 +94,18 @@ export default function VerdictHero({
       )}
       {evidence.length > 0 && (
         <div className="mt-6 max-w-[60ch]">
-          <h2 className="text-label uppercase text-brass">Evidence</h2>
+          <h2 className="text-label uppercase text-ink-3">Evidence</h2>
           <ul className="mt-2 space-y-1">
             {evidence.map((item, i) => (
-              <li key={i} className="text-body text-paper-dim">
-                <span className="text-paper">{item.entity}</span> — {item.claim}
+              <li key={i} className="text-body text-ink-2">
+                <span className="text-ink">{item.entity}</span> — {item.claim}
               </li>
             ))}
           </ul>
         </div>
       )}
       {!converged && (
-        <p className="mt-3 text-body text-paper-dim">
+        <p className="mt-3 text-body text-ink-2">
           The chamber did not converge — this verdict is a plurality, not a consensus.
         </p>
       )}

@@ -28,6 +28,7 @@ Production-grade invariants enforced here:
 Every statement is idempotent (IF NOT EXISTS), so re-running the bootstrap on
 a populated DB is a no-op and safe in production logs.
 """
+
 from __future__ import annotations
 
 import logging
@@ -226,4 +227,8 @@ if __name__ == "__main__":  # pragma: no cover
     from src.graph.config_graph import GraphConfig
 
     cfg = GraphConfig()
-    asyncio.run(_selftest(cfg.neo4j_uri, cfg.neo4j_username, cfg.neo4j_password, cfg.neo4j_database))
+    asyncio.run(
+        _selftest(
+            cfg.neo4j_uri, cfg.neo4j_username, cfg.neo4j_password, cfg.neo4j_database
+        )
+    )

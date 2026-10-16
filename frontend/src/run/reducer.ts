@@ -33,6 +33,8 @@ export interface RunVerdict {
   converged: boolean
   summary: string
   narrative: string
+  /** "ok" | "fallback" — "fallback" means the narrative degraded to `summary` (§17.3). */
+  narrativeStatus: string
   dissentingViews: DissentingView[]
   evidence: EvidenceItem[]
   confidence: number | null
@@ -136,6 +138,7 @@ export function applyEvent(state: RunState, event: RunEvent, now: number): RunSt
           converged: event.converged,
           summary: event.verdict,
           narrative: event.narrative ?? '',
+          narrativeStatus: event.narrative_status ?? 'ok',
           dissentingViews: event.dissenting_views ?? [],
           evidence: event.evidence ?? [],
           confidence: event.confidence_score ?? null,

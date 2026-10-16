@@ -1,0 +1,169 @@
+# Societas — single-node production stack (Task 8).
+#
+# NO SECRETS ARE COMMITTED HERE. Every value below is either a non-secret local
+# default (safe for a dev/CI box) or interpolated from the environment.
+#
+# Production hardening: supply real secrets via a `.env` file (auto-loaded by
+# Compose and injected into api/worker via `env_file`) or a secret manager —
+# POSTGRES_PASSWORD, NEO4J_PASSWORD, and the LLM provider API keys must be set
+# to strong, unique values and the dev defaults below must NOT ship to prod.
+# Put a real domain in SITE_ADDRESS so Caddy requests a Let's Encrypt cert.
+
+x-app-service: &app-service
+  restart: unless-stopped
+  depends_on:
+    postgres:
+      condition: service_healthy
+    redis:
+      condition: service_healthy
+    neo4j:
+      condition: service_healthy
+    minio:
+      condition: service_healthy
+  # Optional user `.env`; absent by default so `docker compose config` validates
+  # without any .env file present (R8 — no .env* is committed).
+  env_file:
+    - path: .env
+      required: false
+  environment:
+    DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-societas}:${POSTGRES_PASSWORD:-societas_dev}@postgres:5432/${POSTGRES_DB:-societas}
+    REDIS_URL: redis://redis:6379/0
+    NEO4J_URI: bolt://neo4j:7687
+    NEO4J_USERNAME: neo4j
+    NEO4J_PASSWORD: ${NEO4J_PASSWORD:-societas_dev}
+    NEO4J_DATABASE: neo4j
+    ENV: ${ENV:-prod}
+    QUEUE_MODE: rq
+    # Observability (plan §10): the api serves /metrics and the worker serves its
+    # registry on METRICS_PORT (default 9100); both scrapeable over the compose
+    # network. Tracing/Sentry stay off until OTEL_EXPORTER_OTLP_ENDPOINT /
+    # SENTRY_DSN are supplied (secrets — set them in `.env`).
+    METRICS_ENABLED: ${METRICS_ENABLED:-true}
+    # In-network MinIO endpoint (the app default 127.0.0.1:9000 resolves inside
+    # the container). Credentials/bucket track the minio service's own vars.
+    S3_ENDPOINT_URL: http://minio:9000
+    S3_ACCESS_KEY: ${MINIO_ROOT_USER:-minioadmin}
+    S3_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-minioadmin}
+    S3_BUCKET: ${S3_BUCKET:-societas-uploads}
+    COOKIE_SECURE: ${COOKIE_SECURE:-true}
+    ALLOWED_HOSTS: ${ALLOWED_HOSTS:-localhost,127.0.0.1}
+    CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost}
+    # LLM provider keys (OPENAI_API_KEY, ANTHROPIC_API_KEY, NVIDIA_NIM_API_KEY,
+    # OLLAMA_BASE_URL, DEFAULT_LLM_PROVIDER, ANALYSIS_LLM_MODEL, …) are secrets
+    # or host-specific — set them in `.env`, which env_file injects. They are
+    # deliberately not interpolated here so nothing lands in compose config output.
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-societas}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-societas_dev}
+      POSTGRES_DB: ${POSTGRES_DB:-societas}
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+      # Least-privilege app role (plan §8). Runs once on a fresh volume; the
+      # api/worker can then connect as `societas_app` (see the SQL's notes).
+      - ./scripts/setup_db_roles.sql:/docker-entrypoint-initdb.d/10-setup-db-roles.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$$POSTGRES_USER\" -d \"$$POSTGRES_DB\""]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    # No published port: api/worker reach it over the compose network. Host
+    # ports 5432/6379/7687 belong to the live local dev stack.
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  neo4j:
+    image: neo4j:5
+    restart: unless-stopped
+    environment:
+      NEO4J_AUTH: "neo4j/${NEO4J_PASSWORD:-societas_dev}"
+      # Exposed only so the healthcheck below can authenticate.
+      NEO4J_PASSWORD: ${NEO4J_PASSWORD:-societas_dev}
+    volumes:
+      - neo4j_data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "cypher-shell -u neo4j -p \"$$NEO4J_PASSWORD\" 'RETURN 1'"]
+      interval: 10s
+      timeout: 10s
+      retries: 12
+      start_period: 40s
+
+  minio:
+    image: minio/minio
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
+    volumes:
+      - minio_data:/data
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # One-shot: create the uploads bucket, then exit. Idempotent via
+  # --ignore-existing, so restarts are safe.
+  minio-init:
+    image: minio/mc
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: >
+      /bin/sh -c "
+      mc alias set local http://minio:9000
+      ${MINIO_ROOT_USER:-minioadmin} ${MINIO_ROOT_PASSWORD:-minioadmin};
+      mc mb --ignore-existing local/${S3_BUCKET:-societas-uploads};
+      "
+
+  api:
+    <<: *app-service
+    build:
+      context: .
+      target: api
+    ports:
+      - "${API_PORT:-8000}:8000"
+
+  worker:
+    <<: *app-service
+    build:
+      context: .
+      target: worker
+
+  proxy:
+    image: caddy:2
+    restart: unless-stopped
+    depends_on:
+      - api
+    environment:
+      SITE_ADDRESS: ${SITE_ADDRESS:-localhost}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./frontend/dist:/srv:ro
+      - caddy_data:/data
+      - caddy_config:/config
+
+volumes:
+  pg_data:
+  neo4j_data:
+  minio_data:
+  caddy_data:
+  caddy_config:

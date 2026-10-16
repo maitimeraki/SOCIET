@@ -64,7 +64,7 @@ export default function Seat({ seat, tabIndex, onKeyNav }: { seat: SeatSpec; tab
         height={SEAT_H + 4}
         rx={4}
         fill="none"
-        stroke="var(--color-accent)"
+        stroke="var(--focus-ring)"
         strokeWidth={1.5}
       />
       <rect
@@ -74,7 +74,7 @@ export default function Seat({ seat, tabIndex, onKeyNav }: { seat: SeatSpec; tab
         height={SEAT_H}
         rx={3}
         fill={fill}
-        stroke={seat.voice === 'spoke' ? 'var(--color-paper)' : STANCE_VAR[stance]}
+        stroke={seat.voice === 'spoke' ? 'var(--color-ink)' : STANCE_VAR[stance]}
         strokeWidth={seat.voice === 'spoke' ? 1 : 1.2}
       />
       {seat.pulsing && !reduced && (
@@ -83,7 +83,7 @@ export default function Seat({ seat, tabIndex, onKeyNav }: { seat: SeatSpec; tab
             cx={x}
             cy={y}
             fill="none"
-            stroke="var(--color-accent)"
+            stroke="var(--color-datum)"
             strokeWidth={1}
             initial={{ r: SEAT_W / 2 + 2, opacity: 0.8 }}
             animate={{ r: SEAT_W / 2 + 8, opacity: 0 }}
@@ -93,7 +93,7 @@ export default function Seat({ seat, tabIndex, onKeyNav }: { seat: SeatSpec; tab
             cx={x}
             cy={y}
             fill="none"
-            stroke="var(--color-accent)"
+            stroke="var(--color-datum)"
             strokeWidth={1}
             initial={{ r: SEAT_W / 2 + 2, opacity: 0.8 }}
             animate={{ r: SEAT_W / 2 + 8, opacity: 0 }}
@@ -101,7 +101,7 @@ export default function Seat({ seat, tabIndex, onKeyNav }: { seat: SeatSpec; tab
           />
         </>
       )}
-      {seat.pulsing && reduced && <circle cx={x} cy={y} r={SEAT_W / 2 + 3} fill="none" stroke="var(--color-accent)" strokeWidth={1} />}
+      {seat.pulsing && reduced && <circle cx={x} cy={y} r={SEAT_W / 2 + 3} fill="none" stroke="var(--color-datum)" strokeWidth={1} />}
     </motion.g>
   )
 }

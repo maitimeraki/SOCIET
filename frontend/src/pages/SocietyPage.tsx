@@ -61,31 +61,33 @@ export default function SocietyPage() {
         ]}
       />
       <div>
-        <p className="text-label uppercase text-paper-mute">Step 3 · Question</p>
-        <h1 className="mt-2 font-serif text-display text-paper">Set the question</h1>
-        <p className="tnum mt-2 font-mono text-mono text-paper-mute">
+        <p className="text-label uppercase text-ink-3">Step 3 · Question</p>
+        <h1 className="mt-2 font-titling text-display text-ink">Set the question</h1>
+        <p className="tnum mt-2 font-measurement text-mono text-ink-3">
           Corpus: {corpusName}
           {graphSummary ? ` (${fmtInt(graphSummary.chunks)} chunks)` : ''}
         </p>
       </div>
 
       <div>
-        <p className="mb-2 text-label uppercase text-paper-mute">What should the society deliberate?</p>
-        <QueryComposer value={query} onChange={setQuery} onSubmit={convene} />
-        <p className="mt-2 max-w-[60ch] text-micro text-paper-mute">
+        <label htmlFor="society-question" className="mb-2 block text-label uppercase text-ink-3">
+          What should the society deliberate?
+        </label>
+        <QueryComposer id="society-question" value={query} onChange={setQuery} onSubmit={convene} />
+        <p className="mt-2 max-w-[60ch] text-micro text-ink-3">
           The question picks which parts of the graph speak. Broader questions convene more of the society.
         </p>
       </div>
 
       <ConfigPanel value={config} onChange={setConfig} />
 
-      {error && <p className="rounded-[6px] border border-critical/40 px-4 py-3 text-body text-paper-dim">{error}</p>}
+      {error && <p className="border-t border-route/40 pt-3 text-body text-ink-2">{error}</p>}
 
       <div className="flex items-center gap-4">
         <Button variant="primary" loading={submitting} disabled={!query.trim()} onClick={convene}>
           Convene the debate
         </Button>
-        <span className="text-micro text-paper-mute">Runs take a few minutes — you can watch every round live.</span>
+        <span className="text-micro text-ink-3">Runs take a few minutes — you can watch every round live.</span>
       </div>
     </div>
   )

@@ -1,35 +1,48 @@
 import asyncio
-import uuid
-import json
-import sys
 import logging
-from pathlib import Path
-from src.logging.setup_logging import setup_logging
-from src.api.middleware import LoggingMiddleware
-from fastapi import FastAPI, BackgroundTasks, HTTPException, status, Request
-from fastapi.responses import JSONResponse
-from fastapi.middleware.cors import CORSMiddleware
-from typing import TYPE_CHECKING, List, Dict, Optional, AsyncGenerator, Any, Set
+import sys
+import time
 from contextlib import asynccontextmanager
-from src.api.config_api import (
-    UserQuery,
-    SimulationAccepted,
-    SimulationResponse,
-    SimulationRunStatus,
-    OntologyAccepted,
-    OntologyRunStatus,
-    OntologyResult,
-    JobMode,
-    ChunkProgress,
-    UnifiedJobResult,
+from typing import TYPE_CHECKING, Any, AsyncGenerator, Dict, List, Optional, Set
+
+import redis.asyncio as aioredis
+from fastapi import (
+    APIRouter,
+    BackgroundTasks,
+    Depends,
+    FastAPI,
+    HTTPException,
+    Request,
+    status,
 )
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.trustedhost import TrustedHostMiddleware
+from sqlalchemy import text
+
+from src.api import run_doc
+from src.api.config_api import (
+    ChunkProgress,
+    JobMode,
+    SimulationResponse,
+    UserQuery,
+)
+from src.api.errors import error_response, install_error_handlers
+from src.api.limits import JSONBodySizeLimitMiddleware, install_rate_limiter
+from src.api.middleware import LoggingMiddleware, SecurityHeadersMiddleware
+from src.auth.cookies import verify_csrf
+from src.auth.deps import current_user, require_owner
+from src.config.settings import get_settings
+from src.db.engine import get_engine
+from src.db.models import User
 from src.graph.config_graph import GraphConfig
-from src.graph.models_graph import GlobalInputDocument, ProcessedChunk, LocalOntology
+from src.graph.models_graph import GlobalInputDocument, LocalOntology, ProcessedChunk
+from src.graph.normalization import GraphNormalizationStage
 from src.graph.ontology import OntologyDiscoveryStage
 from src.graph.vocabulary import discover_vocabulary
-from src.graph.normalization import GraphNormalizationStage
 from src.llm.client import global_llm_client
 from src.llm.config_llm import get_llm_config
+from src.logging.setup_logging import setup_logging
+from src.observability import init_sentry, init_tracing, setup_metrics
 from src.utils.chunkProcessor import ChunkProcessor, split_text_sentences
 
 if TYPE_CHECKING:
@@ -40,32 +53,111 @@ if TYPE_CHECKING:
 # Configure basic logging
 logging.basicConfig(
     level=logging.INFO,  # DEBUG, INFO, WARNING, ERROR, CRITICAL
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.StreamHandler(sys.stdout)  # Output to terminal
-    ]
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    handlers=[logging.StreamHandler(sys.stdout)],  # Output to terminal
 )
-logging.basicConfig(level=logging.ERROR, format="%(asctime)s - %(levelname)s - %(message)s")
+logging.basicConfig(
+    level=logging.ERROR, format="%(asctime)s - %(levelname)s - %(message)s"
+)
 
 # # Create logger instance
 # logger = logging.getLogger(__name__)
-logger = setup_logging()  # Ensure logging is configured with handler clearing to prevent duplication
+logger = (
+    setup_logging()
+)  # Ensure logging is configured with handler clearing to prevent duplication
+
+_PROBE_CACHE_SECONDS = 60.0
+
+
+async def _probe_llm(app: FastAPI) -> bool:
+    """One bounded LLM call; records the verdict on ``app.state``.
+
+    Never raises — a dead provider leaves the app degraded but serving (plan
+    §9: degraded-alive instead of boot abort).
+    """
+    config = get_llm_config()
+    try:
+        test = await asyncio.wait_for(
+            global_llm_client.generate(
+                "You are a test system.",
+                "Say 'OK' if working.",
+                provider=config.default_llm_provider,
+                model=config.debate_model,
+                temperature=0.7,
+            ),
+            timeout=get_settings().llm_probe_timeout_seconds,
+        )
+        ok = bool(test)
+        if ok:
+            logger.info(f"LLM connected: {config.default_llm_provider}")
+        else:
+            logger.warning("LLM probe returned an empty completion")
+    except Exception as exc:
+        logger.warning("LLM connectivity test failed: %s", exc, exc_info=True)
+        ok = False
+
+    app.state.degraded = not ok
+    app.state.last_llm_probe_at = time.monotonic()
+    return ok
+
+
+async def _llm_healthy(app: FastAPI) -> bool:
+    """Last probe's verdict, re-probing only when the cached one is stale."""
+    last = getattr(app.state, "last_llm_probe_at", None)
+    if last is not None and time.monotonic() - last < _PROBE_CACHE_SECONDS:
+        return not getattr(app.state, "degraded", False)
+    return await _probe_llm(app)
+
+
+async def _postgres_ok() -> bool:
+    async def _ping() -> None:
+        async with get_engine().connect() as connection:
+            await connection.execute(text("SELECT 1"))
+
+    try:
+        await asyncio.wait_for(
+            _ping(), timeout=get_settings().llm_probe_timeout_seconds
+        )
+        return True
+    except Exception as exc:
+        logger.warning("Readiness: Postgres is not reachable: %s", exc)
+        return False
+
+
+async def _redis_ok() -> bool:
+    # A client per probe: the auth service's pooled client is bound to whichever
+    # event loop created it, and readiness must answer on any loop.
+    client = aioredis.from_url(get_settings().redis_url, decode_responses=True)
+    try:
+        await asyncio.wait_for(
+            client.ping(), timeout=get_settings().llm_probe_timeout_seconds
+        )
+        return True
+    except Exception as exc:
+        logger.warning("Readiness: Redis is not reachable: %s", exc)
+        return False
+    finally:
+        await client.aclose()
+
 
 @asynccontextmanager
-async def lifespan(app: FastAPI)-> AsyncGenerator[None, None]:
+async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """Startup and shutdown events for the API server.
 
     On startup:
       1. Apply Neo4j schema bootstrap (constraints, indexes, vector index)
          so writes and vector retrieval don't fail at runtime.
-      2. Probe the LLM provider.
+      2. Probe the LLM provider — a failure degrades, it does not abort.
     """
     # 1. Setup: Everything before 'yield' runs on STARTUP
     logger.info("Starting up API server...")
+    app.state.degraded = False
+    app.state.last_llm_probe_at = None
 
     # 1a. Apply Neo4j schema bootstrap (idempotent).
     try:
         from neo4j import AsyncGraphDatabase
+
         from src.graph.config_graph import GraphConfig
         from src.graph.neo4j_bootstrap import ensure_schema
 
@@ -88,93 +180,117 @@ async def lifespan(app: FastAPI)-> AsyncGenerator[None, None]:
         # individual requests surface the failure.
         logger.exception("Neo4j schema bootstrap failed; continuing startup")
 
-    # 1b. LLM connectivity probe.
-    client = global_llm_client
+    # 1b. Interrupted-run reconciliation (plan §5): this process just started,
+    # so any job still `running` in the rows belongs to a dead one — mark it
+    # failed/'interrupted' rather than letting it poll "running" forever.
     try:
-        test = await client.generate(
-            "You are a test system.",
-            "Say 'OK' if working.",
-            provider=get_llm_config().default_llm_provider,
-            model=get_llm_config().debate_model,
-            temperature=0.7,
-        )
-        if test:
-            logger.info(f"LLM connected: {get_llm_config().default_llm_provider}")
-    except Exception as e:
-        logger.exception(f"LLM connectivity test failed: {e}")
-        raise RuntimeError("LLM provider is not reachable. Check configuration.")
+        swept = await run_doc.sweep_interrupted()
+        if swept:
+            logger.warning("Marked %d interrupted job(s) failed at startup", swept)
+    except Exception:
+        # Same policy as the Neo4j bootstrap: log, don't abort boot — /ready
+        # reports Postgres unavailability, and writes surface it per request.
+        logger.exception("Interrupted-run sweep failed; continuing startup")
+
+    # 1c. LLM connectivity probe — degrades, never aborts.
+    await _probe_llm(app)
 
     yield
-    # 2. Shutdown: Everything after 'yield' runs on SHUTDOWN
+    # 2. Shutdown: Everything after 'yield' runs on SHUTDOWN.
+    # Uvicorn has already stopped accepting connections (no new work arrives);
+    # bound how long in-flight jobs may run before this process exits (§9).
+    app.state.shutting_down = True
+    from src.jobs import queue as jobs_queue
+
+    await jobs_queue.graceful_shutdown(get_settings().shutdown_drain_seconds)
+
 
 app = FastAPI(
     title="Socirty Simulator API",
     description="API for simulating societal debates using AI agents",
     version="1.0",
-    lifespan=lifespan
+    lifespan=lifespan,
 )
 
+app.add_middleware(JSONBodySizeLimitMiddleware)
+app.add_middleware(TrustedHostMiddleware, allowed_hosts=get_settings().allowed_hosts)
+# allow_credentials=True is only sound with an explicit origin list (plan §6),
+# hence CORS_ALLOWED_ORIGINS — never "*".
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://localhost:3000", "http://127.0.0.1:5173","*"],
+    allow_origins=get_settings().cors_allowed_origins,
+    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
-app.add_middleware(LoggingMiddleware)
+app.add_middleware(SecurityHeadersMiddleware)
+app.add_middleware(LoggingMiddleware)  # outermost: stamps the correlation ID first
+
+install_error_handlers(app)
+install_rate_limiter(app)
+
+# Observability (plan §10): each is env-gated and a no-op when unconfigured —
+# metrics off locally, tracing/Sentry off unless the operator sets their env.
+setup_metrics(app)
+init_tracing(app)
+init_sentry()
 
 
-@app.exception_handler(Exception)
-async def global_exception_handler(request: Request, exc: Exception):
-    """Global exception handler with correlation ID support."""
-    correlation_id = getattr(request.state, "correlation_id", "unknown")
-    logger.error(f"Unhandled exception [{correlation_id}]: {exc}", exc_info=True)
-    return JSONResponse(
-        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-        content={"error": "Internal server error", "correlation_id": correlation_id},
-    )
-
-
-# Persona API (hatch personas from user query)
-from src.api.persona_api import router as persona_router
-app.include_router(persona_router)
-# Debate API
+# R15: each router is mounted twice — the legacy alias keeps today's exact
+# path; `/api/v1` is the canonical surface. Both mounts share the route
+# functions, so the guards on them cover both.
+from src.api.auth_api import router as auth_router
+from src.api.auth_api import ws_ticket_router
 from src.api.debate_api import router as debate_router
-app.include_router(debate_router)
-
-# Ingest API (documents → GlobalInputDocument payloads)
-from src.api.ingest_api import router as ingest_router
-app.include_router(ingest_router)
-
-# Graph streaming API (live build progress over WebSocket)
 from src.api.graph_stream_api import router as graph_stream_router
-app.include_router(graph_stream_router)
+from src.api.ingest_api import router as ingest_router
+from src.api.jobs_api import enqueue_or_http
+from src.api.jobs_api import router as jobs_router
+from src.api.persona_api import router as persona_router
+
+app.include_router(persona_router, prefix="/api")  # /api/personas/hatch
+app.include_router(debate_router)  # /simulate/*
+app.include_router(ingest_router, prefix="/api")  # /api/ingest/*
+app.include_router(graph_stream_router)  # WS /simulate/{id}/graph_stream
+
+app.include_router(persona_router, prefix="/api/v1")  # /api/v1/personas/hatch
+app.include_router(debate_router, prefix="/api/v1")  # /api/v1/simulate/*
+app.include_router(ingest_router, prefix="/api/v1")  # /api/v1/ingest/*
+app.include_router(
+    graph_stream_router, prefix="/api/v1"
+)  # WS /api/v1/simulate/{id}/graph_stream
+
+# Auth API (accounts, sessions, CSRF) under /api/v1/auth
+app.include_router(auth_router)
+app.include_router(ws_ticket_router)
+
+# Unified graph jobs (ontology / build_graph / normalize_graph / jobs). The
+# router is populated at the bottom of this module, so it is mounted there.
+simulate_router = APIRouter(
+    prefix="/simulate", tags=["simulate"], dependencies=[Depends(verify_csrf)]
+)
 
 
 RUNS: Dict[str, Dict[str, Any]] = {}
 _RUNS_LOCK = asyncio.Lock()
-_RUNS_RUNTIME_DIR = Path("src/api/runtime/jobs")
-_RUNS_RUNTIME_DIR.mkdir(parents=True, exist_ok=True)
+
 
 async def _persist_run(job_id: str, run: Dict[str, Any]) -> None:
-    path = _RUNS_RUNTIME_DIR / f"{job_id}.json"
-    await asyncio.to_thread(path.write_text, json.dumps(run, ensure_ascii=False, indent=2), "utf-8")
+    """Write the job's rows (Postgres is the truth; RUNS is the live cache)."""
+    await run_doc.write_job_doc(run)
 
 
 async def _ontology_from_run(ontology_job_id: Optional[str]) -> Optional[LocalOntology]:
     """The completed ontology job's merged schema, or None if absent/not finished.
 
-    Never raises: `_persist_run` writes non-atomically, so a crash mid-write
-    leaves invalid JSON — a raising read here would strand the build job in
-    "queued" forever. A bad read degrades to the per-chunk discovery path.
+    Read from the job's rows (`run_doc`), never the live dict. Never raises: a
+    raising read here would strand the build job in "queued" forever, so a bad
+    read degrades to the per-chunk discovery path.
     """
     if not ontology_job_id:
         return None
     try:
-        run = RUNS.get(ontology_job_id)
-        if run is None:
-            path = _RUNS_RUNTIME_DIR / f"{ontology_job_id}.json"
-            if path.exists():
-                run = json.loads(await asyncio.to_thread(path.read_text, "utf-8"))
+        run = await run_doc.read_job_doc(ontology_job_id)
         payload = ((run or {}).get("result") or {}).get("ontology")
         return LocalOntology.model_validate(payload) if payload else None
     except Exception as exc:
@@ -207,6 +323,7 @@ async def _chunk_documents(
 
     return chunks
 
+
 def _merge_labels(items: List[str], fallback: str) -> List[str]:
     seen: Set[str] = set()
     merged: List[str] = []
@@ -218,6 +335,7 @@ def _merge_labels(items: List[str], fallback: str) -> List[str]:
     if merged is None or len(merged) == 0:
         merged = [fallback]
     return merged
+
 
 async def _discover_for_chunk(
     discovery_stage: OntologyDiscoveryStage,
@@ -235,14 +353,22 @@ async def _discover_for_chunk(
                 timeout=timeout_seconds,
             )
         except asyncio.TimeoutError:
-            logger.warning(f"Ontology discovery timeout for {chunk_doc.chunk_id} on attempt {attempt + 1}")
-            last_exc = RuntimeError(f"Ontology discovery timed out after {timeout_seconds} seconds")
+            logger.warning(
+                f"Ontology discovery timeout for {chunk_doc.chunk_id} on attempt {attempt + 1}"
+            )
+            last_exc = RuntimeError(
+                f"Ontology discovery timed out after {timeout_seconds} seconds"
+            )
         except Exception as exc:
             last_exc = exc
             if attempt < retry_attempts - 1:
-                await asyncio.sleep(retry_backoff_seconds * (2 ** attempt))
-            logger.warning(f"Ontology discovery attempt {attempt + 1} failed for {chunk_doc.chunk_id}: {exc}. Retrying...")
-    raise RuntimeError(f"ontology discovery failed for {chunk_doc.chunk_id}: {last_exc}")
+                await asyncio.sleep(retry_backoff_seconds * (2**attempt))
+            logger.warning(
+                f"Ontology discovery attempt {attempt + 1} failed for {chunk_doc.chunk_id}: {exc}. Retrying..."
+            )
+    raise RuntimeError(
+        f"ontology discovery failed for {chunk_doc.chunk_id}: {last_exc}"
+    )
 
 
 async def _discover_dataset_vocabulary(
@@ -271,13 +397,19 @@ async def _discover_dataset_vocabulary(
                 timeout=timeout_seconds,
             )
         except asyncio.TimeoutError:
-            logger.warning(f"Dataset vocabulary discovery timeout on attempt {attempt + 1}")
-            last_exc = RuntimeError(f"dataset vocabulary discovery timed out after {timeout_seconds} seconds")
+            logger.warning(
+                f"Dataset vocabulary discovery timeout on attempt {attempt + 1}"
+            )
+            last_exc = RuntimeError(
+                f"dataset vocabulary discovery timed out after {timeout_seconds} seconds"
+            )
         except Exception as exc:
             last_exc = exc
             if attempt < retry_attempts - 1:
-                await asyncio.sleep(retry_backoff_seconds * (2 ** attempt))
-            logger.warning(f"Dataset vocabulary discovery attempt {attempt + 1} failed: {exc}. Retrying...")
+                await asyncio.sleep(retry_backoff_seconds * (2**attempt))
+            logger.warning(
+                f"Dataset vocabulary discovery attempt {attempt + 1} failed: {exc}. Retrying..."
+            )
     raise RuntimeError(f"dataset vocabulary discovery failed: {last_exc}")
 
 
@@ -289,7 +421,11 @@ async def _process_chunk(
     retry_backoff_seconds: float,
 ) -> ChunkProgress:
     ontology = await _discover_for_chunk(
-        discovery_stage, chunk_doc, timeout_seconds, retry_attempts, retry_backoff_seconds
+        discovery_stage,
+        chunk_doc,
+        timeout_seconds,
+        retry_attempts,
+        retry_backoff_seconds,
     )
     view = ontology.to_public_view()
     return {
@@ -317,10 +453,14 @@ async def _process_document(
             job_id=job_id,
         )
     except asyncio.TimeoutError:
-        logger.error(f"Graph extraction timeout for document {doc_chunks[0].parent_doc_id}")
+        logger.error(
+            f"Graph extraction timeout for document {doc_chunks[0].parent_doc_id}"
+        )
         raise
     except Exception as exc:
-        logger.error(f"Graph extraction failed for document {doc_chunks[0].parent_doc_id}: {exc}")
+        logger.error(
+            f"Graph extraction failed for document {doc_chunks[0].parent_doc_id}: {exc}"
+        )
         raise
 
     view = ontology.to_public_view()
@@ -330,6 +470,7 @@ async def _process_document(
         "docs_built": docs_built,
         "ontology": None,
     }
+
 
 async def _execute_unified_job(
     job_id: str,
@@ -354,9 +495,13 @@ async def _execute_unified_job(
         # module-scope import here would bypass that mock and hit a live Neo4j.
         from src.graph.graph_build import GraphExtractionStage
 
-        provided_ontology = await _ontology_from_run(ontology_job_id) if mode == "build_graph" else None
+        provided_ontology = (
+            await _ontology_from_run(ontology_job_id) if mode == "build_graph" else None
+        )
         if mode == "build_graph" and ontology_job_id and provided_ontology is None:
-            logger.warning(f"ontology job {ontology_job_id} has no completed ontology — falling back to a dataset-wide spread-sample vocabulary")
+            logger.warning(
+                f"ontology job {ontology_job_id} has no completed ontology — falling back to a dataset-wide spread-sample vocabulary"
+            )
 
         discovery_stage = (
             OntologyDiscoveryStage(
@@ -371,10 +516,16 @@ async def _execute_unified_job(
         # (refresh_schema + CREATE CONSTRAINT on the sync driver), which would
         # otherwise stall every other request on the event loop.
         if mode == "build_graph":
-            extraction_stage = await asyncio.to_thread(lambda: GraphExtractionStage(cfg))
-            normalization_stage = await asyncio.to_thread(lambda: GraphNormalizationStage(cfg))
+            extraction_stage = await asyncio.to_thread(
+                lambda: GraphExtractionStage(cfg)
+            )
+            normalization_stage = await asyncio.to_thread(
+                lambda: GraphNormalizationStage(cfg)
+            )
 
-        chunks = await _chunk_documents(documents, cfg.chunk_size_tokens, cfg.chunk_overlap_tokens)
+        chunks = await _chunk_documents(
+            documents, cfg.chunk_size_tokens, cfg.chunk_overlap_tokens
+        )
         total_chunks = len(chunks)
 
         async with _RUNS_LOCK:
@@ -422,7 +573,9 @@ async def _execute_unified_job(
                 by_doc.setdefault(c.parent_doc_id, []).append(c)
             units = list(by_doc.items())
 
-        async def _worker(doc_id: str, doc_chunks: List[ProcessedChunk]) -> ChunkProgress:
+        async def _worker(
+            doc_id: str, doc_chunks: List[ProcessedChunk]
+        ) -> ChunkProgress:
             async with semaphore:
                 if mode == "ontology":
                     return await _process_chunk(
@@ -467,7 +620,9 @@ async def _execute_unified_job(
         # yields the finished tasks themselves, keeping the counts map exact.
         pending = set(tasks)
         while pending:
-            done, pending = await asyncio.wait(pending, return_when=asyncio.FIRST_COMPLETED)
+            done, pending = await asyncio.wait(
+                pending, return_when=asyncio.FIRST_COMPLETED
+            )
             for fut in done:
                 partial = fut.result()
                 completed += counts[fut]
@@ -479,14 +634,18 @@ async def _execute_unified_job(
 
                 async with _RUNS_LOCK:
                     RUNS[job_id]["stage"] = f"{mode}_running"
-                    RUNS[job_id]["progress"] = min(0.95, completed / max(1, total_chunks))
+                    RUNS[job_id]["progress"] = min(
+                        0.95, completed / max(1, total_chunks)
+                    )
                     RUNS[job_id]["result"] = {
                         "dataset_id": dataset_id,
                         "chunks_total": total_chunks,
                         "chunks_completed": completed,
                         "docs_built": docs_built,
                         "entity_types": _merge_labels(entity_accumulator, "ENTITY"),
-                        "relation_types": _merge_labels(relation_accumulator, "RELATED_TO"),
+                        "relation_types": _merge_labels(
+                            relation_accumulator, "RELATED_TO"
+                        ),
                     }
                     await _persist_run(job_id, RUNS[job_id])
 
@@ -504,10 +663,14 @@ async def _execute_unified_job(
             await normalization_stage.run(dataset_id=dataset_id)
 
         if mode == "ontology" and chunk_ontologies:
-            merged = LocalOntology.merge([LocalOntology.model_validate(o) for o in chunk_ontologies])
+            merged = LocalOntology.merge(
+                [LocalOntology.model_validate(o) for o in chunk_ontologies]
+            )
             RUNS[job_id]["result"]["ontology"] = merged.model_dump()
             RUNS[job_id]["result"]["entity_types"] = merged.entity_labels or ["ENTITY"]
-            RUNS[job_id]["result"]["relation_types"] = merged.relation_labels or ["RELATED_TO"]
+            RUNS[job_id]["result"]["relation_types"] = merged.relation_labels or [
+                "RELATED_TO"
+            ]
 
         async with _RUNS_LOCK:
             RUNS[job_id]["status"] = "completed"
@@ -538,67 +701,127 @@ async def _execute_unified_job(
         if normalization_stage is not None:
             await normalization_stage.close()
 
-@app.post("/simulate/ontology", status_code=status.HTTP_202_ACCEPTED)
-async def discover_ontology_async(dataset_id: str, documents: List[GlobalInputDocument]):
-    job_id = str(uuid.uuid4())
-    run = {
-        "job_id": job_id,
-        "mode": "ontology",
-        "status": "queued",
-        "progress": 0.0,
-        "stage": "queued",
-        "error": None,
-        "result": None,
-    }
+
+async def _ensure_run_slot(job_id: str, mode: str) -> None:
+    """The live RUNS entry for a job this process did not create.
+
+    `RUNS` is a live-process cache and the row is the truth: the same job
+    dispatched to the queue worker starts with an empty dict there.
+    """
     async with _RUNS_LOCK:
-        RUNS[job_id] = run
-        await _persist_run(job_id, run)
+        if job_id in RUNS:
+            return
+        doc = await run_doc.read_job_doc(job_id) or {}
+        RUNS[job_id] = {
+            "job_id": job_id,
+            "user_id": doc.get("user_id"),
+            "mode": doc.get("mode") or mode,
+            "status": doc.get("status") or "queued",
+            "progress": doc.get("progress") or 0.0,
+            "stage": doc.get("stage") or "queued",
+            "error": doc.get("error"),
+            "result": doc.get("result"),
+        }
 
-    asyncio.create_task(_execute_unified_job(job_id, "ontology", dataset_id, documents))
-    return {"job_id": job_id, "status": "queued", "message": "Ontology job accepted."}
 
-@app.post("/simulate/build_graph", status_code=status.HTTP_202_ACCEPTED)
-async def build_graph_async(
+async def run_graph_job(
+    job_id: str,
+    mode: str,
     dataset_id: str,
     documents: List[GlobalInputDocument],
     ontology_job_id: Optional[str] = None,
-):
-    job_id = str(uuid.uuid4())
-    run = {
-        "job_id": job_id,
-        "mode": "build_graph",
-        "status": "queued",
-        "progress": 0.0,
-        "stage": "queued",
-        "error": None,
-        "result": None,
-    }
-    async with _RUNS_LOCK:
-        RUNS[job_id] = run
-        await _persist_run(job_id, run)
-
-    asyncio.create_task(
-        _execute_unified_job(job_id, "build_graph", dataset_id, documents, ontology_job_id=ontology_job_id)
+) -> None:
+    """Queue entrypoint for the unified graph jobs (ontology / build_graph)."""
+    await _ensure_run_slot(job_id, mode)
+    await _execute_unified_job(
+        job_id, mode, dataset_id, documents, ontology_job_id=ontology_job_id
     )
-    return {"job_id": job_id, "status": "queued", "message": "Build graph job accepted."}
 
-@app.get("/simulate/jobs/{job_id}")
-async def get_job(job_id: str):
-    async with _RUNS_LOCK:
-        run = RUNS.get(job_id)
-        if run:
-            return run
 
-    # `_persist_run` writes non-atomically, so a crash mid-write leaves invalid
-    # JSON; degrade to the same not-found shape `_job_state` uses rather than
-    # letting the read raise out of the endpoint.
-    path = _RUNS_RUNTIME_DIR / f"{job_id}.json"
+async def run_normalize_job(job_id: str, dataset_id: str) -> None:
+    """Queue entrypoint for graph normalization (was the route's inline closure).
+
+    Re-raises after the terminal write: the queue lifecycle owns the failure
+    verdict, and a swallowed exception would let it record the job as succeeded.
+    """
+    await _ensure_run_slot(job_id, "normalize_graph")
     try:
-        payload = await asyncio.to_thread(path.read_text, "utf-8")
-        return json.loads(payload)
-    except (OSError, ValueError) as exc:
-        logger.warning(f"Could not read job {job_id} from runtime file ({exc})")
-        return {"job_id": job_id, "status": "failed", "stage": "not_found", "error": "job id not found"}
+        cfg = GraphConfig()
+        normalization_stage = GraphNormalizationStage(cfg)
+        await normalization_stage.run(dataset_id=dataset_id)
+
+        async with _RUNS_LOCK:
+            RUNS[job_id]["status"] = "completed"
+            RUNS[job_id]["stage"] = "completed"
+            RUNS[job_id]["progress"] = 1.0
+            await _persist_run(job_id, RUNS[job_id])
+    except Exception as exc:
+        async with _RUNS_LOCK:
+            RUNS[job_id]["status"] = "failed"
+            RUNS[job_id]["stage"] = "failed"
+            RUNS[job_id]["error"] = str(exc)
+            await _persist_run(job_id, RUNS[job_id])
+        raise
+
+
+@simulate_router.post("/ontology", status_code=status.HTTP_202_ACCEPTED)
+async def discover_ontology_async(
+    dataset_id: str,
+    documents: List[GlobalInputDocument],
+    request: Request,
+    user: User = Depends(current_user),
+):
+    job_id = await enqueue_or_http(
+        "ontology",
+        {
+            "user_id": str(user.id),
+            "dataset_id": dataset_id,
+            "documents": [doc.model_dump(mode="json") for doc in documents],
+            "correlation_id": getattr(request.state, "correlation_id", None),
+        },
+    )
+    return {"job_id": job_id, "status": "queued", "message": "Ontology job accepted."}
+
+
+@simulate_router.post("/build_graph", status_code=status.HTTP_202_ACCEPTED)
+async def build_graph_async(
+    dataset_id: str,
+    documents: List[GlobalInputDocument],
+    request: Request,
+    ontology_job_id: Optional[str] = None,
+    user: User = Depends(current_user),
+):
+    # Ownership guard: a caller-supplied ontology job feeds its schema into this
+    # run's graph build, so it must belong to the caller. A missing or foreign
+    # job is the same 404 — existence is never leaked.
+    if ontology_job_id:
+        doc = await run_doc.read_job_doc(ontology_job_id)
+        await require_owner((doc or {}).get("user_id"), user)
+
+    job_id = await enqueue_or_http(
+        "build_graph",
+        {
+            "user_id": str(user.id),
+            "dataset_id": dataset_id,
+            "documents": [doc.model_dump(mode="json") for doc in documents],
+            "ontology_job_id": ontology_job_id,
+            "correlation_id": getattr(request.state, "correlation_id", None),
+        },
+    )
+    return {
+        "job_id": job_id,
+        "status": "queued",
+        "message": "Build graph job accepted.",
+    }
+
+
+@simulate_router.get("/jobs/{job_id}")
+async def get_job(job_id: str, user: User = Depends(current_user)):
+    # The one status implementation lives in `jobs_api` (also mounted as
+    # `/api/v1/jobs/{id}`); this keeps the legacy `/simulate/jobs/{id}` twin.
+    from src.api.jobs_api import get_job_status
+
+    return await get_job_status(job_id, user)
 
 
 @app.post("/simulate/async", status_code=status.HTTP_202_ACCEPTED)
@@ -617,54 +840,77 @@ async def create_simulation(query: UserQuery, background_tasks: BackgroundTasks)
     )
 
 
-@app.post('/simulate/normalize_graph', status_code=status.HTTP_202_ACCEPTED)
-async def normalize_graph(dataset_id: str, background_tasks: BackgroundTasks):
-    job_id = str(uuid.uuid4())
-    run = {
+@simulate_router.post("/normalize_graph", status_code=status.HTTP_202_ACCEPTED)
+async def normalize_graph(
+    dataset_id: str,
+    request: Request,
+    user: User = Depends(current_user),
+):
+    job_id = await enqueue_or_http(
+        "normalize_graph",
+        {
+            "user_id": str(user.id),
+            "dataset_id": dataset_id,
+            "correlation_id": getattr(request.state, "correlation_id", None),
+        },
+    )
+    return {
         "job_id": job_id,
-        "mode": "normalize_graph",
         "status": "queued",
-        "progress": 0.0,
-        "stage": "queued",
-        "error": None,
-        "result": None,
+        "message": "Graph normalization job accepted.",
     }
-    async with _RUNS_LOCK:
-        RUNS[job_id] = run
-        await _persist_run(job_id, run)
-
-    async def _normalize():
-        try:
-            cfg = GraphConfig()
-            normalization_stage = GraphNormalizationStage(cfg)
-            await normalization_stage.run(dataset_id=dataset_id)
-
-            async with _RUNS_LOCK:
-                RUNS[job_id]["status"] = "completed"
-                RUNS[job_id]["stage"] = "completed"
-                RUNS[job_id]["progress"] = 1.0
-                await _persist_run(job_id, RUNS[job_id])
-        except Exception as exc:
-            async with _RUNS_LOCK:
-                RUNS[job_id]["status"] = "failed"
-                RUNS[job_id]["stage"] = "failed"
-                RUNS[job_id]["error"] = str(exc)
-                await _persist_run(job_id, RUNS[job_id])
-
-    asyncio.create_task(_normalize())
-    return {"job_id": job_id, "status": "queued", "message": "Graph normalization job accepted."}
 
 
-if __name__=="__main__":
+# The unified-job routes above are all registered on `simulate_router` now:
+# mount it bare (legacy `/simulate/*`) and under `/api/v1` (R15).
+app.include_router(simulate_router)
+app.include_router(simulate_router, prefix="/api/v1")
+
+# Job cancellation: `/api/v1/jobs/{id}` and the legacy `/simulate/jobs/{id}`
+# twin, next to the status route above.
+app.include_router(jobs_router, prefix="/api/v1")
+app.include_router(jobs_router, prefix="/simulate")
+
+# Account lifecycle (delete/export) — new surface, v1-only (R15).
+from src.api.account_api import router as account_router
+
+app.include_router(account_router)
+
+
+if __name__ == "__main__":
     import uvicorn
+
     uvicorn.run(app, host="127.0.0.1", port=8000)
 
 
 @app.get("/health")
 async def health_check():
-    """Health check endpoint for monitoring."""
+    """Liveness: the process is up. Always 200 (plan §9)."""
     return {
         "status": "healthy",
         "version": "1.0",
         "active_jobs": len(RUNS),
     }
+
+
+@app.get("/ready")
+async def readiness_check(request: Request):
+    """Readiness: Postgres + Redis reachable and the LLM last probed OK.
+
+    503 (uniform error contract) tells the proxy to drop the replica from
+    rotation without restarting it; the LLM verdict is cached, so this costs at
+    most one bounded probe per ``_PROBE_CACHE_SECONDS``.
+    """
+    if not await _llm_healthy(request.app):
+        return error_response(
+            503, "service_unavailable", "LLM provider is not reachable.", request
+        )
+    if not await _postgres_ok():
+        return error_response(
+            503, "service_unavailable", "Database is not reachable.", request
+        )
+    if not await _redis_ok():
+        return error_response(
+            503, "service_unavailable", "Cache is not reachable.", request
+        )
+    return {"status": "ready"}

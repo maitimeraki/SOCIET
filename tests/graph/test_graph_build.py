@@ -1,7 +1,10 @@
 """Tests for graph extraction module."""
+
+from unittest.mock import AsyncMock, MagicMock, patch
+
 import pytest
-from unittest.mock import AsyncMock, patch, MagicMock
-from src.graph.models_graph import ProcessedChunk, LocalOntology, OntologyMetadata
+
+from src.graph.models_graph import LocalOntology, OntologyMetadata, ProcessedChunk
 
 
 # Mock heavy llama_index imports before importing graph_build
@@ -15,28 +18,34 @@ def mock_llama_index():
     namespace before this patch runs. Re-point graph_build's own module-level
     names too, so the stage never dials a real Neo4j whatever the import order.
     """
-    with patch.dict('sys.modules', {
-        'llama_index.core': MagicMock(),
-        'llama_index.llms': MagicMock(),
-        'llama_index.llms.openai_like': MagicMock(),
-        'llama_index.embeddings': MagicMock(),
-        'llama_index.embeddings.ollama': MagicMock(),
-        'llama_index.graph_stores': MagicMock(),
-        'llama_index.graph_stores.neo4j': MagicMock(),
-        'llama_index.core.node_parser': MagicMock(),
-        'llama_index.core.node_parser.text_splitter': MagicMock(),
-        'llama_index.core.indices': MagicMock(),
-        'llama_index.core.indices.property_graph': MagicMock(),
-        'llama_index.core.settings': MagicMock(),
-        # Task 7: `_proposed_labels` / `_delta_payload` read these keys lazily.
-        'llama_index.core.graph_stores': MagicMock(),
-        'llama_index.core.graph_stores.types': MagicMock(),
-    }):
+    with patch.dict(
+        "sys.modules",
+        {
+            "llama_index.core": MagicMock(),
+            "llama_index.llms": MagicMock(),
+            "llama_index.llms.openai_like": MagicMock(),
+            "llama_index.embeddings": MagicMock(),
+            "llama_index.embeddings.ollama": MagicMock(),
+            "llama_index.graph_stores": MagicMock(),
+            "llama_index.graph_stores.neo4j": MagicMock(),
+            "llama_index.core.node_parser": MagicMock(),
+            "llama_index.core.node_parser.text_splitter": MagicMock(),
+            "llama_index.core.indices": MagicMock(),
+            "llama_index.core.indices.property_graph": MagicMock(),
+            "llama_index.core.settings": MagicMock(),
+            # Task 7: `_proposed_labels` / `_delta_payload` read these keys lazily.
+            "llama_index.core.graph_stores": MagicMock(),
+            "llama_index.core.graph_stores.types": MagicMock(),
+        },
+    ):
         import src.graph.graph_build as gb
-        with patch.object(gb, "OpenAILike", MagicMock()), \
-             patch.object(gb, "OllamaEmbedding", MagicMock()), \
-             patch.object(gb, "Neo4jPropertyGraphStore", MagicMock()), \
-             patch.object(gb, "SentenceSplitter", MagicMock()):
+
+        with (
+            patch.object(gb, "OpenAILike", MagicMock()),
+            patch.object(gb, "OllamaEmbedding", MagicMock()),
+            patch.object(gb, "Neo4jPropertyGraphStore", MagicMock()),
+            patch.object(gb, "SentenceSplitter", MagicMock()),
+        ):
             yield
 
 
@@ -91,7 +100,9 @@ class TestExtractGraphFunction:
         # Import here after mocks are in place
         from src.graph.graph_build import GraphExtractionStage, extract_graph
 
-        with patch.object(GraphExtractionStage, "run", new_callable=AsyncMock) as mock_run:
+        with patch.object(
+            GraphExtractionStage, "run", new_callable=AsyncMock
+        ) as mock_run:
             mock_run.return_value = len(sample_chunks)
             result = extract_graph(sample_chunks, sample_ontology)
 
@@ -102,33 +113,42 @@ class TestExtractGraphFunction:
         """Verify extraction uses ontology schema through the stage."""
         from src.graph.graph_build import GraphExtractionStage, extract_graph
 
-        with patch.object(GraphExtractionStage, "run", new_callable=AsyncMock) as mock_run:
+        with patch.object(
+            GraphExtractionStage, "run", new_callable=AsyncMock
+        ) as mock_run:
             mock_run.return_value = len(sample_chunks)
             extract_graph(sample_chunks, sample_ontology)
 
             # Verify ontology was passed to the stage
             call_args = mock_run.call_args
-            assert call_args[0][2] == sample_ontology  # Third positional arg is ontology
+            assert (
+                call_args[0][2] == sample_ontology
+            )  # Third positional arg is ontology
 
     def test_accepts_custom_dataset_id(self, sample_chunks, sample_ontology):
         """Verify custom dataset_id is used when provided."""
-        from src.graph.graph_build import extract_graph
-        from src.graph.graph_build import GraphExtractionStage
+        from src.graph.graph_build import GraphExtractionStage, extract_graph
 
         custom_id = "my-custom-dataset-123"
 
-        with patch.object(GraphExtractionStage, "run", new_callable=AsyncMock) as mock_run:
+        with patch.object(
+            GraphExtractionStage, "run", new_callable=AsyncMock
+        ) as mock_run:
             mock_run.return_value = len(sample_chunks)
             extract_graph(sample_chunks, sample_ontology, dataset_id=custom_id)
 
             call_args = mock_run.call_args
             assert call_args[0][0] == custom_id
 
-    def test_generates_dataset_id_when_not_provided(self, sample_chunks, sample_ontology):
+    def test_generates_dataset_id_when_not_provided(
+        self, sample_chunks, sample_ontology
+    ):
         """Verify dataset_id is auto-generated when not provided."""
-        from src.graph.graph_build import extract_graph, GraphExtractionStage
+        from src.graph.graph_build import GraphExtractionStage, extract_graph
 
-        with patch.object(GraphExtractionStage, "run", new_callable=AsyncMock) as mock_run:
+        with patch.object(
+            GraphExtractionStage, "run", new_callable=AsyncMock
+        ) as mock_run:
             mock_run.return_value = len(sample_chunks)
             extract_graph(sample_chunks, sample_ontology)
 
@@ -143,13 +163,15 @@ class TestGraphExtractionStage:
 
     def test_initialization(self):
         """Verify stage initializes with config."""
-        from src.graph.graph_build import GraphExtractionStage
         from src.graph.config_graph import GraphConfig
+        from src.graph.graph_build import GraphExtractionStage
 
-        with patch('src.graph.graph_build.OpenAILike'), \
-             patch('src.graph.graph_build.OllamaEmbedding'), \
-             patch('src.graph.graph_build.Neo4jPropertyGraphStore'), \
-             patch('src.graph.graph_build.SentenceSplitter'):
+        with (
+            patch("src.graph.graph_build.OpenAILike"),
+            patch("src.graph.graph_build.OllamaEmbedding"),
+            patch("src.graph.graph_build.Neo4jPropertyGraphStore"),
+            patch("src.graph.graph_build.SentenceSplitter"),
+        ):
             config = GraphConfig()
             stage = GraphExtractionStage(config)
 
@@ -183,10 +205,12 @@ class TestGraphExtractionStage:
     @pytest.mark.asyncio
     async def test_run_returns_document_count(self, sample_chunks, sample_ontology):
         """Verify run method returns document count."""
-        from src.graph.graph_build import GraphExtractionStage
         from src.graph.config_graph import GraphConfig
+        from src.graph.graph_build import GraphExtractionStage
 
-        with patch.object(GraphExtractionStage, "_run_async", new_callable=AsyncMock) as mock_async:
+        with patch.object(
+            GraphExtractionStage, "_run_async", new_callable=AsyncMock
+        ) as mock_async:
             mock_async.return_value = len(sample_chunks)
 
             config = GraphConfig()
@@ -198,10 +222,12 @@ class TestGraphExtractionStage:
     @pytest.mark.asyncio
     async def test_run_handles_errors(self, sample_chunks, sample_ontology):
         """Verify run propagates errors with context."""
-        from src.graph.graph_build import GraphExtractionStage
         from src.graph.config_graph import GraphConfig
+        from src.graph.graph_build import GraphExtractionStage
 
-        with patch.object(GraphExtractionStage, "_run_async", new_callable=AsyncMock) as mock_async:
+        with patch.object(
+            GraphExtractionStage, "_run_async", new_callable=AsyncMock
+        ) as mock_async:
             mock_async.side_effect = RuntimeError("Extraction failed")
 
             config = GraphConfig()
@@ -223,10 +249,12 @@ class TestStageConfigWiring:
         monkeypatch.setattr(LLMConfig, "nvidia_nim_api_key", "sentinel-key")
         monkeypatch.setattr(LLMConfig, "nvidia_nim_base_url", "http://sentinel-base/v1")
 
-        with patch('src.graph.graph_build.OpenAILike') as mock_llm, \
-             patch('src.graph.graph_build.OllamaEmbedding'), \
-             patch('src.graph.graph_build.Neo4jPropertyGraphStore'), \
-             patch('src.graph.graph_build.SentenceSplitter'):
+        with (
+            patch("src.graph.graph_build.OpenAILike") as mock_llm,
+            patch("src.graph.graph_build.OllamaEmbedding"),
+            patch("src.graph.graph_build.Neo4jPropertyGraphStore"),
+            patch("src.graph.graph_build.SentenceSplitter"),
+        ):
             GraphExtractionStage(GraphConfig())
 
             assert mock_llm.call_args.kwargs["api_key"] == "sentinel-key"
@@ -261,10 +289,12 @@ class TestNetworkBounds:
         from src.graph.config_graph import GraphConfig
         from src.graph.graph_build import GraphExtractionStage
 
-        with patch('src.graph.graph_build.OpenAILike') as mock_llm, \
-             patch('src.graph.graph_build.OllamaEmbedding'), \
-             patch('src.graph.graph_build.Neo4jPropertyGraphStore'), \
-             patch('src.graph.graph_build.SentenceSplitter'):
+        with (
+            patch("src.graph.graph_build.OpenAILike") as mock_llm,
+            patch("src.graph.graph_build.OllamaEmbedding"),
+            patch("src.graph.graph_build.Neo4jPropertyGraphStore"),
+            patch("src.graph.graph_build.SentenceSplitter"),
+        ):
             GraphExtractionStage(GraphConfig(extraction_timeout_seconds=123))
 
             assert mock_llm.call_args.kwargs["timeout"] == 123
@@ -274,10 +304,12 @@ class TestNetworkBounds:
         from src.graph.config_graph import GraphConfig
         from src.graph.graph_build import GraphExtractionStage
 
-        with patch('src.graph.graph_build.OpenAILike') as mock_llm, \
-             patch('src.graph.graph_build.OllamaEmbedding'), \
-             patch('src.graph.graph_build.Neo4jPropertyGraphStore'), \
-             patch('src.graph.graph_build.SentenceSplitter'):
+        with (
+            patch("src.graph.graph_build.OpenAILike") as mock_llm,
+            patch("src.graph.graph_build.OllamaEmbedding"),
+            patch("src.graph.graph_build.Neo4jPropertyGraphStore"),
+            patch("src.graph.graph_build.SentenceSplitter"),
+        ):
             GraphExtractionStage(GraphConfig())
 
             assert mock_llm.call_args.kwargs["max_retries"] == 1
@@ -290,10 +322,12 @@ class TestNetworkBounds:
 
         monkeypatch.setattr(LLMConfig, "ollama_base_url", "http://sentinel-ollama:1234")
 
-        with patch('src.graph.graph_build.OpenAILike'), \
-             patch('src.graph.graph_build.OllamaEmbedding') as mock_embed, \
-             patch('src.graph.graph_build.Neo4jPropertyGraphStore'), \
-             patch('src.graph.graph_build.SentenceSplitter'):
+        with (
+            patch("src.graph.graph_build.OpenAILike"),
+            patch("src.graph.graph_build.OllamaEmbedding") as mock_embed,
+            patch("src.graph.graph_build.Neo4jPropertyGraphStore"),
+            patch("src.graph.graph_build.SentenceSplitter"),
+        ):
             GraphExtractionStage(GraphConfig())
 
             kwargs = mock_embed.call_args.kwargs
@@ -301,7 +335,9 @@ class TestNetworkBounds:
             assert kwargs["client_kwargs"]["timeout"] == 60
 
     @pytest.mark.asyncio
-    async def test_extractors_pin_num_workers_to_one(self, sample_chunks, sample_ontology):
+    async def test_extractors_pin_num_workers_to_one(
+        self, sample_chunks, sample_ontology
+    ):
         """Sync mode still fans out per document (run_jobs semaphore = num_workers).
 
         One extraction call now carries a whole document's chunks, so the outer
@@ -313,16 +349,20 @@ class TestNetworkBounds:
         from src.graph.config_graph import GraphConfig
         from src.graph.graph_build import GraphExtractionStage
 
-        with patch('src.graph.graph_build.OpenAILike'), \
-             patch('src.graph.graph_build.OllamaEmbedding'), \
-             patch('src.graph.graph_build.Neo4jPropertyGraphStore'), \
-             patch('src.graph.graph_build.SentenceSplitter'):
+        with (
+            patch("src.graph.graph_build.OpenAILike"),
+            patch("src.graph.graph_build.OllamaEmbedding"),
+            patch("src.graph.graph_build.Neo4jPropertyGraphStore"),
+            patch("src.graph.graph_build.SentenceSplitter"),
+        ):
             stage = GraphExtractionStage(GraphConfig(ontology_max_concurrency=8))
 
         await stage.run("test-dataset", sample_chunks, sample_ontology)
 
-        property_graph = sys.modules['llama_index.core.indices.property_graph']
-        assert property_graph.DynamicLLMPathExtractor.call_args.kwargs["num_workers"] == 1
+        property_graph = sys.modules["llama_index.core.indices.property_graph"]
+        assert (
+            property_graph.DynamicLLMPathExtractor.call_args.kwargs["num_workers"] == 1
+        )
 
 
 class TestSingleChunkingOwner:
@@ -367,24 +407,30 @@ class TestSingleChunkingOwner:
             seen.extend(nodes)
             return nodes
 
-        with patch('src.graph.graph_build.OpenAILike'), \
-             patch('src.graph.graph_build.OllamaEmbedding'), \
-             patch('src.graph.graph_build.Neo4jPropertyGraphStore'), \
-             patch('src.graph.graph_build.SentenceSplitter'):
+        with (
+            patch("src.graph.graph_build.OpenAILike"),
+            patch("src.graph.graph_build.OllamaEmbedding"),
+            patch("src.graph.graph_build.Neo4jPropertyGraphStore"),
+            patch("src.graph.graph_build.SentenceSplitter"),
+        ):
             stage = GraphExtractionStage(GraphConfig())
 
-        core = sys.modules['llama_index.core']
+        core = sys.modules["llama_index.core"]
         # Production pins Settings.node_parser = self.splitter; the splitter must
         # never be reached by the per-chunk path.
         core.Settings.transformations = [stage.splitter]
         index = core.PropertyGraphIndex.return_value
         index.docstore.docs = {f"node-{i}": MagicMock() for i in range(len(chunks))}
 
-        with patch.object(GraphExtractionStage, "_build_extractors", return_value=[_recording_extractor]):
+        with patch.object(
+            GraphExtractionStage,
+            "_build_extractors",
+            return_value=[_recording_extractor],
+        ):
             count = await stage.run("test-dataset", chunks, sample_ontology)
 
-        assert count == len(chunks)          # one docstore node per chunk
-        assert len(seen) == len(chunks)      # one extraction pass, 1:1 — no re-split
+        assert count == len(chunks)  # one docstore node per chunk
+        assert len(seen) == len(chunks)  # one extraction pass, 1:1 — no re-split
 
         # the empty index is built with a truthy no-op extractor, so its own
         # `_insert_nodes` only performs the store writes (never re-extracts)
@@ -406,24 +452,30 @@ class TestExtractionPromptForbidsValueNodes:
         from src.graph.config_graph import GraphConfig
         from src.graph.graph_build import GraphExtractionStage
 
-        with patch('src.graph.graph_build.OpenAILike'), \
-             patch('src.graph.graph_build.OllamaEmbedding'), \
-             patch('src.graph.graph_build.Neo4jPropertyGraphStore'), \
-             patch('src.graph.graph_build.SentenceSplitter'):
+        with (
+            patch("src.graph.graph_build.OpenAILike"),
+            patch("src.graph.graph_build.OllamaEmbedding"),
+            patch("src.graph.graph_build.Neo4jPropertyGraphStore"),
+            patch("src.graph.graph_build.SentenceSplitter"),
+        ):
             return GraphExtractionStage(GraphConfig())
 
     def test_no_simple_extractor_and_prompt_forbids_value_nodes(self, sample_ontology):
         import sys
 
         stage = self._stage()
-        property_graph = sys.modules['llama_index.core.indices.property_graph']
+        property_graph = sys.modules["llama_index.core.indices.property_graph"]
         property_graph.reset_mock()
 
         extractors = stage._build_extractors(sample_ontology)
 
-        assert property_graph.SimpleLLMPathExtractor.call_count == 0   # triple-only extractor retired
-        assert len(extractors) == 2                                    # dynamic + implicit
-        prompt = property_graph.DynamicLLMPathExtractor.call_args.kwargs["extract_prompt"]
+        assert (
+            property_graph.SimpleLLMPathExtractor.call_count == 0
+        )  # triple-only extractor retired
+        assert len(extractors) == 2  # dynamic + implicit
+        prompt = property_graph.DynamicLLMPathExtractor.call_args.kwargs[
+            "extract_prompt"
+        ]
         assert "never" in prompt.lower() and "propert" in prompt.lower()
 
     def test_extraction_prompt_braces_match_extractor_kwargs(self):
@@ -453,7 +505,9 @@ class TestExtractionPromptForbidsValueNodes:
             if name
         }
         assert used <= supplied
-        _EXTRACTION_PROMPT.format(**{name: "x" for name in supplied})   # renders, no KeyError
+        _EXTRACTION_PROMPT.format(
+            **{name: "x" for name in supplied}
+        )  # renders, no KeyError
 
 
 class TestLiteralRouting:
@@ -463,10 +517,12 @@ class TestLiteralRouting:
         from src.graph.config_graph import GraphConfig
         from src.graph.graph_build import GraphExtractionStage
 
-        with patch('src.graph.graph_build.OpenAILike'), \
-             patch('src.graph.graph_build.OllamaEmbedding'), \
-             patch('src.graph.graph_build.Neo4jPropertyGraphStore'), \
-             patch('src.graph.graph_build.SentenceSplitter'):
+        with (
+            patch("src.graph.graph_build.OpenAILike"),
+            patch("src.graph.graph_build.OllamaEmbedding"),
+            patch("src.graph.graph_build.Neo4jPropertyGraphStore"),
+            patch("src.graph.graph_build.SentenceSplitter"),
+        ):
             return GraphExtractionStage(GraphConfig())
 
     @staticmethod
@@ -476,7 +532,7 @@ class TestLiteralRouting:
         values so this test's metadata bag is the one the code reads."""
         import sys
 
-        types = sys.modules['llama_index.core.graph_stores.types']
+        types = sys.modules["llama_index.core.graph_stores.types"]
         types.KG_NODES_KEY = "nodes"
         types.KG_RELATIONS_KEY = "relations"
 
@@ -496,14 +552,36 @@ class TestLiteralRouting:
         self._pin_kg_keys()
         stage = self._stage()
 
-        amazon = MagicMock(); amazon.id = "e2"; amazon.name = "Amazon"; amazon.label = "Company"; amazon.properties = {}
-        whole = MagicMock(); whole.id = "e3"; whole.name = "WholeFoods"; whole.label = "Company"; whole.properties = {}
-        money = MagicMock(); money.id = "e1"; money.name = "$2.5 billion"; money.label = "Money"
-        acquired = MagicMock(); acquired.source_id = "e2"; acquired.target_id = "e3"; acquired.label = "ACQUIRED"; acquired.properties = {}
-        price_edge = MagicMock(); price_edge.source_id = "e3"; price_edge.target_id = "e1"; price_edge.label = "PRICE"; price_edge.properties = {}
+        amazon = MagicMock()
+        amazon.id = "e2"
+        amazon.name = "Amazon"
+        amazon.label = "Company"
+        amazon.properties = {}
+        whole = MagicMock()
+        whole.id = "e3"
+        whole.name = "WholeFoods"
+        whole.label = "Company"
+        whole.properties = {}
+        money = MagicMock()
+        money.id = "e1"
+        money.name = "$2.5 billion"
+        money.label = "Money"
+        acquired = MagicMock()
+        acquired.source_id = "e2"
+        acquired.target_id = "e3"
+        acquired.label = "ACQUIRED"
+        acquired.properties = {}
+        price_edge = MagicMock()
+        price_edge.source_id = "e3"
+        price_edge.target_id = "e1"
+        price_edge.label = "PRICE"
+        price_edge.properties = {}
 
         def _extractor(nodes):
-            nodes[0].metadata = {"nodes": [amazon, whole, money], "relations": [acquired, price_edge]}
+            nodes[0].metadata = {
+                "nodes": [amazon, whole, money],
+                "relations": [acquired, price_edge],
+            }
             return nodes
 
         ontology = LocalOntology(
@@ -516,16 +594,24 @@ class TestLiteralRouting:
             ],
         )
 
-        doc = MagicMock(); doc.metadata = {}
+        doc = MagicMock()
+        doc.metadata = {}
         _, ent_labels, _, delta_nodes, delta_edges = stage._extract_chunk(
             doc, [_extractor], ontology.relation_types
         )
 
-        assert [n["label"] for n in delta_nodes] == ["Amazon", "WholeFoods"]   # literal node gone
+        assert [n["label"] for n in delta_nodes] == [
+            "Amazon",
+            "WholeFoods",
+        ]  # literal node gone
         assert "Money" not in ent_labels
-        assert [(e["source"], e["target"]) for e in delta_edges] == [("e2", "e3")]   # ACQUIRED survives
+        assert [(e["source"], e["target"]) for e in delta_edges] == [
+            ("e2", "e3")
+        ]  # ACQUIRED survives
         assert acquired.properties["price"] == {"amount": 2.5e9, "currency": "USD"}
-        assert "price" not in price_edge.properties   # value not stranded on the dropped edge
+        assert (
+            "price" not in price_edge.properties
+        )  # value not stranded on the dropped edge
 
     def test_two_same_kind_literals_route_to_their_own_relation(self):
         """Two money literals must not collide on one real→real edge.
@@ -546,16 +632,54 @@ class TestLiteralRouting:
         self._pin_kg_keys()
         stage = self._stage()
 
-        amazon = MagicMock(); amazon.id = "e2"; amazon.name = "Amazon"; amazon.label = "Company"; amazon.properties = {}
-        whole = MagicMock(); whole.id = "e3"; whole.name = "WholeFoods"; whole.label = "Company"; whole.properties = {}
-        revco = MagicMock(); revco.id = "e5"; revco.name = "RevenueCo"; revco.label = "Company"; revco.properties = {}
-        revco2 = MagicMock(); revco2.id = "e6"; revco2.name = "RevenueCo2"; revco2.label = "Company"; revco2.properties = {}
-        deal = MagicMock(); deal.id = "e1"; deal.name = "$2.5 billion"; deal.label = "Money"
-        revenue = MagicMock(); revenue.id = "e4"; revenue.name = "$391 billion"; revenue.label = "Money"
-        acquired = MagicMock(); acquired.source_id = "e2"; acquired.target_id = "e3"; acquired.label = "ACQUIRED"; acquired.properties = {}
-        has_revenue = MagicMock(); has_revenue.source_id = "e5"; has_revenue.target_id = "e6"; has_revenue.label = "HAS_REVENUE"; has_revenue.properties = {}
-        price_edge = MagicMock(); price_edge.source_id = "e3"; price_edge.target_id = "e1"; price_edge.label = "PRICE"; price_edge.properties = {}
-        rev_edge = MagicMock(); rev_edge.source_id = "e6"; rev_edge.target_id = "e4"; rev_edge.label = "REV"; rev_edge.properties = {}
+        amazon = MagicMock()
+        amazon.id = "e2"
+        amazon.name = "Amazon"
+        amazon.label = "Company"
+        amazon.properties = {}
+        whole = MagicMock()
+        whole.id = "e3"
+        whole.name = "WholeFoods"
+        whole.label = "Company"
+        whole.properties = {}
+        revco = MagicMock()
+        revco.id = "e5"
+        revco.name = "RevenueCo"
+        revco.label = "Company"
+        revco.properties = {}
+        revco2 = MagicMock()
+        revco2.id = "e6"
+        revco2.name = "RevenueCo2"
+        revco2.label = "Company"
+        revco2.properties = {}
+        deal = MagicMock()
+        deal.id = "e1"
+        deal.name = "$2.5 billion"
+        deal.label = "Money"
+        revenue = MagicMock()
+        revenue.id = "e4"
+        revenue.name = "$391 billion"
+        revenue.label = "Money"
+        acquired = MagicMock()
+        acquired.source_id = "e2"
+        acquired.target_id = "e3"
+        acquired.label = "ACQUIRED"
+        acquired.properties = {}
+        has_revenue = MagicMock()
+        has_revenue.source_id = "e5"
+        has_revenue.target_id = "e6"
+        has_revenue.label = "HAS_REVENUE"
+        has_revenue.properties = {}
+        price_edge = MagicMock()
+        price_edge.source_id = "e3"
+        price_edge.target_id = "e1"
+        price_edge.label = "PRICE"
+        price_edge.properties = {}
+        rev_edge = MagicMock()
+        rev_edge.source_id = "e6"
+        rev_edge.target_id = "e4"
+        rev_edge.label = "REV"
+        rev_edge.properties = {}
 
         def _extractor(nodes):
             nodes[0].metadata = {
@@ -578,7 +702,8 @@ class TestLiteralRouting:
             ],
         )
 
-        doc = MagicMock(); doc.metadata = {}
+        doc = MagicMock()
+        doc.metadata = {}
         stage._extract_chunk(doc, [_extractor], ontology.relation_types)
 
         assert acquired.properties["price"] == {"amount": 2.5e9, "currency": "USD"}
@@ -592,20 +717,34 @@ class TestLiteralRouting:
         self._pin_kg_keys()
         stage = self._stage()
 
-        amazon = MagicMock(); amazon.id = "e2"; amazon.name = "Amazon"; amazon.label = "Company"; amazon.properties = {}
-        money = MagicMock(); money.id = "e1"; money.name = "$2.5 billion"; money.label = "Money"
-        rel = MagicMock(); rel.source_id = "e2"; rel.target_id = "e1"; rel.label = "ACQUIRED"; rel.properties = {}
+        amazon = MagicMock()
+        amazon.id = "e2"
+        amazon.name = "Amazon"
+        amazon.label = "Company"
+        amazon.properties = {}
+        money = MagicMock()
+        money.id = "e1"
+        money.name = "$2.5 billion"
+        money.label = "Money"
+        rel = MagicMock()
+        rel.source_id = "e2"
+        rel.target_id = "e1"
+        rel.label = "ACQUIRED"
+        rel.properties = {}
 
         def _extractor(nodes):
             nodes[0].metadata = {"nodes": [amazon, money], "relations": [rel]}
             return nodes
 
-        doc = MagicMock(); doc.metadata = {}
-        _, ent_labels, _, delta_nodes, delta_edges = stage._extract_chunk(doc, [_extractor])
+        doc = MagicMock()
+        doc.metadata = {}
+        _, ent_labels, _, delta_nodes, delta_edges = stage._extract_chunk(
+            doc, [_extractor]
+        )
 
-        assert [n["label"] for n in delta_nodes] == ["Amazon"]     # literal node gone
+        assert [n["label"] for n in delta_nodes] == ["Amazon"]  # literal node gone
         assert "Money" not in ent_labels
-        assert delta_edges == []                                   # dangling edge removed
+        assert delta_edges == []  # dangling edge removed
         assert amazon.properties["acquired"] == {"amount": 2.5e9, "currency": "USD"}
 
     def test_literal_routes_into_declared_entity_slot(self):
@@ -622,9 +761,20 @@ class TestLiteralRouting:
         self._pin_kg_keys()
         stage = self._stage()
 
-        amazon = MagicMock(); amazon.id = "e2"; amazon.name = "Amazon"; amazon.label = "Company"; amazon.properties = {}
-        money = MagicMock(); money.id = "e1"; money.name = "$2.5 billion"; money.label = "Money"
-        rel = MagicMock(); rel.source_id = "e2"; rel.target_id = "e1"; rel.label = "ACQUIRED"; rel.properties = {}
+        amazon = MagicMock()
+        amazon.id = "e2"
+        amazon.name = "Amazon"
+        amazon.label = "Company"
+        amazon.properties = {}
+        money = MagicMock()
+        money.id = "e1"
+        money.name = "$2.5 billion"
+        money.label = "Money"
+        rel = MagicMock()
+        rel.source_id = "e2"
+        rel.target_id = "e1"
+        rel.label = "ACQUIRED"
+        rel.properties = {}
 
         def _extractor(nodes):
             nodes[0].metadata = {"nodes": [amazon, money], "relations": [rel]}
@@ -640,7 +790,8 @@ class TestLiteralRouting:
             ],
         )
 
-        doc = MagicMock(); doc.metadata = {}
+        doc = MagicMock()
+        doc.metadata = {}
         stage._extract_chunk(doc, [_extractor], ontology.relation_types)
 
         assert amazon.properties["price"] == {"amount": 2.5e9, "currency": "USD"}
@@ -652,16 +803,28 @@ class TestLiteralRouting:
         stage = self._stage()
 
         rel = MagicMock()
-        rel.source_id = "e1"; rel.target_id = "e2"; rel.label = "ON"; rel.properties = {}
+        rel.source_id = "e1"
+        rel.target_id = "e2"
+        rel.label = "ON"
+        rel.properties = {}
 
         def _extractor(nodes):
-            year = MagicMock(); year.id = "e1"; year.name = "2018"; year.label = "Date"
-            share = MagicMock(); share.id = "e2"; share.name = "40%"; share.label = "Percentage"
+            year = MagicMock()
+            year.id = "e1"
+            year.name = "2018"
+            year.label = "Date"
+            share = MagicMock()
+            share.id = "e2"
+            share.name = "40%"
+            share.label = "Percentage"
             nodes[0].metadata = {"nodes": [year, share], "relations": [rel]}
             return nodes
 
-        doc = MagicMock(); doc.metadata = {}
-        _, ent_labels, _, delta_nodes, delta_edges = stage._extract_chunk(doc, [_extractor])
+        doc = MagicMock()
+        doc.metadata = {}
+        _, ent_labels, _, delta_nodes, delta_edges = stage._extract_chunk(
+            doc, [_extractor]
+        )
 
         assert delta_nodes == []
         assert ent_labels == []
@@ -680,7 +843,7 @@ class TestDeltaPayloadProperties:
     def _pin_kg_keys():
         import sys
 
-        types = sys.modules['llama_index.core.graph_stores.types']
+        types = sys.modules["llama_index.core.graph_stores.types"]
         types.KG_NODES_KEY = "nodes"
         types.KG_RELATIONS_KEY = "relations"
 
@@ -690,9 +853,16 @@ class TestDeltaPayloadProperties:
         from src.graph.graph_build import _delta_payload
 
         self._pin_kg_keys()
-        item = MagicMock(); item.id = "e1"; item.name = "Amazon"; item.label = "Company"
-        item.properties = {"revenue": "$391B", "chunk_id": "c1"}   # chunk_id is lineage, not a fact
-        node = MagicMock(); node.metadata = {"nodes": [item], "relations": []}
+        item = MagicMock()
+        item.id = "e1"
+        item.name = "Amazon"
+        item.label = "Company"
+        item.properties = {
+            "revenue": "$391B",
+            "chunk_id": "c1",
+        }  # chunk_id is lineage, not a fact
+        node = MagicMock()
+        node.metadata = {"nodes": [item], "relations": []}
 
         nodes, _ = _delta_payload([node])
 
@@ -705,9 +875,13 @@ class TestDeltaPayloadProperties:
         from src.graph.graph_build import _delta_payload
 
         self._pin_kg_keys()
-        rel = MagicMock(); rel.source_id = "e2"; rel.target_id = "e3"; rel.label = "ACQUIRED"
+        rel = MagicMock()
+        rel.source_id = "e2"
+        rel.target_id = "e3"
+        rel.label = "ACQUIRED"
         rel.properties = {"price": "$2.5B", "document_anchor": "x"}
-        node = MagicMock(); node.metadata = {"nodes": [], "relations": [rel]}
+        node = MagicMock()
+        node.metadata = {"nodes": [], "relations": [rel]}
 
         _, edges = _delta_payload([node])
 

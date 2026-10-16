@@ -1,15 +1,18 @@
+import asyncio
+import itertools
+import logging
+import uuid
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
-import asyncio
-import uuid
-import itertools
+
 from neo4j import AsyncGraphDatabase, Query
+
 from src.graph.config_graph import GraphConfig
 from src.logging.setup_logging import setup_logging
-import logging
+
 logging.basicConfig(
     level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
 )
 logger = setup_logging()
 
@@ -17,6 +20,7 @@ logger = setup_logging()
 @dataclass
 class EntityNode:
     """Represents an entity node to be written to Neo4j."""
+
     id: Optional[str] = None
     labels: List[str] = field(default_factory=list)
     properties: Dict[str, Any] = field(default_factory=dict)
@@ -29,6 +33,7 @@ class EntityNode:
 @dataclass
 class RelationEdge:
     """Represents a relationship edge to be written to Neo4j."""
+
     source_id: str
     target_id: str
     relation_type: str
@@ -40,6 +45,7 @@ class MergeCandidate:
     node_id: str
     labels: List[str]
     properties: Dict[str, Any]
+
 
 class GraphNormalizationStage:
     """
@@ -74,7 +80,9 @@ class GraphNormalizationStage:
             return await result.data()
 
     # ---------- Candidate detection ----------
-    async def find_surface_duplicates(self, dataset_id: str) -> List[List[MergeCandidate]]:
+    async def find_surface_duplicates(
+        self, dataset_id: str
+    ) -> List[List[MergeCandidate]]:
         """
         Finds groups of nodes that share the same canonical surface form.
         Returns groups with length > 1.
@@ -93,7 +101,12 @@ class GraphNormalizationStage:
         records = await self._run(q, {"dataset_id": dataset_id})
         groups = []
         for record in records:
-            nodes = [MergeCandidate(node_id=n["id"], labels=n["labels"], properties=n["props"]) for n in record["nodes"]]
+            nodes = [
+                MergeCandidate(
+                    node_id=n["id"], labels=n["labels"], properties=n["props"]
+                )
+                for n in record["nodes"]
+            ]
             groups.append(nodes)
         return groups
 
@@ -117,13 +130,27 @@ class GraphNormalizationStage:
         async def score_pair(a: MergeCandidate, b: MergeCandidate) -> Dict[str, Any]:
             async with semaphore:
                 type_score = 1.0 if set(a.labels) & set(b.labels) else 0.0
-                provenance_score = 1.0 if a.properties.get("source") and a.properties.get("source") == b.properties.get("source") else 0.0
+                provenance_score = (
+                    1.0
+                    if a.properties.get("source")
+                    and a.properties.get("source") == b.properties.get("source")
+                    else 0.0
+                )
                 # neighbor overlap: fetch neighboring labels
-                neighbor_score = await self._neighbor_label_jaccard(str(a.node_id), str(b.node_id))
+                neighbor_score = await self._neighbor_label_jaccard(
+                    str(a.node_id), str(b.node_id)
+                )
                 # embedding similarity placeholder (0..1) - user must implement actual embed service
-                embed_score = await self._embedding_similarity(a.properties.get("name", ""), b.properties.get("name", ""))
+                embed_score = await self._embedding_similarity(
+                    a.properties.get("name", ""), b.properties.get("name", "")
+                )
                 # weighted sum
-                weight = 0.25 * type_score + 0.25 * provenance_score + 0.3 * neighbor_score + 0.2 * embed_score
+                weight = (
+                    0.25 * type_score
+                    + 0.25 * provenance_score
+                    + 0.3 * neighbor_score
+                    + 0.2 * embed_score
+                )
             return {
                 "a": a.node_id,
                 "b": b.node_id,
@@ -164,14 +191,14 @@ class GraphNormalizationStage:
             rec = records[0]
             la_set = rec["la_set"] or []
             lb_set = rec["lb_set"] or []
-            
+
             # FIX: APOC returns lists of lists/sets, we need to flatten and convert to set
             la_set = set(item for sublist in la_set for item in sublist)
             lb_set = set(item for sublist in lb_set for item in sublist)
 
             if not la_set and not lb_set:
                 return 0.0
-            
+
             inter = la_set & lb_set
             union = la_set | lb_set
             return float(len(inter) / len(union)) if union else 0.0
@@ -196,7 +223,13 @@ class GraphNormalizationStage:
         return 0.0
 
     # ---------- Non-destructive operations ----------
-    async def create_alias_relationships(self, canonical_label: str, canonical_props: dict, originals: List[MergeCandidate], audit_note: Optional[str] = None) -> None:
+    async def create_alias_relationships(
+        self,
+        canonical_label: str,
+        canonical_props: dict,
+        originals: List[MergeCandidate],
+        audit_note: Optional[str] = None,
+    ) -> None:
         """
         Create a canonical node and connect originals to it via :ALIAS_OF (non-destructive).
         """
@@ -212,9 +245,20 @@ class GraphNormalizationStage:
         RETURN elementId(canon) as canon_id
         """)
         originals_param = [{"id": c.node_id} for c in originals]
-        await self._run(create_q, {"originals": originals_param, "canonical_id": canonical_id, "dataset_id": canonical_props.get("dataset_id"), "canon_props": canonical_props, "audit_note": audit_note})
+        await self._run(
+            create_q,
+            {
+                "originals": originals_param,
+                "canonical_id": canonical_id,
+                "dataset_id": canonical_props.get("dataset_id"),
+                "canon_props": canonical_props,
+                "audit_note": audit_note,
+            },
+        )
 
-    async def soft_link_same_as(self, a_id: str, b_id: str, confidence: float, reason: Optional[str] = None):
+    async def soft_link_same_as(
+        self, a_id: str, b_id: str, confidence: float, reason: Optional[str] = None
+    ):
         q = Query("""
         MATCH (a) WHERE elementId(a) = $a_id
         MATCH (b) WHERE elementId(b) = $b_id
@@ -222,10 +266,18 @@ class GraphNormalizationStage:
         ON CREATE SET r.confidence = $confidence, r.reason = $reason, r.created_at = timestamp()
         RETURN r
         """)
-        await self._run(q, {"a_id": a_id, "b_id": b_id, "confidence": confidence, "reason": reason})
+        await self._run(
+            q, {"a_id": a_id, "b_id": b_id, "confidence": confidence, "reason": reason}
+        )
 
     # ---------- Destructive merge (audited, reversible) ----------
-    async def destructive_merge(self, survivors: MergeCandidate, to_merge: List[MergeCandidate], merge_author: str = "system", min_confidence: float = 0.95) -> Dict[str, Any]:
+    async def destructive_merge(
+        self,
+        survivors: MergeCandidate,
+        to_merge: List[MergeCandidate],
+        merge_author: str = "system",
+        min_confidence: float = 0.95,
+    ) -> Dict[str, Any]:
         """
         Perform a destructive merge using APOC but only when safe:
          - all nodes share a compatible label/type
@@ -244,16 +296,22 @@ class GraphNormalizationStage:
         for n in to_merge:
             labels &= set(n.labels)
         if agg < min_confidence:
-            raise ValueError(f"Aggregate confidence {agg:.3f} < min_confidence {min_confidence}")
+            raise ValueError(
+                f"Aggregate confidence {agg:.3f} < min_confidence {min_confidence}"
+            )
 
         if not labels:
             raise ValueError("No common label/type across nodes - abort merge")
 
         # Create audit record pre-merge (node ids and properties)
         audit_id = str(uuid.uuid4())
-        pre_snapshot = [{"id": n.node_id, "labels": n.labels, "props": n.properties} for n in group]
+        pre_snapshot = [
+            {"id": n.node_id, "labels": n.labels, "props": n.properties} for n in group
+        ]
         try:
-            async with self.driver.session(database=self.config.neo4j_database) as session:
+            async with self.driver.session(
+                database=self.config.neo4j_database
+            ) as session:
                 #  begin_transaction() returns a coroutine, not a context manager -> update to Await the transaction first
                 async with await session.begin_transaction() as tx:
                     await tx.run(
@@ -267,7 +325,13 @@ class GraphNormalizationStage:
                             nodes_before: $pre_snapshot
                         })
                         """,
-                        {"audit_id": audit_id, "dataset_id": survivors.properties.get("dataset_id"), "author": merge_author, "agg": agg, "pre_snapshot": pre_snapshot}
+                        {
+                            "audit_id": audit_id,
+                            "dataset_id": survivors.properties.get("dataset_id"),
+                            "author": merge_author,
+                            "agg": agg,
+                            "pre_snapshot": pre_snapshot,
+                        },
                     )
 
                     # Try apoc merge (best-effort). If APOC missing, raise and abort.
@@ -281,7 +345,11 @@ class GraphNormalizationStage:
                             SET merged.merged_from = $merged_from, merged.merge_audit = $audit_id
                             RETURN elementId(merged) AS merged_id
                             """,
-                            {"node_ids": node_ids, "merged_from": [n.node_id for n in group], "audit_id": audit_id}
+                            {
+                                "node_ids": node_ids,
+                                "merged_from": [n.node_id for n in group],
+                                "audit_id": audit_id,
+                            },
                         )
                     except Exception as apoc_ex:
                         # APOC missing or failing -- roll back by raising so transaction aborts.
@@ -294,16 +362,30 @@ class GraphNormalizationStage:
                         MATCH (m:MergeAudit {audit_id: $audit_id})
                         SET m.completed_at = timestamp()
                         """,
-                        {"audit_id": audit_id}
+                        {"audit_id": audit_id},
                     )
                     await tx.commit()
-            return {"audit_id": audit_id, "aggregate_confidence": agg, "status": "merged"}
+            return {
+                "audit_id": audit_id,
+                "aggregate_confidence": agg,
+                "status": "merged",
+            }
         except Exception as e:
             logger.exception("Destructive merge failed")
-            return {"audit_id": audit_id, "aggregate_confidence": agg, "status": "failed", "error": str(e)}
+            return {
+                "audit_id": audit_id,
+                "aggregate_confidence": agg,
+                "status": "failed",
+                "error": str(e),
+            }
 
     # ---------- Human-review queue ----------
-    async def enqueue_for_review(self, group: List[MergeCandidate], signals: Dict[str, Any], reason: Optional[str] = None) -> str:
+    async def enqueue_for_review(
+        self,
+        group: List[MergeCandidate],
+        signals: Dict[str, Any],
+        reason: Optional[str] = None,
+    ) -> str:
         q = Query("""
         CREATE (q:MergeReview {
             review_id: $review_id,
@@ -315,11 +397,20 @@ class GraphNormalizationStage:
         RETURN q.review_id AS id
         """)
         review_id = str(uuid.uuid4())
-        group_payload = [{"id": n.node_id, "labels": n.labels, "props": n.properties} for n in group]
-        await self._run(q, {"review_id": review_id, "group": group_payload, "signals": signals, "reason": reason})
+        group_payload = [
+            {"id": n.node_id, "labels": n.labels, "props": n.properties} for n in group
+        ]
+        await self._run(
+            q,
+            {
+                "review_id": review_id,
+                "group": group_payload,
+                "signals": signals,
+                "reason": reason,
+            },
+        )
         return review_id
-    
-    
+
     async def run(self, dataset_id: str):
         """
         Orchestrate detection and merging in batches. Destructive merges are deferred and only executed
@@ -328,7 +419,7 @@ class GraphNormalizationStage:
         groups = await self.find_surface_duplicates(dataset_id)
         # process in batches to control DB load
         for i in range(0, len(groups), self.batch_size):
-            batch = groups[i:i + self.batch_size]
+            batch = groups[i : i + self.batch_size]
             for group in batch:
                 signals = await self.compute_signals(group)
                 agg = signals.get("aggregate_confidence", 0.0)
@@ -338,22 +429,43 @@ class GraphNormalizationStage:
                     survivor = max(group, key=lambda g: len(g.properties or {}))
                     to_merge = [g for g in group if g.node_id != survivor.node_id]
                     try:
-                        await self.destructive_merge(survivor, to_merge, merge_author="auto")
+                        await self.destructive_merge(
+                            survivor, to_merge, merge_author="auto"
+                        )
                     except Exception:
                         # fallback to canonicalization if destructive merge fails
-                        await self.create_alias_relationships("CanonicalEntity", {"dataset_id": dataset_id, "created_by": "auto"}, group, audit_note="fallback-to-canonical")
+                        await self.create_alias_relationships(
+                            "CanonicalEntity",
+                            {"dataset_id": dataset_id, "created_by": "auto"},
+                            group,
+                            audit_note="fallback-to-canonical",
+                        )
                 elif agg >= 0.75:
-                    await self.create_alias_relationships("CanonicalEntity", {"dataset_id": dataset_id, "created_by": "auto"}, group, audit_note="auto-canonical")
+                    await self.create_alias_relationships(
+                        "CanonicalEntity",
+                        {"dataset_id": dataset_id, "created_by": "auto"},
+                        group,
+                        audit_note="auto-canonical",
+                    )
                 elif agg >= 0.6:
                     # soft-link high-confidence pairs
                     for a, b in itertools.combinations(group, 2):
-                        await self.soft_link_same_as(a.node_id, b.node_id, confidence=0.6, reason="auto-soft-link")
+                        await self.soft_link_same_as(
+                            a.node_id,
+                            b.node_id,
+                            confidence=0.6,
+                            reason="auto-soft-link",
+                        )
                 else:
-                    await self.enqueue_for_review(group, signals, reason="low-confidence")
+                    await self.enqueue_for_review(
+                        group, signals, reason="low-confidence"
+                    )
         await self.close()
 
     # ---------- Write operations ----------
-    async def write_all(self, entities: List[EntityNode], relations: List[RelationEdge], graph_id: str) -> tuple[List[str], int]:
+    async def write_all(
+        self, entities: List[EntityNode], relations: List[RelationEdge], graph_id: str
+    ) -> tuple[List[str], int]:
         """Write entities and relations to Neo4j within a single transaction for consistency."""
         written_ids = []
         count = 0
@@ -373,11 +485,10 @@ class GraphNormalizationStage:
                             n.created_at = COALESCE(n.created_at, timestamp())
                         RETURN elementId(n) AS neo_id
                     """)
-                    result = await tx.run(q, {
-                        "entity_id": entity.id,
-                        "props": props,
-                        "graph_id": graph_id
-                    })
+                    result = await tx.run(
+                        q,
+                        {"entity_id": entity.id, "props": props, "graph_id": graph_id},
+                    )
                     record = await result.single()
                     if record:
                         written_ids.append(record["neo_id"])
@@ -404,19 +515,24 @@ class GraphNormalizationStage:
                         SET r += $props, r.graph_id = $graph_id, r.created_at = timestamp()
                         RETURN r
                     """)
-                    await tx.run(q, {
-                        "source_id": rel.source_id,
-                        "target_id": rel.target_id,
-                        "rel_type": rel.relation_type,
-                        "props": props,
-                        "graph_id": graph_id
-                    })
+                    await tx.run(
+                        q,
+                        {
+                            "source_id": rel.source_id,
+                            "target_id": rel.target_id,
+                            "rel_type": rel.relation_type,
+                            "props": props,
+                            "graph_id": graph_id,
+                        },
+                    )
                     count += 1
 
                 await tx.commit()
         return written_ids, count
 
-    async def write_entities(self, entities: List[EntityNode], graph_id: str) -> List[str]:
+    async def write_entities(
+        self, entities: List[EntityNode], graph_id: str
+    ) -> List[str]:
         """Write entity nodes to Neo4j using MERGE for idempotency."""
         written_ids = []
         for entity in entities:
@@ -432,16 +548,16 @@ class GraphNormalizationStage:
                     n.created_at = COALESCE(n.created_at, timestamp())
                 RETURN elementId(n) AS neo_id
             """)
-            records = await self._run(q, {
-                "entity_id": entity.id,
-                "props": props,
-                "graph_id": graph_id
-            })
+            records = await self._run(
+                q, {"entity_id": entity.id, "props": props, "graph_id": graph_id}
+            )
             if records:
                 written_ids.append(records[0]["neo_id"])
         return written_ids
 
-    async def write_relations(self, relations: List[RelationEdge], graph_id: str) -> int:
+    async def write_relations(
+        self, relations: List[RelationEdge], graph_id: str
+    ) -> int:
         """Write relation edges to Neo4j using MATCH + MERGE."""
         count = 0
         async with self.driver.session(database=self.config.neo4j_database) as session:
@@ -468,13 +584,16 @@ class GraphNormalizationStage:
                         SET r += $props, r.graph_id = $graph_id, r.created_at = timestamp()
                         RETURN r
                     """)
-                    await tx.run(q, {
-                        "source_id": rel.source_id,
-                        "target_id": rel.target_id,
-                        "rel_type": rel.relation_type,
-                        "props": props,
-                        "graph_id": graph_id
-                    })
+                    await tx.run(
+                        q,
+                        {
+                            "source_id": rel.source_id,
+                            "target_id": rel.target_id,
+                            "rel_type": rel.relation_type,
+                            "props": props,
+                            "graph_id": graph_id,
+                        },
+                    )
                     count += 1
                 await tx.commit()
         return count
@@ -486,32 +605,42 @@ class GraphNormalizationStage:
             if not entity.labels:
                 errors.append(f"Entity {entity.id}: must have at least one label")
             if not entity.id:
-                errors.append(f"Entity: missing id")
+                errors.append("Entity: missing id")
             # Validate property types
             for key, value in entity.properties.items():
                 if not isinstance(key, str):
-                    errors.append(f"Entity {entity.id}: property key must be string, got {type(key)}")
+                    errors.append(
+                        f"Entity {entity.id}: property key must be string, got {type(key)}"
+                    )
         return errors
 
-    async def validate_relations(self, relations: List[RelationEdge], valid_entity_ids: List[str]) -> List[str]:
+    async def validate_relations(
+        self, relations: List[RelationEdge], valid_entity_ids: List[str]
+    ) -> List[str]:
         """Validate relations and return list of error messages."""
         errors = []
         valid_ids = set(valid_entity_ids)
         for rel in relations:
             if not rel.source_id:
-                errors.append(f"Relation: missing source_id")
+                errors.append("Relation: missing source_id")
             if not rel.target_id:
-                errors.append(f"Relation: missing target_id")
+                errors.append("Relation: missing target_id")
             if not rel.relation_type:
-                errors.append(f"Relation: missing relation_type")
+                errors.append("Relation: missing relation_type")
             if rel.source_id not in valid_ids:
-                errors.append(f"Relation: source_id '{rel.source_id}' not in valid entity IDs")
+                errors.append(
+                    f"Relation: source_id '{rel.source_id}' not in valid entity IDs"
+                )
             if rel.target_id not in valid_ids:
-                errors.append(f"Relation: target_id '{rel.target_id}' not in valid entity IDs")
+                errors.append(
+                    f"Relation: target_id '{rel.target_id}' not in valid entity IDs"
+                )
         return errors
 
 
-async def normalize_and_write(entities: List[EntityNode], relations: List[RelationEdge]) -> str:
+async def normalize_and_write(
+    entities: List[EntityNode], relations: List[RelationEdge]
+) -> str:
     """Merge duplicates, validate, and write to Neo4j.
 
     Args:
@@ -542,7 +671,10 @@ async def normalize_and_write(entities: List[EntityNode], relations: List[Relati
             if entity.id in seen:
                 # Merge properties, preferring non-empty values
                 for key, value in entity.properties.items():
-                    if key not in seen[entity.id].properties or seen[entity.id].properties[key] is None:
+                    if (
+                        key not in seen[entity.id].properties
+                        or seen[entity.id].properties[key] is None
+                    ):
                         seen[entity.id].properties[key] = value
             else:
                 seen[entity.id] = entity

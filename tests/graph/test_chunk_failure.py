@@ -10,6 +10,7 @@ tests/graph/test_incremental_insert.py) and the per-chunk seams are stubbed.
 The job machinery is driven (`_execute_unified_job`), so the assertions are on
 JOB STATUS, not just `_run_async`.
 """
+
 import asyncio
 import time
 import types
@@ -26,29 +27,31 @@ from src.graph.models_graph import (
     RelationTypeDefinition,
 )
 
-
 FAILING_DOC = "doc-1"
 FAILING_CHUNK = "doc-1-2"
 
 
 @pytest.fixture(autouse=True)
 def mock_llama_index():
-    with patch.dict('sys.modules', {
-        'llama_index.core': MagicMock(),
-        'llama_index.llms': MagicMock(),
-        'llama_index.llms.openai_like': MagicMock(),
-        'llama_index.embeddings': MagicMock(),
-        'llama_index.embeddings.ollama': MagicMock(),
-        'llama_index.graph_stores': MagicMock(),
-        'llama_index.graph_stores.neo4j': MagicMock(),
-        'llama_index.core.node_parser': MagicMock(),
-        'llama_index.core.node_parser.text_splitter': MagicMock(),
-        'llama_index.core.indices': MagicMock(),
-        'llama_index.core.indices.property_graph': MagicMock(),
-        'llama_index.core.settings': MagicMock(),
-        'llama_index.core.graph_stores': MagicMock(),
-        'llama_index.core.graph_stores.types': MagicMock(),
-    }):
+    with patch.dict(
+        "sys.modules",
+        {
+            "llama_index.core": MagicMock(),
+            "llama_index.llms": MagicMock(),
+            "llama_index.llms.openai_like": MagicMock(),
+            "llama_index.embeddings": MagicMock(),
+            "llama_index.embeddings.ollama": MagicMock(),
+            "llama_index.graph_stores": MagicMock(),
+            "llama_index.graph_stores.neo4j": MagicMock(),
+            "llama_index.core.node_parser": MagicMock(),
+            "llama_index.core.node_parser.text_splitter": MagicMock(),
+            "llama_index.core.indices": MagicMock(),
+            "llama_index.core.indices.property_graph": MagicMock(),
+            "llama_index.core.settings": MagicMock(),
+            "llama_index.core.graph_stores": MagicMock(),
+            "llama_index.core.graph_stores.types": MagicMock(),
+        },
+    ):
         yield
 
 
@@ -112,7 +115,7 @@ def _install_index():
         indexes.append(index)
         return index
 
-    sys.modules['llama_index.core'].PropertyGraphIndex.side_effect = _factory
+    sys.modules["llama_index.core"].PropertyGraphIndex.side_effect = _factory
     return indexes
 
 
@@ -120,10 +123,12 @@ def _stage(**config_kwargs):
     from src.graph.config_graph import GraphConfig
     from src.graph.graph_build import GraphExtractionStage
 
-    with patch('src.graph.graph_build.OpenAILike'), \
-         patch('src.graph.graph_build.OllamaEmbedding'), \
-         patch('src.graph.graph_build.Neo4jPropertyGraphStore'), \
-         patch('src.graph.graph_build.SentenceSplitter'):
+    with (
+        patch("src.graph.graph_build.OpenAILike"),
+        patch("src.graph.graph_build.OllamaEmbedding"),
+        patch("src.graph.graph_build.Neo4jPropertyGraphStore"),
+        patch("src.graph.graph_build.SentenceSplitter"),
+    ):
         return GraphExtractionStage(GraphConfig(**config_kwargs))
 
 
@@ -154,7 +159,9 @@ async def _drive_build_job(monkeypatch, stage, chunks, recorded):
     monkeypatch.setattr(api_server, "GraphNormalizationStage", lambda cfg: AsyncMock())
     monkeypatch.setattr(api_server, "_persist_run", AsyncMock())
     monkeypatch.setattr(api_server, "_chunk_documents", AsyncMock(return_value=chunks))
-    monkeypatch.setattr(api_server, "_ontology_from_run", AsyncMock(return_value=_ontology()))
+    monkeypatch.setattr(
+        api_server, "_ontology_from_run", AsyncMock(return_value=_ontology())
+    )
 
     job_id = "task16-job"
     api_server.RUNS[job_id] = {"job_id": job_id, "status": "queued", "result": None}
@@ -236,7 +243,7 @@ class TestOneBadChunkAmongFour:
         with extract_patch:
             await _drive_build_job(monkeypatch, stage, chunks, recorded)
 
-        assert all(d.error for d in recorded)          # non-empty, despite the bare raise
+        assert all(d.error for d in recorded)  # non-empty, despite the bare raise
         frames = await _frames_for(recorded)
         assert [f["type"] for f in frames] == ["error", "error"]
 
@@ -271,8 +278,10 @@ class TestJobScopedFailureVerdict:
     @pytest.mark.asyncio
     async def test_one_bad_document_does_not_sink_the_job(self, monkeypatch):
         chunks = [
-            _chunk(0, "doc-a"), _chunk(1, "doc-a"),
-            _chunk(0, "doc-b"), _chunk(1, "doc-b"),
+            _chunk(0, "doc-a"),
+            _chunk(1, "doc-a"),
+            _chunk(0, "doc-b"),
+            _chunk(1, "doc-b"),
         ]
         stage = _stage(
             chunk_parallelism=4,
@@ -298,14 +307,19 @@ class TestJobScopedFailureVerdict:
         frames = await _frames_for(recorded)
         # Sibling chunks fail in the same sliding window, so their publication
         # order is scheduler-dependent — assert membership, not order.
-        assert {f["chunk_id"] for f in frames if f["type"] == "error"} == {"doc-a-0", "doc-a-1"}
+        assert {f["chunk_id"] for f in frames if f["type"] == "error"} == {
+            "doc-a-0",
+            "doc-a-1",
+        }
         assert len([f for f in frames if f["type"] == "delta"]) == 2
 
     @pytest.mark.asyncio
     async def test_every_document_failing_fails_the_job(self, monkeypatch):
         chunks = [
-            _chunk(0, "doc-a"), _chunk(1, "doc-a"),
-            _chunk(0, "doc-b"), _chunk(1, "doc-b"),
+            _chunk(0, "doc-a"),
+            _chunk(1, "doc-a"),
+            _chunk(0, "doc-b"),
+            _chunk(1, "doc-b"),
         ]
         stage = _stage(
             chunk_parallelism=4,
@@ -356,7 +370,7 @@ class TestFailureLeavesNoOrphanedWriters:
 
         _, extract_patch = _wire(stage, chunks, _extract)
         recorded = []
-        with extract_patch, patch('src.graph.graph_build.promote', _promote):
+        with extract_patch, patch("src.graph.graph_build.promote", _promote):
             job_id = await _drive_build_job(monkeypatch, stage, chunks, recorded)
 
         assert api_server.RUNS[job_id]["status"] == "failed"

@@ -4,6 +4,7 @@ A non-empty `Agent.source_evidence` adds one labelled block; an empty list adds
 nothing at all (no stray header), so an agent with no fetched chunks looks
 exactly as it did before this feature existed.
 """
+
 from src.persona.agent import (
     SOURCE_EVIDENCE_MAX_SNIPPETS,
     SOURCE_EVIDENCE_SNIPPET_CHARS,
@@ -64,9 +65,7 @@ def test_full_perspective_reaches_prompt():
 
 
 def test_prompt_truncates_long_snippet_at_word_boundary():
-    prompt = _build_system_prompt(
-        _agent(source_evidence=["word " * 500]), _agent(), []
-    )
+    prompt = _build_system_prompt(_agent(source_evidence=["word " * 500]), _agent(), [])
 
     rendered = [line[2:] for line in prompt.splitlines() if line.startswith("- ")]
     assert len(rendered) == 1

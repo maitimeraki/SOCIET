@@ -1,13 +1,17 @@
-from typing import List, Dict, Any
+from typing import Any, Dict, List
+
 from .config_graph import GraphConfig
-from .models_graph import GlobalInputDocument
-from .ontology import OntologyDiscoveryStage
 from .graph_build import GraphExtractionStage
-from .normalization import GraphNormalizationStage, normalize_and_write, EntityNode, RelationEdge
+from .models_graph import GlobalInputDocument
+from .normalization import (
+    GraphNormalizationStage,
+)
+from .ontology import OntologyDiscoveryStage
 
 
 class UniversalGraphPipeline:
     """End-to-end pipeline for graph construction from unstructured documents. This class orchestrates the entire process, from discovering the ontology schema to extracting entities and relationships, and finally normalizing the graph data. It provides a single interface for users to input raw documents and receive a structured graph representation in return. The pipeline is designed to be modular, allowing for easy customization or extension of individual stages as needed."""
+
     def __init__(self, config: GraphConfig | None = None):
         self.config = config or GraphConfig()
         self.discovery = OntologyDiscoveryStage(
@@ -17,7 +21,9 @@ class UniversalGraphPipeline:
         self.extraction = GraphExtractionStage(self.config)
         self.normalization = GraphNormalizationStage(self.config)
 
-    async def run(self, dataset_id: str, documents: List[GlobalInputDocument]) -> Dict[str, Any]:
+    async def run(
+        self, dataset_id: str, documents: List[GlobalInputDocument]
+    ) -> Dict[str, Any]:
         try:
             ontology = await self.discovery.run(
                 documents=documents,

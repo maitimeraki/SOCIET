@@ -1,8 +1,9 @@
 import asyncio
-import pytest
 from unittest.mock import AsyncMock
 
-from src.simulation.llm_batch import BatchedLLMRunner, PairPrompt, PairResult
+import pytest
+
+from src.simulation.llm_batch import BatchedLLMRunner, PairPrompt
 
 
 @pytest.fixture
@@ -32,18 +33,24 @@ async def test_concurrency_limit(mock_llm):
 
     mock_llm.generate = slow_generate
 
-    prompts = [PairPrompt(system_prompt="s", user_prompt=f"u{i}", pair_id=f"p{i}") for i in range(16)]
+    prompts = [
+        PairPrompt(system_prompt="s", user_prompt=f"u{i}", pair_id=f"p{i}")
+        for i in range(16)
+    ]
     results = []
     async for result in runner.gather(prompts):
         results.append(result)
 
     assert len(results) == 16
-    assert max_in_flight <= concurrency, f"Max in-flight was {max_in_flight}, expected {concurrency}"
+    assert (
+        max_in_flight <= concurrency
+    ), f"Max in-flight was {max_in_flight}, expected {concurrency}"
 
 
 @pytest.mark.asyncio
 async def test_error_isolation(mock_llm):
     """If one call raises, others still complete."""
+
     async def patched_generate(system_prompt, user_prompt, **kwargs):
         await asyncio.sleep(0.01)
         if user_prompt == "u4":
@@ -53,7 +60,10 @@ async def test_error_isolation(mock_llm):
     mock_llm.generate = patched_generate
 
     runner = BatchedLLMRunner(mock_llm, concurrency=8)
-    prompts = [PairPrompt(system_prompt="s", user_prompt=f"u{i}", pair_id=f"p{i}") for i in range(10)]
+    prompts = [
+        PairPrompt(system_prompt="s", user_prompt=f"u{i}", pair_id=f"p{i}")
+        for i in range(10)
+    ]
 
     results = []
     async for result in runner.gather(prompts):

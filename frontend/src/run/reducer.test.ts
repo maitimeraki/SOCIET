@@ -53,6 +53,20 @@ describe('reducer', () => {
     expect(state.verdict?.dissentingViews).toEqual([])
     expect(state.verdict?.evidence).toEqual([])
   })
+  it('carries narrative_status off the complete event — fallback is the notice-bearing value (§17.3)', () => {
+    const fallback = applyEvent(
+      initialState,
+      { type: 'complete', converged: false, verdict: 'Aggregates only.', narrative_status: 'fallback', final_stances: {}, warnings: [], rounds_executed: 0 },
+      1,
+    )
+    expect(fallback.verdict?.narrativeStatus).toBe('fallback')
+    const ok = applyEvent(
+      initialState,
+      { type: 'complete', converged: true, verdict: 'Written.', final_stances: {}, warnings: [], rounds_executed: 1 },
+      1,
+    )
+    expect(ok.verdict?.narrativeStatus).toBe('ok')
+  })
   it('tolerates unknown event types as warnings', () => {
     const state = applyEvent(initialState, { type: 'future_thing' } as unknown as RunEvent, 1)
     expect(state.warnings).toContain('Unhandled event type: future_thing')

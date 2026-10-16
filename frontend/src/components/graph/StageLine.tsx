@@ -11,17 +11,17 @@ export default function StageLine({
 }) {
   const glyph =
     state === 'done' ? (
-      <CheckCircle size={16} className="text-good" aria-hidden="true" />
+      <CheckCircle size={16} className="text-ink-2" aria-hidden="true" />
     ) : state === 'active' ? (
-      <span aria-hidden="true" className="h-2.5 w-2.5 animate-pulse rounded-full bg-accent" />
+      <span aria-hidden="true" className="h-2.5 w-2.5 animate-pulse rounded-full bg-datum" />
     ) : (
-      <span aria-hidden="true" className="h-2.5 w-2.5 rounded-full border border-paper-faint" />
+      <span aria-hidden="true" className="h-2.5 w-2.5 rounded-full border border-ink-4" />
     )
   return (
     <div className="flex items-center gap-2.5">
       {glyph}
-      <span className={`text-body ${state === 'pending' ? 'text-paper-mute' : 'text-paper'}`}>{label}</span>
-      {helper && state === 'active' && <span className="text-micro text-paper-mute">{helper}</span>}
+      <span className={`text-body ${state === 'pending' ? 'text-ink-3' : 'text-ink'}`}>{label}</span>
+      {helper && state === 'active' && <span className="text-micro text-ink-3">{helper}</span>}
     </div>
   )
 }

@@ -121,14 +121,14 @@ export default function RunPage() {
         activeKey={tab}
         onSelect={(key) => navigate(`/runs/${runId}/${RAIL_TARGETS[key] ?? 'roster'}`)}
       />
-      <nav className="flex items-center gap-1 border-b border-ink-700">
+      <nav className="flex items-center gap-1 border-b border-ink-4">
         {TABS.map((name) => (
           <NavLink
             key={name}
             to={`/runs/${runId}/${name}`}
             className={({ isActive }) =>
               `px-3 py-2 text-body capitalize transition-colors ${
-                isActive ? 'text-paper shadow-[inset_0_-2px_0_0_var(--color-accent)]' : 'text-paper-dim hover:text-paper'
+                isActive ? 'text-ink shadow-[inset_0_-2px_0_0_var(--color-datum)]' : 'text-ink-2 hover:text-ink'
               }`
             }
           >
@@ -151,7 +151,7 @@ export default function RunPage() {
       {tab === 'floor' && (
         <div className="grid gap-6 min-[900px]:grid-cols-[3fr_2fr]">
           <div className="space-y-4">
-            <div className={`rounded-[12px] border border-ink-700 bg-ink-900 p-4 ${run.status === 'failed' ? 'opacity-40' : ''}`}>
+            <div className={`plot-ground p-4 ${run.status === 'failed' ? 'opacity-40' : ''}`}>
               <ChamberFloor
                 roster={run.roster}
                 rounds={run.rounds}
@@ -159,20 +159,20 @@ export default function RunPage() {
                 livePairs={run.livePairs}
                 onOpenProfile={() => navigate(`/runs/${runId}/agents`)}
               />
-              <div className="mt-3 flex items-center justify-center gap-3 text-micro text-paper-mute">
-                <button type="button" disabled={activeRound === null || activeRound <= 1} onClick={() => setScrubbed(Math.max(1, (activeRound ?? 1) - 1))} className="rounded-[4px] px-2 py-0.5 hover:bg-ink-800 disabled:opacity-40">◀</button>
-                <span className="tnum font-mono">{activeRound === null ? 'live' : `round ${activeRound}`}</span>
-                <button type="button" disabled={scrubbed === null} onClick={() => setScrubbed((current) => (current === null ? current : current >= (latestRound ?? 1) ? null : current + 1))} className="rounded-[4px] px-2 py-0.5 hover:bg-ink-800 disabled:opacity-40">▶</button>
-                <button type="button" onClick={() => setScrubbed(null)} className="rounded-[4px] px-2 py-0.5 text-accent hover:bg-ink-800">End — back to live</button>
+              <div className="mt-3 flex items-center justify-center gap-3 text-micro text-ink-3">
+                <button type="button" aria-label="Previous round" disabled={activeRound === null || activeRound <= 1} onClick={() => setScrubbed(Math.max(1, (activeRound ?? 1) - 1))} className="inline-flex min-h-6 min-w-6 items-center justify-center rounded-[4px] px-2 py-0.5 hover:bg-survey-paper-2 disabled:opacity-40">◀</button>
+                <span className="tnum font-measurement">{activeRound === null ? 'live' : `round ${activeRound}`}</span>
+                <button type="button" aria-label="Next round" disabled={scrubbed === null} onClick={() => setScrubbed((current) => (current === null ? current : current >= (latestRound ?? 1) ? null : current + 1))} className="inline-flex min-h-6 min-w-6 items-center justify-center rounded-[4px] px-2 py-0.5 hover:bg-survey-paper-2 disabled:opacity-40">▶</button>
+                <button type="button" onClick={() => setScrubbed(null)} className="rounded-[4px] px-2 py-0.5 text-datum hover:bg-survey-paper-2">End — back to live</button>
               </div>
             </div>
             <ConvergenceTape ticks={series} threshold={run.config?.convergence_threshold ?? 0.8} activeRound={activeRound} />
             {run.verdict && (
-              <div className="flex items-center justify-between rounded-[6px] border border-ink-600 bg-ink-800 px-4 py-3">
-                <p className="text-body text-paper">
+              <div className="flex items-center justify-between border-t border-ink-4 pt-3">
+                <p className="text-body text-ink">
                   {run.verdict.converged ? 'Converged — the verdict is ready.' : 'Verdict ready — a plurality, not a consensus.'}
                 </p>
-                <Link to={`/runs/${runId}/verdict`} className="text-body text-accent hover:text-accent-strong">
+                <Link to={`/runs/${runId}/verdict`} className="text-body text-datum hover:text-datum">
                   Open verdict →
                 </Link>
               </div>
@@ -180,13 +180,13 @@ export default function RunPage() {
           </div>
           <div className="space-y-3">
             {run.status === 'failed' && (
-              <div className="rounded-[6px] border border-critical/40 bg-ink-800 px-4 py-3">
-                <p className="text-body text-paper">The debate stopped: {run.error ?? 'unknown error'}.</p>
+              <div className="border-t border-route/40 pt-3">
+                <p className="text-body text-ink">The debate stopped: {run.error ?? 'unknown error'}.</p>
                 <div className="mt-2 flex items-center gap-4">
-                  <a href="#run-stream" className="text-body text-accent hover:text-accent-strong">
+                  <a href="#run-stream" className="text-body text-datum hover:text-datum">
                     See what happened ↓
                   </a>
-                  <Link to="/new/society" className="text-body text-paper-dim hover:text-paper">
+                  <Link to="/new/society" className="text-body text-ink-2 hover:text-ink">
                     Start a new run
                   </Link>
                 </div>
@@ -207,6 +207,7 @@ export default function RunPage() {
               converged={view.converged}
               summary={view.summary}
               narrative={view.narrative}
+              narrativeStatus={view.narrativeStatus}
               dissentingViews={view.dissentingViews}
               evidence={view.evidence}
               onReplay={() => navigate(`/runs/${runId}/floor`, { state: { replayFrom: 1 } })}
@@ -214,26 +215,26 @@ export default function RunPage() {
               onNew={() => navigate('/new/society')}
             />
             <section>
-              <h2 className="mb-4 text-heading text-paper">The division</h2>
+              <h2 className="mb-4 text-heading text-ink">The division</h2>
               <DivisionBars clusters={view.clusters} />
             </section>
             <section>
-              <h2 className="mb-4 text-heading text-paper">Final stances</h2>
+              <h2 className="mb-4 text-heading text-ink">Final stances</h2>
               <FinalStanceTable run={run} />
             </section>
             <section>
-              <h2 className="mb-4 text-heading text-paper">On the record</h2>
+              <h2 className="mb-4 text-heading text-ink">On the record</h2>
               <EntityChips supporting={view.supporting} opposing={view.opposing} />
             </section>
             {view.warnings.length > 0 && (
               <section>
-                <h2 className="mb-4 text-heading text-paper">Warnings ({view.warnings.length})</h2>
+                <h2 className="mb-4 text-heading text-ink">Warnings ({view.warnings.length})</h2>
                 <WarningList warnings={view.warnings} />
               </section>
             )}
           </div>
         ) : (
-          <p className="text-body text-paper-mute">The verdict appears when the debate completes.</p>
+          <p className="text-body text-ink-3">The verdict appears when the debate completes.</p>
         )
       )}
       {tab === 'agents' && <AgentsTab run={run} />}

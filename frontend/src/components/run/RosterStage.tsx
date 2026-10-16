@@ -23,18 +23,18 @@ function Beat({
 }) {
   const glyph =
     state === 'done' ? (
-      <CheckCircle size={16} className="text-good" aria-hidden="true" />
+      <CheckCircle size={16} className="text-ink-2" aria-hidden="true" />
     ) : state === 'running' ? (
-      <span aria-hidden="true" className="h-2.5 w-2.5 animate-pulse rounded-full bg-accent" />
+      <span aria-hidden="true" className="h-2.5 w-2.5 animate-pulse rounded-full bg-datum" />
     ) : (
-      <span aria-hidden="true" className="h-2.5 w-2.5 rounded-full border border-paper-faint" />
+      <span aria-hidden="true" className="h-2.5 w-2.5 rounded-full border border-ink-4" />
     )
   return (
     <section>
       <header className="mb-3 flex items-center gap-2.5">
-        <span className="font-serif text-title text-paper">{number}</span>
-        <h2 className="text-label uppercase text-paper">{title}</h2>
-        {meta && <span className="tnum font-mono text-micro text-paper-mute">{meta}</span>}
+        <span className="font-titling text-title text-ink">{number}</span>
+        <h2 className="text-label uppercase text-ink">{title}</h2>
+        {meta && <span className="tnum font-measurement text-micro text-ink-3">{meta}</span>}
         {glyph}
       </header>
       {children}
@@ -66,13 +66,13 @@ export default function RosterStage({
 
   return (
     <div className="space-y-8">
-      <p className="text-label uppercase text-brass">Building the society</p>
+      <p className="text-label uppercase text-ink-3">Building the society</p>
 
       <Beat number="①" title="Reading the question" meta="S3 · intent" state={intent ? 'done' : 'running'}>
         {intent ? (
           <IntentCard intent={intent} question={question} />
         ) : (
-          <p className="animate-pulse text-body text-paper-mute">Reading the question…</p>
+          <p className="animate-pulse text-body text-ink-3">Reading the question…</p>
         )}
       </Beat>
 
@@ -85,7 +85,7 @@ export default function RosterStage({
         {selection.length > 0 ? (
           <SelectionTable rows={selection} />
         ) : (
-          <p className={`text-body ${intent ? 'animate-pulse text-paper-mute' : 'text-paper-faint'}`}>
+          <p className={`text-body ${intent ? 'animate-pulse text-ink-3' : 'text-ink-3'}`}>
             Choosing who speaks…
           </p>
         )}
@@ -98,8 +98,8 @@ export default function RosterStage({
         state={progress.phase === 'seated' ? 'done' : selection.length > 0 ? 'running' : 'pending'}
       >
         {progress.phase === 'empty' ? (
-          <div className="rounded-[6px] border border-ink-600 bg-ink-900 p-5">
-            <p className="max-w-[60ch] text-body text-paper-dim">
+          <div className="border-t border-ink-4 pt-5">
+            <p className="max-w-[60ch] text-body text-ink-2">
               Nothing to convene. "{question}" didn't connect to enough of the corpus. Try a broader question, or add
               documents to this corpus.
             </p>
@@ -129,13 +129,13 @@ export default function RosterStage({
         {floorSlot}
         {progress.phase === 'seated' ? (
           <div className="mt-3 flex items-center gap-3">
-            <p className="text-body text-paper">The floor is seated — round 1 begins.</p>
+            <p className="text-body text-ink">The floor is seated — round 1 begins.</p>
             <Button variant="primary" size={32} onClick={onSkip}>
               Watch the floor →
             </Button>
           </div>
         ) : (
-          <p className="text-body text-paper-faint">Seats rise as profiles build.</p>
+          <p className="text-body text-ink-3">Seats rise as profiles build.</p>
         )}
       </Beat>
     </div>

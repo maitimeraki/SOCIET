@@ -154,6 +154,7 @@ export interface VerdictView {
   converged: boolean
   summary: string
   narrative: string
+  narrativeStatus: string
   dissentingViews: DissentingView[]
   evidence: EvidenceItem[]
   clusters: ClusterSummary[]
@@ -179,6 +180,7 @@ export function verdictView(state: RunState): VerdictView | null {
     converged: verdict.converged,
     summary: verdict.summary,
     narrative: verdict.narrative,
+    narrativeStatus: verdict.narrativeStatus,
     dissentingViews: verdict.dissentingViews,
     evidence: verdict.evidence,
     clusters,

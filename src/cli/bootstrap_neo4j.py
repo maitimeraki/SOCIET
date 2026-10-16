@@ -7,6 +7,7 @@ Usage:
 Reads connection settings from .env via GraphConfig.
 Idempotent — safe to re-run.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -20,11 +21,15 @@ from src.graph.neo4j_bootstrap import ensure_schema
 
 
 async def main() -> int:
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s | %(message)s")
+    logging.basicConfig(
+        level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s | %(message)s"
+    )
     logger = logging.getLogger("bootstrap_neo4j")
 
     cfg = GraphConfig()
-    driver = AsyncGraphDatabase.driver(cfg.neo4j_uri, auth=(cfg.neo4j_username, cfg.neo4j_password))
+    driver = AsyncGraphDatabase.driver(
+        cfg.neo4j_uri, auth=(cfg.neo4j_username, cfg.neo4j_password)
+    )
 
     try:
         result = await ensure_schema(driver, cfg.neo4j_database)

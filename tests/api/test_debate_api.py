@@ -1,28 +1,36 @@
 """
 Tests for Debate API endpoints.
 """
+
 import asyncio
 import json
+import os
+import sys
 import uuid
 from dataclasses import asdict
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from unittest.mock import AsyncMock, patch, MagicMock
+import pytest_asyncio
 from fastapi import FastAPI, WebSocketDisconnect
 from fastapi.testclient import TestClient
+from httpx import ASGITransport, AsyncClient
+from sqlalchemy import delete
 
+from src.api import run_doc
 from src.api.debate_api import (
-    router,
-    create_debate,
-    stream_debate,
-    DebateRequest,
-    DebateConfigRequest,
-    _run_debate_async,
-    _DebateWSManager,
     _DEBATE_JOBS,
-    _DEBATE_JOBS_LOCK,
+    DebateConfigRequest,
+    DebateRequest,
+    _DebateWSManager,
+    _run_debate_async,
+    router,
+    stream_debate,
 )
-from src.simulation.orchestrator import OrchestratedDebateResult
+from src.auth.deps import current_user
+from src.db.engine import get_session_factory
+from src.db.models import User
 from src.persona.agent import (
     Agent,
     ConfidenceBreakdown,
@@ -33,7 +41,75 @@ from src.persona.agent import (
     Stance,
 )
 from src.simulation.debate_config import DebateConfig
+from src.simulation.orchestrator import OrchestratedDebateResult
 from src.simulation.pair_turn import CommPair, DebateVerdict, RoundResult
+
+if sys.platform == "win32":
+    asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+
+
+_ROUTE_USER = SimpleNamespace(id=uuid.uuid4())
+
+requires_db = pytest.mark.skipif(
+    not os.getenv("DATABASE_URL"), reason="DATABASE_URL is not set"
+)
+
+
+@pytest_asyncio.fixture
+async def job_owner(db):
+    """A real account for the DB-backed route tests — the routes write rows and
+    jobs.user_id is an FK, so a bare SimpleNamespace id cannot own one. The
+    route fixtures (`client`, `ws_authenticated`) act as this caller for the
+    test's duration, so ownership resolves to the row's user."""
+    factory = get_session_factory()
+    async with factory() as session:
+        user = User(
+            email=f"auth-test-debate-{uuid.uuid4().hex[:10]}@example.com",
+            password_hash="not-a-real-hash",
+        )
+        session.add(user)
+        await session.commit()
+        owner_id = user.id
+    route_user_id = _ROUTE_USER.id
+    _ROUTE_USER.id = owner_id
+    try:
+        yield SimpleNamespace(id=str(owner_id))
+    finally:
+        _ROUTE_USER.id = route_user_id
+        async with factory() as session:
+            await session.execute(delete(User).where(User.id == owner_id))
+            await session.commit()
+
+
+async def _write_run_row(
+    run_id: str, owner_id: str, *, status: str = "queued", result=None
+) -> None:
+    """The run's rows, as `create_debate` would have written them."""
+    await run_doc.write_run_doc(
+        {
+            "run_id": run_id,
+            "user_id": owner_id,
+            "status": status,
+            "query": "Should we tax carbon?",
+            "dataset_id": "ds1",
+            "config": {},
+            "result": result,
+            "error": None,
+        }
+    )
+
+
+@pytest_asyncio.fixture
+async def db_client(job_owner):
+    """The debate router in a real app, serving requests as the row's owner."""
+    app = FastAPI()
+    app.include_router(router)
+    app.dependency_overrides[current_user] = lambda: SimpleNamespace(
+        id=uuid.UUID(job_owner.id)
+    )
+    transport = ASGITransport(app=app, client=("10.99.8.3", 5000))
+    async with AsyncClient(transport=transport, base_url="http://testserver") as http:
+        yield http
 
 
 @pytest.fixture
@@ -43,9 +119,14 @@ def client():
     FastAPI >=0.135 requires the app-level AsyncExitStack middleware; a bare
     router lacks it ("fastapi_middleware_astack not found in request scope"),
     so the previous `TestClient(router)` could not serve a request at all.
+
+    These tests are about routing, not auth, so `current_user` is overridden
+    with a fixed caller; the guards themselves are covered by
+    tests/api/test_guards.py against the real session path.
     """
     app = FastAPI()
     app.include_router(router)
+    app.dependency_overrides[current_user] = lambda: _ROUTE_USER
     return TestClient(app)
 
 
@@ -55,16 +136,16 @@ class TestRoutesThroughTheApp:
     def test_unknown_job_is_404(self, client):
         assert client.get("/simulate/no-such-job").status_code == 404
 
-    def test_queued_job_status_is_reported(self, client):
-        job_id = f"route-{uuid.uuid4()}"
-        _DEBATE_JOBS[job_id] = {
-            "job_id": job_id, "status": "queued", "query": "q",
-            "graph_id": "ds1", "config": {}, "result": None, "error": None,
-        }
-        try:
-            response = client.get(f"/simulate/{job_id}")
-        finally:
-            _DEBATE_JOBS.pop(job_id, None)
+    @requires_db
+    @pytest.mark.asyncio
+    async def test_queued_job_status_is_reported(self, db_client, job_owner):
+        """The route answers from the run's row — the in-memory dict is empty."""
+        job_id = str(uuid.uuid4())
+        await _write_run_row(job_id, job_owner.id)
+        _DEBATE_JOBS.pop(job_id, None)
+
+        response = await db_client.get(f"/simulate/{job_id}")
+
         assert (response.status_code, response.json()["status"]) == (200, "queued")
 
     def test_create_debate_rejects_a_blank_query(self, client):
@@ -195,7 +276,6 @@ class TestGraphContextSignature:
     def test_graph_config_creation(self):
         """Test that GraphConfig creates valid config for GraphContext."""
         from src.graph.config_graph import GraphConfig
-        from src.persona.graph_context import GraphContext
 
         cfg = GraphConfig()
         # GraphContext should accept a GraphConfig object
@@ -207,9 +287,10 @@ class TestGraphContextSignature:
     @pytest.mark.asyncio
     async def test_graph_context_accepts_config(self):
         """Test that GraphContext.__init__ accepts a GraphConfig parameter."""
+        import inspect
+
         from src.graph.config_graph import GraphConfig
         from src.persona.graph_context import GraphContext
-        import inspect
 
         # Check GraphContext signature
         sig = inspect.signature(GraphContext.__init__)
@@ -229,18 +310,20 @@ class TestDebateOrchestrator:
     def test_orchestrator_import(self):
         """Test that DebateOrchestrator can be imported."""
         from src.simulation.orchestrator import DebateOrchestrator
+
         assert DebateOrchestrator is not None
 
     @pytest.mark.asyncio
     async def test_orchestrator_run_method_exists(self):
         """Test that orchestrator has run method with expected signature."""
+        import inspect
+
+        from src.simulation.llm_batch import BatchedLLMRunner
         from src.simulation.orchestrator import DebateOrchestrator
         from src.simulation.profile_synthesizer import ProfileSynthesizer
-        from src.simulation.topology import CommunicationTopology
-        from src.simulation.llm_batch import BatchedLLMRunner
-        from src.simulation.verdict import VerdictSynthesizer
         from src.simulation.society_memory import SocietyMemory
-        import inspect
+        from src.simulation.topology import CommunicationTopology
+        from src.simulation.verdict import VerdictSynthesizer
 
         # Create mock dependencies
         mock_profiler = MagicMock(spec=ProfileSynthesizer)
@@ -258,7 +341,7 @@ class TestDebateOrchestrator:
         )
 
         # Verify run method exists
-        assert hasattr(orchestrator, 'run')
+        assert hasattr(orchestrator, "run")
         sig = inspect.signature(orchestrator.run)
         params = list(sig.parameters.keys())
         assert "query" in params
@@ -271,7 +354,9 @@ class TestDebateOrchestrator:
 def _stub_profile(name: str) -> Agent:
     return Agent(
         agent_id=uuid.uuid4(),
-        identity=PersonaIdentity(name=name, archetype="Expert", communication_style="Formal"),
+        identity=PersonaIdentity(
+            name=name, archetype="Expert", communication_style="Formal"
+        ),
         discovery_type=DiscoveryType.INTENT_DRIVEN,
         expertise_level=ExpertiseLevel.TECHNICAL,
         bio=f"{name} bio",
@@ -297,15 +382,17 @@ def _stub_verdict() -> DebateVerdict:
     )
 
 
-_INTENT_REPLY = json.dumps({
-    "core_question": "Should we tax carbon?",
-    "domain_tags": ["economic"],
-    "direct_keywords": ["carbon", "tax"],
-    "latent_sectors": [],
-    "entity_frame": [],
-    "search_perspectives": ["Economic"],
-    "stance_axis": "Support = tax carbon.",
-})
+_INTENT_REPLY = json.dumps(
+    {
+        "core_question": "Should we tax carbon?",
+        "domain_tags": ["economic"],
+        "direct_keywords": ["carbon", "tax"],
+        "latent_sectors": [],
+        "entity_frame": [],
+        "search_perspectives": ["Economic"],
+        "stance_axis": "Support = tax carbon.",
+    }
+)
 
 # The denser cluster is the OFF-topic one, so the intent visibly flips the
 # ranking — that is what makes the delivered selection explain the roster.
@@ -330,7 +417,9 @@ def _selection_entity_nodes():
     return nodes
 
 
-async def _run_stubbed_job(job_id, config, query="Should we tax carbon?", pre_stored_ws_manager=None):
+async def _run_stubbed_job(
+    job_id, config, query="Should we tax carbon?", pre_stored_ws_manager=None
+):
     """Run the real job path — real orchestrator, S4 selection and S9 wiring —
     with only the graph (Neo4j), round LLM calls and verdict seams stubbed.
 
@@ -356,42 +445,69 @@ async def _run_stubbed_job(job_id, config, query="Should we tax carbon?", pre_st
     )
 
     topo = MagicMock()
-    topo.compute_round_pairs = AsyncMock(return_value=[
-        CommPair(agent_a="Carbon Analyst", agent_b="Quarterly Logistics Review",
-                 shared_entities=[], score=0.5)
-    ])
+    topo.compute_round_pairs = AsyncMock(
+        return_value=[
+            CommPair(
+                agent_a="Carbon Analyst",
+                agent_b="Quarterly Logistics Review",
+                shared_entities=[],
+                score=0.5,
+            )
+        ]
+    )
     verdict_synth = MagicMock()
     verdict_synth.asynthesize = AsyncMock(return_value=_stub_verdict())
     society_memory = MagicMock()
-    society_memory.commit_round = AsyncMock(return_value={
-        "round": 1, "dataset_id": "ds1", "query_hash": "qh",
-        "opinions": 0, "edges": 0, "failed": False,
-    })
+    society_memory.commit_round = AsyncMock(
+        return_value={
+            "round": 1,
+            "dataset_id": "ds1",
+            "query_hash": "qh",
+            "opinions": 0,
+            "edges": 0,
+            "failed": False,
+        }
+    )
     ws_manager = MagicMock()
     ws_manager.broadcast = AsyncMock()
 
     _DEBATE_JOBS[job_id] = {
-        "job_id": job_id, "status": "queued", "query": query,
-        "graph_id": "ds1", "config": asdict(config), "result": None, "error": None,
+        "job_id": job_id,
+        "status": "queued",
+        "query": query,
+        "graph_id": "ds1",
+        "config": asdict(config),
+        "result": None,
+        "error": None,
     }
     if pre_stored_ws_manager is not None:
         _DEBATE_JOBS[job_id]["ws_manager"] = pre_stored_ws_manager
     try:
-        with patch("src.llm.client.LLMClient", return_value=llm), \
-             patch("src.persona.graph_context.GraphContext", return_value=ctx), \
-             patch("src.persona.repository.PersonaRepository", return_value=repo), \
-             patch("src.simulation.topology.CommunicationTopology", return_value=topo), \
-             patch("src.simulation.orchestrator.RoundRunner") as rr_cls, \
-             patch("src.simulation.verdict.VerdictSynthesizer", return_value=verdict_synth), \
-             patch("src.simulation.society_memory.SocietyMemory", return_value=society_memory), \
-             patch("src.api.debate_api._DebateWSManager", return_value=ws_manager):
+        with (
+            patch("src.llm.client.LLMClient", return_value=llm),
+            patch("src.persona.graph_context.GraphContext", return_value=ctx),
+            patch("src.persona.repository.PersonaRepository", return_value=repo),
+            patch("src.simulation.topology.CommunicationTopology", return_value=topo),
+            patch("src.simulation.orchestrator.RoundRunner") as rr_cls,
+            patch(
+                "src.simulation.verdict.VerdictSynthesizer", return_value=verdict_synth
+            ),
+            patch(
+                "src.simulation.society_memory.SocietyMemory",
+                return_value=society_memory,
+            ),
+            patch("src.api.debate_api._DebateWSManager", return_value=ws_manager),
+        ):
             rr_instance = MagicMock()
             rr_instance.execute_round = AsyncMock(
                 return_value=RoundResult(round_num=1, turns=[], pairs=[])
             )
             rr_cls.return_value = rr_instance
             await _run_debate_async(
-                job_id=job_id, query=query, graph_id="ds1", config=config,
+                job_id=job_id,
+                query=query,
+                graph_id="ds1",
+                config=config,
                 selected_domains=None,
             )
     finally:
@@ -401,7 +517,8 @@ async def _run_stubbed_job(job_id, config, query="Should we tax carbon?", pre_st
 
 def _stage_events(ws_manager):
     return [
-        call.args[0] for call in ws_manager.broadcast.call_args_list
+        call.args[0]
+        for call in ws_manager.broadcast.call_args_list
         if call.args and call.args[0].get("type") == "stage"
     ]
 
@@ -427,7 +544,8 @@ class TestDebateJobPayload:
         # denser but off-topic cluster — the payload explains the roster.
         selection = result["selection"]
         assert [row["name"] for row in selection] == [
-            "Carbon Analyst", "Quarterly Logistics Review",
+            "Carbon Analyst",
+            "Quarterly Logistics Review",
         ]
         assert set(selection[0]) >= {"name", "semantic", "density", "blended"}
         assert selection[0]["semantic"] > selection[1]["semantic"]
@@ -438,13 +556,19 @@ class TestDebateJobPayload:
 
         # stage events: real transitions pushed through the job's WS manager
         assert [e["stage"] for e in _stage_events(ws_manager)] == [
-            "intake", "selection", "synthesis", "round", "convergence", "verdict",
+            "intake",
+            "selection",
+            "synthesis",
+            "round",
+            "convergence",
+            "verdict",
         ]
         assert [e["index"] for e in _stage_events(ws_manager)] == list(range(6))
 
         # complete: the verdict rides the wire — same fields as the job result
         complete_msg = next(
-            call.args[0] for call in ws_manager.broadcast.call_args_list
+            call.args[0]
+            for call in ws_manager.broadcast.call_args_list
             if call.args and call.args[0].get("type") == "complete"
         )
         assert "confidence_score" in complete_msg
@@ -458,7 +582,9 @@ class TestDebateJobPayload:
         """Nothing clears the S4 threshold → the degradation is in the payload."""
         job_id = f"payload-{uuid.uuid4()}"
         config = DebateConfig(
-            max_agents=5, max_rounds=1, max_new_agents_per_round=0,
+            max_agents=5,
+            max_rounds=1,
+            max_new_agents_per_round=0,
             selection_score_threshold=0.99,
         )
 
@@ -471,7 +597,8 @@ class TestDebateJobPayload:
         )
         # the fallback reorders to density; the decomposition is still delivered
         assert [row["name"] for row in job["result"]["selection"]] == [
-            "Quarterly Logistics Review", "Carbon Analyst",
+            "Quarterly Logistics Review",
+            "Carbon Analyst",
         ]
 
 
@@ -505,7 +632,12 @@ class TestWSManagerResilience:
 
         assert job["status"] == "complete"
         assert [e["stage"] for e in _stage_events(connected)] == [
-            "intake", "selection", "synthesis", "round", "convergence", "verdict",
+            "intake",
+            "selection",
+            "synthesis",
+            "round",
+            "convergence",
+            "verdict",
         ]
 
 
@@ -535,35 +667,66 @@ class TestDebateJobIntent:
         ctx.__aexit__ = AsyncMock(return_value=False)
 
         profiler = MagicMock()
-        profiler.synthesize = AsyncMock(return_value=[_stub_profile("Alice"), _stub_profile("Bob")])
+        profiler.synthesize = AsyncMock(
+            return_value=[_stub_profile("Alice"), _stub_profile("Bob")]
+        )
         topo = MagicMock()
-        topo.compute_round_pairs = AsyncMock(return_value=[
-            CommPair(agent_a="Alice", agent_b="Bob", shared_entities=[], score=0.5)
-        ])
+        topo.compute_round_pairs = AsyncMock(
+            return_value=[
+                CommPair(agent_a="Alice", agent_b="Bob", shared_entities=[], score=0.5)
+            ]
+        )
         verdict_synth = MagicMock()
         verdict_synth.asynthesize = AsyncMock(return_value=_stub_verdict())
         society_memory = MagicMock()
-        society_memory.commit_round = AsyncMock(return_value={
-            "round": 1, "dataset_id": "ds1", "query_hash": "qh",
-            "opinions": 0, "edges": 0, "failed": False,
-        })
+        society_memory.commit_round = AsyncMock(
+            return_value={
+                "round": 1,
+                "dataset_id": "ds1",
+                "query_hash": "qh",
+                "opinions": 0,
+                "edges": 0,
+                "failed": False,
+            }
+        )
 
         _DEBATE_JOBS[job_id] = {
-            "job_id": job_id, "status": "queued", "query": query,
-            "graph_id": "ds1", "config": asdict(config), "result": None, "error": None,
+            "job_id": job_id,
+            "status": "queued",
+            "query": query,
+            "graph_id": "ds1",
+            "config": asdict(config),
+            "result": None,
+            "error": None,
         }
         try:
-            with patch("src.llm.client.LLMClient", return_value=failing_llm), \
-                 patch("src.persona.graph_context.GraphContext", return_value=ctx), \
-                 patch("src.persona.repository.PersonaRepository"), \
-                 patch("src.simulation.profile_synthesizer.ProfileSynthesizer", return_value=profiler), \
-                 patch("src.simulation.topology.CommunicationTopology", return_value=topo), \
-                 patch("src.simulation.verdict.VerdictSynthesizer", return_value=verdict_synth), \
-                 patch("src.simulation.society_memory.SocietyMemory", return_value=society_memory), \
-                 patch("src.api.debate_api._DebateWSManager", return_value=ws_manager):
+            with (
+                patch("src.llm.client.LLMClient", return_value=failing_llm),
+                patch("src.persona.graph_context.GraphContext", return_value=ctx),
+                patch("src.persona.repository.PersonaRepository"),
+                patch(
+                    "src.simulation.profile_synthesizer.ProfileSynthesizer",
+                    return_value=profiler,
+                ),
+                patch(
+                    "src.simulation.topology.CommunicationTopology", return_value=topo
+                ),
+                patch(
+                    "src.simulation.verdict.VerdictSynthesizer",
+                    return_value=verdict_synth,
+                ),
+                patch(
+                    "src.simulation.society_memory.SocietyMemory",
+                    return_value=society_memory,
+                ),
+                patch("src.api.debate_api._DebateWSManager", return_value=ws_manager),
+            ):
                 await _run_debate_async(
-                    job_id=job_id, query=query, graph_id="ds1",
-                    config=config, selected_domains=["legal"],
+                    job_id=job_id,
+                    query=query,
+                    graph_id="ds1",
+                    config=config,
+                    selected_domains=["legal"],
                 )
         finally:
             job = _DEBATE_JOBS.pop(job_id, None)
@@ -572,13 +735,14 @@ class TestDebateJobIntent:
         intent = job["result"]["intent"]
         assert intent["extraction_confidence"] == 0.2  # FALLBACK, not the 0.9 LLM value
         assert intent["core_question"] == query
-        assert intent["domain_tags"] == ["legal"]  # selected_domains carried into the fallback
+        assert intent["domain_tags"] == [
+            "legal"
+        ]  # selected_domains carried into the fallback
         assert intent["stance_axis"] == ""
         assert "deterministic fallback" in caplog.text
         # S9: the degradation is delivered, not only logged
         assert any(
-            "deterministic fallback intent" in w
-            for w in job["result"]["warnings"]
+            "deterministic fallback intent" in w for w in job["result"]["warnings"]
         )
         # P5: the S3 intent is the first event on the stream — a client joining
         # later gets it replayed from the buffer.
@@ -617,20 +781,33 @@ class TestDebateJobFailure:
         ws_manager.broadcast = capture
 
         _DEBATE_JOBS[job_id] = {
-            "job_id": job_id, "status": "queued", "query": "q",
-            "graph_id": "ds1", "config": asdict(config), "result": None, "error": None,
+            "job_id": job_id,
+            "status": "queued",
+            "query": "q",
+            "graph_id": "ds1",
+            "config": asdict(config),
+            "result": None,
+            "error": None,
         }
         try:
-            with patch("src.llm.client.LLMClient", return_value=llm), \
-                 patch("src.persona.graph_context.GraphContext", return_value=ctx), \
-                 patch("src.persona.repository.PersonaRepository"), \
-                 patch("src.simulation.profile_synthesizer.ProfileSynthesizer", return_value=profiler), \
-                 patch("src.simulation.topology.CommunicationTopology"), \
-                 patch("src.simulation.verdict.VerdictSynthesizer"), \
-                 patch("src.simulation.society_memory.SocietyMemory"), \
-                 patch("src.api.debate_api._DebateWSManager", return_value=ws_manager):
+            with (
+                patch("src.llm.client.LLMClient", return_value=llm),
+                patch("src.persona.graph_context.GraphContext", return_value=ctx),
+                patch("src.persona.repository.PersonaRepository"),
+                patch(
+                    "src.simulation.profile_synthesizer.ProfileSynthesizer",
+                    return_value=profiler,
+                ),
+                patch("src.simulation.topology.CommunicationTopology"),
+                patch("src.simulation.verdict.VerdictSynthesizer"),
+                patch("src.simulation.society_memory.SocietyMemory"),
+                patch("src.api.debate_api._DebateWSManager", return_value=ws_manager),
+            ):
                 await _run_debate_async(
-                    job_id=job_id, query="q", graph_id="ds1", config=config,
+                    job_id=job_id,
+                    query="q",
+                    graph_id="ds1",
+                    config=config,
                     selected_domains=None,
                 )
         finally:
@@ -650,7 +827,10 @@ class TestSimulationDepth:
 
     def test_depth_accepts_the_three_levels(self):
         for depth in ("shallow", "standard", "deep"):
-            assert DebateRequest(query="q", simulation_depth=depth).simulation_depth == depth
+            assert (
+                DebateRequest(query="q", simulation_depth=depth).simulation_depth
+                == depth
+            )
 
     def test_depth_rejects_unknown_values(self):
         with pytest.raises(Exception):
@@ -672,10 +852,19 @@ async def _run_with_depth(job_id: str, depth: str):
 
     repo = MagicMock()
     result = OrchestratedDebateResult(
-        converged=False, verdict="stub", final_stances={}, warnings=[], rounds_executed=0,
+        converged=False,
+        verdict="stub",
+        final_stances={},
+        warnings=[],
+        rounds_executed=0,
         provenance_by_claim={
             "Steel tariffs": [
-                {"doc_id": "d1", "title": "Trade Report", "breadcrumb": "", "chunk_id": "c1"}
+                {
+                    "doc_id": "d1",
+                    "title": "Trade Report",
+                    "breadcrumb": "",
+                    "chunk_id": "c1",
+                }
             ]
         },
     )
@@ -685,18 +874,30 @@ async def _run_with_depth(job_id: str, depth: str):
     ws_manager.broadcast = AsyncMock()
 
     _DEBATE_JOBS[job_id] = {
-        "job_id": job_id, "status": "queued", "query": "Should we tax carbon?",
-        "graph_id": "ds1", "config": {}, "result": None, "error": None,
+        "job_id": job_id,
+        "status": "queued",
+        "query": "Should we tax carbon?",
+        "graph_id": "ds1",
+        "config": {},
+        "result": None,
+        "error": None,
     }
     try:
-        with patch("src.llm.client.LLMClient", return_value=llm), \
-             patch("src.persona.graph_context.GraphContext", return_value=ctx), \
-             patch("src.persona.repository.PersonaRepository", return_value=repo) as repo_cls, \
-             patch("src.simulation.orchestrator.DebateOrchestrator", return_value=orch), \
-             patch("src.api.debate_api._DebateWSManager", return_value=ws_manager):
+        with (
+            patch("src.llm.client.LLMClient", return_value=llm),
+            patch("src.persona.graph_context.GraphContext", return_value=ctx),
+            patch(
+                "src.persona.repository.PersonaRepository", return_value=repo
+            ) as repo_cls,
+            patch("src.simulation.orchestrator.DebateOrchestrator", return_value=orch),
+            patch("src.api.debate_api._DebateWSManager", return_value=ws_manager),
+        ):
             await _run_debate_async(
-                job_id=job_id, query="Should we tax carbon?", graph_id="ds1",
-                config=DebateConfig(max_agents=5, max_rounds=1), simulation_depth=depth,
+                job_id=job_id,
+                query="Should we tax carbon?",
+                graph_id="ds1",
+                config=DebateConfig(max_agents=5, max_rounds=1),
+                simulation_depth=depth,
             )
     finally:
         job = _DEBATE_JOBS.pop(job_id, None)
@@ -708,7 +909,9 @@ class TestSimulationDepthGate:
 
     @pytest.mark.asyncio
     async def test_shallow_turns_distillation_off(self):
-        job, repo_cls, orch, llm = await _run_with_depth(f"depth-{uuid.uuid4()}", "shallow")
+        job, repo_cls, orch, llm = await _run_with_depth(
+            f"depth-{uuid.uuid4()}", "shallow"
+        )
 
         assert job["status"] == "complete"
         assert orch.run.await_args.kwargs["distill"] is False
@@ -719,7 +922,9 @@ class TestSimulationDepthGate:
     @pytest.mark.asyncio
     async def test_standard_and_deep_turn_distillation_on(self):
         for depth in ("standard", "deep"):
-            job, repo_cls, orch, llm = await _run_with_depth(f"depth-{depth}-{uuid.uuid4()}", depth)
+            job, repo_cls, orch, llm = await _run_with_depth(
+                f"depth-{depth}-{uuid.uuid4()}", depth
+            )
 
             assert job["status"] == "complete"
             assert orch.run.await_args.kwargs["distill"] is True
@@ -735,19 +940,45 @@ class TestSimulationDepthGate:
         assert "contested" in job["result"]
         # Step 8: per-claim provenance must reach the delivered payload, not
         # just the verdict object.
-        assert job["result"]["provenance_by_claim"]["Steel tariffs"][0]["title"] == "Trade Report"
+        assert (
+            job["result"]["provenance_by_claim"]["Steel tariffs"][0]["title"]
+            == "Trade Report"
+        )
 
+    @requires_db
     @pytest.mark.asyncio
-    async def test_create_debate_threads_the_requested_depth_to_the_job(self):
-        with patch("src.api.debate_api._run_debate_async", new=AsyncMock()) as runner:
-            response = await create_debate(
-                DebateRequest(query="Should we tax carbon?", simulation_depth="deep")
-            )
-            await asyncio.sleep(0)  # let the scheduled job task start
+    async def test_create_debate_threads_the_requested_depth_to_the_job(
+        self, db_client, job_owner, monkeypatch
+    ):
+        """202 only after the queued run exists as a row (accept-time durability).
+
+        The dispatch is a background job now, so the depth reaches the run from
+        the queued payload: run it inline and drain before asserting.
+        """
+        from src.config.settings import get_settings
+        from src.jobs import queue as jobs_queue
+
+        monkeypatch.setenv("QUEUE_MODE", "inline")
+        get_settings.cache_clear()
+        job_id = None
         try:
-            assert runner.call_args.kwargs["simulation_depth"] == "deep"
+            with patch(
+                "src.api.debate_api._run_debate_async", new=AsyncMock()
+            ) as runner:
+                response = await db_client.post(
+                    "/simulate/debate",
+                    json={"query": "Should we tax carbon?", "simulation_depth": "deep"},
+                )
+                job_id = response.json()["job_id"]
+                assert (await run_doc.read_run_head(job_id))["status"] == "queued"
+                await jobs_queue.drain_inline()
         finally:
-            _DEBATE_JOBS.pop(response.job_id, None)
+            get_settings.cache_clear()
+            if job_id is not None:
+                _DEBATE_JOBS.pop(job_id, None)
+
+        assert response.status_code == 202
+        assert runner.call_args.kwargs["simulation_depth"] == "deep"
 
 
 async def _run_with_result(job_id: str, result: OrchestratedDebateResult):
@@ -764,17 +995,28 @@ async def _run_with_result(job_id: str, result: OrchestratedDebateResult):
     ws_manager.broadcast = AsyncMock()
 
     _DEBATE_JOBS[job_id] = {
-        "job_id": job_id, "status": "queued", "query": "Should we tax carbon?",
-        "graph_id": "ds1", "config": {}, "result": None, "error": None,
+        "job_id": job_id,
+        "status": "queued",
+        "query": "Should we tax carbon?",
+        "graph_id": "ds1",
+        "config": {},
+        "result": None,
+        "error": None,
     }
     try:
-        with patch("src.llm.client.LLMClient", return_value=llm), \
-             patch("src.persona.graph_context.GraphContext", return_value=ctx), \
-             patch("src.persona.repository.PersonaRepository"), \
-             patch("src.simulation.orchestrator.DebateOrchestrator", return_value=orch) as orch_cls, \
-             patch("src.api.debate_api._DebateWSManager", return_value=ws_manager):
+        with (
+            patch("src.llm.client.LLMClient", return_value=llm),
+            patch("src.persona.graph_context.GraphContext", return_value=ctx),
+            patch("src.persona.repository.PersonaRepository"),
+            patch(
+                "src.simulation.orchestrator.DebateOrchestrator", return_value=orch
+            ) as orch_cls,
+            patch("src.api.debate_api._DebateWSManager", return_value=ws_manager),
+        ):
             await _run_debate_async(
-                job_id=job_id, query="Should we tax carbon?", graph_id="ds1",
+                job_id=job_id,
+                query="Should we tax carbon?",
+                graph_id="ds1",
                 config=DebateConfig(max_agents=5, max_rounds=1),
             )
     finally:
@@ -789,7 +1031,10 @@ class TestDebateJobNarrative:
     async def test_result_and_complete_carry_the_narrative(self):
         job_id = f"narr-{uuid.uuid4()}"
         result = OrchestratedDebateResult(
-            converged=True, verdict="short summary", final_stances={}, warnings=[],
+            converged=True,
+            verdict="short summary",
+            final_stances={},
+            warnings=[],
             rounds_executed=1,
             narrative="## Recommendation\nExpand, cautiously.",
             dissenting_views=[{"stance": "NEGATIVE", "view": "too soon"}],
@@ -802,24 +1047,63 @@ class TestDebateJobNarrative:
         # backward-compat: the short summary stays put.
         assert job["result"]["verdict"] == "short summary"
         assert job["result"]["narrative"] == "## Recommendation\nExpand, cautiously."
-        assert job["result"]["dissenting_views"] == [{"stance": "NEGATIVE", "view": "too soon"}]
-        assert job["result"]["evidence"] == [{"entity": "Steel tariffs", "claim": "raises cost"}]
+        assert job["result"]["dissenting_views"] == [
+            {"stance": "NEGATIVE", "view": "too soon"}
+        ]
+        assert job["result"]["evidence"] == [
+            {"entity": "Steel tariffs", "claim": "raises cost"}
+        ]
 
         complete_msg = next(
-            call.args[0] for call in ws_manager.broadcast.call_args_list
+            call.args[0]
+            for call in ws_manager.broadcast.call_args_list
             if call.args and call.args[0].get("type") == "complete"
         )
         assert complete_msg["verdict"] == "short summary"
         assert complete_msg["narrative"] == "## Recommendation\nExpand, cautiously."
-        assert complete_msg["dissenting_views"] == [{"stance": "NEGATIVE", "view": "too soon"}]
-        assert complete_msg["evidence"] == [{"entity": "Steel tariffs", "claim": "raises cost"}]
+        assert complete_msg["dissenting_views"] == [
+            {"stance": "NEGATIVE", "view": "too soon"}
+        ]
+        assert complete_msg["evidence"] == [
+            {"entity": "Steel tariffs", "claim": "raises cost"}
+        ]
+
+    @pytest.mark.asyncio
+    async def test_result_and_complete_carry_the_narrative_status_flag(self):
+        """T7: the narrative fallback flag reaches the client, not just the log."""
+        job_id = f"narr-status-{uuid.uuid4()}"
+        result = OrchestratedDebateResult(
+            converged=True,
+            verdict="short summary",
+            final_stances={},
+            warnings=[],
+            rounds_executed=1,
+            narrative="short summary",
+            narrative_status="fallback",
+        )
+
+        job, ws_manager, _ = await _run_with_result(job_id, result)
+
+        assert job["status"] == "complete"
+        assert job["result"]["narrative_status"] == "fallback"
+
+        complete_msg = next(
+            call.args[0]
+            for call in ws_manager.broadcast.call_args_list
+            if call.args and call.args[0].get("type") == "complete"
+        )
+        assert complete_msg["narrative_status"] == "fallback"
 
     @pytest.mark.asyncio
     async def test_request_context_reaches_the_orchestrator(self):
         """T3/T4: the request's user context is threaded into orchestrator.run."""
         job_id = f"ctx-{uuid.uuid4()}"
         result = OrchestratedDebateResult(
-            converged=False, verdict="v", final_stances={}, warnings=[], rounds_executed=0,
+            converged=False,
+            verdict="v",
+            final_stances={},
+            warnings=[],
+            rounds_executed=0,
         )
         llm = MagicMock()
         llm.generate = AsyncMock(return_value=_INTENT_REPLY)
@@ -832,17 +1116,28 @@ class TestDebateJobNarrative:
         ws_manager.broadcast = AsyncMock()
 
         _DEBATE_JOBS[job_id] = {
-            "job_id": job_id, "status": "queued", "query": "q",
-            "graph_id": "ds1", "config": {}, "result": None, "error": None,
+            "job_id": job_id,
+            "status": "queued",
+            "query": "q",
+            "graph_id": "ds1",
+            "config": {},
+            "result": None,
+            "error": None,
         }
         try:
-            with patch("src.llm.client.LLMClient", return_value=llm), \
-                 patch("src.persona.graph_context.GraphContext", return_value=ctx), \
-                 patch("src.persona.repository.PersonaRepository"), \
-                 patch("src.simulation.orchestrator.DebateOrchestrator", return_value=orch), \
-                 patch("src.api.debate_api._DebateWSManager", return_value=ws_manager):
+            with (
+                patch("src.llm.client.LLMClient", return_value=llm),
+                patch("src.persona.graph_context.GraphContext", return_value=ctx),
+                patch("src.persona.repository.PersonaRepository"),
+                patch(
+                    "src.simulation.orchestrator.DebateOrchestrator", return_value=orch
+                ),
+                patch("src.api.debate_api._DebateWSManager", return_value=ws_manager),
+            ):
                 await _run_debate_async(
-                    job_id=job_id, query="q", graph_id="ds1",
+                    job_id=job_id,
+                    query="q",
+                    graph_id="ds1",
                     config=DebateConfig(max_agents=5, max_rounds=1),
                     context={"budget": "limited"},
                 )
@@ -861,6 +1156,9 @@ class _DisconnectingWSStub:
     async def accept(self):
         self.accepted = True
 
+    async def close(self, code=1000, reason=None):
+        pass
+
     async def receive_text(self):
         raise WebSocketDisconnect()
 
@@ -868,15 +1166,37 @@ class _DisconnectingWSStub:
         pass
 
 
+@pytest.fixture
+def ws_authenticated(monkeypatch):
+    """These tests are about the stream, not the handshake: authenticate every
+    connection as the job's owner. The handshake itself — cookie/ticket, refusal,
+    ownership — is covered against the real session path in test_guards.py."""
+
+    async def _user(_websocket):
+        return _ROUTE_USER
+
+    monkeypatch.setattr("src.api.debate_api.websocket_user", _user)
+
+
 class TestManagerlessJobStream:
     """Re-review obs #1: a client on a job with no manager must not deadlock."""
 
+    @requires_db
     @pytest.mark.asyncio
-    async def test_managerless_job_registers_a_manager_and_returns(self):
-        job_id = f"ws-{uuid.uuid4()}"
+    async def test_managerless_job_registers_a_manager_and_returns(
+        self, ws_authenticated, job_owner
+    ):
+        job_id = str(uuid.uuid4())
+        await _write_run_row(job_id, job_owner.id)
         _DEBATE_JOBS[job_id] = {
-            "job_id": job_id, "status": "queued", "query": "q",
-            "graph_id": "ds1", "config": {}, "result": None, "error": None,
+            "job_id": job_id,
+            "user_id": job_owner.id,
+            "status": "queued",
+            "query": "q",
+            "graph_id": "ds1",
+            "config": {},
+            "result": None,
+            "error": None,
         }
         ws = _DisconnectingWSStub()
         try:
@@ -899,7 +1219,14 @@ class TestWSBufferReplay:
 
         ws = AsyncMock()
         await manager.attach(ws)
-        assert [call.args[0]["type"] for call in ws.send_json.call_args_list] == ["stage", "round"]
+        assert [call.args[0]["type"] for call in ws.send_json.call_args_list] == [
+            "stage",
+            "round",
+        ]
 
         await manager.broadcast({"type": "complete", "converged": True})
-        assert [call.args[0]["type"] for call in ws.send_json.call_args_list] == ["stage", "round", "complete"]
+        assert [call.args[0]["type"] for call in ws.send_json.call_args_list] == [
+            "stage",
+            "round",
+            "complete",
+        ]

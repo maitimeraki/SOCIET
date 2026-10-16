@@ -2,21 +2,21 @@
 
 Provides methods to retrieve relevant entities and their context from the Neo4j graph.
 """
+
 import asyncio
 import inspect
-from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, cast, LiteralString
-
-from neo4j import AsyncGraphDatabase
-from llama_index.embeddings.ollama import OllamaEmbedding
-from pydantic import BaseModel, Field
+from dataclasses import dataclass
+from typing import Any, Dict, List, LiteralString, Optional, cast
 from uuid import UUID, uuid4
+
+from llama_index.embeddings.ollama import OllamaEmbedding
+from neo4j import AsyncGraphDatabase
+from pydantic import BaseModel, Field
 
 from src.graph.config_graph import GraphConfig
 from src.graph.neo4j_bootstrap import ENTITY_EMBEDDINGS_INDEX
 from src.llm.config_llm import LLMConfig
 from src.persona.models_persona import ProvenanceLink
-
 
 # The ollama clients default to httpx `timeout=None` (unbounded) — a stuck
 # localhost embed call would wait forever. 60 s is a generous bound for it.
@@ -29,8 +29,10 @@ _BASE_LABELS = {"__Entity__", "__Node__", "Chunk", "Document"}
 
 # ---- Supporting Types ----
 
+
 class EntityNode(BaseModel):
     """A graph entity node with properties and relevance score."""
+
     id: str
     name: str
     label: str
@@ -43,12 +45,14 @@ class EntityNode(BaseModel):
 @dataclass
 class EntityContext:
     """Complete context for an entity: the entity itself, its neighbors, and provenance."""
+
     entity: EntityNode
     neighbors: List[EntityNode]
     provenance: List[ProvenanceLink]
 
 
 # ---- GraphContext ----
+
 
 class GraphContext:
     """Fetches relevant graph context for agent prompts.
@@ -163,11 +167,15 @@ class GraphContext:
             label=labels[0],
             properties=props,
             relevance_score=relevance_score,
-            summary=props.get("summary_context") or props.get("summary") or props.get("description"),
+            summary=props.get("summary_context")
+            or props.get("summary")
+            or props.get("description"),
             domain_tags=self._parse_tags(props.get("domain_tags")),
         )
 
-    async def find_connected_nodes(self, node_ids: List[str], limit: int = 25) -> List[EntityNode]:
+    async def find_connected_nodes(
+        self, node_ids: List[str], limit: int = 25
+    ) -> List[EntityNode]:
         """Entity nodes one relationship hop from the seed nodes.
 
         The roster-expansion walk for required-node derivation: seeds match by
@@ -293,7 +301,9 @@ class GraphContext:
             label=label,
             properties=props,
             relevance_score=1.0,
-            summary=props.get("summary_context") or props.get("summary") or props.get("description"),
+            summary=props.get("summary_context")
+            or props.get("summary")
+            or props.get("description"),
             domain_tags=self._parse_tags(props.get("domain_tags")),
         )
 
@@ -323,15 +333,21 @@ class GraphContext:
             props = self._node_props(node)
             labels = self._node_labels(node, props)
 
-            neighbors.append(EntityNode(
-                id=str(props.get("id", props.get("name", uuid4()))),
-                name=str(props.get("name", "Unknown")),
-                label=labels[0],
-                properties={**props, "relation_type": row.get("rel_type", ""), "relation_summary": row.get("rel_summary", "")},
-                relevance_score=1.0,
-                summary=props.get("summary_context") or props.get("summary"),
-                domain_tags=self._parse_tags(props.get("domain_tags")),
-            ))
+            neighbors.append(
+                EntityNode(
+                    id=str(props.get("id", props.get("name", uuid4()))),
+                    name=str(props.get("name", "Unknown")),
+                    label=labels[0],
+                    properties={
+                        **props,
+                        "relation_type": row.get("rel_type", ""),
+                        "relation_summary": row.get("rel_summary", ""),
+                    },
+                    relevance_score=1.0,
+                    summary=props.get("summary_context") or props.get("summary"),
+                    domain_tags=self._parse_tags(props.get("domain_tags")),
+                )
+            )
 
         return neighbors
 
@@ -367,18 +383,22 @@ class GraphContext:
             chunk_id = row.get("chunk_id")
             if chunk_id:
                 try:
-                    chunk_uuid = UUID(chunk_id) if isinstance(chunk_id, str) else chunk_id
+                    chunk_uuid = (
+                        UUID(chunk_id) if isinstance(chunk_id, str) else chunk_id
+                    )
                 except (ValueError, TypeError):
                     chunk_uuid = uuid4()
             else:
                 chunk_uuid = uuid4()
 
-            provenance.append(ProvenanceLink(
-                doc_id=row.get("doc_id", ""),
-                title=row.get("title", "Unknown Source"),
-                breadcrumb=row.get("breadcrumb", ""),
-                chunk_id=chunk_uuid,
-            ))
+            provenance.append(
+                ProvenanceLink(
+                    doc_id=row.get("doc_id", ""),
+                    title=row.get("title", "Unknown Source"),
+                    breadcrumb=row.get("breadcrumb", ""),
+                    chunk_id=chunk_uuid,
+                )
+            )
 
         return provenance
 
@@ -417,7 +437,8 @@ class GraphContext:
 
         for row in rows:
             matched = {
-                value for value in (row.get("node_id"), row.get("node_name"))
+                value
+                for value in (row.get("node_id"), row.get("node_name"))
                 if value is not None
             } & by_key.keys()
             if not matched:
@@ -426,7 +447,9 @@ class GraphContext:
             chunk_id = row.get("chunk_id")
             if chunk_id:
                 try:
-                    chunk_uuid = UUID(chunk_id) if isinstance(chunk_id, str) else chunk_id
+                    chunk_uuid = (
+                        UUID(chunk_id) if isinstance(chunk_id, str) else chunk_id
+                    )
                 except (ValueError, TypeError):
                     chunk_uuid = uuid4()
             else:
@@ -445,6 +468,7 @@ class GraphContext:
 
 
 # ---- Factory ----
+
 
 def create_graph_context(config: Optional[GraphConfig] = None) -> GraphContext:
     """Create a GraphContext instance with optional config."""

@@ -29,7 +29,6 @@ export function toast(kind: ToastKind, message: string) {
 }
 
 const ICON: Record<ToastKind, Icon> = { success: CheckCircle, error: WarningCircle, neutral: Info }
-const ICON_CLASS: Record<ToastKind, string> = { success: 'text-good', error: 'text-critical', neutral: 'text-paper-mute' }
 
 export function ToastHost() {
   const toasts = useToastStore((s) => s.toasts)
@@ -37,9 +36,12 @@ export function ToastHost() {
     <div className="fixed bottom-6 right-6 z-[60] flex flex-col gap-2" aria-live="polite">
       {toasts.map((t) => {
         const IconCmp = ICON[t.kind]
+        // An overlay, not a content card: ToastHost floats over arbitrary page content (e.g. the dark
+        // plot-ground panel), so it keeps an opaque filled surface rather than the ruled-block
+        // treatment used for in-flow cards.
         return (
-          <div key={t.id} className="flex items-center gap-2 rounded-[6px] border border-ink-600 bg-ink-800 px-4 py-3 text-body text-paper">
-            <IconCmp size={16} className={ICON_CLASS[t.kind]} aria-hidden="true" />
+          <div key={t.id} className="flex items-center gap-2 rounded-[6px] border border-ink-3 bg-survey-paper-2 px-4 py-3 text-body text-ink">
+            <IconCmp size={16} className="shrink-0" aria-hidden="true" />
             {t.message}
           </div>
         )

@@ -6,6 +6,7 @@ literal-indexConfig check. Neo4j rejects parameters inside
 swallows that rejection into its ``failed`` list — so a parameterized vector
 statement silently produces no index. These two assertions are what catch it.
 """
+
 import re
 
 from src.graph.neo4j_bootstrap import _statements
@@ -17,7 +18,11 @@ PLACEHOLDER = re.compile(r"\$([A-Za-z_][A-Za-z0-9_]*)")
 
 
 def _vectors():
-    return [(cypher, params) for cypher, params in _statements() if "CREATE VECTOR INDEX" in cypher]
+    return [
+        (cypher, params)
+        for cypher, params in _statements()
+        if "CREATE VECTOR INDEX" in cypher
+    ]
 
 
 def test_statement_count_is_eleven():
@@ -77,7 +82,9 @@ def test_embedding_model_is_single_sourced():
 
 
 def test_document_id_uniqueness_constraint_present():
-    matches = [cypher for cypher, _ in _statements() if "CONSTRAINT document_id" in cypher]
+    matches = [
+        cypher for cypher, _ in _statements() if "CONSTRAINT document_id" in cypher
+    ]
     assert len(matches) == 1
     assert "FOR (d:Document) REQUIRE d.document_id IS UNIQUE" in matches[0]
     assert matches[0].startswith("CREATE CONSTRAINT document_id IF NOT EXISTS ")
@@ -115,4 +122,7 @@ def test_entity_vector_index_name_matches_the_llama_index_store():
         if "CREATE VECTOR INDEX" in cypher and "__Entity__" in cypher
     ]
     assert len(entity_stmts) == 1
-    assert f"CREATE VECTOR INDEX {ENTITY_EMBEDDINGS_INDEX} IF NOT EXISTS" in entity_stmts[0]
+    assert (
+        f"CREATE VECTOR INDEX {ENTITY_EMBEDDINGS_INDEX} IF NOT EXISTS"
+        in entity_stmts[0]
+    )

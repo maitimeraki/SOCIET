@@ -4,7 +4,7 @@ import type { StreamStatus } from '../api/ws'
 import { useGraphStore } from './graphStore'
 import type { GraphEdge, GraphNode } from './graphStore'
 
-/** A frame on `/simulate/{id}/graph_stream`, matching the backend wire shapes verbatim. */
+/** A frame on `/api/v1/simulate/{id}/graph_stream`, matching the backend wire shapes verbatim. */
 export type GraphFrame =
   | { type: 'snapshot'; nodes: GraphNode[]; edges: GraphEdge[]; labels: string[] }
   | { type: 'delta'; nodes: GraphNode[]; edges: GraphEdge[] }

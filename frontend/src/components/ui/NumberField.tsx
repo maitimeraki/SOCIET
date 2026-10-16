@@ -1,3 +1,14 @@
+import type { InputHTMLAttributes } from 'react'
+
+type NumberFieldProps = {
+  value: number
+  onChange: (value: number) => void
+  min: number
+  max: number
+  step?: number
+  disabled?: boolean
+} & Omit<InputHTMLAttributes<HTMLInputElement>, 'value' | 'onChange' | 'min' | 'max' | 'step' | 'disabled'>
+
 export default function NumberField({
   value,
   onChange,
@@ -5,17 +16,14 @@ export default function NumberField({
   max,
   step = 1,
   disabled = false,
-}: {
-  value: number
-  onChange: (value: number) => void
-  min: number
-  max: number
-  step?: number
-  disabled?: boolean
-}) {
+  ...rest
+}: NumberFieldProps) {
   const clamp = (n: number) => Math.min(max, Math.max(min, n))
   return (
     <input
+      // `...rest` carries the ARIA a `Field` injects (`aria-describedby`/`aria-errormessage`/
+      // `aria-invalid`); without it those attributes were dropped and the hint described nothing (F5).
+      {...rest}
       type="number"
       value={value}
       min={min}
@@ -26,7 +34,7 @@ export default function NumberField({
         const next = Number(event.target.value)
         if (!Number.isNaN(next)) onChange(clamp(next))
       }}
-      className="tnum h-9 w-24 rounded-[4px] border border-ink-700 bg-ink-800 px-2 text-mono text-paper focus:border-accent"
+      className="corner-tick tnum h-9 w-24 rounded-[4px] border border-ink-3 bg-survey-paper-2 px-2 text-mono text-ink focus:border-datum"
     />
   )
 }
