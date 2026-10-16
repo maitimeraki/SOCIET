@@ -10,7 +10,14 @@ import type {
 } from './types'
 import type { ConsensusInfo } from '../run/events'
 
-export const API_BASE: string = import.meta.env.VITE_API_BASE ?? 'http://127.0.0.1:8000'
+const API_BASE_ENV = import.meta.env.VITE_API_BASE
+if (!API_BASE_ENV) {
+  throw new Error(
+    'VITE_API_BASE is not set. Set it in frontend/.env (local default: ' +
+      'VITE_API_BASE=http://127.0.0.1:8000) or in the build environment.',
+  )
+}
+export const API_BASE: string = API_BASE_ENV
 
 export class ApiError extends Error {
   status: number

@@ -70,7 +70,23 @@ class GraphConfig:
     # the other).
     ontology_max_concurrency: int = int(os.getenv("GRAPH_ONTOLOGY_MAX_CONCURRENCY", "8"))
 
-    neo4j_uri: str = os.getenv("NEO4J_URI", "bolt://localhost:7687")
-    neo4j_username: str = os.getenv("NEO4J_USERNAME", "neo4j")
-    neo4j_password: str = os.getenv("NEO4J_PASSWORD", "password")
-    neo4j_database: str = os.getenv("NEO4J_DATABASE", "neo4j")
+    # Neo4j connection — the single source is the environment (.env, loaded by
+    # config_llm on import). No hardcoded fallback: a missing value fails loudly
+    # at construction instead of silently dialing a wrong local default.
+    neo4j_uri: str = os.getenv("NEO4J_URI", "")
+    neo4j_username: str = os.getenv("NEO4J_USERNAME", "")
+    neo4j_password: str = os.getenv("NEO4J_PASSWORD", "")
+    neo4j_database: str = os.getenv("NEO4J_DATABASE", "")
+
+    def __post_init__(self) -> None:
+        missing = [
+            name
+            for name in ("neo4j_uri", "neo4j_username", "neo4j_password", "neo4j_database")
+            if not getattr(self, name)
+        ]
+        if missing:
+            raise ValueError(
+                "Neo4j configuration missing from environment: "
+                + ", ".join(missing)
+                + ". Set NEO4J_URI / NEO4J_USERNAME / NEO4J_PASSWORD / NEO4J_DATABASE (see .env)."
+            )

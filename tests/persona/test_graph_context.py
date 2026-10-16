@@ -18,7 +18,7 @@ from src.graph.config_graph import GraphConfig
 @pytest_asyncio.fixture
 async def graph_ctx():
     """Create a GraphContext with Neo4j connection for testing."""
-    uri = os.getenv("NEO4J_URI", "bolt://localhost:7687")
+    uri = os.getenv("NEO4J_URI", "neo4j://127.0.0.1:7687")
     user = os.getenv("NEO4J_USER", "neo4j")
     pwd = os.getenv("NEO4J_PASSWORD", "password")
     db = os.getenv("NEO4J_DATABASE", "neo4j")

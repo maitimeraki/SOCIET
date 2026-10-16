@@ -265,7 +265,7 @@ def test_connected_neighbour_renders_marker():
 
 @pytest_asyncio.fixture
 async def live_memory():
-    uri = os.getenv("NEO4J_URI", "bolt://localhost:7687")
+    uri = os.getenv("NEO4J_URI", "neo4j://127.0.0.1:7687")
     user = os.getenv("NEO4J_USER", "neo4j")
     pwd = os.getenv("NEO4J_PASSWORD", "password")
     db = os.getenv("NEO4J_DATABASE", "neo4j")

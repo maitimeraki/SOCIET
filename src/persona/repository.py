@@ -1513,8 +1513,17 @@ class PersonaRepository:
     
 if __name__ == "__main__":
     import asyncio
+
+    from src.graph.config_graph import GraphConfig
+
     async def test():
-        repo = PersonaRepository(neo4j_uri="neo4j://localhost:7687", neo4j_user="neo4j", neo4j_password="password", neo4j_database="neo4j")
+        cfg = GraphConfig()
+        repo = PersonaRepository(
+            neo4j_uri=cfg.neo4j_uri,
+            neo4j_user=cfg.neo4j_username,
+            neo4j_password=cfg.neo4j_password,
+            neo4j_database=cfg.neo4j_database,
+        )
         profile = await repo.create_agent_profiles_from_query(user_query="Simulate debate on AI ethics in healthcare", dataset_id="test_dataset", max_agents=5)
         print(profile)
     asyncio.run(test())
