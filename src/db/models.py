@@ -159,6 +159,7 @@ class Upload(Base):
         UUID(as_uuid=True), ForeignKey("datasets.id", ondelete="SET NULL")
     )
     object_key: Mapped[str] = mapped_column(Text, nullable=False)
+    name: Mapped[str | None] = mapped_column(Text)
     bytes: Mapped[int] = mapped_column(BigInteger, nullable=False)
     mime: Mapped[str] = mapped_column(Text, nullable=False)
     sha256: Mapped[str] = mapped_column(Text, nullable=False)

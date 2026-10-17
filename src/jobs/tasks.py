@@ -175,6 +175,7 @@ async def _extract_url_upload(
             upload_id=upload_id,
             user_id=uuid.UUID(str(user_id)),
             object_key=meta["source_url"],
+            name=url,
             size=meta["bytes"],
             mime="text/html",
             sha256=meta["sha256"],

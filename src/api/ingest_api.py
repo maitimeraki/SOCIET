@@ -13,7 +13,6 @@ import hashlib
 import json
 import logging
 import uuid
-from pathlib import PurePosixPath
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, UploadFile
 from pydantic import BaseModel
@@ -86,8 +85,6 @@ async def _discard_staged(db: AsyncSession, object_keys: list[str]) -> None:
     """
     from sqlalchemy import delete
 
-    from src.db.models import Upload
-
     try:
         await db.execute(delete(Upload).where(Upload.object_key.in_(object_keys)))
         await db.commit()
@@ -154,6 +151,7 @@ async def ingest_files(
             upload_id=upload_id,
             user_id=user.id,
             object_key=key,
+            name=name,
             size=len(data),
             mime=mime_for_filename(name),
             sha256=hashlib.sha256(data).hexdigest(),
@@ -256,8 +254,8 @@ async def list_uploads(
 ):
     """The caller's own uploads, newest first — the documents section's rows.
 
-    Every field comes off the row: ``name`` is the object key's basename (the
-    filename is the honest name — no title column exists), ``read`` is
+    Every field comes off the row: ``name`` is the stored upload name (the
+    filename as supplied at ingest — never the object key), ``read`` is
     ``extracted_text is not None``, and ``dataset_name`` is left-joined from
     ``Dataset`` (null until the upload joins a corpus). Scoped to the caller,
     never a filter a request can drop.
@@ -273,7 +271,7 @@ async def list_uploads(
         "items": [
             {
                 "id": str(upload.id),
-                "name": PurePosixPath(upload.object_key).name,
+                "name": upload.name,
                 "bytes": upload.bytes,
                 "mime": upload.mime,
                 "read": upload.extracted_text is not None,

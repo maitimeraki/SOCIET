@@ -10,11 +10,11 @@ import pytest
 import pytest_asyncio
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
-from sqlalchemy import delete, select
+from sqlalchemy import delete
 
 from src.auth.deps import current_user
 from src.db.engine import get_session_factory
-from src.db.models import Upload, User
+from src.db.models import Dataset, Upload, User
 
 if sys.platform == "win32":
     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
@@ -54,13 +54,21 @@ async def client(account):
         yield http
 
 
-async def _add_upload(user_id: str, object_key: str, *, read: bool, mime: str = "application/pdf") -> Upload:
+async def _add_upload(
+    user_id: str,
+    object_key: str,
+    *,
+    read: bool,
+    name: str = "notes.pdf",
+    mime: str = "application/pdf",
+    dataset_id: uuid.UUID | None = None,
+) -> Upload:
     factory = get_session_factory()
     async with factory() as session:
         row = Upload(
             id=uuid.uuid4(),
-            user_id=uuid.UUID(user_id), object_key=object_key, bytes=1024, mime=mime,
-            sha256=uuid.uuid4().hex,
+            user_id=uuid.UUID(user_id), object_key=object_key, name=name,
+            bytes=1024, mime=mime, sha256=uuid.uuid4().hex, dataset_id=dataset_id,
             extracted_text="text" if read else None,
         )
         session.add(row)
@@ -69,8 +77,8 @@ async def _add_upload(user_id: str, object_key: str, *, read: bool, mime: str = 
 
 
 async def test_lists_the_users_uploads_newest_first(account, client):
-    await _add_upload(account.id, f"{account.id}/old.pdf", read=True)
-    await _add_upload(account.id, f"{account.id}/new.pdf", read=False)
+    await _add_upload(account.id, f"{account.id}/old.pdf", read=True, name="old.pdf")
+    await _add_upload(account.id, f"{account.id}/new.pdf", read=False, name="new.pdf")
     response = await client.get("/api/v1/uploads")
     assert response.status_code == 200
     items = response.json()["items"]
@@ -80,10 +88,12 @@ async def test_lists_the_users_uploads_newest_first(account, client):
 
 
 async def test_item_shape_is_honest(account, client):
-    row = await _add_upload(account.id, f"{account.id}/report.pdf", read=True)
+    # The object key is UUID-shaped (as it is in production); the name must come
+    # from the stored name, never the key's basename.
+    row = await _add_upload(account.id, f"{account.id}/{uuid.uuid4()}", read=True, name="Q3-report.pdf")
     item = (await client.get("/api/v1/uploads")).json()["items"][0]
     assert item["id"] == str(row.id)
-    assert item["name"] == "report.pdf"
+    assert item["name"] == "Q3-report.pdf"
     assert item["bytes"] == 1024
     assert item["mime"] == "application/pdf"
     assert item["read"] is True
@@ -119,3 +129,21 @@ async def test_limit_bounds(account, client):
         await _add_upload(account.id, f"{account.id}/f{index}.pdf", read=True)
     items = (await client.get("/api/v1/uploads", params={"limit": 2})).json()["items"]
     assert len(items) == 2
+
+
+async def test_an_upload_in_a_corpus_reports_its_dataset(account, client):
+    """The join branch: a named corpus populates dataset_id and dataset_name."""
+    factory = get_session_factory()
+    async with factory() as session:
+        dataset = Dataset(
+            id=uuid.uuid4(), user_id=uuid.UUID(account.id), name="europe-expansion"
+        )
+        session.add(dataset)
+        await session.commit()
+        dataset_id = dataset.id
+    await _add_upload(
+        account.id, f"{account.id}/{uuid.uuid4()}", read=True, dataset_id=dataset_id
+    )
+    item = (await client.get("/api/v1/uploads")).json()["items"][0]
+    assert item["dataset_id"] == str(dataset_id)
+    assert item["dataset_name"] == "europe-expansion"

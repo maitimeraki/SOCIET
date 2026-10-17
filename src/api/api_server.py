@@ -250,12 +250,12 @@ from src.api.persona_api import router as persona_router
 
 app.include_router(persona_router, prefix="/api")  # /api/personas/hatch
 app.include_router(debate_router)  # /simulate/*
-app.include_router(ingest_router, prefix="/api")  # /api/ingest/*
+app.include_router(ingest_router, prefix="/api")  # /api/ingest/*, /api/uploads
 app.include_router(graph_stream_router)  # WS /simulate/{id}/graph_stream
 
 app.include_router(persona_router, prefix="/api/v1")  # /api/v1/personas/hatch
 app.include_router(debate_router, prefix="/api/v1")  # /api/v1/simulate/*
-app.include_router(ingest_router, prefix="/api/v1")  # /api/v1/ingest/*
+app.include_router(ingest_router, prefix="/api/v1")  # /api/v1/ingest/*, /api/v1/uploads
 app.include_router(
     graph_stream_router, prefix="/api/v1"
 )  # WS /api/v1/simulate/{id}/graph_stream

@@ -134,6 +134,7 @@ async def _seed(
             upload_id=upload_id,
             user_id=owner,
             object_key=f"{owner}/{upload_id}",
+            name="notes.txt",
             size=4,
             mime="text/plain",
             sha256="sha",
