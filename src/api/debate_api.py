@@ -22,6 +22,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.api import run_doc
+from src.api.graph_snapshot import read_snapshot as read_graph_snapshot
 from src.api.jobs_api import enqueue_or_http
 from src.api.limits import limiter, service_available
 from src.audit import client_ip
@@ -529,6 +530,78 @@ async def get_debate_doc(run_id: str, user: User = Depends(current_user)):
         raise HTTPException(status_code=404, detail="Run not found")
     await require_owner(doc.get("user_id"), user)
     return doc
+
+
+# --- a run's corpus (the replay path's seed) ---------------------------------
+
+# The four reasons a run's graph can be missing, told apart by their `code`:
+# "run_not_found" (no such run), "not_yours" (someone else's — still 404, never
+# 403, so existence is never leaked), "no_corpus" (the run never named one), and
+# "corpus_gone" (it named one and the graph no longer holds it). The last two
+# are separate on purpose: the frontend says "no sources" for one and "sources
+# unavailable" for the other.
+_FLAT_NOT_FOUND = "Not found."  # identical for unknown and foreign
+
+
+def _missing_run(code: str, message: str) -> HTTPException:
+    return HTTPException(status_code=404, detail={"code": code, "message": message})
+
+
+def _snapshot_field(snapshot, name: str, default):
+    """One field off the snapshot read.
+
+    The reader hands back a `GraphDelta`; a mapping is accepted too, so the
+    route's payload contract is the field names, not the reader's class.
+    """
+    value = (
+        snapshot.get(name)
+        if isinstance(snapshot, dict)
+        else getattr(snapshot, name, None)
+    )
+    return default if value is None else value
+
+
+@router.get("/debates/{run_id}/graph")
+async def get_debate_graph(run_id: str, user: User = Depends(current_user)):
+    """The run's stored map — its corpus id, every node and edge, the vocabulary.
+
+    Reopening a finished run reads this plus the persisted events and rebuilds
+    the identical graph. Read-only truth: the existing dataset-scoped snapshot
+    read is the only graph access, so this invents nothing.
+    """
+    doc = await run_doc.read_run_doc(run_id)
+    if doc is None or doc.get("kind") != "debate":
+        raise _missing_run("run_not_found", _FLAT_NOT_FOUND)
+    try:
+        await require_owner(doc.get("user_id"), user)
+    except HTTPException:
+        raise _missing_run("not_yours", _FLAT_NOT_FOUND)
+
+    dataset_id = doc.get("dataset_id")
+    if not dataset_id:
+        raise _missing_run("no_corpus", "This run names no corpus.")
+
+    try:
+        snapshot = await read_graph_snapshot(str(dataset_id))
+    except Exception as exc:
+        # A corpus that cannot be read is a calm typed 404, not a 500: the
+        # frontend's answer is the same as for a corpus that was emptied, and a
+        # raise here would report a server fault for a run whose graph simply is
+        # not there. Logged, never swallowed.
+        logger.warning("graph read failed for dataset %s: %s", dataset_id, exc)
+        raise _missing_run("corpus_gone", "This run's corpus is gone.")
+
+    nodes = _snapshot_field(snapshot, "nodes", [])
+    if not nodes:
+        raise _missing_run("corpus_gone", "This run's corpus is gone.")
+    return {
+        "dataset_id": str(dataset_id),
+        "nodes": nodes,
+        "edges": _snapshot_field(snapshot, "edges", []),
+        "labels": _snapshot_field(snapshot, "labels", None)
+        or _snapshot_field(snapshot, "new_labels", []),
+        "chunk_count": _snapshot_field(snapshot, "chunk_count", 0),
+    }
 
 
 @router.get("/{job_id}", response_model=DebateStatusResponse)
