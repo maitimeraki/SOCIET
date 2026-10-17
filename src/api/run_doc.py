@@ -140,10 +140,12 @@ def _upsert_run(
     confidence: Optional[float],
     created_at: datetime.datetime,
     finished_at: Optional[datetime.datetime],
+    dataset_id: Optional[uuid.UUID] = None,
 ):
     statement = pg_insert(Run).values(
         id=run_id,
         user_id=user_id,
+        dataset_id=dataset_id,
         query=query,
         status=status,
         verdict=verdict,
@@ -158,6 +160,7 @@ def _upsert_run(
                 "status": statement.excluded.status,
                 "verdict": statement.excluded.verdict,
                 "confidence": statement.excluded.confidence,
+                "dataset_id": statement.excluded.dataset_id,
                 "finished_at": func.coalesce(
                     Run.finished_at, statement.excluded.finished_at
                 ),
@@ -250,6 +253,9 @@ async def write_run_doc(doc: dict[str, Any]) -> None:
             confidence=confidence,
             created_at=created_at,
             finished_at=finished_at,
+            # The doc's own corpus id (a datasets.id). A legacy doc without one,
+            # or one that is not a uuid, leaves the FK column null.
+            dataset_id=_as_uuid(doc.get("dataset_id")),
         )
         await _upsert_job(session, _job_values(doc, run_id, user_id, "debate"))
         await session.execute(
