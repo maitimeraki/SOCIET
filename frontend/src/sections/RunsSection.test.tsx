@@ -1,8 +1,10 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { listRunsPage } from '../api/rest'
 import type { RunSummary } from '../api/types'
-import { filterRuns } from './RunsPage'
+import { filterRuns } from './RunsSection'
 
+// Moved from `pages/RunsPage.test.tsx` when Task 3.2 repointed `/runs` at `sections/RunsSection.tsx`
+// (Ruling F4): the section's behaviour coverage is unchanged, only its home moved with the code.
 afterEach(() => vi.unstubAllGlobals())
 
 const run = (patch: Partial<RunSummary> = {}): RunSummary => ({
@@ -17,7 +19,7 @@ const run = (patch: Partial<RunSummary> = {}): RunSummary => ({
   ...patch,
 })
 
-describe('RunsPage — the v1 paginated shape', () => {
+describe('RunsSection — the v1 paginated shape', () => {
   it('reads { items, next_cursor } and walks the keyset cursor', async () => {
     const fetchMock = vi
       .fn()

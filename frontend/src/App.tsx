@@ -15,7 +15,10 @@ const IngestPage = lazy(() => import('./pages/IngestPage'))
 const GraphPage = lazy(() => import('./pages/GraphPage'))
 const SocietyPage = lazy(() => import('./pages/SocietyPage'))
 const RunPage = lazy(() => import('./pages/RunPage'))
-const RunsPage = lazy(() => import('./pages/RunsPage'))
+const DocumentsSection = lazy(() => import('./sections/DocumentsSection'))
+const RunsSection = lazy(() => import('./sections/RunsSection'))
+const ResultsSection = lazy(() => import('./sections/ResultsSection'))
+const PanelSection = lazy(() => import('./sections/PanelSection'))
 const AgentsPage = lazy(() => import('./pages/AgentsPage'))
 const DashboardPage = lazy(() => import('./pages/DashboardPage'))
 const SignInPage = lazy(() => import('./pages/SignInPage'))
@@ -50,9 +53,13 @@ export default function App() {
           <Route element={<RequireAuth />}>
             <Route element={<AppShell />}>
               <Route path="/dashboard" element={<DashboardPage />} />
-              <Route path="/runs" element={<RunsPage />} />
+              {/* The rail's four destinations (D16): the label differs from the path on purpose. */}
+              <Route path="/documents" element={<DocumentsSection />} />
+              <Route path="/runs" element={<RunsSection />} />
               <Route path="/runs/:runId" element={<RunPage />} />
               <Route path="/runs/:runId/:tab" element={<RunPage />} />
+              <Route path="/results" element={<ResultsSection />} />
+              <Route path="/panel" element={<PanelSection />} />
               <Route path="/new" element={<Navigate to="/new/ingest" replace />} />
               <Route path="/new/ingest" element={<IngestPage />} />
               <Route path="/new/graph" element={<GraphPage />} />
