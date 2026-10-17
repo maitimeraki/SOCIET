@@ -18,10 +18,9 @@ export default function HealthDot() {
     return () => window.clearInterval(timer)
   }, [check])
 
-  // The mark is the map's own reading, never a stance hue: a live reading takes --datum, a failed one
-  // the warning route, and an unread one the idle hairline ink. --stance-pos would say "an agent
-  // argued POSITIVE", which is not what a health check means (§3.1, §7).
-  const dot = state === 'online' ? 'bg-datum' : state === 'offline' ? 'bg-route' : 'bg-ink-4'
+  // The mark is the map's own reading, never a stance hue: a live reading takes --accent, a failed one
+  // the danger hue, and an unread one the idle hairline ink.
+  const dot = state === 'online' ? 'bg-accent' : state === 'offline' ? 'bg-danger' : 'bg-ink-4'
   const label =
     state === 'online'
       ? 'API online'

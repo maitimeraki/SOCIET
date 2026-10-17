@@ -1,113 +1,126 @@
 @import "tailwindcss";
 
 @theme {
-  /* ── §3.1 THE SURVEY MAP — colour is map meaning; a hue with no legend entry does not exist.
-        This block replaces the incumbent "Chamber" token names wholesale (the rename map is
-        recorded in .superpowers/sdd/societas-production/task-13-report.md). */
+  /* ── §2 Colour. Neutral ground, one accent, colour-as-meaning: a hue with no job does not exist. */
 
-  /* Sheet — the light ground. Everything but the plotting table sits on this. */
-  --color-survey-paper: #e7e5db;   /* page ground — cool linen, deliberately not warm cream */
-  --color-survey-paper-2: #f1efe7; /* raised — the lamp-lit table, panels */
-  --color-survey-paper-3: #dad8cd; /* folded — recesses, folded reveals */
+  /* §2.2 Light surfaces — the ground, the canvas, the edges. */
+  --color-ground: #f8fafc;        /* app background */
+  --color-ground-2: #f1f5f9;      /* rail, bands, table heads */
+  --color-canvas: #ffffff;        /* cards, sheets */
+  --color-border: #e2e8f0;        /* card edges, dividers */
+  --color-border-strong: #cbd5e1; /* inputs, hover */
+  --color-ink: #0f172a;           /* headings */
+  --color-ink-2: #334155;         /* body */
+  --color-ink-3: #64748b;         /* secondary, captions */
+  --color-ink-4: #94a3b8;         /* rules and disabled fills ONLY, never text */
 
-  /* Ink — all text and weighed lines */
-  --color-ink: #1a1814;
-  --color-ink-2: #4a463d; /* body, hachure base */
-  /* labels, captions. R29/F1: the DSPEC §3.1 value (#7C7768) measures 3.54:1 on --survey-paper and
-     fails §9's 4.5:1 text floor, so the floor wins and a measured-passing value is substituted
-     (#6B6657 = 4.54:1). The name, the role and the three-tier ink structure are unchanged. */
-  --color-ink-3: #6b6657;
-  --color-ink-4: #b4b0a3; /* hairlines, graticule (fine) */
+  /* §2.2 The one accent — action, links, "live". */
+  --color-accent: #4f46e5;
+  --color-accent-hover: #4338ca;
+  --color-accent-press: #3730a3;
+  --color-accent-soft: #eef2ff; /* selected row, tinted band */
+  --color-accent-ink: #ffffff;  /* on-accent */
 
-  /* Datum — interactive and "live" only */
-  --color-datum: #1e5aa8;
-  --color-datum-dim: #6e93c4;                  /* graticule, inactive live */
-  --color-datum-soft: rgba(30, 90, 168, 0.12); /* derived tint of datum — the interactive wash */
+  /* §2.2 Status. */
+  --color-ok: #15803d;     /* complete, converged */
+  --color-warn: #b45309;   /* caution, partial */
+  --color-danger: #b91c1c; /* failure, destructive */
 
-  /* Route — the plotted fix, and warnings */
-  --color-route: #c0392b;
+  /* §2.3 The map surface — the ONE dark surface, because the map must stay in view. */
+  --color-map-ground: #0b1220;
+  --color-map-ground-2: #111c33;
+  --color-map-ink: #e2e8f0;
+  --color-map-ink-2: #94a3b8;
+  --color-map-rule: #1e293b;
 
-  /* Brass — the field-pencil: annotation and caution. The one reserved mark. */
-  --color-brass: #c99a38;
+  /* §2.4 Map entry colours — one per entry kind. */
+  --color-corpus: #3b82f6; /* the material — informational, neutral */
+  --color-expert: #e2e8f0; /* an expert — luminous on the dark ground */
+  --color-edge: #334155;   /* connection — recedes; the entries dominate */
 
-  /* Stance legend — the frozen canonical order POS → NEU → AMB → NEG */
-  --color-stance-pos: #55702f; /* vegetation green */
-  --color-stance-neu: #5d6b70; /* unwooded slate */
-  --color-stance-amb: #b07a2e; /* marsh amber */
-  --color-stance-neg: #b23b2e; /* route vermilion */
+  /* §2.4/§2.5 The four positions — frozen order POSITIVE, NEUTRAL, AMBIVALENT, NEGATIVE.
+        A position renders shape + colour + word at every size; a colour with no visible shape is banned. */
+  --color-pos: #4ade80;       /* dark ground */
+  --color-neu: #94a3b8;
+  --color-amb: #fbbf24;
+  --color-neg: #f87171;
+  --color-pos-light: #16a34a; /* light ground */
+  --color-neu-light: #64748b;
+  --color-amb-light: #d97706;
+  --color-neg-light: #dc2626;
 
-  /* §3.1/§9 R29/F3 — USAGE CONSTRAINTS for Tasks 14–17. These are SYMBOL and ANNOTATION colours
-     only, never text on the sheet: --route (4.31:1), --brass (2.04:1), --datum-dim (2.51:1), and
-     every stance hue (pos 4.44:1, neu 4.37:1, amb 2.93:1; only neg 4.67:1 passes). The legend law
-     makes stance colour a symbol colour: convey stance by hue PLUS form, and set the stance WORD
-     in ink. */
+  /* ── §3 The gradient law. Gradients are material, not wallpaper: three permitted uses, no others. */
+  --color-accent-top: #5a52e8;  /* §3 use 1 — the action ramp, top */
+  --color-accent-base: #453dc9; /* §3 use 1 — the action ramp, base (label contrast unchanged) */
+  /* §3 use 1 — the action, and nothing else (never secondary, ghost, destructive or disabled). */
+  --gradient-action: linear-gradient(
+    to bottom,
+    var(--color-accent-top),
+    var(--color-accent) 50%,
+    var(--color-accent-base)
+  );
+  /* §3 use 3 — the map, so the luminous plot sits in depth rather than on a flat rectangle. */
+  --gradient-map: linear-gradient(to bottom, var(--color-map-ground), var(--color-map-ground-2));
 
-  /* §3.2 The plotting table — the ONE dark surface in the product. A live traced plot
-        reads luminous; everything else is the light sheet. The `plot-ground` utility inverts
-        the sheet's ink scale to these on the plot, so text and rules stay ≥4.5:1 / visible on
-        the dark ground (§9). */
-  --color-plot-ground: #14150f;
-  --color-plot-raised: #1f2018;  /* a raised panel on the plot — the sheet's survey-paper-2 inverted */
-  --color-plot-ink: #f1efe7;     /* plot text — the sheet's raised tone, luminous on the dark ground */
-  --color-plot-ink-2: #cfcbbf;   /* plot body */
-  --color-plot-ink-3: #a8a496;   /* plot labels and captions (≈7:1 on the ground) */
-  --color-plot-ink-4: #6f6c60;   /* plot hairlines, graticule, sightlines (rule tier) */
+  /* §3 Elevation — shadow is not gradient. Soft, low-opacity, never coloured. */
+  --shadow-raised: 0 1px 2px rgb(15 23 42 / 0.06);
+  --shadow-floating: 0 4px 12px rgb(15 23 42 / 0.08);
+  --shadow-overlay: 0 12px 32px rgb(15 23 42 / 0.14);
 
-  /* ── §4 Registers. Titling names the sheet, the record says what was found, the
-        measurement counts it. Cardinal rule: any figure that is a measurement is set in
-        the mono, in the sheet's coordinate grammar. */
+  /* ── §4 Typography — three installed families, each with one job. No new font dependency. */
   --font-titling: "Archivo Variable", Archivo, system-ui, sans-serif;
   --font-record: "Spectral", Spectral, Georgia, serif;
   --font-measurement: "JetBrains Mono Variable", "JetBrains Mono", ui-monospace, monospace;
 
-  /* Addendum §4 — the record face is the default. Nothing in `src/` uses `.font-sans` / `.font-mono`,
-     so this changes no live class: it only stops unstyled text landing in Tailwind's system sans. */
-  --default-font-family: var(--font-record);
+  /* Spectral is long-form reading only — never UI chrome. Titling is the default face. */
+  --default-font-family: var(--font-titling);
 
-  /* §4.1 Scale — the dense instrument base is kept (14px body / 21px leading) and the
-        display ceiling is raised for a real B2B hero: the 44px ops-console hero is gone.
-        --text-marketing-hero is fluid: 40px on the narrowest phone, 96px (6rem) at the
-        widest desktop, scaling on viewport width so the question reads as the sheet title. */
-  --text-marketing-hero: clamp(2.5rem, 1.25rem + 5.5vw, 6rem);
-  --text-marketing-hero--line-height: 1.02;
-  --text-marketing-hero--letter-spacing: 0.02em;
-  --text-marketing-hero--font-weight: 600;
-  --text-display: 32px;
+  /* §4 The scale. Any figure that is a measurement is set in the mono, tabular. The hero is set
+        large deliberately — a small hero is what reads as an internal tool. */
+  --text-hero: clamp(2.5rem, 1.25rem + 5.5vw, 6rem); /* homepage h1 only */
+  --text-hero--line-height: 1.02;
+  --text-hero--letter-spacing: -0.01em;
+  --text-hero--font-weight: 600;
+  --text-display: 32px; /* page titles */
   --text-display--line-height: 38px;
   --text-display--letter-spacing: -0.01em;
-  --text-title: 24px;
+  --text-display--font-weight: 600;
+  --text-title: 24px; /* section headings */
   --text-title--line-height: 30px;
-  --text-heading: 16px;
+  --text-title--font-weight: 600;
+  --text-heading: 16px; /* card titles */
   --text-heading--line-height: 22px;
   --text-heading--font-weight: 600;
-  --text-body: 14px;
+  --text-body: 14px; /* UI copy */
   --text-body--line-height: 21px;
-  --text-body-lg: 15px;
+  --text-body-lg: 15px; /* long-form reading */
   --text-body-lg--line-height: 24px;
-  --text-label: 12px;
+  --text-label: 12px; /* caps labels */
   --text-label--line-height: 16px;
   --text-label--letter-spacing: 0.06em;
   --text-label--font-weight: 500;
-  --text-micro: 11px;
+  --text-micro: 11px; /* captions, timestamps */
   --text-micro--line-height: 14px;
-  --text-mono: 12px;
+  --text-mono: 12px; /* identifiers */
   --text-mono--line-height: 18px;
-  --text-mono-lg: 20px;
-  --text-mono-lg--line-height: 24px;
-  --text-mono-lg--font-weight: 500;
-  --text-numeral: 56px;
+  --text-numeral: 56px; /* the confidence figure */
   --text-numeral--line-height: 56px;
   --text-numeral--letter-spacing: -0.02em;
+  --text-numeral--font-weight: 500;
 
-  /* §5 shape */
-  --radius-sm: 4px;
-  --radius-md: 6px;
-  --radius-lg: 12px;
+  /* ── §5 Space, radius, elevation. Spacing is a single 4px-based scale (Tailwind's default
+        `--spacing`), so only the radii need naming. */
+  --radius-sm: 6px;  /* chips, inputs */
+  --radius-md: 10px; /* cards, buttons */
+  --radius-lg: 16px; /* panels, dialogs, auth card */
 
-  /* §5 motion — the plotting hand's curve. Bare `transition-*` utilities and the
-     motion primitives below both run on it. */
-  --ease-plot: cubic-bezier(0.2, 0, 0, 1);
-  --default-transition-timing-function: cubic-bezier(0.2, 0, 0, 1);
+  /* ── §6 Motion. One grammar, one easing curve for the whole product. */
+  --ease-standard: cubic-bezier(0.2, 0, 0, 1);
+  --default-transition-timing-function: var(--ease-standard);
+  --duration-state: 120ms;  /* state change — hover, focus, press */
+  --duration-enter: 180ms;  /* enter — content appearing */
+  --duration-layout: 240ms; /* layout — panel and pane resize */
+  --duration-bloom: 560ms;  /* the bloom — a new map entry */
 }
 
 @layer base {
@@ -115,30 +128,28 @@
     color-scheme: light;
   }
   body {
-    background: var(--color-survey-paper);
+    background: var(--color-ground);
     color: var(--color-ink);
-    font-family: var(--font-record);
+    font-family: var(--font-titling);
     font-size: 14px;
     line-height: 21px;
     -webkit-font-smoothing: antialiased;
   }
-  /* §9 Focus — the ring is 2px and offset, and its colour switches with the ground it sits on.
-     R29/F2: --datum clears 3:1 on the sheet (5.39:1) but not on --plot-ground (2.70:1), so the
-     plotting-table container rebinds --focus-ring to --datum-dim (5.80:1 there) and the ring
-     inherits the switch to every descendant. */
+  /* §12 Focus — a 2px accent ring at 2px offset on the light ground (`map-ground` rebinds it to
+     --color-map-ink on the dark surface, where the accent falls short of 3:1). */
   :root {
-    --focus-ring: var(--color-datum);
+    --focus-ring: var(--color-accent);
   }
   :focus-visible {
     outline: 2px solid var(--focus-ring);
     outline-offset: 2px;
   }
   ::selection {
-    background: var(--color-datum-dim);
+    background: var(--color-accent-soft);
     color: var(--color-ink);
   }
-  /* §9/§5 Motion is fully suppressed: the sheet renders complete and static, and no
-     figure depends on motion to be understood. */
+  /* §12 Motion is suppressed under `prefers-reduced-motion` — everything renders complete and
+     static, so the sheet is finished rather than blank. */
   @media (prefers-reduced-motion: reduce) {
     *,
     *::before,
@@ -151,19 +162,22 @@
   }
 }
 
-/* ── §5 The plotting hand — motion is drawn, not snapped. One grammar, four moves,
-      keyframes + utilities only, no JS. Each move settles to a complete figure so a
-      reduced-motion user sees the finished sheet, not a blank one. */
+/* ── §6.2 The four moves. The two that are animation-shaped, as keyframes + utilities — no JS. */
 
-/* draw — lines and sightlines stroke on; they never fade in. */
-@keyframes plot-draw {
+/* §6.2 Enter — content fades and rises 8px, once. */
+@keyframes plot-enter {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
   to {
-    stroke-dashoffset: 0;
+    opacity: 1;
+    transform: none;
   }
 }
 
-/* fix — a reading is taken: an ink dot blooms once and settles. */
-@keyframes plot-fix {
+/* §6.2 Live — a new map entry blooms once (scale 0 → 1.28 → 1), then settles and never moves again. */
+@keyframes plot-bloom {
   0% {
     transform: scale(0);
     opacity: 0;
@@ -178,54 +192,20 @@
   }
 }
 
-/* overlay — the translucent tracing sheet slides over the base to reveal a layer. */
-@keyframes plot-overlay {
-  from {
-    transform: translateY(-100%);
-    opacity: 0;
-  }
-  to {
-    transform: translateY(0);
-    opacity: 1;
-  }
+@utility enter {
+  animation: plot-enter var(--duration-enter) var(--ease-standard) both;
 }
 
-/* traverse — the party advances along the line. */
-@keyframes plot-traverse {
-  from {
-    transform: translateX(0);
-  }
-  to {
-    transform: translateX(var(--traverse-to, 100%));
-  }
+@utility bloom {
+  animation: plot-bloom var(--duration-bloom) var(--ease-standard) both;
 }
 
-/* draw: set --draw-length to the path length (or use pathLength="1" on the SVG path). */
-@utility draw {
-  stroke-dasharray: var(--draw-length, 1200);
-  stroke-dashoffset: var(--draw-length, 1200);
-  animation: plot-draw var(--draw-duration, 900ms) var(--ease-plot) forwards;
-}
-
-@utility fix {
-  animation: plot-fix 560ms var(--ease-plot) both;
-}
-
-@utility overlay {
-  animation: plot-overlay 380ms var(--ease-plot) both;
-}
-
-@utility traverse {
-  animation: plot-traverse 720ms var(--ease-plot) both;
-}
-
-/* §6/§9 The registration mark — the corner tick a field shows when it takes focus. It is painted as
+/* §6/§11 The registration mark — the corner tick a field shows when it takes focus. It is painted as
    a background ON THE CONTROL ITSELF, not on a wrapper: an input/textarea/select is a replaced
    element and cannot host a ::after, and any wrapper would register against the row rather than the
    control — wrong for a w-24 number field in a grid cell, and absent entirely for a bare control
    with no `Field` around it. Painted this way the mark lands on the control's own corner at any
-   width. It reads `--focus-ring`, not `--datum` directly, so it follows the ground it sits on (the
-   plotting-table container rebinds the ring to --datum-dim, R29/F2). */
+   width. It reads `--focus-ring`, not the accent directly, so it follows the ground it sits on. */
 @utility corner-tick {
   background-image: linear-gradient(transparent, transparent), linear-gradient(transparent, transparent);
   background-size: 7px 2px, 2px 7px;
@@ -239,11 +219,10 @@
   }
 }
 
-/* §6/§7.2 Invalid — a vermilion hatched margin note, never a red box. `Field` applies this to the
-   field entry whenever `error` is set, so Task 15's auth forms inherit it with no new prop. The
-   margin it sits in is reserved unconditionally by `Field` (`pl-2.5`), so the mark never moves the
-   control — the hatch appears, the layout does not. The message itself stays Field's `role="alert"`
-   line in ink; the hue is the mark, never the text. */
+/* §8.2 Invalid — a monochrome danger rule at the left edge, never a red box. `Field` applies this to
+   the field entry whenever `error` is set. The margin it sits in is reserved unconditionally by
+   `Field` (`pl-2.5`), so the mark never moves the control — the rule appears, the layout does not.
+   The message itself stays Field's `role="alert"` line in ink; the hue is the mark, never the text. */
 @utility field-invalid {
   position: relative;
 
@@ -254,25 +233,22 @@
     bottom: 0;
     left: 0;
     width: 3px;
-    background: repeating-linear-gradient(-45deg, var(--color-route) 0 1px, transparent 1px 3px);
+    background: repeating-linear-gradient(-45deg, var(--color-danger) 0 1px, transparent 1px 3px);
   }
 }
 
-/* §3.2 The plotting table — the ONE dark surface. Apply to the container: it paints the ground,
-   rebinds --focus-ring to the only datum that clears 3:1 on it (R29/F2), and inverts the sheet's
-   ink/sheet/datum scale to the plot tokens so descendants using those tokens read correctly on the
-   dark ground (text stays ≥4.5:1, §9). */
+/* §2.3 The map surface — the ONE dark surface. Apply to the container: it paints the §3 map ramp,
+   rebinds `--focus-ring` to `--color-map-ink` (the only ring that clears 3:1 there, §12), and
+   inverts the light ink scale to the map tokens so descendants keep their text and rules legible on
+   the dark ground. */
 @utility plot-ground {
-  background: var(--color-plot-ground);
-  color: var(--color-plot-ink);
-  --focus-ring: var(--color-datum-dim);
-  --color-ink: var(--color-plot-ink);
-  --color-ink-2: var(--color-plot-ink-2);
-  --color-ink-3: var(--color-plot-ink-3);
-  --color-ink-4: var(--color-plot-ink-4);
-  --color-survey-paper: var(--color-plot-ground);
-  --color-survey-paper-2: var(--color-plot-raised);
-  --color-datum: var(--color-datum-dim);
+  background: var(--gradient-map);
+  color: var(--color-map-ink);
+  --focus-ring: var(--color-map-ink);
+  --color-ink: var(--color-map-ink);
+  --color-ink-2: var(--color-map-ink);
+  --color-ink-3: var(--color-map-ink-2);
+  --color-ink-4: var(--color-map-rule);
 }
 
 @utility tnum {
