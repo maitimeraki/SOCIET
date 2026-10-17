@@ -35,11 +35,22 @@ def _profile_float(profile, attr: str, default: float) -> float:
     return default if value is None else float(value)
 
 
+def _opinion_key(dataset_id: str, query_hash: str, opinion: dict) -> str:
+    """The Opinion MERGE's identity, read off the write params — never re-derived."""
+    return f"{dataset_id}:{query_hash}:{opinion['round_no']}:{opinion['agent_name']}"
+
+
+def _persona_key(dataset_id: str, agent_name: str) -> str:
+    """The Persona MERGE's identity, read off the write params — never re-derived."""
+    return f"{dataset_id}:{agent_name}"
+
+
 _OPINION_CYPHER = """
 UNWIND $opinions AS op
 MERGE (o:Opinion {dataset_id: $dataset_id, query_hash: $query_hash,
                   round_no: op.round_no, agent_name: op.agent_name})
-SET o.text = op.text, o.stance = op.stance, o.confidence = op.confidence,
+SET o.text = op.text, o.name = op.name, o.stance = op.stance,
+    o.confidence = op.confidence,
     o.conviction = op.conviction, o.cior = op.cior, o.weight = op.weight,
     o.entities = op.entities, o.ts = datetime()
 MERGE (p:Persona {name: op.agent_name, dataset_id: $dataset_id})
@@ -248,6 +259,7 @@ class SocietyMemory:
                 {
                     "agent_name": agent_name,
                     "round_no": round_result.round_num,
+                    "name": f"{agent_name} · pass {round_result.round_num}",
                     "text": "\n\n".join(t.content for t in turns),
                     "stance": last.stance,
                     "confidence": last.confidence,
@@ -258,15 +270,6 @@ class SocietyMemory:
                 }
             )
 
-        receipt = {
-            "round": round_result.round_num,
-            "opinions": len(opinions),
-            "edges": len(reactions),
-            "failed": False,
-        }
-        if not opinions:
-            return receipt
-
         mention_rows = [
             {
                 "agent_name": o["agent_name"],
@@ -276,6 +279,54 @@ class SocietyMemory:
             for o in opinions
             if o["entities"]
         ]
+
+        # The receipt must be what the transaction wrote, captured here from the
+        # same params the Cyphers receive — never re-queried or re-derived later.
+        written_nodes = [
+            {
+                "key": _opinion_key(dataset_id, query_hash, o),
+                "label": "Opinion",
+                "name": o["name"],
+            }
+            for o in opinions
+        ]
+        written_links = [
+            {
+                "from": _persona_key(dataset_id, o["agent_name"]),
+                "to": _opinion_key(dataset_id, query_hash, o),
+                "kind": "STATED",
+            }
+            for o in opinions
+        ]
+        written_links += [
+            {
+                "from": _persona_key(dataset_id, r["speaker_name"]),
+                "to": _persona_key(dataset_id, r["target_name"]),
+                "kind": "REACTED_TO",
+            }
+            for r in reactions
+        ]
+        written_links += [
+            {
+                "from": _opinion_key(dataset_id, query_hash, row),
+                "to": entity,
+                "kind": "MENTIONS",
+            }
+            for row in mention_rows
+            for entity in row["entities"]
+        ]
+
+        receipt = {
+            "round": round_result.round_num,
+            "opinions": len(opinions),
+            "edges": len(reactions),
+            "failed": False,
+            "written_nodes": written_nodes,
+            "written_links": written_links,
+        }
+        if not opinions:
+            return receipt
+
         try:
             async with self._driver.session(database=self._db) as session:
                 tx = await session.begin_transaction()
@@ -309,6 +360,9 @@ class SocietyMemory:
                 "edges": len(reactions),
                 "failed": True,
                 "error": str(exc),
+                # A failed write claims nothing: no nodes, no links.
+                "written_nodes": [],
+                "written_links": [],
             }
         return receipt
 
