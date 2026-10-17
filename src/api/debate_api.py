@@ -61,6 +61,11 @@ class DebateRequest(BaseModel):
 
     graph_id: str = Field(default="simulation_runtime", description="Graph/dataset ID")
     query: str = Field(..., description="Debate topic/question")
+    corpus_label: Optional[str] = Field(
+        default=None,
+        max_length=120,
+        description="The wizard's client-side corpus name, for the history list.",
+    )
     selected_domains: List[str] = Field(
         default_factory=list,
         description="Domain filter, also carried into the intent fallback",
@@ -125,6 +130,7 @@ def _job_doc(job: dict) -> dict:
         "created_at": job.get("created_at"),
         "query": job.get("query"),
         "dataset_id": job.get("graph_id"),
+        "corpus_label": job.get("corpus_label"),
         "config": job.get("config"),
         "status": job.get("status"),
         "events": [],
@@ -468,6 +474,7 @@ async def create_debate(
             "user_id": str(user.id),
             "query": body.query,
             "graph_id": body.graph_id,
+            "corpus_label": body.corpus_label,
             "config": asdict(config),
             "selected_domains": body.selected_domains,
             "simulation_depth": body.simulation_depth,
@@ -483,6 +490,7 @@ async def create_debate(
             "status": "queued",
             "query": body.query,
             "graph_id": body.graph_id,
+            "corpus_label": body.corpus_label,
             "config": asdict(config),
             "created_at": datetime.now(timezone.utc).isoformat(),
             "result": None,

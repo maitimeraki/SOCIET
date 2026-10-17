@@ -100,6 +100,7 @@ class Run(Base):
         UUID(as_uuid=True), ForeignKey("datasets.id", ondelete="SET NULL")
     )
     query: Mapped[str] = mapped_column(Text, nullable=False)
+    corpus_label: Mapped[str | None] = mapped_column(Text)
     status: Mapped[str] = mapped_column(Text, nullable=False)
     verdict: Mapped[dict | None] = mapped_column(JSONB)
     confidence: Mapped[float | None] = mapped_column(Double)
