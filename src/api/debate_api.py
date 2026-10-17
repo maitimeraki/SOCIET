@@ -155,6 +155,7 @@ async def _ensure_live_job(job_id: str) -> dict:
         "status": doc.get("status") or "queued",
         "query": doc.get("query"),
         "graph_id": doc.get("dataset_id"),
+        "corpus_label": doc.get("corpus_label"),
         "config": doc.get("config") or {},
         "created_at": doc.get("created_at"),
         "result": doc.get("result"),

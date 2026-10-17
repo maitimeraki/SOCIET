@@ -20,6 +20,7 @@ from src.auth.cookies import verify_csrf
 from src.auth.deps import current_user
 from src.db.engine import get_session_factory
 from src.db.models import Run, User
+from src.jobs import queue
 
 if sys.platform == "win32":
     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
@@ -97,3 +98,29 @@ async def test_summary_returns_the_label(account, client, monkeypatch):
     listed = await run_doc.list_run_summaries(uuid.UUID(account.id))
     row = next(item for item in listed["items"] if item["run_id"] == run_id)
     assert row["corpus_label"] == "Expansion pack"
+
+
+async def test_queued_row_carries_the_label(account):
+    """The rq path's first write: `enqueue` → `_write_queued_rows` carries the label."""
+    run_id = str(uuid.uuid4())
+    await queue._write_queued_rows(
+        "debate",
+        run_id,
+        {
+            "user_id": account.id,
+            "query": "Should we expand?",
+            "corpus_label": "European Expansion Analysis",
+        },
+    )
+    assert await _label_of(run_id) == "European Expansion Analysis"
+
+
+async def test_live_job_rebuilt_from_rows_keeps_the_label(account):
+    """The rq worker rebuilds its live dict from the rows via `_ensure_live_job`."""
+    run_id = str(uuid.uuid4())
+    await run_doc.write_run_doc({
+        "run_id": run_id, "user_id": account.id, "corpus_label": "Expansion pack",
+        "query": "q", "status": "queued", "events": [], "result": None, "error": None,
+    })
+    job = await debate_api._ensure_live_job(run_id)
+    assert job["corpus_label"] == "Expansion pack"

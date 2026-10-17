@@ -315,6 +315,7 @@ async def read_run_head(run_id: str) -> Optional[dict[str, Any]]:
         "kind": job.kind if job is not None else None,
         "created_at": run.created_at.isoformat(),
         "query": run.query,
+        "corpus_label": run.corpus_label,
         "status": run.status,
         "result": run.verdict,
         "error": job.error if job is not None else None,
