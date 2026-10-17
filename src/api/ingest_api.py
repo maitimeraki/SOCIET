@@ -13,9 +13,11 @@ import hashlib
 import json
 import logging
 import uuid
+from pathlib import PurePosixPath
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, UploadFile
 from pydantic import BaseModel
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.api.jobs_api import enqueue_or_http
@@ -25,7 +27,7 @@ from src.auth.cookies import verify_csrf
 from src.auth.deps import current_user
 from src.config.settings import get_settings
 from src.db.engine import get_db
-from src.db.models import User
+from src.db.models import Dataset, Upload, User
 from src.ingest import repository
 from src.ingest.extract import IngestValidationError, mime_for_filename, validate_upload
 from src.ingest.quota import QuotaExceeded, enforce_upload_quota
@@ -33,10 +35,10 @@ from src.ingest.ssrf import validate_url
 from src.ingest.storage import delete_upload, put_upload
 
 # Mounted twice by `api_server`: prefix "/api" keeps today's /api/ingest/* alias;
-# "/api/v1" is the canonical surface (R15).
-router = APIRouter(
-    prefix="/ingest", tags=["ingest"], dependencies=[Depends(verify_csrf)]
-)
+# "/api/v1" is the canonical surface (R15). The router is prefix-less: each
+# route's own path is the whole surface — the ingest trio carries "/ingest" and
+# the documents list carries "/uploads" (so it lands at /api/v1/uploads).
+router = APIRouter(tags=["ingest"], dependencies=[Depends(verify_csrf)])
 
 logger = logging.getLogger(__name__)
 
@@ -98,7 +100,7 @@ async def _discard_staged(db: AsyncSession, object_keys: list[str]) -> None:
             logger.warning("could not delete staged object %s: %s", key, exc)
 
 
-@router.post("/files", status_code=202)
+@router.post("/ingest/files", status_code=202)
 async def ingest_files(
     request: Request,
     files: list[UploadFile] = File(...),
@@ -179,7 +181,7 @@ async def ingest_files(
     return {"job_id": job_id, "status": "queued"}
 
 
-@router.post("/url", status_code=202)
+@router.post("/ingest/url", status_code=202)
 async def ingest_url(
     request: UrlRequest,
     http_request: Request,
@@ -234,7 +236,7 @@ def _payload(row) -> dict:
         return {"upload_id": str(row.id), "text": row.extracted_text}
 
 
-@router.get("/documents")
+@router.get("/ingest/documents")
 async def get_documents(
     upload_ids: str = Query(...),
     user: User = Depends(current_user),
@@ -244,3 +246,41 @@ async def get_documents(
     ids = [part.strip() for part in upload_ids.split(",") if part.strip()]
     rows = await repository.owned_uploads(db, user.id, ids)
     return {"documents": [_payload(row) for row in rows]}
+
+
+@router.get("/uploads")
+async def list_uploads(
+    limit: int = Query(100, ge=1),
+    user: User = Depends(current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """The caller's own uploads, newest first — the documents section's rows.
+
+    Every field comes off the row: ``name`` is the object key's basename (the
+    filename is the honest name — no title column exists), ``read`` is
+    ``extracted_text is not None``, and ``dataset_name`` is left-joined from
+    ``Dataset`` (null until the upload joins a corpus). Scoped to the caller,
+    never a filter a request can drop.
+    """
+    rows = await db.execute(
+        select(Upload, Dataset.name)
+        .join(Dataset, Upload.dataset_id == Dataset.id, isouter=True)
+        .where(Upload.user_id == user.id)
+        .order_by(Upload.created_at.desc())
+        .limit(min(limit, 200))
+    )
+    return {
+        "items": [
+            {
+                "id": str(upload.id),
+                "name": PurePosixPath(upload.object_key).name,
+                "bytes": upload.bytes,
+                "mime": upload.mime,
+                "read": upload.extracted_text is not None,
+                "dataset_id": str(upload.dataset_id) if upload.dataset_id else None,
+                "dataset_name": dataset_name,
+                "created_at": upload.created_at.isoformat(),
+            }
+            for upload, dataset_name in rows.all()
+        ]
+    }
