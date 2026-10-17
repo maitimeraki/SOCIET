@@ -87,6 +87,16 @@ def snapshot(monkeypatch):
     return fake
 
 
+@pytest.fixture
+def emptied_snapshot(monkeypatch):
+    """A corpus emptied while Neo4j is healthy: the read succeeds and returns nothing."""
+    fake = AsyncMock(
+        return_value={"nodes": [], "edges": [], "labels": [], "chunk_count": 0}
+    )
+    monkeypatch.setattr(debate_api, "read_graph_snapshot", fake)
+    return fake
+
+
 async def _add_corpus(user_id: str, dataset_id: str) -> None:
     """``runs.dataset_id`` is an FK to ``datasets.id``: the parent row comes first."""
     factory = get_session_factory()
@@ -149,6 +159,18 @@ async def test_run_without_corpus_is_typed_404(accounts, client, snapshot):
     assert response.json()["detail"]["code"] == "no_corpus"
 
 
+async def test_emptied_corpus_is_typed_404(accounts, client, emptied_snapshot):
+    owner, _ = accounts
+    run_id = await _write_run(owner.id, str(uuid.uuid4()))
+    response = await client.get(f"/api/v1/simulate/debates/{run_id}/graph")
+    assert response.status_code == 404
+    assert response.json()["detail"]["code"] == "corpus_gone"
+
+
+# The unmocked read, end to end: a corpus id Neo4j holds nothing under. Its
+# corpus_gone answer comes from the zero-node branch when Neo4j is reachable and
+# from the read-failure branch when it is not — the deterministic cover for the
+# zero-node branch is `test_emptied_corpus_is_typed_404` above.
 async def test_corpus_absent_from_graph_is_typed_404(accounts, client):
     owner, _ = accounts
     run_id = await _write_run(owner.id, str(uuid.uuid4()))
