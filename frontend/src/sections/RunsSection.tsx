@@ -3,7 +3,7 @@ import type { RunSummary } from '../api/types'
 import EmptyState from '../components/ui/EmptyState'
 import { buttonClasses } from '../components/ui/Button'
 
-export type StatusFilter = 'all' | 'complete' | 'running' | 'failed' | 'interrupted'
+type StatusFilter = 'all' | 'complete' | 'running' | 'failed' | 'interrupted'
 
 /**
  * The list's client-side filter — pure, so it is testable without a DOM (this suite is node-only).

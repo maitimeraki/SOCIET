@@ -3,6 +3,9 @@ import { describe, expect, it } from 'vitest'
 // to static markup in Node. `App` itself cannot render here — `BrowserRouter` needs a window and the
 // pages are `lazy` — so the tree is exercised the way AppShell.test.tsx and RequireAuth.test.tsx
 // already do: replicate the guard + route shape under `MemoryRouter` and render the real elements.
+// App.tsx's own nesting — which element sits under which route — is confirmed by reading App.tsx, not
+// by rendering it (no test renders `App`; it would suspend on its `lazy()` chunks and emit only the
+// fallback), so this file proves the section+guard composition and the guard's contract.
 //
 // `<Navigate>` does not navigate under SSR (RequireAuth.test.tsx:2), so the guard's next-preserving
 // redirect cannot be asserted by rendering it. It is pinned through the guard's OWN contract —
@@ -97,5 +100,35 @@ describe('the guard preserves the path a signed-out visitor was reaching for', (
 describe('the rail marks the section the visitor is in', () => {
   it.each(SECTIONS)('$path marks its own item current', ({ path }) => {
     expect(currentHref(renderShell(path))).toBe(path)
+  })
+})
+
+/** §13 — the copy law, matched against the RENDERED TEXT only: tags and their attributes are stripped
+ *  first, so a class name like `bg-ground` can never trip `\bround\b`. The patterns are whole-word and
+ *  plural-tolerant — `\bagent` must catch "Agents" (the RunTable header this plan bans), while
+ *  `\bround\b` still leaves "ground" and "background" alone. */
+const BANNED = [
+  'agent', 'graph', 'node', 'edge', 'round', 'retrieval', 'ontology', 'model',
+  'society', 'chunk', 'embedding', 'vector', 'llm', 'prompt', 'token', 'pipeline', 'job',
+]
+const BANNED_WORD = new RegExp(`\\b(?:${BANNED.join('|')})s?\\b`, 'i')
+const renderedText = (html: string) => html.replace(/<[^>]*>/g, ' ')
+
+describe('the copy-law pattern itself catches banned words, whole-word only', () => {
+  it('matches a banned word and its plural', () => {
+    expect(BANNED_WORD.test('an agent here')).toBe(true)
+    expect(BANNED_WORD.test('Agents')).toBe(true)
+    expect(BANNED_WORD.test('a society of models')).toBe(true)
+  })
+
+  it('does not match a banned word inside a longer one', () => {
+    expect(BANNED_WORD.test('bg-ground background ground')).toBe(false)
+    expect(BANNED_WORD.test('tookend rundown')).toBe(false)
+  })
+})
+
+describe('the copy law (§13) holds on every section', () => {
+  it.each(SECTIONS)('$path renders no banned word', ({ path, Component }) => {
+    expect(renderedText(renderGuarded('authed', path, Component))).not.toMatch(BANNED_WORD)
   })
 })
