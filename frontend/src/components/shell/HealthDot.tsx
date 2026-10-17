@@ -33,7 +33,10 @@ export default function HealthDot() {
   return (
     <span className="inline-flex items-center gap-2" title={`Checked ${API_BASE}/health`}>
       <span aria-hidden="true" className={`h-2 w-2 rounded-full ${dot}`} />
-      <span className="tnum font-measurement text-mono text-ink-3">{label}</span>
+      {/* ink-2, not ink-3: the dot sits on the rail's --ground-2 (#F1F5F9), where ink-3 measures
+          4.34:1 — under §12's floor. The dot itself is aria-hidden, so this word is the only
+          carrier of the status; ink-2 measures 9.45:1 there. */}
+      <span className="tnum font-measurement text-mono text-ink-2">{label}</span>
     </span>
   )
 }

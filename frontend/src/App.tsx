@@ -33,7 +33,7 @@ const SignUpPage = lazy(() => import('./pages/SignUpPage'))
  *
  * The top-level `<Suspense>` covers the public layouts' lazy pages. The authed tree carries its own
  * Suspense INSIDE AppShell (see AppShell.tsx), which is what keeps the shell mounted while a page
- * chunk loads — a page swap must not blink the masthead away.
+ * chunk loads — a page swap must not blink the rail away.
  */
 export default function App() {
   return (

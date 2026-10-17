@@ -41,4 +41,9 @@ describe('AppShell', () => {
   it('marks the current section with aria-current', () => {
     expect(openingTag(render(), 'href="/documents"')).toContain('aria-current="page"')
   })
+
+  it('keeps the account foot outside the sections landmark', () => {
+    const html = render()
+    expect(html.indexOf('</nav>')).toBeLessThan(html.indexOf('Account'))
+  })
 })

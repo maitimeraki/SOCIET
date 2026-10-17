@@ -34,34 +34,35 @@ export default function Rail() {
   const initials = email.split('@')[0].slice(0, 2).toUpperCase()
 
   return (
-    <nav
-      aria-label="Sections"
-      className="flex w-16 shrink-0 flex-col border-r border-border bg-ground-2 lg:w-60"
-    >
-      <div className="flex h-14 shrink-0 items-center gap-2 px-4">
-        <Link to="/" className="flex items-center gap-2 text-ink">
-          {/* §7 draws a diamond, not a logo — the glyph is the mark, the wordmark names the product. */}
-          <span aria-hidden="true" className="font-titling text-title leading-none">
-            ◆
-          </span>
-          <span className="sr-only font-titling text-heading font-semibold lg:not-sr-only">
-            Societas
-          </span>
-        </Link>
-      </div>
+    // The column. The `<nav>` holds only the sections; the account foot is its sibling, not its
+    // child — a landmark jump to "Sections" must not land on account or health chrome.
+    <div className="flex w-16 shrink-0 flex-col border-r border-border bg-ground-2 lg:w-60">
+      <nav aria-label="Sections" className="flex flex-1 flex-col">
+        <div className="flex h-14 shrink-0 items-center gap-2 px-4">
+          <Link to="/" className="flex items-center gap-2 text-ink">
+            {/* §7 draws a diamond, not a logo — the glyph is the mark, the wordmark names the product. */}
+            <span aria-hidden="true" className="font-titling text-title leading-none">
+              ◆
+            </span>
+            <span className="sr-only font-titling text-heading font-semibold lg:not-sr-only">
+              Societas
+            </span>
+          </Link>
+        </div>
 
-      <ul className="flex flex-1 flex-col gap-1">
-        {SECTIONS.map((s) => (
-          <li key={s.to}>
-            <NavLink to={s.to} className={itemClass}>
-              <span aria-hidden="true" className="w-4 shrink-0 text-center">
-                {s.glyph}
-              </span>
-              <span className={LABEL}>{s.label}</span>
-            </NavLink>
-          </li>
-        ))}
-      </ul>
+        <ul className="flex flex-1 flex-col gap-1">
+          {SECTIONS.map((s) => (
+            <li key={s.to}>
+              <NavLink to={s.to} className={itemClass}>
+                <span aria-hidden="true" className="w-4 shrink-0 text-center">
+                  {s.glyph}
+                </span>
+                <span className={LABEL}>{s.label}</span>
+              </NavLink>
+            </li>
+          ))}
+        </ul>
+      </nav>
 
       <div className="border-t border-border pt-2">
         {/* 240px only: the reading's label text does not fit the 64px rail. */}
@@ -78,6 +79,6 @@ export default function Rail() {
           <span className={`${LABEL} text-label text-ink-2`}>Account</span>
         </div>
       </div>
-    </nav>
+    </div>
   )
 }
