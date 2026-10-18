@@ -1,10 +1,9 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { ApiError, startDebate } from '../api/rest'
 import { DEBATE_CONFIG_DEFAULTS } from '../api/types'
 import type { DebateConfig } from '../api/types'
 import { useDraftStore } from '../wizard/draftStore'
-import StageRail from '../components/common/StageRail'
 import QueryComposer from '../components/society/QueryComposer'
 import ConfigPanel from '../components/society/ConfigPanel'
 import Button from '../components/ui/Button'
@@ -22,9 +21,8 @@ export default function SocietyPage() {
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  useEffect(() => {
-    if (!datasetId) navigate('/new/ingest', { state: { note: "Your session's documents expired — add them again." } })
-  }, [datasetId, navigate])
+  // No session guard here — this is a step, not a host. The workspace returns to the first step with
+  // the note IngestPage renders when the corpus is gone. `convene` still refuses without a graph id.
 
   const convene = async () => {
     if (!query.trim() || !datasetId || submitting) return
@@ -52,42 +50,34 @@ export default function SocietyPage() {
   }
 
   return (
-    <div className="mx-auto max-w-[760px] space-y-8">
-      <StageRail
-        stages={[
-          { key: 'ingest', label: 'Ingest', state: 'done' },
-          { key: 'graph', label: 'Graph', state: 'done' },
-          { key: 'question', label: 'Question', state: 'running' },
-        ]}
-      />
+    <div className="space-y-6">
       <div>
-        <p className="text-label uppercase text-ink-3">Step 3 · Question</p>
-        <h1 className="mt-2 font-titling text-display text-ink">Set the question</h1>
+        <h1 className="font-titling text-display text-ink">Set the question</h1>
         <p className="tnum mt-2 font-measurement text-mono text-ink-3">
           Corpus: {corpusName}
-          {graphSummary ? ` (${fmtInt(graphSummary.chunks)} chunks)` : ''}
+          {graphSummary ? ` (${fmtInt(graphSummary.chunks)} sections)` : ''}
         </p>
       </div>
 
       <div>
         <label htmlFor="society-question" className="mb-2 block text-label uppercase text-ink-3">
-          What should the society deliberate?
+          What should your panel deliberate?
         </label>
         <QueryComposer id="society-question" value={query} onChange={setQuery} onSubmit={convene} />
         <p className="mt-2 max-w-[60ch] text-micro text-ink-3">
-          The question picks which parts of the graph speak. Broader questions convene more of the society.
+          The question picks which parts of the map speak. Broader questions convene more of your panel.
         </p>
       </div>
 
       <ConfigPanel value={config} onChange={setConfig} />
 
-      {error && <p className="border-t border-route/40 pt-3 text-body text-ink-2">{error}</p>}
+      {error && <p className="border-t border-danger/40 pt-3 text-body text-ink-2">{error}</p>}
 
       <div className="flex items-center gap-4">
         <Button variant="primary" loading={submitting} disabled={!query.trim()} onClick={convene}>
           Convene the debate
         </Button>
-        <span className="text-micro text-ink-3">Runs take a few minutes — you can watch every round live.</span>
+        <span className="text-micro text-ink-3">Runs take a few minutes — you can watch every pass live.</span>
       </div>
     </div>
   )

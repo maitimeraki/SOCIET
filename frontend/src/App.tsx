@@ -11,9 +11,7 @@ import NotFoundPage from './pages/NotFoundPage'
 // computed path would defeat Vite's deterministic split. NotFoundPage stays eager (12 lines, no heavy
 // imports) so a mistyped URL never waits on a chunk fetch to say "not found".
 const LandingPage = lazy(() => import('./marketing/LandingPage'))
-const IngestPage = lazy(() => import('./pages/IngestPage'))
-const GraphPage = lazy(() => import('./pages/GraphPage'))
-const SocietyPage = lazy(() => import('./pages/SocietyPage'))
+const NewRunWorkspace = lazy(() => import('./pages/NewRunWorkspace'))
 const RunPage = lazy(() => import('./pages/RunPage'))
 const DocumentsSection = lazy(() => import('./sections/DocumentsSection'))
 const RunsSection = lazy(() => import('./sections/RunsSection'))
@@ -60,10 +58,13 @@ export default function App() {
               <Route path="/runs/:runId/:tab" element={<RunPage />} />
               <Route path="/results" element={<ResultsSection />} />
               <Route path="/panel" element={<PanelSection />} />
-              <Route path="/new" element={<Navigate to="/new/ingest" replace />} />
-              <Route path="/new/ingest" element={<IngestPage />} />
-              <Route path="/new/graph" element={<GraphPage />} />
-              <Route path="/new/society" element={<SocietyPage />} />
+              {/* §9 one workspace, three steps (Ruling F22). `/new` renders the workspace; the old
+                  per-step paths stay valid routes as redirects into it, carrying the step as `?step=`
+                  — eight existing call sites navigate to them, and nothing may 404. */}
+              <Route path="/new" element={<NewRunWorkspace />} />
+              <Route path="/new/ingest" element={<Navigate to="/new?step=ingest" replace />} />
+              <Route path="/new/graph" element={<Navigate to="/new?step=graph" replace />} />
+              <Route path="/new/society" element={<Navigate to="/new?step=society" replace />} />
               <Route path="/agents" element={<AgentsPage />} />
               <Route path="*" element={<NotFoundPage />} />
             </Route>

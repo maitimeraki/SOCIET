@@ -5,7 +5,6 @@ import { runFileIngest, runUrlIngest } from '../api/ingestFlow'
 import FileDrop from '../components/ingest/FileDrop'
 import DocCard from '../components/ingest/DocCard'
 import UrlFetchRow from '../components/ingest/UrlFetchRow'
-import StageRail from '../components/common/StageRail'
 import Button from '../components/ui/Button'
 import Input from '../components/ui/Input'
 import Field from '../components/ui/Field'
@@ -112,30 +111,22 @@ export default function IngestPage() {
   }
 
   return (
-    <div className="mx-auto max-w-[760px] space-y-8">
-      <StageRail
-        stages={[
-          { key: 'ingest', label: 'Ingest', state: 'running' },
-          { key: 'graph', label: 'Graph', state: 'pending' },
-          { key: 'question', label: 'Question', state: 'pending' },
-        ]}
-      />
+    <div className="space-y-6">
       <div>
-        <p className="text-label uppercase text-ink-3">Step 1 · Ingest</p>
-        <h1 className="mt-2 font-titling text-display text-ink">Build the corpus</h1>
+        <h1 className="font-titling text-display text-ink">Build the corpus</h1>
         <p className="mt-3 max-w-[60ch] text-body text-ink-2">
           Add the documents your experts would have read — PDFs, Word files, Markdown, plain text, or a web page.
         </p>
       </div>
 
       {note && (
-        <p className="border-t border-brass/40 pt-3 text-body text-ink-2">{note}</p>
+        <p className="border-t border-warn/40 pt-3 text-body text-ink-2">{note}</p>
       )}
 
-      {/* R35: the mark may be brass, the words are ink — a full quota is a distinct, recoverable state. */}
+      {/* R35: the mark may be the warn hue, the words are ink — a full quota is a distinct, recoverable state. */}
       {quota && (
-        <div role="status" className="flex items-start gap-2 border-t border-brass/40 pt-3">
-          <Warning size={16} className="mt-0.5 shrink-0 text-brass" aria-hidden="true" />
+        <div role="status" className="flex items-start gap-2 border-t border-warn/40 pt-3">
+          <Warning size={16} className="mt-0.5 shrink-0 text-warn" aria-hidden="true" />
           <p className="text-body text-ink">
             {quota.message} {retryLine(quota.retryAfterSeconds)}
           </p>
@@ -147,7 +138,7 @@ export default function IngestPage() {
           the single announcement: the duplicate error toasts below were removed so the same string is
           not read twice. */}
       {failure && (
-        <div role="alert" className="border-t border-route/40 pt-3">
+        <div role="alert" className="border-t border-danger/40 pt-3">
           <p className="text-body text-ink">Extraction failed: {failure}. Nothing was saved — try again.</p>
         </div>
       )}
@@ -174,7 +165,7 @@ export default function IngestPage() {
         </Field>
         <div className="text-right">
           <Button variant="primary" disabled={!canContinue} onClick={buildGraph}>
-            Build the graph
+            Build the map
             <ArrowRight size={16} aria-hidden="true" />
           </Button>
           {!canContinue && <p className="mt-2 text-micro text-ink-3">Add at least one document to continue</p>}

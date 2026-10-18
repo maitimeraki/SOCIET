@@ -5,8 +5,6 @@ import { startGraphBuild, startOntology } from '../api/rest'
 import { pollJob } from '../api/poll'
 import type { GraphJobResult, JobStatus } from '../api/types'
 import { useDraftStore } from '../wizard/draftStore'
-import StageRail from '../components/common/StageRail'
-import GraphCanvas from '../components/graph/GraphCanvas'
 import StageLine from '../components/graph/StageLine'
 import ProgressBar from '../components/graph/ProgressBar'
 import SchemaCard from '../components/graph/SchemaCard'
@@ -21,7 +19,6 @@ type Phase = 'ontology' | 'build' | 'done' | 'failed'
 export default function GraphPage() {
   const navigate = useNavigate()
   const datasetId = useDraftStore((s) => s.datasetId)
-  const graphJobId = useDraftStore((s) => s.graphJobId)
   const setJobs = useDraftStore((s) => s.setJobs)
   const setGraphSummary = useDraftStore((s) => s.setGraphSummary)
   const [phase, setPhase] = useState<Phase>('ontology')
@@ -92,16 +89,15 @@ export default function GraphPage() {
   useEffect(() => {
     const draft = useDraftStore.getState()
     const readyCount = draft.docs.filter((doc) => doc.status === 'ready').length
-    if (!datasetId || readyCount === 0) {
-      navigate('/new/ingest', { state: { note: "Your session's documents expired — add them again." } })
-      return
-    }
+    // No corpus to build from: do not boot. The workspace's guard returns to the first step with the
+    // note IngestPage renders, so this page no longer redirects (it is a step, not a host).
+    if (!datasetId || readyCount === 0) return
     if (bootRef.current) return // StrictMode double-invoke guard
     bootRef.current = true
     // eslint-disable-next-line react-hooks/set-state-in-effect -- boot guard: run() owns the phase machine and must start synchronously once per mount
     void run()
     // No abort on unmount: the job continues server-side; the persisted job ids resume it on return (§7.3).
-  }, [datasetId, navigate, run])
+  }, [datasetId, run])
 
   const rerun = () => {
     setJobs({ ontologyJobId: null, graphJobId: null })
@@ -112,45 +108,36 @@ export default function GraphPage() {
     void run()
   }
 
-  const railStages = [
-    { key: 'ingest', label: 'Ingest', state: 'done' as const },
-    { key: 'graph', label: 'Graph', state: phase === 'done' ? ('done' as const) : phase === 'failed' ? ('failed' as const) : ('running' as const) },
-    { key: 'question', label: 'Question', state: 'pending' as const },
-  ]
-
   const completed = result?.chunks_completed ?? 0
   const total = result?.chunks_total ?? 0
 
   return (
-    <div className="mx-auto max-w-[760px] space-y-8">
-      <StageRail stages={railStages} />
+    <div className="space-y-6">
       <div>
-        <p className="text-label uppercase text-ink-3">Step 2 · Graph</p>
-        <h1 className="mt-2 font-titling text-display text-ink">Grow the knowledge graph</h1>
+        <h1 className="font-titling text-display text-ink">Grow the map</h1>
       </div>
 
       {reconnecting && (
-        <p className="rounded-[4px] border border-brass/40 px-3 py-2 text-micro text-ink">
-          Can't reach the server. The job continues on the server — we'll reconnect.
+        <p className="rounded-[4px] border border-warn/40 px-3 py-2 text-micro text-ink">
+          Can't reach the server. The work continues on the server — we'll reconnect.
         </p>
       )}
 
       {phase !== 'done' && phase !== 'failed' && (
         <div className="space-y-4 border-t border-ink-4 pt-5">
           <StageLine
-            label="Discovering the ontology"
+            label="Discovering the kinds of things in your material"
             state={phase === 'ontology' ? 'active' : 'done'}
             helper="Discovery takes about a minute per ten documents."
           />
           <StageLine label="Extracting entities and relations" state={phase === 'build' ? 'active' : 'pending'} />
           {phase === 'build' && (
             <div className="space-y-4">
-              <ProgressBar value={progress} label={`${fmtInt(completed)} / ${fmtInt(total)} chunks`} />
+              <ProgressBar value={progress} label={`${fmtInt(completed)} / ${fmtInt(total)} sections`} />
               <p className="tnum font-measurement text-mono text-ink-2">
-                graph so far · {fmtInt(result?.entity_types.length ?? 0)} entity types · {fmtInt(result?.relation_types.length ?? 0)} relation types
+                map so far · {fmtInt(result?.entity_types.length ?? 0)} entity types · {fmtInt(result?.relation_types.length ?? 0)} relation types
               </p>
-              <p className="text-micro text-ink-3">Each chunk is written as it finishes — the graph grows while the build runs.</p>
-              {datasetId && graphJobId && <GraphCanvas datasetId={datasetId} jobId={graphJobId} />}
+              <p className="text-micro text-ink-3">Each section is written as it finishes — the map grows while the build runs.</p>
             </div>
           )}
         </div>
@@ -158,22 +145,20 @@ export default function GraphPage() {
 
       {result && (result.entity_types.length > 0 || result.relation_types.length > 0) && (
         <div className="grid grid-cols-2 gap-4">
-          <SchemaCard title="The ontology it discovered" names={result.entity_types} />
+          <SchemaCard title="The kinds of things it found" names={result.entity_types} />
           <RelationTable names={result.relation_types} />
         </div>
       )}
 
       {phase === 'done' && (
         <div className="space-y-6">
-          {/* The build is over, so the canvas unmounts from the build block above; re-mount it here
-              so the finished graph stays on screen. The stream reconnects to the completed job and
-              reads one full snapshot, which now carries every DERIVED_FROM-linked entity. */}
-          {datasetId && graphJobId && <GraphCanvas datasetId={datasetId} jobId={graphJobId} />}
+          {/* The finished map lives in the workspace's map pane, which stays mounted across the whole
+              lifecycle — this surface no longer renders a canvas of its own (D14: one map). */}
           <div>
-            <p className="text-heading text-ink">Graph built</p>
+            <p className="text-heading text-ink">The map is built</p>
             <StatRow
               items={[
-                { label: 'Chunks', value: fmtInt(result?.chunks_total ?? 0) },
+                { label: 'Sections', value: fmtInt(result?.chunks_total ?? 0) },
                 { label: 'Documents', value: fmtInt(result?.docs_built ?? 0) },
                 { label: 'Entity types', value: fmtInt(result?.entity_types.length ?? 0) },
                 { label: 'Relation types', value: fmtInt(result?.relation_types.length ?? 0) },
