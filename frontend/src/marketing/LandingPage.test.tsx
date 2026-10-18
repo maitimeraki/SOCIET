@@ -34,10 +34,10 @@ describe('the sheet — the first viewport', () => {
 describe('the legend law', () => {
   // The hue each stance's symbol owns (DSPEC §3.1) — the symbol colour, never the word's.
   const HUE: Record<string, string> = {
-    positive: 'var(--color-stance-pos)',
-    neutral: 'var(--color-stance-neu)',
-    ambivalent: 'var(--color-stance-amb)',
-    negative: 'var(--color-stance-neg)',
+    positive: 'var(--color-pos-light)',
+    neutral: 'var(--color-neu-light)',
+    ambivalent: 'var(--color-amb-light)',
+    negative: 'var(--color-neg-light)',
   }
 
   it('pairs every stance hue with its own word in one legend entry', () => {

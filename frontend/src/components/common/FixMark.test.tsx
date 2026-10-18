@@ -8,8 +8,8 @@ describe('FixMark', () => {
   it('draws the ink ring, the brass centre and the vermilion plotted point', () => {
     const html = renderToStaticMarkup(<FixMark confidence={0.82} />)
     expect(html).toContain('stroke="currentColor"') // the ink ring follows its ground
-    expect(html).toContain('--color-brass') // the centre
-    expect(html).toContain('--color-route') // the plotted point
+    expect(html).toContain('--color-warn') // the centre
+    expect(html).toContain('--color-danger') // the plotted point
   })
 
   it('is always accompanied by the confidence figure, in the measurement face', () => {

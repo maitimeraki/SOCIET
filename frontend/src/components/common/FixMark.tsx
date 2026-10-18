@@ -32,13 +32,13 @@ export default function FixMark({
         {/* the fix circle — an ink ring */}
         <circle cx="20" cy="20" r="15" fill="none" stroke="currentColor" strokeWidth="1.5" />
         {/* the brass centre — the instrument's own mark */}
-        <circle cx="20" cy="20" r="5" fill="var(--color-brass)" />
+        <circle cx="20" cy="20" r="5" fill="var(--color-warn)" />
         {/* the plotted point — it blooms once and settles (§5, the `fix` move) */}
         <circle
           cx="30"
           cy="10"
           r="3.4"
-          fill="var(--color-route)"
+          fill="var(--color-danger)"
           className="fix"
           style={{ transformOrigin: '30px 10px' }}
         />

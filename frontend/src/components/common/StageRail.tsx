@@ -27,9 +27,9 @@ export default function StageRail({
             // means "a station argued for the proposal", never "this stage finished" (§3.1, §7).
             <CheckCircle size={16} className="text-ink-2" aria-hidden="true" />
           ) : stage.state === 'running' ? (
-            <span aria-hidden="true" className="h-2.5 w-2.5 animate-pulse rounded-full bg-datum" />
+            <span aria-hidden="true" className="h-2.5 w-2.5 animate-pulse rounded-full bg-accent" />
           ) : stage.state === 'failed' ? (
-            <XCircle size={16} className="text-route" aria-hidden="true" />
+            <XCircle size={16} className="text-danger" aria-hidden="true" />
           ) : (
             <span aria-hidden="true" className="h-2.5 w-2.5 rounded-full border border-ink-3" />
           )
@@ -49,7 +49,7 @@ export default function StageRail({
                 type="button"
                 aria-current={current ? 'step' : undefined}
                 onClick={() => onSelect(stage.key)}
-                className="rounded-[4px] px-1 py-0.5 transition-colors hover:bg-survey-paper-2"
+                className="rounded-[4px] px-1 py-0.5 transition-colors hover:bg-ground-2"
               >
                 {inner}
               </button>

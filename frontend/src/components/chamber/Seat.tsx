@@ -5,10 +5,10 @@ export const SEAT_W = 14
 export const SEAT_H = 10
 
 const STANCE_VAR: Record<Stance, string> = {
-  POSITIVE: 'var(--color-stance-pos)',
-  NEUTRAL: 'var(--color-stance-neu)',
-  AMBIVALENT: 'var(--color-stance-amb)',
-  NEGATIVE: 'var(--color-stance-neg)',
+  POSITIVE: 'var(--color-pos)',
+  NEUTRAL: 'var(--color-neu)',
+  AMBIVALENT: 'var(--color-amb)',
+  NEGATIVE: 'var(--color-neg)',
 }
 
 export interface SeatSpec {
@@ -83,7 +83,7 @@ export default function Seat({ seat, tabIndex, onKeyNav }: { seat: SeatSpec; tab
             cx={x}
             cy={y}
             fill="none"
-            stroke="var(--color-datum)"
+            stroke="var(--color-accent)"
             strokeWidth={1}
             initial={{ r: SEAT_W / 2 + 2, opacity: 0.8 }}
             animate={{ r: SEAT_W / 2 + 8, opacity: 0 }}
@@ -93,7 +93,7 @@ export default function Seat({ seat, tabIndex, onKeyNav }: { seat: SeatSpec; tab
             cx={x}
             cy={y}
             fill="none"
-            stroke="var(--color-datum)"
+            stroke="var(--color-accent)"
             strokeWidth={1}
             initial={{ r: SEAT_W / 2 + 2, opacity: 0.8 }}
             animate={{ r: SEAT_W / 2 + 8, opacity: 0 }}
@@ -101,7 +101,7 @@ export default function Seat({ seat, tabIndex, onKeyNav }: { seat: SeatSpec; tab
           />
         </>
       )}
-      {seat.pulsing && reduced && <circle cx={x} cy={y} r={SEAT_W / 2 + 3} fill="none" stroke="var(--color-datum)" strokeWidth={1} />}
+      {seat.pulsing && reduced && <circle cx={x} cy={y} r={SEAT_W / 2 + 3} fill="none" stroke="var(--color-accent)" strokeWidth={1} />}
     </motion.g>
   )
 }

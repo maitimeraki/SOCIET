@@ -5,10 +5,10 @@ import StanceChip from '../common/StanceChip'
 import { fmtPct } from '../../utils/format'
 
 const SEGMENT_FILL: Record<Stance, string> = {
-  POSITIVE: 'bg-stance-pos',
-  NEUTRAL: 'bg-stance-neu',
-  AMBIVALENT: 'bg-stance-amb',
-  NEGATIVE: 'bg-stance-neg',
+  POSITIVE: 'bg-pos-light',
+  NEUTRAL: 'bg-neu-light',
+  AMBIVALENT: 'bg-amb-light',
+  NEGATIVE: 'bg-neg-light',
 }
 
 export default function ConvergenceTape({
@@ -32,8 +32,8 @@ export default function ConvergenceTape({
       <div className="relative">
         {/* brass threshold line across all tracks — only meaningful once a tick exists */}
         {ticks.length > 0 && (
-          <div aria-hidden="true" className="pointer-events-none absolute inset-y-0 z-10 w-px border-l-2 border-dashed border-brass" style={{ left: `calc(2.25rem + ${threshold} * (100% - 2.25rem))` }}>
-            <span className="absolute -top-1 left-1.5 rounded-[4px] bg-survey-paper-2 px-1 font-measurement text-micro text-ink-2">{threshold.toFixed(2)}</span>
+          <div aria-hidden="true" className="pointer-events-none absolute inset-y-0 z-10 w-px border-l-2 border-dashed border-warn" style={{ left: `calc(2.25rem + ${threshold} * (100% - 2.25rem))` }}>
+            <span className="absolute -top-1 left-1.5 rounded-[4px] bg-ground-2 px-1 font-measurement text-micro text-ink-2">{threshold.toFixed(2)}</span>
           </div>
         )}
 

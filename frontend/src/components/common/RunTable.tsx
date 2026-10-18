@@ -43,10 +43,10 @@ export default function RunTable({ runs, loading = false }: { runs: RunSummary[]
           </thead>
           <tbody className="text-ink-2">
             {runs.map((run) => (
-              <tr key={run.run_id} className="border-t border-ink-4 transition-colors hover:bg-survey-paper-2">
+              <tr key={run.run_id} className="border-t border-ink-4 transition-colors hover:bg-ground-2">
                 <td className="tnum py-2.5 pr-4 font-measurement text-mono text-ink-3">{fmtDate(run.created_at)}</td>
                 <td className="max-w-[360px] py-2.5 pr-4">
-                  <Link to={`/runs/${run.run_id}`} className="block truncate text-ink hover:text-datum">
+                  <Link to={`/runs/${run.run_id}`} className="block truncate text-ink hover:text-accent">
                     {run.query}
                   </Link>
                 </td>
@@ -66,7 +66,7 @@ export default function RunTable({ runs, loading = false }: { runs: RunSummary[]
         {runs.map((run) => (
           <li key={run.run_id} className="border-t border-ink-4 pt-3">
             <div className="flex items-start justify-between gap-3">
-              <Link to={`/runs/${run.run_id}`} className="text-body text-ink hover:text-datum">
+              <Link to={`/runs/${run.run_id}`} className="text-body text-ink hover:text-accent">
                 {run.query}
               </Link>
               <StateChip state={run.status} />

@@ -3,7 +3,7 @@ import { CheckCircle, Circle, CircleNotch, Warning, WarningOctagon } from '@phos
 export type RunStateWord = 'queued' | 'running' | 'complete' | 'converged' | 'failed' | 'interrupted'
 
 export default function StateChip({ state }: { state: RunStateWord }) {
-  const base = 'inline-flex items-center gap-1.5 rounded-[4px] border border-ink-3 bg-survey-paper-2 px-2 py-1 text-label'
+  const base = 'inline-flex items-center gap-1.5 rounded-[4px] border border-ink-3 bg-ground-2 px-2 py-1 text-label'
   switch (state) {
     case 'queued':
       return (
@@ -13,7 +13,7 @@ export default function StateChip({ state }: { state: RunStateWord }) {
       )
     case 'running':
       return (
-        <span className={`${base} text-datum`}>
+        <span className={`${base} text-accent`}>
           <CircleNotch size={14} className="animate-spin" aria-hidden="true" /> Deliberating
         </span>
       )

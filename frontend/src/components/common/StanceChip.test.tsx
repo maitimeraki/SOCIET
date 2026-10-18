@@ -10,10 +10,10 @@ import Legend from './Legend'
 
 /** The map-legend hue each stance's symbol owns (DSPEC §3.1) — the symbol colour, never the word's. */
 const HUE: Record<Stance, string> = {
-  POSITIVE: '--color-stance-pos',
-  NEUTRAL: '--color-stance-neu',
-  AMBIVALENT: '--color-stance-amb',
-  NEGATIVE: '--color-stance-neg',
+  POSITIVE: '--color-pos-light',
+  NEUTRAL: '--color-neu-light',
+  AMBIVALENT: '--color-amb-light',
+  NEGATIVE: '--color-neg-light',
 }
 
 describe('StanceChip — the legend law', () => {

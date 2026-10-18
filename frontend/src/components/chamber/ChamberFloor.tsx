@@ -154,7 +154,7 @@ export default function ChamberFloor({ roster, rounds, activeRound, livePairs, o
           </div>
           <p className="tnum mt-2 font-measurement text-micro text-ink-2">conf {seated.profile.confidence.toFixed(2)}</p>
           {onOpenProfile && (
-            <button type="button" onClick={onOpenProfile} className="mt-2 inline-block text-micro text-datum hover:text-datum">
+            <button type="button" onClick={onOpenProfile} className="mt-2 inline-block text-micro text-accent hover:text-accent">
               Open profile →
             </button>
           )}
