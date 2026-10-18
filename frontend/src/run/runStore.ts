@@ -2,6 +2,7 @@ import { create } from 'zustand'
 import { getRun } from '../api/rest'
 import { connectRun } from '../api/ws'
 import type { RunSocket } from '../api/ws'
+import { useGraphStore } from '../graph/graphStore'
 import type { RunEvent } from './events'
 import { applyEvent, initialState } from './reducer'
 import type { RunState } from './reducer'
@@ -41,6 +42,24 @@ const scheduleFrame = (flush: () => void): void => {
   else setTimeout(flush, 0)
 }
 
+/**
+ * Grow the one map (D14) from the debate stream. Each `agent` event seats one expert entry, keyed as
+ * the backend keys the stored person; each `commit` event adds the entries and connections it reports
+ * it wrote, verbatim (D7). Everything else in the stream leaves the map alone. Idempotent, so a
+ * reconnect's replay of the buffer adds nothing new.
+ */
+const foldIntoMap = (event: RunEvent): void => {
+  const { mergeExpert, mergeOpinions } = useGraphStore.getState()
+  if (event.type === 'agent') {
+    const datasetId = event.profile.graph_snapshot?.dataset_id
+    // Without a dataset there is no Persona key to mirror: leave the entry unseated rather than key
+    // it off a fabricated id. The live payload always carries one.
+    if (datasetId) mergeExpert({ datasetId, name: event.profile.identity.name })
+    return
+  }
+  if (event.type === 'commit') mergeOpinions(event.written_nodes ?? [], event.written_links ?? [])
+}
+
 export const useRunStore = create<RunStoreState>((set, get) => {
   // Fold every buffered event in ONE set. The fold still runs through `applyEvent`, so a batched
   // live stream and a per-event replay produce the same state (§11.2) — only the timing changes.
@@ -54,6 +73,9 @@ export const useRunStore = create<RunStoreState>((set, get) => {
       for (const event of batch) run = applyEvent(run, event, Date.now())
       return { run, events: [...state.events, ...batch] }
     })
+    // Same frame, same batch: the map grows alongside the run state, once per frame — not once per
+    // event, which is the per-event render cost this batching exists to avoid.
+    for (const event of batch) foldIntoMap(event)
   }
 
   return {

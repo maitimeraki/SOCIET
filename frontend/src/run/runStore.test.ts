@@ -1,6 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { RunDoc } from '../api/types'
+import { useGraphStore } from '../graph/graphStore'
 import { RUN_SAMPLE } from './__fixtures__/run-sample'
+import type { RunEvent } from './events'
 import { fold, initialState } from './reducer'
 import { useRunStore } from './runStore'
 
@@ -60,6 +62,8 @@ describe('runStore rAF batching', () => {
       frame = cb
       return 1
     })
+    // The graph store is a module singleton — reset it so the map assertions are absolute.
+    useGraphStore.setState({ nodes: {}, edges: {}, labels: [], version: 0 })
   })
 
   afterEach(() => {
@@ -113,5 +117,31 @@ describe('runStore rAF batching', () => {
     flushFrame()
 
     expect(useRunStore.getState().events).toEqual(RUN_SAMPLE.slice(0, 3))
+  })
+
+  it('grows the one map from a dispatched agent and commit as the frame lands (the live path)', () => {
+    const seated = RUN_SAMPLE.find((event) => event.type === 'agent') as Extract<RunEvent, { type: 'agent' }>
+    const agent: RunEvent = {
+      ...seated,
+      profile: { ...seated.profile, graph_snapshot: { dataset_id: 'ds-1', chunk_count: 3, version_hash: 'v1' } },
+    }
+    const commit: RunEvent = {
+      type: 'commit',
+      round: 1,
+      opinions: 1,
+      edges: 1,
+      written_nodes: [{ key: 'ds-1:qh:1:D. Weber', label: 'Opinion', name: 'D. Weber · pass 1' }],
+      written_links: [{ from: 'ds-1:D. Weber', to: 'ds-1:qh:1:D. Weber', kind: 'STATED' }],
+    }
+
+    useRunStore.getState().dispatch(agent)
+    useRunStore.getState().dispatch(commit)
+    flushFrame()
+
+    const { nodes, edges } = useGraphStore.getState()
+    expect([Object.keys(nodes), Object.keys(edges)]).toEqual([
+      ['ds-1:D. Weber', 'ds-1:qh:1:D. Weber'],
+      ['ds-1:D. Weber|ds-1:qh:1:D. Weber|STATED'],
+    ])
   })
 })

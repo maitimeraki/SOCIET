@@ -333,6 +333,16 @@ describe('the one map, fed by both streams', () => {
     ])
   })
 
+  it('keeps a written entry verbatim — its name is the label, its kind the type', () => {
+    useGraphStore.getState().mergeOpinions(
+      [{ key: 'ds-1:qh:1:D. Weber', label: 'Opinion', name: 'D. Weber · pass 1' }],
+      [],
+    )
+
+    const node = useGraphStore.getState().nodes['ds-1:qh:1:D. Weber']
+    expect([node.label, node.type]).toEqual(['D. Weber · pass 1', 'Opinion'])
+  })
+
   it('folding the same commit twice adds nothing the second time', () => {
     const nodes = [{ key: 'ds-1:qh:1:D. Weber', label: 'Opinion', name: 'D. Weber · pass 1' }]
     const links = [{ from: 'ds-1:D. Weber', to: 'ds-1:qh:1:D. Weber', kind: 'STATED' }]
