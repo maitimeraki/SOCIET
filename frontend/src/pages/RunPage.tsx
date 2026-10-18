@@ -3,20 +3,16 @@ import type { ReactNode } from 'react'
 import { Link, NavLink, Navigate, useLocation, useNavigate, useParams } from 'react-router-dom'
 import { useRunStore } from '../run/runStore'
 import { convergenceSeries, isLive, railState, rosterProgress, streamItems, verdictView } from '../run/selectors'
-import { toast } from '../components/ui/Toast'
+import Button from '../components/ui/Button'
 import StageRail from '../components/common/StageRail'
-import WarningList from '../components/common/WarningList'
 import RunHeader from '../components/run/RunHeader'
 import RosterStage from '../components/run/RosterStage'
 import EventStream from '../components/run/EventStream'
 import ArtifactsTab from '../components/run/ArtifactsTab'
 import AgentsTab from '../components/run/AgentsTab'
+import AnswerDocument, { sourceTitles } from '../components/run/AnswerDocument'
 import ChamberFloor from '../components/chamber/ChamberFloor'
 import ConvergenceTape from '../components/chamber/ConvergenceTape'
-import VerdictHero from '../components/verdict/VerdictHero'
-import DivisionBars from '../components/verdict/DivisionBars'
-import FinalStanceTable from '../components/verdict/FinalStanceTable'
-import EntityChips from '../components/verdict/EntityChips'
 import GraphCanvas from '../components/graph/GraphCanvas'
 import { busiestEntries, mapCounts } from '../components/workspace/GraphPane'
 import Workspace, { WorkspaceView } from '../components/workspace/Workspace'
@@ -73,10 +69,13 @@ export interface RunWorkProps {
   scrubbed: number | null
   /** The newest pass the run has, for the scrubber's bounds; null before any pass has landed. */
   latestRound: number | null
+  /** The run's material is gone — the answer states it rather than omitting the sources (§8.5). */
+  corpusMissing?: boolean
   onScrub: (next: number | null) => void
   onNavigate: (path: string) => void
   onReplay: () => void
-  onExport: () => void
+  /** Retired with the raw-JSON dump: the answer document owns its own export. Kept optional for callers. */
+  onExport?: () => void
 }
 
 /**
@@ -84,7 +83,7 @@ export interface RunWorkProps {
  * pure view, so the two can never drift: the only thing that differs between them is the wrapper
  * around this node (`Workspace` owns the pane state; `WorkspaceView` takes it as a prop).
  */
-function RunWork({ run, events, tab, runId, scrubbed, latestRound, onScrub, onNavigate, onReplay, onExport }: RunWorkProps) {
+function RunWork({ run, events, tab, runId, scrubbed, latestRound, corpusMissing, onScrub, onNavigate, onReplay }: RunWorkProps) {
   const progress = rosterProgress(run)
   const view = verdictView(run)
   const series = convergenceSeries(run)
@@ -155,38 +154,23 @@ function RunWork({ run, events, tab, runId, scrubbed, latestRound, onScrub, onNa
       )}
       {tab === 'verdict' && (
         view ? (
-          <div className="space-y-10">
-            <VerdictHero
-              stance={view.stance}
-              confidence={view.confidence}
-              converged={view.converged}
-              summary={view.summary}
-              narrative={view.narrative}
-              narrativeStatus={view.narrativeStatus}
-              dissentingViews={view.dissentingViews}
-              evidence={view.evidence}
-              onReplay={onReplay}
-              onExport={onExport}
-              onNew={() => onNavigate('/new/society')}
+          <div className="space-y-8">
+            {/* §8.5 — the answer IS the reading view and the export: one document, derived once. The
+                raw-JSON dump it replaces is retired; the export lives inside the document, so what is
+                read here and what leaves are the same. The interactive affordances live beside it. */}
+            <AnswerDocument
+              runId={runId}
+              question={run.query}
+              view={view}
+              sources={sourceTitles(run.roster)}
+              corpusMissing={corpusMissing ?? false}
             />
-            <section>
-              <h2 className="mb-4 text-heading text-ink">The division</h2>
-              <DivisionBars clusters={view.clusters} />
-            </section>
-            <section>
-              <h2 className="mb-4 text-heading text-ink">Final stances</h2>
-              <FinalStanceTable run={run} />
-            </section>
-            <section>
-              <h2 className="mb-4 text-heading text-ink">On the record</h2>
-              <EntityChips supporting={view.supporting} opposing={view.opposing} />
-            </section>
-            {view.warnings.length > 0 && (
-              <section>
-                <h2 className="mb-4 text-heading text-ink">Warnings ({view.warnings.length})</h2>
-                <WarningList warnings={view.warnings} />
-              </section>
-            )}
+            <div className="flex items-center gap-3 print:hidden">
+              <Button onClick={onReplay}>Replay this decision</Button>
+              <Button variant="ghost" onClick={() => onNavigate('/new/society')}>
+                Start a new decision
+              </Button>
+            </div>
           </div>
         ) : (
           <p className="text-body text-ink-3">The verdict appears when the debate completes.</p>
@@ -249,29 +233,6 @@ export default function RunPage() {
   }, [runId, loadAndConnect])
 
   useEffect(() => () => useRunStore.getState().disconnect(), [])
-
-  const exportRun = () => {
-    const doc = {
-      run_id: run.runId,
-      query: run.query,
-      dataset_id: run.datasetId,
-      status: run.status,
-      config: run.config,
-      rounds_executed: run.rounds.length,
-      verdict: run.verdict,
-      roster: run.roster,
-      events,
-    }
-    const blob = new Blob([JSON.stringify(doc, null, 2)], { type: 'application/json' })
-    const url = URL.createObjectURL(blob)
-    const anchor = document.createElement('a')
-    anchor.href = url
-    anchor.download = `${run.runId ?? 'run'}_run.json`
-    anchor.click()
-    // Deferred: revoking synchronously after click() is racy in Firefox.
-    setTimeout(() => URL.revokeObjectURL(url), 0)
-    toast('success', 'Export downloaded')
-  }
 
   const location = useLocation()
   const replayFrom = (location.state as { replayFrom?: number } | null)?.replayFrom
@@ -353,10 +314,10 @@ export default function RunPage() {
             runId={runId}
             scrubbed={scrubbed}
             latestRound={latestRound}
+            corpusMissing={corpusMissing}
             onScrub={setScrubbed}
             onNavigate={navigate}
             onReplay={() => navigate(`/runs/${runId}/floor`, { state: { replayFrom: 1 } })}
-            onExport={exportRun}
           />
         }
       />
