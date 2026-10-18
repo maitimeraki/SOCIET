@@ -1,6 +1,8 @@
 import Graph from 'graphology'
 import { EXPERT_TYPE, expertKey } from '../graph/graphStore'
 import type { GraphEdge, GraphNode, GraphSnapshot } from '../graph/graphStore'
+import { asStance } from './events'
+import type { Stance, WrittenLink } from './events'
 import type { RunState } from './reducer'
 
 /** A connection's identity in the map's terms — the store's edge key, reproduced. */
@@ -9,9 +11,10 @@ const edgeKey = (source: string, target: string, label: string): string => `${so
 type Attributes = Record<string, unknown>
 
 /** A store entry as node attributes — identity is the graph key, so `id` is dropped. */
-function nodeAttributes({ label, type, kind, properties }: GraphNode): Attributes {
+function nodeAttributes({ label, type, kind, stance, properties }: GraphNode): Attributes {
   const attributes: Attributes = { label, type }
   if (kind !== undefined) attributes.kind = kind
+  if (stance !== undefined) attributes.stance = stance
   if (properties !== undefined) attributes.properties = properties
   return attributes
 }
@@ -21,6 +24,40 @@ function edgeAttributes({ label, properties }: GraphEdge): Attributes {
   const attributes: Attributes = { label }
   if (properties !== undefined) attributes.properties = properties
   return attributes
+}
+
+/** A person's name behind the backend's Persona key (`{dataset_id}:{name}`; names may hold colons). */
+const personName = (key: string): string => key.slice(key.indexOf(':') + 1)
+
+/**
+ * The position each entry a commit wrote is coloured by, keyed as the backend keyed it (§9.2).
+ *
+ * The backend stores an opinion's stance as the holder's LAST turn in that pass — `society_memory.
+ * commit_round` reads `last = turns[-1]` and MERGEs the opinion with `last.stance` — so that is what
+ * the map mirrors. The holder is read off the `STATED` connection the same commit reported writing,
+ * never parsed out of the entry's label. An opinion whose holder or turn the stored events do not
+ * carry is left out of the map, so it draws in the unpositioned neutral rather than a guessed hue
+ * (D7). The one function serves both producers, so a reopened run resolves exactly what the live
+ * fold resolved.
+ */
+export function opinionStances(run: RunState, round: number, links: readonly WrittenLink[]): Record<string, Stance> {
+  const turns = run.rounds.find((entry) => entry.round === round)?.turns ?? []
+  const stances: Record<string, Stance> = {}
+  for (const link of links) {
+    if (link.kind !== 'STATED') continue
+    const holder = personName(link.from)
+    const turn = turns.filter((spun) => spun.agent_name === holder).pop()
+    if (turn) stances[link.to] = asStance(turn.stance)
+  }
+  return stances
+}
+
+/** An entry a commit wrote, as the map holds it — verbatim, plus the position resolved for it. */
+function opinionEntry(written: { key: string; label: string; name: string }, stances: Record<string, Stance>): GraphNode {
+  const entry: GraphNode = { id: written.key, label: written.name, type: written.label }
+  const stance = stances[written.key]
+  if (stance !== undefined) entry.stance = stance
+  return entry
 }
 
 /**
@@ -58,9 +95,11 @@ export function composeRunGraph(run: RunState, corpus: GraphSnapshot | null): Gr
     nodes[id] = { id, label: profile.identity.name, type: EXPERT_TYPE }
   }
 
-  // Opinion layer — the entries and connections the commits report they wrote, taken verbatim (D7).
+  // Opinion layer — the entries and connections the commits report they wrote, taken verbatim (D7),
+  // each entry carrying the position the pass recorded for its holder so the map can colour it (§9.2).
   for (const commit of run.commits) {
-    for (const written of commit.writtenNodes) nodes[written.key] = { id: written.key, label: written.name, type: written.label }
+    const stances = opinionStances(run, commit.round, commit.writtenLinks)
+    for (const written of commit.writtenNodes) nodes[written.key] = opinionEntry(written, stances)
     for (const link of commit.writtenLinks) edges[edgeKey(link.from, link.to, link.kind)] = { source: link.from, target: link.to, label: link.kind }
   }
 

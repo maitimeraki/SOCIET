@@ -211,6 +211,15 @@ describe('runStore reopened-run map (replay = live)', () => {
     seat('D. Weber'),
     seat('M. Chen'),
     {
+      type: 'round',
+      round: 1,
+      pairs: [],
+      turns: [
+        { agent_id: 'D. Weber', agent_name: 'D. Weber', content: 'expand', stance: 'POSITIVE', confidence: 0.8, references: [] },
+        { agent_id: 'M. Chen', agent_name: 'M. Chen', content: 'hold', stance: 'NEGATIVE', confidence: 0.7, references: [] },
+      ],
+    },
+    {
       type: 'commit',
       round: 1,
       opinions: 1,
@@ -257,6 +266,9 @@ describe('runStore reopened-run map (replay = live)', () => {
       ['EU', 'EuroSteel', `${DATASET}:D. Weber`, `${DATASET}:M. Chen`, `${DATASET}:qh:1:D. Weber`],
       ['EuroSteel|EU|OPERATES_IN', `${DATASET}:D. Weber|${DATASET}:qh:1:D. Weber|STATED`],
     ])
+    // The colour's own state rides the fold on both producers: the opinion carries the position the
+    // pass recorded for its holder, so the two maps cannot colour an entry differently (§9.2, F30).
+    expect(live.nodes[`${DATASET}:qh:1:D. Weber`].stance).toBe('POSITIVE')
     expect(reopened).toEqual(live)
   })
 

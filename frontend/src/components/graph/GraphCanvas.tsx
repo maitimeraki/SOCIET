@@ -8,8 +8,20 @@ import type { NodeLabelDrawingFunction } from 'sigma/rendering'
 import { CheckCircle, CircleNotch, Warning, XCircle } from '@phosphor-icons/react'
 import type { StreamStatus } from '../../api/ws'
 import { useGraphStore } from '../../graph/graphStore'
-import type { GraphEdge, GraphLabel, GraphNode } from '../../graph/graphStore'
-import { useVisibleLayers, visibleSlice } from '../../graph/layers'
+import type { GraphEdge, GraphNode } from '../../graph/graphStore'
+import {
+  CORPUS_COLOR,
+  EXPERT_COLOR,
+  LAYER_GLYPHS,
+  POSITION_COLORS,
+  POSITION_GLYPHS,
+  POSITION_ORDER,
+  UNPOSITIONED_COLOR,
+  UNPOSITIONED_GLYPH,
+  entryColor,
+  useVisibleLayers,
+  visibleSlice,
+} from '../../graph/layers'
 import { useSelectionStore } from '../../graph/selectionStore'
 import type { MapSelection } from '../../graph/selectionStore'
 import { useGraphStream } from '../../graph/useGraphStream'
@@ -35,8 +47,6 @@ const NODE_SIZE = 7
 const surveyColor = (token: string): string =>
   typeof document === 'undefined' ? '' : getComputedStyle(document.documentElement).getPropertyValue(token).trim()
 
-/** A node whose type has no label yet (vocabulary frame still in flight). Muted plot ink, not a hue. */
-const DEFAULT_NODE_COLOR = surveyColor('--color-plot-ink-3')
 /**
  * The ground the graph is plotted on — the container's own fill (§3.2, the dark plotting table).
  * Node marks are contrast-validated against it, and the label halo is struck in it, so an edge
@@ -165,12 +175,13 @@ export function seedPosition(index: number): { x: number; y: number } {
 }
 
 /**
- * Mirror the store's nodes/edges/labels into `graph`, in place.
+ * Mirror the store's nodes/edges into `graph`, in place.
  *
  * Identity is the store's: a repeated node id updates the one node's attributes,
  * an edge keyed `source|target|label` updates the one edge. Nodes/edges the store
  * no longer holds (a snapshot reset) are dropped, so a reconnect cannot leave stale
- * elements behind. Node colour is the colour of its type's promoted label.
+ * elements behind. Node colour is the entry's kind and — for an opinion — the position
+ * the backend stored with it (§2.4, §9.2).
  *
  * Above the ceilings the `label` attribute is omitted (and any stale one cleared), so
  * Sigma draws no text at all for a graph too big to label.
@@ -179,16 +190,14 @@ export function syncGraph(
   graph: Graph,
   nodes: Record<string, GraphNode>,
   edges: Record<string, GraphEdge>,
-  labels: GraphLabel[],
 ): void {
-  const colorByLabel = new Map(labels.map((entry) => [entry.label, entry.color]))
   const nodeCount = Object.keys(nodes).length
   const withNodeLabels = showNodeLabels(nodeCount)
 
   for (const id of graph.nodes()) if (!(id in nodes)) graph.dropNode(id)
 
   Object.values(nodes).forEach((node, index) => {
-    const color = colorByLabel.get(node.type) ?? DEFAULT_NODE_COLOR
+    const color = entryColor(node)
     if (graph.hasNode(node.id)) graph.mergeNodeAttributes(node.id, { color })
     else graph.addNode(node.id, { color, size: NODE_SIZE, ...seedPosition(index) })
     // Drop the label outright above the ceiling — clearing any stale one left from when the graph was small.
@@ -229,15 +238,14 @@ function useThrottledLayout(graph: Graph, nodeCount: number): () => void {
 function LiveGraph({ graph }: { graph: Graph }) {
   const nodes = useGraphStore((s) => s.nodes)
   const edges = useGraphStore((s) => s.edges)
-  const labels = useGraphStore((s) => s.labels)
   const layers = useVisibleLayers()
   const runLayout = useThrottledLayout(graph, Object.keys(nodes).length)
 
   useEffect(() => {
     const visible = visibleSlice(nodes, edges, layers)
-    syncGraph(graph, visible.nodes, visible.edges, labels)
+    syncGraph(graph, visible.nodes, visible.edges)
     runLayout()
-  }, [graph, nodes, edges, labels, layers, runLayout])
+  }, [graph, nodes, edges, layers, runLayout])
 
   return null
 }
@@ -347,15 +355,37 @@ const SIGMA_SETTINGS = {
 }
 const CANVAS_STYLE = { '--sigma-background-color': 'transparent' } as CSSProperties
 
-/** The legend — one colour swatch + type name per promoted label, using the nodes' own colours. */
-function GraphLegend({ labels }: { labels: GraphLabel[] }) {
-  if (labels.length === 0) return null
+/** One legend row: the mark, the hue and the word — a hue never stands alone (§2.5, §6). */
+interface LegendRow {
+  glyph: string
+  color: string
+  word: string
+}
+
+/**
+ * §2.4/§9.2 The map's key — every colour the canvas draws: the material's blue, an expert's white,
+ * the four positions an opinion can hold in the spec's frozen order, and the neutral an opinion
+ * draws in while its position is not recorded. Each row is **symbol + colour + word**, so no colour
+ * is the only signal. The table is fixed because the colours are: the map encodes kind and position,
+ * not entity type.
+ */
+export const LEGEND_ROWS: readonly LegendRow[] = [
+  { glyph: LAYER_GLYPHS.corpus, color: CORPUS_COLOR, word: 'Corpus' },
+  { glyph: LAYER_GLYPHS.experts, color: EXPERT_COLOR, word: 'Experts' },
+  ...POSITION_ORDER.map((stance) => ({ glyph: POSITION_GLYPHS[stance], color: POSITION_COLORS[stance], word: stance })),
+  { glyph: UNPOSITIONED_GLYPH, color: UNPOSITIONED_COLOR, word: 'No position' },
+]
+
+/** The map's key, drawn over the plot while the map holds anything. `hasEntries` is false only when nothing is drawn. */
+export function GraphLegend({ hasEntries }: { hasEntries: boolean }) {
+  if (!hasEntries) return null
   return (
-    <ul className="pointer-events-none absolute left-2 top-2 inline-flex max-w-[60%] flex-wrap gap-x-3 gap-y-1 rounded-[4px] border border-ink-4 bg-survey-paper/85 px-2.5 py-1.5">
-      {labels.map((entry) => (
-        <li key={entry.label} className="flex items-center gap-1.5 text-micro text-ink-2">
-          <span aria-hidden="true" className="inline-block size-2.5 rounded-[2px]" style={{ backgroundColor: entry.color }} />
-          {entry.label}
+    <ul className="pointer-events-none absolute left-2 top-2 inline-flex max-w-[70%] flex-wrap gap-x-3 gap-y-1 rounded-[4px] border border-map-rule bg-map-ground/85 px-2.5 py-1.5">
+      {LEGEND_ROWS.map((row) => (
+        <li key={row.word} className="flex items-center gap-1.5 text-micro text-ink-3">
+          <span aria-hidden="true">{row.glyph}</span>
+          <span aria-hidden="true" className="inline-block size-2.5 rounded-[2px]" style={{ backgroundColor: row.color }} />
+          {row.word}
         </li>
       ))}
     </ul>
@@ -455,7 +485,7 @@ export default function GraphCanvas({ datasetId, jobId }: GraphCanvasProps) {
           <SelectionWatch onPick={pick} />
         </SigmaContainer>
       </div>
-      <GraphLegend labels={labels} />
+      <GraphLegend hasEntries={nodeCount > 0} />
       {/* The counts grow on every delta; role="img" alone is read on demand, so mirror the label into a live region. */}
       <div aria-live="polite" className="sr-only">
         {canvasLabel}

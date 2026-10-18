@@ -25,7 +25,7 @@ describe('routeGraphFrame', () => {
 
   it('vocabulary adds labels to the store', () => {
     routeGraphFrame({ type: 'vocabulary', labels: ['Molecule', 'Process'] })
-    expect(useGraphStore.getState().labels.map((l) => l.label)).toEqual(['Molecule', 'Process'])
+    expect(useGraphStore.getState().labels).toEqual(['Molecule', 'Process'])
   })
 
   it('an error frame surfaces its message but never merges as graph data', () => {

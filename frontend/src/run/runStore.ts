@@ -7,7 +7,7 @@ import type { GraphSnapshot } from '../graph/graphStore'
 import type { RunEvent } from './events'
 import { applyEvent, initialState } from './reducer'
 import type { RunState } from './reducer'
-import { composeRunGraph } from './runGraphStore'
+import { composeRunGraph, opinionStances } from './runGraphStore'
 
 interface RunStoreState {
   run: RunState
@@ -68,8 +68,10 @@ const scheduleFrame = (flush: () => void): void => {
 /**
  * Grow the one map (D14) from the debate stream. Each `agent` event seats one expert entry, keyed as
  * the backend keys the stored person; each `commit` event adds the entries and connections it reports
- * it wrote, verbatim (D7). Everything else in the stream leaves the map alone. Idempotent, so a
- * reconnect's replay of the buffer adds nothing new.
+ * it wrote, verbatim (D7), each entry carrying the position the pass recorded for its holder — read
+ * off the run state the same events folded, by the same resolver the composer uses, so the live map
+ * and a reopened one colour an opinion identically (§9.2, §11.2). Everything else in the stream
+ * leaves the map alone. Idempotent, so a reconnect's replay of the buffer adds nothing new.
  */
 const foldIntoMap = (event: RunEvent): void => {
   const { mergeExpert, mergeOpinions } = useGraphStore.getState()
@@ -80,7 +82,10 @@ const foldIntoMap = (event: RunEvent): void => {
     if (datasetId) mergeExpert({ datasetId, name: event.profile.identity.name })
     return
   }
-  if (event.type === 'commit') mergeOpinions(event.written_nodes ?? [], event.written_links ?? [])
+  if (event.type === 'commit') {
+    const links = event.written_links ?? []
+    mergeOpinions(event.written_nodes ?? [], links, opinionStances(useRunStore.getState().run, event.round, links))
+  }
 }
 
 export const useRunStore = create<RunStoreState>((set, get) => {

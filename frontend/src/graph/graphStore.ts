@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 import type Graph from 'graphology'
-import type { WrittenLink, WrittenNode } from '../run/events'
+import type { Stance, WrittenLink, WrittenNode } from '../run/events'
 
 /** A graph entity. Identity is `id` — the same entity in two chunks is ONE node. */
 export interface GraphNode {
@@ -9,6 +9,13 @@ export interface GraphNode {
   type: string
   /** The extracted type, as the delta frames it (`type` is the stored label). */
   kind?: string
+  /**
+   * The position the backend stored with this entry — an opinion's own stance, resolved from the run's
+   * folded state and carried here so the one map can colour the entry by it (§9.2). Absent on entries
+   * the backend stores no position for: the material, an expert, and an opinion whose holder's turn
+   * the stored events do not carry.
+   */
+  stance?: Stance
   /** The entity's extracted facts — lineage keys stripped server-side. */
   properties?: Record<string, unknown>
 }
@@ -20,12 +27,6 @@ export interface GraphEdge {
   label: string
   /** The relation's extracted facts — lineage keys stripped server-side. */
   properties?: Record<string, unknown>
-}
-
-/** A legend label (an entity type) with its assigned colour. */
-export interface GraphLabel {
-  label: string
-  color: string
 }
 
 /** The payload of a `delta` frame — the incremental slice a chunk contributed. */
@@ -58,7 +59,8 @@ export const EXPERT_TYPE = 'Expert'
 interface GraphStoreState {
   nodes: Record<string, GraphNode>
   edges: Record<string, GraphEdge>
-  labels: GraphLabel[]
+  /** The entity types the map's vocabulary holds, in first-seen order — the text alternative's count. */
+  labels: string[]
   /**
    * Monotonic count of node/edge merges. A cheap primitive invalidation key for derived views, so
    * they key on "the graph changed" without deep-comparing (or holding a reference to) the maps.
@@ -70,8 +72,12 @@ interface GraphStoreState {
   mergeVocabulary: (labels: string[]) => void
   /** Fold one expert the debate stream seated into the one map. Idempotent on the Persona key. */
   mergeExpert: (expert: ExpertIdentity) => void
-  /** Fold one commit's written entries and connections into the one map, verbatim (D7). */
-  mergeOpinions: (nodes: WrittenNode[], links: WrittenLink[]) => void
+  /**
+   * Fold one commit's written entries and connections into the one map, verbatim (D7). `stances` is
+   * the position resolved for each entry the commit wrote, keyed as the backend keyed it — the entry
+   * itself carries none, so the caller resolves it from the run's folded state.
+   */
+  mergeOpinions: (nodes: WrittenNode[], links: WrittenLink[], stances?: Record<string, Stance>) => void
   /**
    * Replace the whole map with a composed graph — the reopened run's seed (§11.2, F36). It reads a
    * graphology graph (the composer's output) into the record maps verbatim, so a run switch REPLACES
@@ -82,55 +88,15 @@ interface GraphStoreState {
   seedFromGraph: (graph: Graph, labels: string[]) => void
 }
 
-/**
- * The territory's categorical legend palette — one NAMED hue per entity type. R33: the graph's
- * categorical palette is data encoding, not theme colour, so it stays literal rather than becoming a
- * CSS custom property. It feeds Sigma's WebGL colour path and the legend swatches directly, in a
- * format Sigma parses (hex; it draws black on anything it cannot read). It stays literal because the
- * store also loads under Vitest's Node environment, where there is no document to resolve a `var()`
- * against, and a palette that resolved to empty strings there would make the arrival-order-invariance
- * test below pass vacuously.
- *
- * The table's KEYS are the legend entries — every hue has a name, so none is an anonymous hex (DSPEC
- * §3: a hue with no legend entry does not exist). `Legend` (components/common/Legend.tsx) renders this
- * same table, so the palette and its legend share one source.
- *
- * Repainted for the Survey sheet (addendum §5), then re-tuned for the dark plot. The graph now
- * renders on `--plot-ground` (#14150f) as well as the light sheet `--survey-paper` (#e7e5db), and a
- * hue must carry its mark on BOTH — the legend swatch is the non-colour cue and must match the mark,
- * so the two grounds share one table. The hues are held near luminance 0.168, the value that
- * equalises the two grounds' contrast, so every one clears SC 1.4.11's 3:1 non-text floor on both.
- * Measured WCAG contrast, sheet/plot: teal 3.86/3.77 · azure 3.79/3.84 · violet 3.83/3.79 ·
- * rose 3.81/3.81 · coral 4.21/3.46 · gold 4.47/3.25 · green 3.81/3.81. (Teal, azure, violet, rose
- * and green were re-tuned — they measured 2.61–2.99 on the plot and failed; coral and gold already
- * sat inside the window and are unchanged.) The map's *meaning* hues (the four stance tokens, datum,
- * route, brass) are deliberately not reused: an entity type is not a stance.
- *
- * Colours are keyed off the label SET (labels taken in sorted order), so a given set maps to the same
- * colours whatever order it arrives in — a reconnect or reload that replays the labels differently
- * cannot recolour the graph.
- */
-export const GRAPH_PALETTE = {
-  teal: '#1d7e79',
-  azure: '#3472c8',
-  violet: '#8560b5',
-  rose: '#c0476c',
-  coral: '#a8541f',
-  gold: '#7e6410',
-  green: '#567d28',
-} as const
-
-/** The palette in slot order — `Object.values` preserves insertion order, so slots are stable. */
-const PALETTE_SLOTS = Object.values(GRAPH_PALETTE)
-
-// ponytail: a 7-colour palette wraps past the 7th label (two types can share a hue); extend the table if a corpus ever promotes more.
-/** The palette colour for a label at `index` (its slot in the sorted label set). */
-export const labelColor = (index: number): string => PALETTE_SLOTS[index % PALETTE_SLOTS.length]
-
 const edgeKey = (edge: GraphEdge): string => `${edge.source}|${edge.target}|${edge.label}`
 
 /** A written entry as the store holds it: the backend's key is the id, its name and kind become the label and type. */
-const asGraphNode = (node: WrittenNode): GraphNode => ({ id: node.key, label: node.name, type: node.label })
+const asGraphNode = (node: WrittenNode, stances: Record<string, Stance>): GraphNode => {
+  const entry: GraphNode = { id: node.key, label: node.name, type: node.label }
+  const stance = stances[node.key]
+  if (stance !== undefined) entry.stance = stance
+  return entry
+}
 
 /** A written connection as the store holds it — endpoints and kind verbatim. */
 const asGraphEdge = (link: WrittenLink): GraphEdge => ({ source: link.from, target: link.to, label: link.kind })
@@ -148,22 +114,25 @@ const upsertEdges = (existing: Record<string, GraphEdge>, incoming: GraphEdge[])
 }
 
 /**
- * Add unseen labels (the array keeps first-seen order, so the legend stays append-only), but derive
- * every colour from the SET: labels taken in sorted order take palette slots 0..n-1. The mapping is
- * therefore a pure function of the set — the same labels in any arrival order, across an
- * `applySnapshot` reset or a reload, land on the same colours.
+ * Add unseen labels, keeping first-seen order — so the vocabulary is append-only and the text
+ * alternative's count of entity types never reshuffles on a reconnect.
  */
-const mergeLabels = (incoming: string[], existing: GraphLabel[]): GraphLabel[] => {
-  const byLabel = new Map(existing.map((entry) => [entry.label, entry]))
-  for (const label of incoming) if (!byLabel.has(label)) byLabel.set(label, { label, color: '' })
-  const colorByName = new Map([...byLabel.keys()].sort().map((label, index) => [label, labelColor(index)]))
-  return [...byLabel.values()].map((entry) => ({ label: entry.label, color: colorByName.get(entry.label) ?? entry.color }))
+const mergeLabels = (incoming: string[], existing: string[]): string[] => {
+  const seen = new Set(existing)
+  const merged = [...existing]
+  for (const label of incoming) {
+    if (seen.has(label)) continue
+    seen.add(label)
+    merged.push(label)
+  }
+  return merged
 }
 
 /** A composed graph's node attributes back into a store entry — the composer's `nodeAttributes`, read backwards. */
 const fromNodeAttributes = (id: string, attributes: Record<string, unknown>): GraphNode => {
   const node: GraphNode = { id, label: String(attributes.label), type: String(attributes.type) }
   if (attributes.kind !== undefined) node.kind = String(attributes.kind)
+  if (attributes.stance !== undefined) node.stance = attributes.stance as Stance
   if (attributes.properties !== undefined) node.properties = attributes.properties as GraphNode['properties']
   return node
 }
@@ -204,9 +173,12 @@ export const useGraphStore = create<GraphStoreState>((set) => ({
       version: state.version + 1,
     })),
 
-  mergeOpinions: (nodes, links) =>
+  mergeOpinions: (written, links, stances = {}) =>
     set((state) => ({
-      nodes: upsertNodes(state.nodes, nodes.map(asGraphNode)),
+      nodes: upsertNodes(
+        state.nodes,
+        written.map((node) => asGraphNode(node, stances)),
+      ),
       edges: upsertEdges(state.edges, links.map(asGraphEdge)),
       version: state.version + 1,
     })),

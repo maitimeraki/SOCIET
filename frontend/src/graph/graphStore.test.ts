@@ -1,7 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest'
-import { GRAPH_PALETTE, labelColor, useGraphStore } from './graphStore'
-
-const PALETTE = Object.values(GRAPH_PALETTE)
+import { useGraphStore } from './graphStore'
 
 // The store is a module singleton — reset it between cases so counts are absolute.
 beforeEach(() => useGraphStore.setState({ nodes: {}, edges: {}, labels: [] }))
@@ -26,17 +24,29 @@ describe('useGraphStore', () => {
     expect(Object.values(useGraphStore.getState().edges)).toHaveLength(1)
   })
 
-  it('mergeVocabulary adds a label once and keeps its colour on a second call', () => {
+  it('mergeVocabulary adds a label once and keeps its place on a second call', () => {
     const { mergeVocabulary } = useGraphStore.getState()
     mergeVocabulary(['Molecule'])
-    const first = useGraphStore.getState().labels
-    expect(first).toHaveLength(1)
-    expect(first[0].label).toBe('Molecule')
+    expect(useGraphStore.getState().labels).toEqual(['Molecule'])
 
-    mergeVocabulary(['Molecule'])
-    const second = useGraphStore.getState().labels
-    expect(second).toHaveLength(1)
-    expect(second[0].color).toBe(first[0].color)
+    mergeVocabulary(['Molecule', 'Process'])
+    expect(useGraphStore.getState().labels).toEqual(['Molecule', 'Process'])
+  })
+
+  it('mergeOpinions seats the position the caller resolved for an entry, and none when it resolved none', () => {
+    const { mergeOpinions } = useGraphStore.getState()
+    mergeOpinions(
+      [
+        { key: 'ds-1:qh:1:D. Weber', label: 'Opinion', name: 'D. Weber · pass 1' },
+        { key: 'ds-1:qh:1:M. Chen', label: 'Opinion', name: 'M. Chen · pass 1' },
+      ],
+      [],
+      { 'ds-1:qh:1:D. Weber': 'POSITIVE' },
+    )
+
+    const { nodes } = useGraphStore.getState()
+    expect(nodes['ds-1:qh:1:D. Weber'].stance).toBe('POSITIVE')
+    expect(nodes['ds-1:qh:1:M. Chen'].stance).toBeUndefined()
   })
 
   it('applySnapshot replaces the graph as a reconnect reset', () => {
@@ -53,54 +63,24 @@ describe('useGraphStore', () => {
     const state = useGraphStore.getState()
     expect(Object.keys(state.nodes)).toEqual(['new'])
     expect(Object.values(state.edges)).toHaveLength(1)
-    expect(state.labels.map((l) => l.label)).toEqual(['Y'])
+    expect(state.labels).toEqual(['Y'])
   })
 })
 
-describe('label palette', () => {
-  it('emits hex colours Sigma can parse (never hsl)', () => {
-    for (const color of PALETTE) expect(color).toMatch(/^#[0-9a-f]{6}$/i)
-  })
-
-  it('names every hue, so no palette colour is an anonymous hex (R33)', () => {
-    for (const key of Object.keys(GRAPH_PALETTE)) expect(key).toMatch(/^[a-z]+$/)
-  })
-
-  it('assigns a distinct colour to each of the first seven labels', () => {
-    const colors = PALETTE.map((_, index) => labelColor(index))
-    expect(new Set(colors).size).toBe(PALETTE.length)
-  })
-
-  it('gives the same set the same colours whatever the arrival order', () => {
+describe('the vocabulary — the entity types the map holds', () => {
+  it('keeps the labels in first-seen order, deduped, whatever the arrival order', () => {
     const { mergeVocabulary } = useGraphStore.getState()
     mergeVocabulary(['Company', 'Market', 'Regulation'])
-    const first = Object.fromEntries(useGraphStore.getState().labels.map((l) => [l.label, l.color]))
+    mergeVocabulary(['Regulation', 'Company'])
 
-    useGraphStore.setState({ labels: [] })
-    mergeVocabulary(['Regulation', 'Company', 'Market'])
-    const second = Object.fromEntries(useGraphStore.getState().labels.map((l) => [l.label, l.color]))
-
-    expect(second).toEqual(first)
+    expect(useGraphStore.getState().labels).toEqual(['Company', 'Market', 'Regulation'])
   })
 
-  it('preserves each label colour across an applySnapshot that reorders the same labels', () => {
-    const { applySnapshot } = useGraphStore.getState()
-    applySnapshot({ nodes: [], edges: [], labels: ['Company', 'Market', 'Regulation'] })
-    const first = Object.fromEntries(useGraphStore.getState().labels.map((l) => [l.label, l.color]))
+  it('replaces the vocabulary on a snapshot reset, so no previous read’s types linger', () => {
+    const { mergeVocabulary, applySnapshot } = useGraphStore.getState()
+    mergeVocabulary(['Company'])
+    applySnapshot({ nodes: [], edges: [], labels: ['Regulation', 'Market'] })
 
-    applySnapshot({ nodes: [], edges: [], labels: ['Regulation', 'Company', 'Market'] })
-    const second = Object.fromEntries(useGraphStore.getState().labels.map((l) => [l.label, l.color]))
-
-    expect(second).toEqual(first)
-  })
-
-  it('gives a promoted seventh label a colour unlike the existing six', () => {
-    const { mergeVocabulary } = useGraphStore.getState()
-    mergeVocabulary(['Company', 'Market', 'Regulation', 'Person', 'Product', 'Location'])
-    mergeVocabulary(['RelationType'])
-
-    const colors = useGraphStore.getState().labels.map((l) => l.color)
-    expect(colors).toHaveLength(7)
-    expect(new Set(colors).size).toBe(7)
+    expect(useGraphStore.getState().labels).toEqual(['Regulation', 'Market'])
   })
 })

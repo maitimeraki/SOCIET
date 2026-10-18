@@ -130,7 +130,7 @@ describe('the canvas’s node budget still governs the wired map', () => {
     const graph = new Graph({ multi: true })
 
     const slice = visibleSlice(nodes, {}, ALL_LAYERS)
-    syncGraph(graph, slice.nodes, slice.edges, [])
+    syncGraph(graph, slice.nodes, slice.edges)
 
     expect(graph.order).toBe(MAX_LABELLED_NODES + 1)
     expect(showNodeLabels(graph.order)).toBe(false)
@@ -147,7 +147,7 @@ describe('the canvas’s node budget still governs the wired map', () => {
     const graph = new Graph({ multi: true })
 
     const slice = visibleSlice(nodes, {}, ALL_LAYERS)
-    syncGraph(graph, slice.nodes, slice.edges, [])
+    syncGraph(graph, slice.nodes, slice.edges)
 
     expect(graph.order).toBe(MAX_ANIMATED_NODES + 1)
   })

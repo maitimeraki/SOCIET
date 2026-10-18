@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import { EXPERT_TYPE } from './graphStore'
 import type { GraphEdge, GraphNode } from './graphStore'
-import { OPINION_TYPE, nodeLayer, visibleSlice, type LayerName } from './layers'
+import { CORPUS_COLOR, EXPERT_COLOR, OPINION_TYPE, POSITION_COLORS, UNPOSITIONED_COLOR, entryColor, nodeLayer, visibleSlice, type LayerName } from './layers'
+import type { Stance } from '../run/events'
 
 // The layer filter's drop-branch, asserted on its own: `nodeLayer`'s mapping and the two ways
 // `visibleSlice` narrows the store. The pane's tests drive the *toggle UI*; these drive what the
@@ -37,6 +38,33 @@ describe('nodeLayer — which layer an entry belongs to', () => {
   })
 })
 
+describe('entryColor — an entry’s colour, by kind and by position (§2.4, §9.2)', () => {
+  it('draws the material in its own blue', () => {
+    expect(entryColor(corpus)).toBe('#3B82F6')
+    expect(CORPUS_COLOR).toBe('#3B82F6')
+  })
+
+  it('draws an expert in the luminous white', () => {
+    expect(entryColor(expert)).toBe('#E2E8F0')
+    expect(EXPERT_COLOR).toBe('#E2E8F0')
+  })
+
+  it('draws an opinion in its own position’s colour', () => {
+    const positions: Stance[] = ['POSITIVE', 'NEUTRAL', 'AMBIVALENT', 'NEGATIVE']
+    for (const stance of positions) expect(entryColor({ ...opinion, stance })).toBe(POSITION_COLORS[stance])
+  })
+
+  it('draws an opinion whose position the stored events do not carry in the neutral fallback, never a position’s hue', () => {
+    const color = entryColor(opinion) // no stance seated
+    expect(color).toBe(UNPOSITIONED_COLOR)
+    expect(Object.values(POSITION_COLORS)).not.toContain(color)
+  })
+
+  it('names the four positions with the spec’s own colours (§2.4)', () => {
+    expect(POSITION_COLORS).toEqual({ POSITIVE: '#4ADE80', NEUTRAL: '#94A3B8', AMBIVALENT: '#FBBF24', NEGATIVE: '#F87171' })
+  })
+})
+
 describe('visibleSlice — the layers the canvas may draw', () => {
   it('drops the entries of a hidden layer and keeps the rest', () => {
     const slice = visibleSlice(nodes, edges, showing('experts', 'opinions', 'connections'))
@@ -68,5 +96,14 @@ describe('visibleSlice — the layers the canvas may draw', () => {
 
     expect(slice.nodes).toBe(nodes)
     expect(slice.edges).toBe(edges)
+  })
+
+  it('hands the entry map back untouched when only the connections are off (F32)', () => {
+    // Hiding the connections must not rebuild the entry map on every delta: with every ENTRY layer
+    // still on, the slice passes the store's own map through, so only the connections are narrowed.
+    const slice = visibleSlice(nodes, edges, showing('corpus', 'experts', 'opinions'))
+
+    expect(slice.nodes).toBe(nodes)
+    expect(slice.edges).toEqual({})
   })
 })

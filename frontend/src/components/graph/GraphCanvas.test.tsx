@@ -1,8 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import Graph from 'graphology'
+import { renderToStaticMarkup } from 'react-dom/server'
 import { useGraphStore } from '../../graph/graphStore'
-import type { GraphEdge, GraphLabel, GraphNode } from '../../graph/graphStore'
+import type { GraphEdge, GraphNode } from '../../graph/graphStore'
+import { CORPUS_COLOR, EXPERT_COLOR, OPINION_TYPE, POSITION_COLORS, UNPOSITIONED_COLOR } from '../../graph/layers'
 import {
+  GraphLegend,
   MAX_ANIMATED_NODES,
   MAX_LABELLED_NODES,
   TEXT_FALLBACK_LIMIT,
@@ -37,28 +40,51 @@ describe('syncGraph', () => {
       'a|b|POWERS': { source: 'a', target: 'b', label: 'POWERS' },
     }
 
-    syncGraph(graph, nodes, edges, [])
+    syncGraph(graph, nodes, edges)
 
     expect(graph.order).toBe(2)
     expect(graph.size).toBe(1)
   })
 
-  it('colours a node from its promoted label colour', () => {
+  it('colours each entry by its kind — the material blue, an expert’s luminous white', () => {
     const graph = new Graph({ multi: true })
-    const labels: GraphLabel[] = [
-      { label: 'Molecule', color: 'hsl(210 70% 55%)' },
-      { label: 'Process', color: 'hsl(20 70% 55%)' },
-    ]
+    const nodes = byId(
+      { id: 'ds-1:steel tariffs', label: 'Steel tariffs', type: 'Topic' },
+      { id: 'ds-1:D. Weber', label: 'D. Weber', type: 'Expert' },
+    )
 
-    syncGraph(graph, byId({ id: 'a', label: 'Glucose', type: 'Molecule' }), {}, labels)
+    syncGraph(graph, nodes, {})
 
-    expect(graph.getNodeAttribute('a', 'color')).toBe('hsl(210 70% 55%)')
+    expect(graph.getNodeAttribute('ds-1:steel tariffs', 'color')).toBe(CORPUS_COLOR)
+    expect(graph.getNodeAttribute('ds-1:D. Weber', 'color')).toBe(EXPERT_COLOR)
+  })
+
+  it('colours an opinion by the position the backend stored with it (§2.4)', () => {
+    const graph = new Graph({ multi: true })
+    const nodes = byId(
+      { id: 'o+', label: '+', type: OPINION_TYPE, stance: 'POSITIVE' },
+      { id: 'o-', label: '-', type: OPINION_TYPE, stance: 'NEGATIVE' },
+    )
+
+    syncGraph(graph, nodes, {})
+
+    expect(graph.getNodeAttribute('o+', 'color')).toBe(POSITION_COLORS.POSITIVE)
+    expect(graph.getNodeAttribute('o-', 'color')).toBe(POSITION_COLORS.NEGATIVE)
+  })
+
+  it('colours an opinion whose position is not recorded in the neutral fallback, never a position’s hue', () => {
+    const graph = new Graph({ multi: true })
+    syncGraph(graph, byId({ id: 'o', label: 'D. Weber · pass 1', type: OPINION_TYPE }), {})
+
+    const color = graph.getNodeAttribute('o', 'color') as string
+    expect(color).toBe(UNPOSITIONED_COLOR)
+    expect(Object.values(POSITION_COLORS)).not.toContain(color)
   })
 
   it('keeps ONE node when a repeated id arrives', () => {
     const graph = new Graph({ multi: true })
-    syncGraph(graph, byId({ id: 'a', label: 'Glucose', type: 'Molecule' }), {}, [])
-    syncGraph(graph, byId({ id: 'a', label: 'Glucose (revised)', type: 'Molecule' }), {}, [])
+    syncGraph(graph, byId({ id: 'a', label: 'Glucose', type: 'Molecule' }), {})
+    syncGraph(graph, byId({ id: 'a', label: 'Glucose (revised)', type: 'Molecule' }), {})
 
     expect(graph.order).toBe(1)
     expect(graph.getNodeAttribute('a', 'label')).toBe('Glucose (revised)')
@@ -72,7 +98,7 @@ describe('syncGraph', () => {
       { id: 'c', label: 'ATP', type: 'Molecule' },
     )
 
-    syncGraph(graph, nodes, {}, [])
+    syncGraph(graph, nodes, {})
 
     for (const id of ['a', 'b', 'c']) {
       expect(Number.isFinite(graph.getNodeAttribute(id, 'x'))).toBe(true)
@@ -82,10 +108,10 @@ describe('syncGraph', () => {
 
   it('keeps a node position once it has settled (a re-sync does not re-seed it)', () => {
     const graph = new Graph({ multi: true })
-    syncGraph(graph, byId({ id: 'a', label: 'A', type: 'X' }), {}, [])
+    syncGraph(graph, byId({ id: 'a', label: 'A', type: 'X' }), {})
     graph.setNodeAttribute('a', 'x', 42)
 
-    syncGraph(graph, byId({ id: 'a', label: 'A', type: 'X' }), {}, [])
+    syncGraph(graph, byId({ id: 'a', label: 'A', type: 'X' }), {})
 
     expect(graph.getNodeAttribute('a', 'x')).toBe(42)
   })
@@ -96,9 +122,9 @@ describe('syncGraph', () => {
       { id: 'a', label: 'A', type: 'X' },
       { id: 'b', label: 'B', type: 'Y' },
     )
-    syncGraph(graph, nodes, { 'a|b|R': { source: 'a', target: 'b', label: 'R' } }, [])
+    syncGraph(graph, nodes, { 'a|b|R': { source: 'a', target: 'b', label: 'R' } })
 
-    syncGraph(graph, byId({ id: 'b', label: 'B', type: 'Y' }), {}, [])
+    syncGraph(graph, byId({ id: 'b', label: 'B', type: 'Y' }), {})
 
     expect(graph.order).toBe(1)
     expect(graph.hasNode('a')).toBe(false)
@@ -119,7 +145,7 @@ describe('syncGraph', () => {
       'a|b|MANDATES': { source: 'a', target: 'b', label: 'MANDATES' },
     }
 
-    expect(() => syncGraph(graph, nodes, edges, [])).not.toThrow()
+    expect(() => syncGraph(graph, nodes, edges)).not.toThrow()
     expect(graph.size).toBe(2)
     expect(graph.hasEdge('a|b|CLASSIFIES_AS')).toBe(true)
     expect(graph.hasEdge('a|b|MANDATES')).toBe(true)
@@ -154,7 +180,7 @@ describe('large-graph guard', () => {
     const nodes: Record<string, GraphNode> = {}
     for (let i = 0; i < 1600; i++) nodes[`n${i}`] = { id: `n${i}`, label: `Node ${i}`, type: 'Thing' }
 
-    syncGraph(graph, nodes, {}, [])
+    syncGraph(graph, nodes, {})
 
     expect(graph.getNodeAttribute('n0', 'label')).toBeUndefined()
   })
@@ -166,7 +192,7 @@ describe('large-graph guard', () => {
       { id: 'b', label: 'Respiration', type: 'Process' },
     )
 
-    syncGraph(graph, nodes, {}, [])
+    syncGraph(graph, nodes, {})
 
     expect(graph.getNodeAttribute('a', 'label')).toBe('Glucose')
   })
@@ -179,7 +205,7 @@ describe('large-graph guard', () => {
     )
     const edges: Record<string, GraphEdge> = { 'a|b|POWERS': { source: 'a', target: 'b', label: 'POWERS' } }
 
-    syncGraph(graph, nodes, edges, [])
+    syncGraph(graph, nodes, edges)
 
     expect(graph.getEdgeAttribute('a|b|POWERS', 'label')).toBeUndefined()
   })
@@ -299,6 +325,24 @@ describe('graphTextFallback', () => {
 
     expect(lines).toEqual(['Glucose (Molecule)', 'Respiration (Process)', 'ATP (Molecule)'])
     expect(omitted).toBe(0)
+  })
+})
+
+describe('GraphLegend — the map’s key (§6, §9)', () => {
+  it('names every colour the map draws, each with its own word', () => {
+    const html = renderToStaticMarkup(<GraphLegend hasEntries />)
+
+    for (const word of ['Corpus', 'Experts', 'POSITIVE', 'NEUTRAL', 'AMBIVALENT', 'NEGATIVE', 'No position']) {
+      expect(html).toContain(word)
+    }
+    // The swatches carry the very hues the canvas paints, so the key and the map cannot drift.
+    for (const color of [CORPUS_COLOR, EXPERT_COLOR, UNPOSITIONED_COLOR, ...Object.values(POSITION_COLORS)]) {
+      expect(html).toContain(color)
+    }
+  })
+
+  it('draws nothing over a map holding no entry', () => {
+    expect(renderToStaticMarkup(<GraphLegend hasEntries={false} />)).toBe('')
   })
 })
 

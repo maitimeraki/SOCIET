@@ -113,6 +113,50 @@ describe('composeRunGraph', () => {
     expect(first).toEqual(second)
   })
 
+  it('seats each opinion with the position the pass recorded for its holder (§9.2)', () => {
+    const state = fold(
+      [
+        agent('D. Weber'),
+        {
+          type: 'round',
+          round: 1,
+          pairs: [],
+          turns: [{ agent_id: 'D. Weber', agent_name: 'D. Weber', content: 'yes', stance: 'POSITIVE', confidence: 0.8, references: [] }],
+        },
+        {
+          type: 'commit',
+          round: 1,
+          opinions: 1,
+          edges: 1,
+          written_nodes: [{ key: 'ds-1:qh:1:D. Weber', label: 'Opinion', name: 'D. Weber · pass 1' }],
+          written_links: [{ from: 'ds-1:D. Weber', to: 'ds-1:qh:1:D. Weber', kind: 'STATED' }],
+        },
+      ],
+      NOW,
+    )
+
+    // The position the backend stores with an opinion is the holder's LAST turn in the pass.
+    expect(composeRunGraph(state, null).getNodeAttribute('ds-1:qh:1:D. Weber', 'stance')).toBe('POSITIVE')
+  })
+
+  it('leaves the position unseated when the stored events carry no turn for the holder — never a guess', () => {
+    const state = fold(
+      [
+        {
+          type: 'commit',
+          round: 1,
+          opinions: 1,
+          edges: 1,
+          written_nodes: [{ key: 'ds-1:qh:1:D. Weber', label: 'Opinion', name: 'D. Weber · pass 1' }],
+          written_links: [{ from: 'ds-1:D. Weber', to: 'ds-1:qh:1:D. Weber', kind: 'STATED' }],
+        },
+      ],
+      NOW,
+    )
+
+    expect(composeRunGraph(state, null).getNodeAttribute('ds-1:qh:1:D. Weber', 'stance')).toBeUndefined()
+  })
+
   it('keeps an entry of an unknown kind rather than dropping it', () => {
     const state = fold(
       [
