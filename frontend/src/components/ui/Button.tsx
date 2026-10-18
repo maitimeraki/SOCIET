@@ -9,7 +9,7 @@ export type ButtonSize = 32 | 40
 // rule and danger's route outline are boundaries, so every label stays in ink (addendum §2).
 const VARIANT: Record<ButtonVariant, string> = {
   // primary — the route button: the label rides a vermilion rule along the foot of an ink rectangle.
-  primary: 'border border-ink-3 border-b-2 border-b-strong text-ink hover:bg-accent-soft',
+  primary: 'border border-ink-3 border-b-2 border-b-border-strong text-ink hover:bg-accent-soft',
   // secondary — the ink outline. --ink-3 measures 4.54:1 on the sheet, clearing SC 1.4.11 (addendum §1).
   secondary: 'border border-ink-3 text-ink hover:border-ink hover:bg-ground-2',
   // tertiary — the underlined measurement link: mono, ruled beneath, no box and so no registration
@@ -18,7 +18,7 @@ const VARIANT: Record<ButtonVariant, string> = {
   ghost:
     'font-measurement text-mono text-ink-2 underline underline-offset-4 decoration-ink-3 hover:text-ink hover:decoration-accent',
   // danger — the warning stamp: a route rule, ink label.
-  danger: 'border border-strong text-ink hover:bg-danger/10',
+  danger: 'border border-border-strong text-ink hover:bg-danger/10',
 }
 
 // §6 The registration mark: a small hairline corner tick, one corner, present on the stamped variants.
