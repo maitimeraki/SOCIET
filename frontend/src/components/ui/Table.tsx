@@ -6,7 +6,7 @@ import type { ReactNode } from 'react'
 //
 // THE COLUMN CONVENTION, in full — the frozen API cannot enforce it, so the caller applies it:
 //   · any figure that is a measurement  → the mono face (`font-measurement text-mono`)
-//   · a LIVE value                      → `text-datum` (5.39:1 on the sheet, so legal as text)
+//   · a LIVE value                      → `text-accent` (5.39:1 on the sheet, so legal as text)
 //   · a SETTLED value                   → the body ink the <tbody> already sets
 // The table itself guarantees only that the figures line up (`tnum`); it cannot know which column is
 // which. See `common/RunTable.tsx` for the convention in use.
@@ -16,7 +16,7 @@ const RULED =
 export default function Table({ head, children, foot, className = '' }: { head: ReactNode; children: ReactNode; foot?: ReactNode; className?: string }) {
   return (
     <table className={`tnum w-full border-collapse text-body ${RULED} ${className}`}>
-      <thead className="sticky top-0 bg-survey-paper-2 text-label uppercase text-ink-3">{head}</thead>
+      <thead className="sticky top-0 bg-ground-2 text-label uppercase text-ink-3">{head}</thead>
       <tbody className="text-ink-2">{children}</tbody>
       {foot ? <tfoot>{foot}</tfoot> : null}
     </table>

@@ -10,7 +10,7 @@ export default function Tabs({ items, active, onSelect }: { items: TabItem[]; ac
           aria-selected={item.key === active}
           onClick={() => onSelect(item.key)}
           className={`px-3 py-2 text-body transition-colors ${
-            item.key === active ? 'text-ink shadow-[inset_0_-2px_0_0_var(--color-datum)]' : 'text-ink-2 hover:text-ink'
+            item.key === active ? 'text-ink shadow-[inset_0_-2px_0_0_var(--color-accent)]' : 'text-ink-2 hover:text-ink'
           }`}
         >
           {item.label}

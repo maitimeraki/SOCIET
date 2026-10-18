@@ -34,7 +34,7 @@ export default function NumberField({
         const next = Number(event.target.value)
         if (!Number.isNaN(next)) onChange(clamp(next))
       }}
-      className="corner-tick tnum h-9 w-24 rounded-[4px] border border-ink-3 bg-survey-paper-2 px-2 text-mono text-ink focus:border-datum"
+      className="corner-tick tnum h-9 w-24 rounded-[4px] border border-ink-3 bg-ground-2 px-2 text-mono text-ink focus:border-accent"
     />
   )
 }

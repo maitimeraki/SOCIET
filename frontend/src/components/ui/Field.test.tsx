@@ -38,12 +38,12 @@ describe('the field notebook', () => {
     expect(plain).not.toContain('field-invalid')
   })
 
-  it('announces the error and keeps the message in ink, not in the route hue', () => {
+  it('announces the error and keeps the message in ink, not in the danger hue', () => {
     const html = renderToStaticMarkup(<Field label="Name" error="That name is taken."><Input /></Field>)
     expect(html).toContain('role="alert"')
     expect(html).toContain('That name is taken.')
     expect(html).toContain('text-ink-2')
-    expect(html).not.toContain('text-route')
+    expect(html).not.toContain('text-danger')
   })
 
   it('keeps the note out of the label, so it describes the control rather than naming it (F4)', () => {

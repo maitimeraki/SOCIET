@@ -6,7 +6,7 @@ import type { InputHTMLAttributes } from 'react'
 // corner registration tick, which the control paints itself so it registers on the control's own
 // corner whether or not a `Field` wraps it.
 const BASE =
-  'corner-tick h-9 w-full border-b border-ink-3 bg-transparent px-0.5 text-body text-ink placeholder:text-ink-3 focus:border-datum aria-[invalid=true]:border-route'
+  'corner-tick h-9 w-full border-b border-ink-3 bg-transparent px-0.5 text-body text-ink placeholder:text-ink-3 focus:border-accent aria-[invalid=true]:border-danger'
 
 export default function Input({
   className = '',
