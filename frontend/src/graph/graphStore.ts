@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import type { WrittenLink, WrittenNode } from '../run/events'
 
 /** A graph entity. Identity is `id` — the same entity in two chunks is ONE node. */
 export interface GraphNode {
@@ -37,6 +38,22 @@ export interface GraphSnapshot extends GraphDelta {
   labels: string[]
 }
 
+/**
+ * An expert the debate stream seats — the two halves of the backend's Persona identity. The map
+ * keys the entry exactly as the backend keys the stored Persona (`{dataset_id}:{name}`), so the
+ * `STATED`/`REACTED_TO` connections a `commit` reports land on it.
+ */
+export interface ExpertIdentity {
+  datasetId: string
+  name: string
+}
+
+/** The Persona key the backend merges under — `society_memory._persona_key`, reproduced verbatim. */
+export const expertKey = (expert: ExpertIdentity): string => `${expert.datasetId}:${expert.name}`
+
+/** An expert the store renders as an entry. */
+const EXPERT_TYPE = 'Expert'
+
 interface GraphStoreState {
   nodes: Record<string, GraphNode>
   edges: Record<string, GraphEdge>
@@ -50,6 +67,10 @@ interface GraphStoreState {
   mergeDelta: (delta: GraphDelta) => void
   applySnapshot: (snapshot: GraphSnapshot) => void
   mergeVocabulary: (labels: string[]) => void
+  /** Fold one expert the debate stream seated into the one map. Idempotent on the Persona key. */
+  mergeExpert: (expert: ExpertIdentity) => void
+  /** Fold one commit's written entries and connections into the one map, verbatim (D7). */
+  mergeOpinions: (nodes: WrittenNode[], links: WrittenLink[]) => void
 }
 
 /**
@@ -99,6 +120,12 @@ export const labelColor = (index: number): string => PALETTE_SLOTS[index % PALET
 
 const edgeKey = (edge: GraphEdge): string => `${edge.source}|${edge.target}|${edge.label}`
 
+/** A written entry as the store holds it: the backend's key is the id, its name and kind become the label and type. */
+const asGraphNode = (node: WrittenNode): GraphNode => ({ id: node.key, label: node.name, type: node.label })
+
+/** A written connection as the store holds it — endpoints and kind verbatim. */
+const asGraphEdge = (link: WrittenLink): GraphEdge => ({ source: link.from, target: link.to, label: link.kind })
+
 const upsertNodes = (existing: Record<string, GraphNode>, incoming: GraphNode[]): Record<string, GraphNode> => {
   const next = { ...existing }
   for (const node of incoming) next[node.id] = node
@@ -146,4 +173,17 @@ export const useGraphStore = create<GraphStoreState>((set) => ({
     })),
 
   mergeVocabulary: (incoming) => set((state) => ({ labels: mergeLabels(incoming, state.labels) })),
+
+  mergeExpert: (expert) =>
+    set((state) => ({
+      nodes: upsertNodes(state.nodes, [{ id: expertKey(expert), label: expert.name, type: EXPERT_TYPE }]),
+      version: state.version + 1,
+    })),
+
+  mergeOpinions: (nodes, links) =>
+    set((state) => ({
+      nodes: upsertNodes(state.nodes, nodes.map(asGraphNode)),
+      edges: upsertEdges(state.edges, links.map(asGraphEdge)),
+      version: state.version + 1,
+    })),
 }))

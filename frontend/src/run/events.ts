@@ -98,6 +98,26 @@ export interface DissentingView {
   view: string
 }
 
+/**
+ * An entry a `commit` event reports the transaction wrote — taken verbatim (D7). `key` is the
+ * identity the write MERGEs under, `label` the entry's kind, `name` its short display label.
+ */
+export interface WrittenNode {
+  key: string
+  label: string
+  name: string
+}
+
+/**
+ * A connection a `commit` event reports the transaction wrote — taken verbatim (D7). `from`/`to`
+ * are the endpoints' keys as the backend writes them, `kind` the relation name.
+ */
+export interface WrittenLink {
+  from: string
+  to: string
+  kind: string
+}
+
 export interface EvidenceItem {
   entity: string
   claim: string
@@ -123,7 +143,18 @@ export type RunEvent =
   | { type: 'agent'; profile: AgentProfile; index: number; total: number }
   | { type: 'pair_turn'; pair_id: string; response: string | null; error: string | null }
   | { type: 'round'; round: number; pairs: PairInfo[]; turns: TurnInfo[]; consensus?: ConsensusInfo | null }
-  | { type: 'commit'; round: number; opinions: number; edges: number; failed?: boolean; error?: string }
+  | {
+      type: 'commit'
+      round: number
+      opinions: number
+      edges: number
+      /** The entries the transaction wrote, verbatim — the map mirrors stored truth (D7). */
+      written_nodes?: WrittenNode[]
+      /** The connections the transaction wrote, verbatim. */
+      written_links?: WrittenLink[]
+      failed?: boolean
+      error?: string
+    }
   | { type: 'activation'; round: number; agents: string[]; reasons: Record<string, string> }
   | {
       type: 'complete'

@@ -1,5 +1,6 @@
-import { describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import Graph from 'graphology'
+import { useGraphStore } from '../../graph/graphStore'
 import type { GraphEdge, GraphLabel, GraphNode } from '../../graph/graphStore'
 import {
   MAX_ANIMATED_NODES,
@@ -298,5 +299,55 @@ describe('graphTextFallback', () => {
 
     expect(lines).toEqual(['Glucose (Molecule)', 'Respiration (Process)', 'ATP (Molecule)'])
     expect(omitted).toBe(0)
+  })
+})
+
+// One store fed by two streams (D14): the corpus layer folds in from the graph stream, the expert
+// and opinion layers fold in from the debate stream. The store is a module singleton — reset it
+// between cases so counts are absolute.
+describe('the one map, fed by both streams', () => {
+  beforeEach(() => useGraphStore.setState({ nodes: {}, edges: {}, labels: [], version: 0 }))
+
+  it('an agent event seats exactly one entry, keyed as the backend keys the person', () => {
+    useGraphStore.getState().mergeExpert({ datasetId: 'ds-1', name: 'D. Weber' })
+
+    expect(Object.keys(useGraphStore.getState().nodes)).toEqual(['ds-1:D. Weber'])
+  })
+
+  it('a commit seats one entry per written node and one connection per written link, keyed as the backend keyed them', () => {
+    useGraphStore.getState().mergeOpinions(
+      [
+        { key: 'ds-1:qh:1:D. Weber', label: 'Opinion', name: 'D. Weber · pass 1' },
+        { key: 'ds-1:qh:1:M. Chen', label: 'Opinion', name: 'M. Chen · pass 1' },
+      ],
+      [
+        { from: 'ds-1:D. Weber', to: 'ds-1:qh:1:D. Weber', kind: 'STATED' },
+        { from: 'ds-1:M. Chen', to: 'ds-1:qh:1:M. Chen', kind: 'STATED' },
+      ],
+    )
+
+    const { nodes, edges } = useGraphStore.getState()
+    expect([Object.keys(nodes), Object.keys(edges)]).toEqual([
+      ['ds-1:qh:1:D. Weber', 'ds-1:qh:1:M. Chen'],
+      ['ds-1:D. Weber|ds-1:qh:1:D. Weber|STATED', 'ds-1:M. Chen|ds-1:qh:1:M. Chen|STATED'],
+    ])
+  })
+
+  it('folding the same commit twice adds nothing the second time', () => {
+    const nodes = [{ key: 'ds-1:qh:1:D. Weber', label: 'Opinion', name: 'D. Weber · pass 1' }]
+    const links = [{ from: 'ds-1:D. Weber', to: 'ds-1:qh:1:D. Weber', kind: 'STATED' }]
+
+    useGraphStore.getState().mergeOpinions(nodes, links)
+    useGraphStore.getState().mergeOpinions(nodes, links)
+
+    const { nodes: after, edges: afterEdges } = useGraphStore.getState()
+    expect([Object.keys(after).length, Object.keys(afterEdges).length]).toEqual([1, 1])
+  })
+
+  it('the corpus layer and the expert layer share the one store, neither clearing the other', () => {
+    useGraphStore.getState().mergeDelta({ nodes: [{ id: 'ds-1:steel tariffs', label: 'steel tariffs', type: 'Topic' }], edges: [] })
+    useGraphStore.getState().mergeExpert({ datasetId: 'ds-1', name: 'D. Weber' })
+
+    expect(Object.keys(useGraphStore.getState().nodes).sort()).toEqual(['ds-1:D. Weber', 'ds-1:steel tariffs'])
   })
 })
