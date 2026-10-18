@@ -3,9 +3,11 @@
  * (plan §6, the cheap i18n prep). Two laws bind this file:
  *
  *  1. **The honesty law** (task-17 addendum): no fabricated commercial claims, customers,
- *     testimonials, benchmarks, logos, or media. Where an asset is absent, the copy says so.
+ *     testimonials, benchmarks, logos, or media. Where an asset is absent, the copy says so, and
+ *     where proof is wanted the section proves the mechanism by showing the mechanism.
  *  2. **The copy law** (§13): no customer-visible string carries banned machinery words — the
- *     vocabulary is the world's: the material, the map, the panel, the argument, the verdict.
+ *     vocabulary is the customer's: decision, material/documents, experts/panel, position, pass,
+ *     answer, opposing case, sources.
  */
 
 export const meta = {
@@ -34,144 +36,169 @@ export const hero = {
 } as const
 
 /**
- * The section bodies are Task 6.2's. Each `note` is the section's honest, minimal state — real
- * product truth, never a promise the tool cannot keep.
+ * The lower sections. There are no recordings, captures, customers, logos, testimonials or
+ * benchmarks to show, so every section proves the mechanism itself: what the product does, what it
+ * leaves behind, and the limits that come with it. Nothing here imitates evidence.
  */
 export const sections = {
-  demo: {
-    heading: 'The recording',
-    note: 'The demo recording is not published yet. This frame is wired for it: a real, unedited capture of a decision, with captions and a transcript.',
-    poster: 'recording coming',
-    frameLabel: 'Recording',
-    /** The honest caption under the plate — the frame is real, the recording is not. */
-    plateCaption: 'No recording yet — this frame is wired for a real, unedited capture.',
-    transcriptLabel: 'Transcript',
-    transcript: 'The transcript lands with the recording.',
+  open: {
+    heading: 'The decision, in the open',
+    note: 'There is no recording on this page yet, and nothing here pretends to be one. What the product does is visible while it runs, so the work is shown rather than described after the fact.',
+    stagesTitle: 'While a decision runs',
+    /** Three moments a person can watch. Each is product behaviour, not a re-enactment. */
+    stages: [
+      {
+        key: '1',
+        title: 'Your material, being read',
+        body: 'Add the documents the decision turns on. As each one is read, what it contains appears on the map — the same map you will use to judge the answer.',
+      },
+      {
+        key: '2',
+        title: 'The panel, arguing in passes',
+        body: 'The experts who argue are drawn from your documents, not from a fixed cast. Each pass pairs them over what their material shares; you watch the pairings, the turns, and the positions change.',
+      },
+      {
+        key: '3',
+        title: 'The answer, filed with its case',
+        body: 'The decision closes on an answer, the opposing case, the position each expert took, and the sources each argued from. Nothing is summarised away to make the answer look tidier.',
+      },
+    ],
+    /** The recording is absent. Saying so is the honest state — never a player or a frame. */
+    honesty:
+      'No recording yet. When one exists it will be an unedited capture of a real decision, not a re-enactment.',
   },
   howItWorks: {
     heading: 'How it works',
-    note: 'The mechanism in four steps — the material → the panel → the argument → the verdict. Each step keys to its legend.',
-    traverseLegendTitle: 'The order',
-    /** The four steps. Each body is a claim the product actually keeps. */
+    note: 'Four movements, always in the same order: add your material, convene the panel, let it argue in passes, file the answer.',
+    orderTitle: 'The order',
+    /** The four movements. Each body is a claim the product actually keeps. */
     steps: [
       {
         key: 'A',
         title: 'The material',
-        body: 'You bring the documents your experts would have read. Every piece is read into a map of your material. No documents, no map; no map, no panel.',
+        body: 'You add your own documents. They are read into one map of your material, which stays visible from the first document to the filed answer.',
       },
       {
         key: 'B',
         title: 'The panel',
-        body: 'The panel is drawn from your map, never pre-set: candidates are ranked against your question, and each selected one is written up into an expert with a position, a confidence, and a conviction.',
+        body: 'The experts are drawn from that material, never from a fixed cast. Each one is written up with the position it takes, its confidence, and its conviction.',
       },
       {
         key: 'C',
-        title: 'The argument',
-        body: 'Each pass pairs experts over what they share — a query against the map, not a script — and the pairs argue. Every turn is written back to the map before the next pass reads it.',
+        title: 'The passes',
+        body: 'Experts are paired over what their documents share and argue in passes. Every turn is written back to the map before the next pass reads it, so a later view can answer an earlier one.',
       },
       {
         key: 'D',
-        title: 'The verdict',
-        body: 'Every turn is weighted by confidence × conviction × CIOR, and the verdict is the weighted share per position. Dissent is kept, not averaged: a plurality is filed as a plurality.',
+        title: 'The answer',
+        body: 'The panel’s views are weighted by confidence and conviction, and the answer is the weighted share behind each position. A split panel is filed as a split, with the opposing case kept whole.',
       },
     ],
-    /** The legend of what you get: five keyed lines, symbol + word. */
+    /** The five things a finished decision leaves behind. */
     gainsTitle: 'What you get',
     gains: [
-      { key: '1', label: 'verdict', body: 'The position the weighted panel settles on, filed as a document.' },
-      { key: '2', label: 'confidence', body: 'A weighted confidence, not a vibe: the share behind the verdict, with the figures it came from.' },
-      { key: '3', label: 'dissent', body: 'The case against, kept whole — the minority readings, never averaged away.' },
-      { key: '4', label: 'provenance', body: 'A contents map back to your material: every claim traceable to the section it was read from.' },
-      { key: '5', label: 'replay', body: 'The whole decision, kept — reopen a finished one and the map redraws exactly as it ended.' },
+      { key: '1', label: 'the answer', body: 'The position the weighted panel settles on, filed as a document.' },
+      { key: '2', label: 'the opposing case', body: 'The strongest case against the answer, kept whole rather than averaged away.' },
+      { key: '3', label: 'the positions', body: 'The position each expert took, and how the panel divided behind the answer.' },
+      { key: '4', label: 'the sources', body: 'The material each expert argued from, traceable to the section it was read from.' },
+      { key: '5', label: 'the record', body: 'Every decision is kept; reopen one and it renders exactly as it ended, pass by pass.' },
     ],
   },
   comparison: {
     heading: 'How it differs',
-    note: 'Societas against a single chatbot and a scripted assistant — on structure, provenance, dissent, and verdict confidence.',
-    approachColumn: 'Approach',
-    columns: ['Structure', 'Provenance', 'Dissent', 'Verdict confidence'],
-    /** Truthful structural differences only — no invented competitor capability, no benchmark. */
+    note: 'A comparison of mechanisms, not of vendors: one answer from one voice, against a panel decision drawn from your material.',
+    approachColumn: 'What a decision needs',
+    columns: ['A single answer', 'A panel decision'],
+    /** Defensible structural differences only — no named third party, no invented capability. */
     rows: [
       {
-        label: 'Single chatbot',
+        label: 'Who forms the view',
         cells: [
-          'One assistant, one context window — a single answer, no panel.',
-          'None recorded; the answer cites nothing.',
-          'None — one voice.',
-          'None measured.',
+          'One voice, answering once.',
+          'Experts drawn from your own documents, each with a position.',
         ],
       },
       {
-        label: 'Scripted assistant',
+        label: 'What a claim rests on',
         cells: [
-          'A fixed sequence of steps; the steps are authored, not drawn from your material.',
-          'Whatever the chain passes along — nothing kept, nothing to trace.',
-          'Dropped between steps.',
-          'None measured.',
+          'The answer, as written.',
+          'The source in your material that the expert argued from.',
         ],
       },
       {
-        label: 'Societas',
+        label: 'What happens to disagreement',
         cells: [
-          'A panel drawn from your own material; experts paired over what they share, pass after pass.',
-          'Every turn written back to the map it was drawn from, with a contents map to the source.',
-          'Kept and shown — the minority readings, never averaged away.',
-          'A CIOR-weighted share per position.',
+          'One voice, one answer.',
+          'The opposing case is kept whole and shown beside the answer.',
+        ],
+      },
+      {
+        label: 'What confidence means',
+        cells: [
+          'Whatever the answer says about itself.',
+          'The weighted share of the panel behind the position, with the figures it came from.',
+        ],
+      },
+      {
+        label: 'What you keep',
+        cells: [
+          'The answer.',
+          'A filed decision — the answer, opposing case, positions and sources — that reopens as it ended.',
         ],
       },
     ],
     reconciliation:
-      'The difference is structural, not a matter of quality: where the debaters come from, what each turn leaves behind, and whether the case against survives.',
+      'This contrasts how two mechanisms are built, not what any other product does. No third-party capability is claimed or measured.',
   },
   trust: {
-    heading: 'Your record stays yours',
-    note: 'Documents stay in your map. Your data is never used for training. Your history stays yours.',
-    /** Each line is a claim the tool can keep — no certification it does not hold. */
-    lines: [
+    heading: 'What this tool does — and does not',
+    note: 'No badges, testimonials or certifications are shown, because none exist. These are properties built into how the product works — and the limits that come with them.',
+    doesTitle: 'What it does',
+    does: [
       {
-        label: 'Documents stay in your map',
-        body: 'The documents, the map, and every decision stay on the machine running the tool.',
+        label: 'It runs on your machine',
+        body: 'The documents, the map and every decision stay on the machine running the tool.',
       },
       {
-        label: 'No training on your data',
-        body: 'Your data is never used to train anything. The text your experts read is sent only to the provider you configure.',
+        label: 'Every claim has a source',
+        body: 'Each answer names the material each expert argued from, traceable to the section it was read from.',
       },
       {
-        label: 'Your history is yours',
-        body: 'Every decision is kept and reopens exactly as it ended, pass by pass — export the whole thing as JSON whenever you want it.',
-      },
-      {
-        label: 'You choose the provider',
-        body: 'Over 100 providers through LiteLLM, or Ollama on your own machine — point it there and nothing leaves.',
+        label: 'Every decision is kept',
+        body: 'A finished decision reopens and renders exactly as it ended, pass by pass.',
       },
     ],
-    /** May appear only in this form, marked unverified — never implied complete. */
-    soc2: 'SOC 2 in progress — not yet certified.',
-    soc2Marker: 'unverified',
+    doesNotTitle: 'What it does not do',
+    doesNot: [
+      {
+        label: 'It cannot invent a panel',
+        body: 'The experts are drawn only from what you add. With no documents there is no panel and no answer.',
+      },
+      {
+        label: 'It does not guarantee the answer',
+        body: 'Confidence is the weighted share behind the position. It measures the panel, not the truth; a split is filed as a split.',
+      },
+      {
+        label: 'It does not keep the text from your provider',
+        body: 'The text your experts read and write goes to the provider you configure. Point it at a provider on your own machine if it must not leave.',
+      },
+    ],
   },
   record: {
     heading: 'The record',
-    note: 'A finished decision shown as a document — the verdict, the confidence, the dissent kept, and the contents map back to the material.',
-    /** The sample decision is scripted, like any authored example — labelled wherever it is shown. */
-    syntheticLabel: 'Sample decision — a scripted example, not a live one',
+    note: 'Every decision is filed as a document. This is the shape of that document, not a sample decision — no invented answer, no borrowed source.',
     filedLabel: 'Decision · filed',
-    fixLabel: 'The verdict',
-    confidenceLabel: 'Confidence',
-    closureLabel: 'closure',
-    verdictWord: 'POSITIVE',
-    confidence: 0.82,
-    closure: 0.82,
-    dissentLabel: 'Dissent, kept',
-    dissent: 'NEGATIVE — margin erosion in the first two years outruns the tariff gain.',
-    contentsLabel: 'Contents map',
-    contents: [
-      { entity: 'tariff alignment', source: 'EU Trade Brief 2026 · §3.2' },
-      { entity: 'demand depth', source: 'Market Sizing Workbook · Demand' },
-      { entity: 'compliance risk', source: 'Data-Readiness Note · §1' },
+    shapeLabel: 'What the document holds',
+    /** The fields of a filed decision. Labelled as structure, never populated with invented content. */
+    fields: [
+      { key: 'answer', label: 'The answer', body: 'The position the panel settled on.' },
+      { key: 'case', label: 'The opposing case', body: 'The strongest case against it, kept whole.' },
+      { key: 'positions', label: 'The positions', body: 'The position each expert took, and how the panel divided.' },
+      { key: 'sources', label: 'The sources', body: 'The material each expert argued from, with the section it came from.' },
+      { key: 'passes', label: 'The passes', body: 'Every turn in order, so reopening the decision shows exactly what was argued.' },
     ],
-    /** The plate holds the figure's aspect until the real capture replaces it. */
-    captureLabel: 'The map and the verdict',
-    captureNote: 'No capture yet — this space is held for the real thing.',
+    keepLabel: 'Kept, not summarised',
+    keepNote: 'The record is the same document on screen and when it leaves the app. A finished decision reopens as it ended.',
   },
   faq: {
     heading: 'Questions owners ask',
@@ -179,43 +206,43 @@ export const sections = {
     items: [
       {
         q: 'What is Societas?',
-        a: 'A local tool that reads the documents your experts would have read, maps what is in them, and convenes a panel of experts drawn from that material to argue one question to a weighted verdict.',
+        a: 'A local tool that reads the documents your experts would have read, maps what is in them, and convenes a panel of experts drawn from that material to argue one question to an answer.',
       },
       {
         q: 'Do I need my own documents?',
-        a: 'Yes. The panel is built from your material: no documents, no map; no map, no panel. Add PDFs, Word files, Markdown, text, or a web page to begin.',
+        a: 'Yes. The panel is built from your material: no documents, no panel. Add the documents the decision turns on to begin.',
       },
       {
         q: 'What happens when I start a decision?',
-        a: 'Your question is read for what it is asking; candidates are ranked against your map; each selected one is written up into an expert; then passes begin — experts are paired over what they share, answer with a position and a confidence, and every turn is written to the map before the next pass reads it.',
+        a: 'Your question is read for what it is asking. Possible experts are weighed against your material; each selected one is written up with a position and a confidence; then the passes begin — experts are paired over what they share, argue, and every turn is written back to the map before the next pass reads it.',
       },
       {
-        q: 'How is the verdict decided?',
-        a: 'Every turn is weighted by the expert’s confidence, conviction, and CIOR; the verdict is the weighted share per position. If the dominant share stays under the convergence threshold, the answer says so plainly: a plurality, not a consensus.',
+        q: 'How is the answer decided?',
+        a: 'Each expert’s view is weighted by its confidence and conviction, and the answer is the weighted share behind each position. If no position has a clear majority, the answer says so plainly: a split, not a verdict.',
       },
       {
         q: 'Can experts change their minds?',
-        a: 'Yes, and you can watch it happen: later passes read what earlier passes wrote, and each expert’s final position is simply its last turn.',
+        a: 'Yes, and you can watch it happen: later passes read what earlier passes wrote, and each expert’s final position is its last turn.',
       },
       {
         q: 'Where does my data live?',
-        a: 'This is a local tool: the documents, the map, and every decision stay on the machine running it. The text your experts read and write goes to the provider you configure — point it at a local one if you want everything to stay home.',
+        a: 'The documents, the map and every decision stay on the machine running the tool. The text your experts read and write goes to the provider you configure — point it at a provider on your own machine if you want it to stay home.',
       },
       {
         q: 'Which providers work?',
-        a: 'Over 100, through LiteLLM: OpenAI, Anthropic, Azure, Bedrock, or Ollama on your own machine. Configure one and the decision runs against it.',
+        a: 'The one you configure. The product is not tied to a single provider, and a local provider keeps the text on your machine.',
       },
       {
         q: 'How long does a decision take?',
-        a: 'Reading your material takes about a minute per ten documents; the argument is a few minutes. Both show live progress — nothing is a black box.',
+        a: 'It runs while you watch, and progress is shown as it happens; the time depends on how much material you add and the provider you choose. Nothing is hidden until the end.',
       },
       {
         q: 'Can I see what happens inside?',
-        a: 'That is the point of the tool: the panel shows your question becoming experts, the floor shows pairings and turns live, and the details expose the selection scores, pairs, turns, warnings, and the raw event log.',
+        a: 'That is the point of the tool: you can see why each expert was chosen, who argued with whom, what each one said, and the sources behind the answer.',
       },
       {
         q: 'What happens to finished decisions?',
-        a: 'They are kept: reopen one and it renders exactly as it ended, pass by pass, with its verdict, warnings, and final positions — or export the whole thing as JSON.',
+        a: 'They are kept. Reopen one and it renders exactly as it ended, pass by pass, with its answer, opposing case, positions and sources — or take the document away.',
       },
     ],
   },

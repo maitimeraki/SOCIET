@@ -2,40 +2,36 @@ import { describe, expect, it } from 'vitest'
 // No jsdom in this repo — render to static markup in Node (see LandingPage.test.tsx).
 import { renderToStaticMarkup } from 'react-dom/server'
 import HowItWorks from './HowItWorks'
-import { sections } from './copy'
 
 const html = renderToStaticMarkup(<HowItWorks />)
 
-describe('the traverse — four ruled steps', () => {
+describe('the mechanism — four movements in order', () => {
   it('renders every step title and its real-behaviour claim', () => {
-    for (const step of sections.howItWorks.steps) {
-      expect(html).toContain(step.title)
-      expect(html).toContain(step.body)
+    for (const title of ['The material', 'The panel', 'The passes', 'The answer']) {
+      expect(html).toContain(title)
     }
+    expect(html).toContain('The order')
   })
 
-  it('keys the steps to the legend and names the mechanism honestly', () => {
-    expect(html).toContain(sections.howItWorks.traverseLegendTitle)
-    // The argument step's own claim, independent of its title: the pairing pass is a query against
-    // the map, not an authored script.
-    expect(html).toContain('Each pass pairs experts over what they share')
-    // The weighting is stated as it is computed — no invented figure.
-    expect(html).toContain('CIOR')
+  it('states the product truth: your documents, your panel, passes, a kept answer', () => {
+    expect(html).toContain('You add your own documents')
+    expect(html).toContain('The experts are drawn from that material')
+    expect(html).toContain('argue in passes')
+    expect(html).toContain('opposing case')
+    expect(html).toContain('sources')
+  })
+
+  it('weights in plain words and invents no figure', () => {
+    expect(html).toContain('weighted by confidence and conviction')
+    expect(html).not.toMatch(/\d+%/)
   })
 })
 
-describe('the legend of what you get', () => {
-  it('renders all five keyed lines, symbol + word', () => {
-    expect(html).toContain(sections.howItWorks.gainsTitle)
-    for (const gain of sections.howItWorks.gains) {
-      expect(html).toContain(gain.label)
-      expect(html).toContain(gain.body)
+describe('what you get', () => {
+  it('renders all five lines the decision leaves behind', () => {
+    expect(html).toContain('What you get')
+    for (const label of ['the answer', 'the opposing case', 'the positions', 'the sources', 'the record']) {
+      expect(html).toContain(label)
     }
-  })
-
-  it('draws a mark beside every line', () => {
-    // Each gain line carries an authored mark; the section draws four traverse marks plus five gain
-    // marks, so the svg count is a real floor, not a single decorative icon.
-    expect(html.split('<svg').length - 1).toBeGreaterThanOrEqual(9)
   })
 })

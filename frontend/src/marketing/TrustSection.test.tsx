@@ -1,26 +1,37 @@
 import { describe, expect, it } from 'vitest'
 import { renderToStaticMarkup } from 'react-dom/server'
 import TrustSection from './TrustSection'
-import { sections } from './copy'
 
 const html = renderToStaticMarkup(<TrustSection />)
 
-describe('the trust lines — only claims the tool can keep', () => {
-  it('renders every ruled line with its mark', () => {
-    for (const line of sections.trust.lines) {
-      expect(html).toContain(line.label)
-      expect(html).toContain(line.body)
+describe('trust — the mechanism and its limits, not borrowed credibility', () => {
+  it('renders what the tool does', () => {
+    expect(html).toContain('What it does')
+    for (const label of ['It runs on your machine', 'Every claim has a source', 'Every decision is kept']) {
+      expect(html).toContain(label)
     }
   })
 
-  it('keeps the SOC 2 line in its one legal form, marked unverified', () => {
-    expect(html).toContain('SOC 2 in progress — not yet certified')
-    expect(html).toContain('unverified')
+  it('renders what the tool does not do', () => {
+    expect(html).toContain('What it does not do')
+    for (const label of [
+      'It cannot invent a panel',
+      'It does not guarantee the answer',
+      'It does not keep the text from your provider',
+    ]) {
+      expect(html).toContain(label)
+    }
   })
 
-  it('never implies a certification that does not exist', () => {
-    expect(html).not.toContain('SOC 2 certified')
-    expect(html).not.toContain('SOC 2 compliant')
-    expect(html).not.toContain('ISO 27001')
+  it('shows no logo, testimonial or certification claim', () => {
+    expect(html).not.toMatch(/SOC 2|ISO 27001/i)
+    expect(html).not.toMatch(/certified|compliant/i)
+    expect(html).not.toMatch(/trusted by/i)
+    expect(html).not.toContain('<img')
+  })
+
+  it('names the limits plainly', () => {
+    expect(html).toContain('not the truth')
+    expect(html).toContain('goes to the provider you configure')
   })
 })

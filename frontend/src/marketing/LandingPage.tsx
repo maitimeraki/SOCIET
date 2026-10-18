@@ -2,17 +2,17 @@ import { Link } from 'react-router-dom'
 import './marketing.css'
 import ComparisonTable from './ComparisonTable'
 import { footer, meta } from './copy'
-import DemoVideo from './DemoVideo'
 import Faq from './Faq'
 import Hero from './Hero'
 import HowItWorks from './HowItWorks'
+import ProofSection from './ProofSection'
 import RecordSheet from './RecordSheet'
 import TrustSection from './TrustSection'
 
 /**
  * `/` — the homepage (DSPEC §7.1, Persuade). The first viewport makes the claim and reserves the
- * proof region; the sections below it, in the spec's order, are honest and minimal; the footer
- * closes on the wordmark and the two real actions.
+ * capture region; the sections below it prove the mechanism, because no recording, customer proof
+ * or benchmark exists to borrow; the footer closes on the wordmark and the two real actions.
  */
 export default function LandingPage() {
   return (
@@ -20,8 +20,8 @@ export default function LandingPage() {
       <Hero />
 
       <div className="sheet-gutters space-y-16 pt-16">
-        <div id="field-recording">
-          <DemoVideo />
+        <div id="in-the-open">
+          <ProofSection />
         </div>
         <div id="how-it-works">
           <HowItWorks />

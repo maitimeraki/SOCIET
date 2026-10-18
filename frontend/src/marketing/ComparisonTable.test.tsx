@@ -1,30 +1,35 @@
 import { describe, expect, it } from 'vitest'
 import { renderToStaticMarkup } from 'react-dom/server'
 import ComparisonTable from './ComparisonTable'
-import { sections } from './copy'
 
 const html = renderToStaticMarkup(<ComparisonTable />)
 
-describe('the comparison — a real ruled table', () => {
-  it('adopts ui/Table: a thead, a tbody and the reconciliation foot', () => {
+describe('the comparison — mechanisms, not vendors', () => {
+  it('adopts ui/Table with a reconciliation foot', () => {
     expect(html).toContain('<table')
     expect(html).toContain('<thead')
     expect(html).toContain('<tbody')
     expect(html).toContain('<tfoot')
-    expect(html).toContain(sections.comparison.reconciliation)
+    expect(html).toContain('not what any other product does')
   })
 
-  it('states the three approaches and the four compared columns', () => {
-    for (const row of sections.comparison.rows) {
-      expect(html).toContain(row.label)
-      for (const cell of row.cells) expect(html).toContain(cell)
+  it('states the two mechanisms and every compared row', () => {
+    for (const column of ['A single answer', 'A panel decision']) expect(html).toContain(column)
+    for (const row of [
+      'Who forms the view',
+      'What a claim rests on',
+      'What happens to disagreement',
+      'What confidence means',
+      'What you keep',
+    ]) {
+      expect(html).toContain(row)
     }
-    for (const column of sections.comparison.columns) expect(html).toContain(column)
   })
 
-  it('names no competitor and measures nothing — truthful differentiators only', () => {
-    // No benchmark figure and no product name beyond the three approach classes.
+  it('names no third party, measures nothing, and says it is not a vendor comparison', () => {
     expect(html).not.toMatch(/\bvs\.?\b/i)
     expect(html).not.toMatch(/\d+%/)
+    expect(html).not.toMatch(/chatbot|assistant/i)
+    expect(html).toContain('No third-party capability is claimed or measured')
   })
 })

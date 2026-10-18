@@ -5,7 +5,7 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import { MemoryRouter } from 'react-router-dom'
 import LandingPage from './LandingPage'
 import * as copy from './copy'
-import { footer, hero, meta, sections } from './copy'
+import { footer, hero, meta } from './copy'
 
 const html = renderToStaticMarkup(
   <MemoryRouter>
@@ -14,7 +14,7 @@ const html = renderToStaticMarkup(
 )
 
 /** The first viewport ends where the first lower section begins. */
-const FIRST_VIEWPORT_END = 'id="field-recording"'
+const FIRST_VIEWPORT_END = 'id="in-the-open"'
 
 const firstViewport = () => {
   const end = html.indexOf(FIRST_VIEWPORT_END)
@@ -100,12 +100,12 @@ describe('the first viewport — the feeling, the proof, the action', () => {
 describe('the page below the first viewport', () => {
   it('renders every section heading in DSPEC §7.1 order, with a sane heading order', () => {
     const order = [
-      sections.demo.heading,
-      sections.howItWorks.heading,
-      sections.comparison.heading,
-      sections.trust.heading,
-      sections.record.heading,
-      sections.faq.heading,
+      'The decision, in the open',
+      'How it works',
+      'How it differs',
+      'What this tool does — and does not',
+      'The record',
+      'Questions owners ask',
     ]
     // Read the real <h2>s in document order — a substring search would match one heading inside
     // another ("The record" inside "The recording").
@@ -115,9 +115,24 @@ describe('the page below the first viewport', () => {
     expect(count(html, '<h1')).toBe(1)
   })
 
-  it('keeps the SOC 2 line in its one legal form — in progress, marked unverified', () => {
-    expect(html).toContain('SOC 2 in progress — not yet certified')
-    expect(html).toContain('unverified')
+  it('shows no borrowed credibility and no certification claim', () => {
+    // No logos, testimonials, case studies or certifications exist, so none may be implied.
+    expect(html).not.toMatch(/SOC 2|ISO 27001/i)
+    expect(html).not.toMatch(/certified|compliant/i)
+    expect(html).not.toMatch(/trusted by/i)
+  })
+
+  it('fabricates no evidence anywhere on the page', () => {
+    // No recording, capture, sample decision or benchmark figure stands in for proof.
+    expect(html).not.toContain('<img')
+    expect(html).not.toContain('<video')
+    expect(html).not.toContain('<source')
+    expect(html).not.toContain('.mp4')
+    expect(html).not.toMatch(/\d+%/)
+    expect(html).not.toContain('EU Trade Brief')
+    expect(html).not.toContain('Market Sizing Workbook')
+    expect(html).not.toContain('Data-Readiness Note')
+    expect(html).not.toContain('0.82')
   })
 
   it('closes on the title block with the wordmark and the real actions', () => {

@@ -35,6 +35,15 @@
   }
 }
 
+/* The card — the world's one material: white stock, a hairline edge, a low shadow. Used by the
+   lower sections, where the mechanism is shown as structure rather than as a screenshot. */
+.m-card {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  background: var(--color-canvas);
+  box-shadow: var(--shadow-raised);
+}
+
 /* The one primary action — the §3 accent ramp, white label on indigo. Colour is meaning: this is
    the only indigo surface in the first viewport. */
 .action {
