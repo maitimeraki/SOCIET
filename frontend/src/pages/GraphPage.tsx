@@ -16,7 +16,7 @@ import { fmtInt } from '../utils/format'
 
 type Phase = 'ontology' | 'build' | 'done' | 'failed'
 
-export default function GraphPage() {
+export default function GraphPage({ onFailureChange }: { onFailureChange?: (failed: boolean) => void }) {
   const navigate = useNavigate()
   const datasetId = useDraftStore((s) => s.datasetId)
   const setJobs = useDraftStore((s) => s.setJobs)
@@ -32,6 +32,12 @@ export default function GraphPage() {
     setProgress(job.progress)
     if (job.result) setResult(job.result)
   }, [])
+
+  // Report the failure up so the workspace rail shows a failed stage rather than a pulse that would
+  // contradict this body's JobError. The phase machine stays here; only the boolean leaves.
+  useEffect(() => {
+    onFailureChange?.(phase === 'failed')
+  }, [phase, onFailureChange])
 
   const run = useCallback(async () => {
     const draft = useDraftStore.getState()

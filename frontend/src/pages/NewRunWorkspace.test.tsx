@@ -31,7 +31,7 @@ const SUMMARY: MapSummary = {
   step: '',
 }
 
-const renderStep = (step: WorkspaceStep, state: PaneState = 'split') =>
+const renderStep = (step: WorkspaceStep, state: PaneState = 'split', failed = false) =>
   renderToStaticMarkup(
     <MemoryRouter initialEntries={[`/new?step=${step}`]}>
       <NewRunWorkspaceView
@@ -41,6 +41,7 @@ const renderStep = (step: WorkspaceStep, state: PaneState = 'split') =>
         onStateChange={() => {}}
         map={<div data-map-canvas />}
         summary={SUMMARY}
+        failed={failed}
       />
     </MemoryRouter>,
   )
@@ -53,6 +54,10 @@ function tagAround(html: string, marker: string): string {
 }
 
 const hostId = (html: string) => tagAround(html, `id="${HOST_ID}"`).match(/id="[^"]+"/)?.[0]
+
+/** Just the step rail's markup — the failure assertions must not trip on a body element (a running
+ *  StageLine also pulses). */
+const rail = (html: string) => html.slice(html.indexOf('<nav aria-label="Run stages"'), html.indexOf('</nav>') + 6)
 
 /** The label of the stage the rail marks current — the first `text-label` word after `aria-current`. */
 function currentLabel(html: string): string {
@@ -98,6 +103,23 @@ describe('one workspace, three steps — the map pane never unmounts (Ruling F22
 describe('the step indicator advances with the step (§9.4)', () => {
   it.each(STEPS)('%s marks its own stage current', (step) => {
     expect(currentLabel(renderStep(step))).toBe(STEP_LABEL[step])
+  })
+})
+
+describe('a failed step reads as failed in the rail, never as running (§9.4)', () => {
+  // The old GraphPage rail carried a `failed` marker (XCircle in `text-danger`); when it moved into
+  // the workspace the marker was lost, so a failure showed a *pulsing* dot beside the body's error —
+  // an indicator that contradicts the body. The step state now carries the failure signal.
+  it('carries the danger marker on the current step instead of the running pulse', () => {
+    const bar = rail(renderStep('graph', 'split', true))
+    expect(bar).toContain('text-danger')
+    expect(bar).not.toContain('animate-pulse')
+  })
+
+  it('still pulses while the step is running — the failure flag is what flips it', () => {
+    const bar = rail(renderStep('graph'))
+    expect(bar).toContain('animate-pulse')
+    expect(bar).not.toContain('text-danger')
   })
 })
 

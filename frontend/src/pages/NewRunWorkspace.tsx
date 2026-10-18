@@ -1,5 +1,5 @@
 /* eslint-disable react-refresh/only-export-components -- this module deliberately exports its pure helpers (the step resolver, the exported pure view) so the no-DOM suite can drive each step without a renderer. */
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import type { ReactNode } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import GraphCanvas from '../components/graph/GraphCanvas'
@@ -32,28 +32,50 @@ export function stepFromParam(value: string | null): WorkspaceStep {
   return value === 'graph' || value === 'society' ? value : 'ingest'
 }
 
-/** The rail the current step drives (§9.4): earlier steps settle, the current runs, later wait. */
-function stepStages(current: WorkspaceStep) {
+/** The rail the current step drives (§9.4): earlier steps settle, the current runs, later wait — and
+ *  a failed current step carries the danger marker, not a pulse that would contradict the body. */
+function stepStages(current: WorkspaceStep, failed: boolean) {
   const at = STEPS.indexOf(current)
   return STEPS.map((key, index) => ({
     key,
     label: STEP_LABELS[key],
-    state: index < at ? ('done' as const) : index === at ? ('running' as const) : ('pending' as const),
+    state:
+      index < at
+        ? ('done' as const)
+        : index === at
+          ? failed
+            ? ('failed' as const)
+            : ('running' as const)
+          : ('pending' as const),
   }))
 }
 
-function StepSurface({ step }: { step: WorkspaceStep }) {
-  if (step === 'graph') return <GraphPage />
+function StepSurface({
+  step,
+  onFailureChange,
+}: {
+  step: WorkspaceStep
+  onFailureChange?: (failed: boolean) => void
+}) {
+  if (step === 'graph') return <GraphPage onFailureChange={onFailureChange} />
   if (step === 'society') return <SocietyPage />
   return <IngestPage />
 }
 
 /** The step's surface under the step indicator — the activity pane's whole content (§9.4). */
-function StepWork({ step }: { step: WorkspaceStep }) {
+function StepWork({
+  step,
+  failed,
+  onFailureChange,
+}: {
+  step: WorkspaceStep
+  failed: boolean
+  onFailureChange?: (failed: boolean) => void
+}) {
   return (
     <div className="space-y-6">
-      <StageRail stages={stepStages(step)} activeKey={step} />
-      <StepSurface step={step} />
+      <StageRail stages={stepStages(step, failed)} activeKey={step} />
+      <StepSurface step={step} onFailureChange={onFailureChange} />
     </div>
   )
 }
@@ -65,6 +87,8 @@ export interface NewRunWorkspaceViewProps {
   onStateChange: (next: PaneState) => void
   map: ReactNode
   summary: MapSummary
+  /** True when the current step has failed — its rail stage carries the danger marker, not a pulse. */
+  failed?: boolean
 }
 
 /**
@@ -72,7 +96,15 @@ export interface NewRunWorkspaceViewProps {
  * static markup (Rulings F17/F23). The `map` node is handed to the pane's always-rendered host and
  * is never conditionally rendered, so no step change can unmount or remount it (Ruling F22).
  */
-export function NewRunWorkspaceView({ step, mapId, state, onStateChange, map, summary }: NewRunWorkspaceViewProps) {
+export function NewRunWorkspaceView({
+  step,
+  mapId,
+  state,
+  onStateChange,
+  map,
+  summary,
+  failed = false,
+}: NewRunWorkspaceViewProps) {
   return (
     <WorkspaceView
       mapId={mapId}
@@ -80,7 +112,7 @@ export function NewRunWorkspaceView({ step, mapId, state, onStateChange, map, su
       onStateChange={onStateChange}
       map={map}
       summary={{ ...summary, step: STEP_LABELS[step] }}
-      work={<StepWork step={step} />}
+      work={<StepWork step={step} failed={failed} />}
     />
   )
 }
@@ -101,6 +133,10 @@ export default function NewRunWorkspace() {
   const [params] = useSearchParams()
   const step = stepFromParam(params.get('step'))
   const navigate = useNavigate()
+  // The build step reports its own failure up (it owns the phase machine); the rail reads it so the
+  // indicator never says "running" beside the body's error. Gated to the graph step so a later step
+  // cannot inherit a stale marker.
+  const [failed, setFailed] = useState(false)
 
   const datasetId = useDraftStore((s) => s.datasetId)
   const graphJobId = useDraftStore((s) => s.graphJobId)
@@ -128,5 +164,12 @@ export default function NewRunWorkspace() {
 
   const map = datasetId && graphJobId ? <GraphCanvas datasetId={datasetId} jobId={graphJobId} /> : null
 
-  return <Workspace mapId={SESSION_MAP_ID} map={map} work={<StepWork step={step} />} summary={summary} />
+  return (
+    <Workspace
+      mapId={SESSION_MAP_ID}
+      map={map}
+      work={<StepWork step={step} failed={step === 'graph' && failed} onFailureChange={setFailed} />}
+      summary={summary}
+    />
+  )
 }
