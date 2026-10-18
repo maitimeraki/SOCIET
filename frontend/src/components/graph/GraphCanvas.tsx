@@ -9,6 +9,7 @@ import { CheckCircle, CircleNotch, Warning, XCircle } from '@phosphor-icons/reac
 import type { StreamStatus } from '../../api/ws'
 import { useGraphStore } from '../../graph/graphStore'
 import type { GraphEdge, GraphLabel, GraphNode } from '../../graph/graphStore'
+import { useVisibleLayers, visibleSlice } from '../../graph/layers'
 import { useGraphStream } from '../../graph/useGraphStream'
 import Skeleton from '../ui/Skeleton'
 
@@ -217,17 +218,20 @@ function useThrottledLayout(graph: Graph, nodeCount: number): () => void {
   }, [graph, nodeCount])
 }
 
-/** The store's only channel into the rendered graph — every delta re-syncs and re-settles. */
+/** The store's only channel into the rendered graph — every delta re-syncs and re-settles, and the
+ *  pane's layer toggles narrow the slice before it lands (a filter, never a rebuild). */
 function LiveGraph({ graph }: { graph: Graph }) {
   const nodes = useGraphStore((s) => s.nodes)
   const edges = useGraphStore((s) => s.edges)
   const labels = useGraphStore((s) => s.labels)
+  const layers = useVisibleLayers()
   const runLayout = useThrottledLayout(graph, Object.keys(nodes).length)
 
   useEffect(() => {
-    syncGraph(graph, nodes, edges, labels)
+    const visible = visibleSlice(nodes, edges, layers)
+    syncGraph(graph, visible.nodes, visible.edges, labels)
     runLayout()
-  }, [graph, nodes, edges, labels, runLayout])
+  }, [graph, nodes, edges, labels, layers, runLayout])
 
   return null
 }

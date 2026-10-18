@@ -5,6 +5,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom'
 import GraphCanvas from '../components/graph/GraphCanvas'
 import StageRail from '../components/common/StageRail'
 import Workspace, { WorkspaceView } from '../components/workspace/Workspace'
+import { mapCounts } from '../components/workspace/GraphPane'
 import type { MapSummary, PaneState } from '../components/workspace/Workspace'
 import { useDraftStore } from '../wizard/draftStore'
 import { useGraphStore } from '../graph/graphStore'
@@ -155,12 +156,8 @@ export default function NewRunWorkspace() {
 
   const nodes = useGraphStore((s) => s.nodes)
   const edges = useGraphStore((s) => s.edges)
-  const summary: MapSummary = {
-    // The corpus layer is the map today; the expert and opinion layers arrive in Phase 4 (Task 4.0).
-    counts: { entries: Object.keys(nodes).length, experts: 0, opinions: 0, connections: Object.keys(edges).length },
-    busiest: [],
-    step: STEP_LABELS[step],
-  }
+  // The text alternative reads the one store by kind, so all three layers count as they grow (§9.4).
+  const summary: MapSummary = { counts: mapCounts(nodes, edges), busiest: [], step: STEP_LABELS[step] }
 
   const map = datasetId && graphJobId ? <GraphCanvas datasetId={datasetId} jobId={graphJobId} /> : null
 
