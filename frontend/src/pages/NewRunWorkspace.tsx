@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react'
 import type { ReactNode } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import GraphCanvas from '../components/graph/GraphCanvas'
+import NodeDetailsDrawer from '../components/run/NodeDetailsDrawer'
 import StageRail from '../components/common/StageRail'
 import Workspace, { WorkspaceView } from '../components/workspace/Workspace'
 import { mapCounts } from '../components/workspace/GraphPane'
@@ -162,11 +163,17 @@ export default function NewRunWorkspace() {
   const map = datasetId && graphJobId ? <GraphCanvas datasetId={datasetId} jobId={graphJobId} /> : null
 
   return (
-    <Workspace
-      mapId={SESSION_MAP_ID}
-      map={map}
-      work={<StepWork step={step} failed={step === 'graph' && failed} onFailureChange={setFailed} />}
-      summary={summary}
-    />
+    <>
+      <Workspace
+        mapId={SESSION_MAP_ID}
+        map={map}
+        work={<StepWork step={step} failed={step === 'graph' && failed} onFailureChange={setFailed} />}
+        summary={summary}
+      />
+      {/* §9.5 The open entry's details. A sibling of the panes, never a child of the map host: the
+          host is hidden when the map is minimised, and a dialog inside a hidden, aria-hidden subtree
+          is not reachable. It draws nothing until an entry is opened. */}
+      <NodeDetailsDrawer />
+    </>
   )
 }

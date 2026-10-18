@@ -2,7 +2,7 @@
 import { useState } from 'react'
 import type { ReactNode } from 'react'
 import IconButton from '../ui/IconButton'
-import { ALL_LAYERS, LAYER_NAMES, LayerVisibilityContext, nodeLayer } from '../../graph/layers'
+import { ALL_LAYERS, LAYER_GLYPHS, LAYER_NAMES, LayerVisibilityContext, nodeLayer } from '../../graph/layers'
 import type { LayerName } from '../../graph/layers'
 import type { GraphEdge, GraphNode } from '../../graph/graphStore'
 import type { MapCounts, MapSummary, PaneState } from './Workspace'
@@ -30,14 +30,6 @@ const LAYER_LABELS: Record<LayerName, string> = {
   experts: 'Experts',
   opinions: 'Opinions',
   connections: 'Connections',
-}
-
-/** §9.1's glyph per layer — a shape beside the word, so no toggle leans on its hue alone. */
-const LAYER_GLYPHS: Record<LayerName, string> = {
-  corpus: '⊕',
-  experts: '◉',
-  opinions: '⊗',
-  connections: '—',
 }
 
 /** A toggle's identity: one layer, or the master `all` that shows them together. */

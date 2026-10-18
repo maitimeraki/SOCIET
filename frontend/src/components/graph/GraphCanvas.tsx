@@ -1,5 +1,5 @@
 /* eslint-disable react-refresh/only-export-components -- this module deliberately exports its pure helpers (the gating predicates, the label drawing and syncGraph) so the unit test can drive them without a renderer. */
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef } from 'react'
 import type { CSSProperties } from 'react'
 import Graph from 'graphology'
 import forceAtlas2 from 'graphology-layout-forceatlas2'
@@ -10,6 +10,8 @@ import type { StreamStatus } from '../../api/ws'
 import { useGraphStore } from '../../graph/graphStore'
 import type { GraphEdge, GraphLabel, GraphNode } from '../../graph/graphStore'
 import { useVisibleLayers, visibleSlice } from '../../graph/layers'
+import { useSelectionStore } from '../../graph/selectionStore'
+import type { MapSelection } from '../../graph/selectionStore'
 import { useGraphStream } from '../../graph/useGraphStream'
 import Skeleton from '../ui/Skeleton'
 
@@ -278,56 +280,25 @@ function FitCamera({ nodeCount }: { nodeCount: number }) {
 
 const LABEL_HALO_WIDTH = 3
 
-/** How many properties the readout lists — a taste of the fact, not an inspector. */
-const MAX_PROPERTIES = 5
-
-/** A string renders as-is; anything structured (a money object, a list) as compact JSON. */
-const formatValue = (value: unknown): string => (typeof value === 'string' ? value : JSON.stringify(value))
-
 /**
- * The click-to-inspect readout: the last clicked node/edge's top properties, or nothing.
- * Deliberately minimal — the graph's only affordance for reading a node's facts.
+ * The map's one way in: a click on an entry or on a connection puts it in the selection channel,
+ * which the details drawer reads. The canvas only writes the channel — it never draws the panel, so
+ * the pane that hosts this canvas and the pane's own reading of the map share one way to open an
+ * entry. What the selection resolves to lives in `NodeDetailsDrawer`.
  */
-function GraphSelection() {
+function SelectionWatch({ onPick }: { onPick: (selection: MapSelection) => void }) {
   const sigma = useSigma()
-  const nodes = useGraphStore((s) => s.nodes)
-  const edges = useGraphStore((s) => s.edges)
-  const [selected, setSelected] = useState<{ kind: 'node' | 'edge'; key: string } | null>(null)
-
   useEffect(() => {
-    const onNode = ({ node }: { node: string }) => setSelected({ kind: 'node', key: node })
-    const onEdge = ({ edge }: { edge: string }) => setSelected({ kind: 'edge', key: edge })
+    const onNode = ({ node }: { node: string }) => onPick({ kind: 'entry', id: node })
+    const onEdge = ({ edge }: { edge: string }) => onPick({ kind: 'connection', id: edge })
     sigma.on('clickNode', onNode)
     sigma.on('clickEdge', onEdge)
     return () => {
       sigma.off('clickNode', onNode)
       sigma.off('clickEdge', onEdge)
     }
-  }, [sigma])
-
-  if (!selected) return null
-  const item = selected.kind === 'node' ? nodes[selected.key] : edges[selected.key]
-  const entries = Object.entries(item?.properties ?? {}).slice(0, MAX_PROPERTIES)
-  if (entries.length === 0) return null
-
-  const edge = selected.kind === 'edge' ? edges[selected.key] : undefined
-  const title =
-    selected.kind === 'node'
-      ? nodes[selected.key]?.label ?? selected.key
-      : `${edge?.source ?? '?'} —${edge?.label ?? '?'}→ ${edge?.target ?? '?'}`
-
-  return (
-    <div className="pointer-events-none absolute bottom-2 left-2 max-w-[70%] rounded-[4px] border border-ink-4 bg-survey-paper/90 px-2.5 py-1.5">
-      <p className="truncate text-micro text-ink-2">{title}</p>
-      <div className="mt-0.5">
-        {entries.map(([key, value]) => (
-          <p key={key} className="truncate text-micro text-ink-3">
-            <span className="text-ink-3">{key}</span>: {formatValue(value)}
-          </p>
-        ))}
-      </div>
-    </div>
-  )
+  }, [sigma, onPick])
+  return null
 }
 
 /**
@@ -425,6 +396,17 @@ function GraphOverlay({ phase, message }: { phase: GraphStreamPhase; message: st
 
 export default function GraphCanvas({ datasetId, jobId }: GraphCanvasProps) {
   const { status, done } = useGraphStream(jobId)
+  const select = useSelectionStore((s) => s.open)
+  // The map is the opener the details drawer returns focus to, so it takes focus as it opens one:
+  // `tabIndex={-1}` keeps it out of the tab order, and a click does not paint a ring (`:focus-visible`).
+  const root = useRef<HTMLDivElement>(null)
+  const pick = useCallback(
+    (selection: MapSelection) => {
+      root.current?.focus()
+      select(selection)
+    },
+    [select],
+  )
   const nodes = useGraphStore((s) => s.nodes)
   const edges = useGraphStore((s) => s.edges)
   const labels = useGraphStore((s) => s.labels)
@@ -452,7 +434,7 @@ export default function GraphCanvas({ datasetId, jobId }: GraphCanvasProps) {
   )
 
   return (
-    <div className="relative h-[360px] overflow-hidden rounded-[6px] plot-ground" style={CANVAS_STYLE}>
+    <div ref={root} tabIndex={-1} className="relative h-[360px] overflow-hidden rounded-[6px] plot-ground" style={CANVAS_STYLE}>
       <div role="img" aria-label={canvasLabel} className="h-full w-full">
         {/* The height chain is explicit here: the wrapper is a fixed box, this is full-height, and Sigma's
             own `.sigma-container` fills it — its sizing rule ships in @react-sigma/core/lib/style.css (imported in main.tsx). */}
@@ -464,7 +446,7 @@ export default function GraphCanvas({ datasetId, jobId }: GraphCanvasProps) {
         >
           <LiveGraph graph={graph} />
           <FitCamera nodeCount={nodeCount} />
-          <GraphSelection />
+          <SelectionWatch onPick={pick} />
         </SigmaContainer>
       </div>
       <GraphLegend labels={labels} />

@@ -16,6 +16,18 @@ export const LAYER_NAMES: readonly LayerName[] = ['corpus', 'experts', 'opinions
 export const ALL_LAYERS: ReadonlySet<LayerName> = new Set(LAYER_NAMES)
 
 /**
+ * §9.1's glyph per layer — a shape beside the word, so no control leans on its hue alone. The pane
+ * draws one per toggle; the entry-details drawer draws the same glyph for the entry's kind, so an
+ * entry read on the map and the same entry read in the drawer carry one mark.
+ */
+export const LAYER_GLYPHS: Record<LayerName, string> = {
+  corpus: '⊕',
+  experts: '◉',
+  opinions: '⊗',
+  connections: '—',
+}
+
+/**
  * Which layer an entry belongs to: the two the debate stream seats (an expert, an opinion), or the
  * material itself. An entry the backend wrote under a kind we do not know reads as material rather
  * than vanishing — an unknown kind is kept, never dropped (see `composeRunGraph`).
