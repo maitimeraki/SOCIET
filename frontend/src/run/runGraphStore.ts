@@ -1,13 +1,7 @@
 import Graph from 'graphology'
-import { expertKey } from '../graph/graphStore'
+import { EXPERT_TYPE, expertKey } from '../graph/graphStore'
 import type { GraphEdge, GraphNode, GraphSnapshot } from '../graph/graphStore'
 import type { RunState } from './reducer'
-
-/**
- * The kind the map labels a seated expert — the same string `graphStore`'s private `EXPERT_TYPE` holds,
- * so an expert the live fold seats and one the composer seats carry one type.
- */
-const EXPERT_TYPE = 'Expert'
 
 /** A connection's identity in the map's terms — the store's edge key, reproduced. */
 const edgeKey = (source: string, target: string, label: string): string => `${source}|${target}|${label}`

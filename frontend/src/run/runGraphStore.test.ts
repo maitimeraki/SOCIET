@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { EXPERT_TYPE } from '../graph/graphStore'
 import type { GraphSnapshot } from '../graph/graphStore'
 import type { AgentProfile, RunEvent, WrittenNode } from './events'
 import { fold } from './reducer'
@@ -51,7 +52,8 @@ const countsByType = (graph: ReturnType<typeof composeRunGraph>): Record<string,
 describe('composeRunGraph', () => {
   it('seats the corpus layer and one expert per agent', () => {
     const state = fold([agent('D. Weber'), agent('M. Chen')], NOW)
-    expect(countsByType(composeRunGraph(state, CORPUS))).toEqual({ Region: 1, Topic: 1, Company: 1, Expert: 2 })
+    // The expert kind is the live store's own — read from it, so the composer cannot drift from the map's colouring.
+    expect(countsByType(composeRunGraph(state, CORPUS))).toEqual({ Region: 1, Topic: 1, Company: 1, [EXPERT_TYPE]: 2 })
   })
 
   it("adds a commit payload's written entries with their written connections", () => {

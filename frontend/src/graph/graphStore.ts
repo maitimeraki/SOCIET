@@ -52,7 +52,7 @@ export interface ExpertIdentity {
 export const expertKey = (expert: ExpertIdentity): string => `${expert.datasetId}:${expert.name}`
 
 /** An expert the store renders as an entry. */
-const EXPERT_TYPE = 'Expert'
+export const EXPERT_TYPE = 'Expert'
 
 interface GraphStoreState {
   nodes: Record<string, GraphNode>
