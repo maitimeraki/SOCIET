@@ -52,6 +52,29 @@ export function mapCounts(nodes: Record<string, GraphNode>, edges: Record<string
 }
 
 /**
+ * §9.4/§12 The busiest entries — the map's most-connected entries, ranked by how many connections
+ * each one carries, busiest first. An entry with no connection is not "busy", so it is never named;
+ * a map with no connections has none, and the pane's busiest line is honestly absent rather than
+ * empty. Ties keep the store's own order (a stable sort), so the line never reshuffles on a re-render.
+ */
+export function busiestEntries(
+  nodes: Record<string, GraphNode>,
+  edges: Record<string, GraphEdge>,
+  limit = 3,
+): string[] {
+  const degree = new Map<string, number>()
+  const touch = (id: string) => degree.set(id, (degree.get(id) ?? 0) + 1)
+  for (const edge of Object.values(edges)) {
+    if (nodes[edge.source]) touch(edge.source)
+    if (nodes[edge.target]) touch(edge.target)
+  }
+  return [...degree]
+    .sort(([, a], [, b]) => b - a)
+    .slice(0, limit)
+    .map(([id]) => nodes[id].label)
+}
+
+/**
  * One layer's toggle. A real button carrying `aria-pressed`, and a hidden layer is struck through —
  * a shape, so the state reads to the eye without hue and never leans on a dimmed colour: `ink-2`
  * measures 13.7:1 on the map ground and `ink-3` 6.7:1, both clear of AA for the control's own label.
