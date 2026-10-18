@@ -1,14 +1,38 @@
+/* eslint-disable react-refresh/only-export-components -- this module deliberately exports its pure request builder so the no-DOM suite can assert the gate and the label without a renderer. */
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { ApiError, startDebate } from '../api/rest'
 import { DEBATE_CONFIG_DEFAULTS } from '../api/types'
-import type { DebateConfig } from '../api/types'
+import type { DebateConfig, DebateStartRequest } from '../api/types'
 import { useDraftStore } from '../wizard/draftStore'
 import QueryComposer from '../components/society/QueryComposer'
 import ConfigPanel from '../components/society/ConfigPanel'
 import Button from '../components/ui/Button'
 import { toast } from '../components/ui/Toast'
 import { fmtInt } from '../utils/format'
+
+/**
+ * The debate request, or null while there is nothing to ask: no question, or no map (the corpus
+ * hasn't been extracted yet). The gate lives at the one place a request is born — no second
+ * mechanism — so the step cannot convene before extraction, and the whole thing is assertable
+ * without a renderer. The client's corpus name rides along as the run's label.
+ */
+export function debateRequest(
+  datasetId: string | null,
+  corpusName: string,
+  query: string,
+  config: DebateConfig,
+): DebateStartRequest | null {
+  if (!query.trim() || !datasetId) return null
+  return {
+    graph_id: datasetId,
+    corpus_label: corpusName,
+    query: query.trim(),
+    selected_domains: [],
+    simulation_depth: 'standard',
+    config,
+  }
+}
 
 export default function SocietyPage() {
   const navigate = useNavigate()
@@ -25,17 +49,12 @@ export default function SocietyPage() {
   // the note IngestPage renders when the corpus is gone. `convene` still refuses without a graph id.
 
   const convene = async () => {
-    if (!query.trim() || !datasetId || submitting) return
+    const body = debateRequest(datasetId, corpusName, query, config)
+    if (!body || submitting) return
     setSubmitting(true)
     setError(null)
     try {
-      const { job_id } = await startDebate({
-        graph_id: datasetId,
-        query: query.trim(),
-        selected_domains: [],
-        simulation_depth: 'standard',
-        config,
-      })
+      const { job_id } = await startDebate(body)
       clear() // documents are done with; datasetId survives for the run views
       toast('success', 'Run convened')
       navigate(`/runs/${job_id}/roster`)

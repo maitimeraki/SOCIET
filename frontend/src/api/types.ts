@@ -96,6 +96,8 @@ export interface JobStatus<TResult = GraphJobResult> {
 export interface DebateStartRequest {
   graph_id: string
   query: string
+  /** The client's corpus name, for the run history list — null when no corpus existed (backend Task 1.4). */
+  corpus_label: string | null
   selected_domains: string[]
   simulation_depth: 'shallow' | 'standard' | 'deep'
   config: DebateConfig
