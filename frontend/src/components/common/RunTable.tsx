@@ -2,21 +2,23 @@ import { Link } from 'react-router-dom'
 import type { RunSummary } from '../../api/types'
 import { fmtDate, truncateId } from '../../utils/format'
 import Skeleton from '../ui/Skeleton'
+import Table from '../ui/Table'
+import StanceChip from './StanceChip'
 import StateChip from './StateChip'
 
 /**
- * The run timeline (§3.3): timestamp · question · documents used · status · agent count.
+ * §8.4 Decisions — the process of each decision: when it ran, the question, the corpus it drew from,
+ * the passes completed, the outcome and the status.
  *
  * Field mapping against the live `GET /api/v1/simulate/debates` item (`run_doc._summarize`):
- *   · timestamp      → `created_at`
- *   · question       → `query`
- *   · documents used → `dataset_id` — the corpus the run drew from; the payload carries NO document
- *                      count, so the corpus id is the honest available proxy, never a fabricated count
- *   · status         → `status` (StateChip)
- *   · agent count    → ABSENT from the payload → an honest dash, never invented
+ *   · when     → `created_at`
+ *   · question → `query`
+ *   · corpus   → `corpus_label`, falling back to the corpus id `dataset_id` when the run named none
+ *   · passes   → `rounds_executed`
+ *   · outcome  → `verdict_stance` (StanceChip: symbol + colour + word); absent → an honest "still running"
+ *   · status   → `status` (StateChip)
+ * Every rendered field comes from the payload — nothing is derived to fill a column.
  */
-const DASH = '—'
-
 export default function RunTable({ runs, loading = false }: { runs: RunSummary[]; loading?: boolean }) {
   if (loading) {
     return (
@@ -28,37 +30,50 @@ export default function RunTable({ runs, loading = false }: { runs: RunSummary[]
     )
   }
   if (runs.length === 0) return null // callers own the empty state (§13)
+
+  const corpus = (run: RunSummary) => run.corpus_label ?? truncateId(run.dataset_id, 8, 4)
+  const outcome = (run: RunSummary) =>
+    run.verdict_stance ? (
+      <StanceChip stance={run.verdict_stance} />
+    ) : (
+      // No verdict yet is a fact, not a blank cell (§D7 honesty).
+      <span className="text-ink-3">still running</span>
+    )
+
   return (
     <>
       <div className="hidden overflow-x-auto md:block">
-        <table className="w-full border-collapse text-body">
-          <thead>
-            <tr className="text-label uppercase text-ink-3">
-              <th className="py-2 pr-4 text-left font-medium">Timestamp</th>
+        <Table
+          head={
+            <tr>
+              <th className="py-2 pr-4 text-left font-medium">When</th>
               <th className="py-2 pr-4 text-left font-medium">Question</th>
-              <th className="py-2 pr-4 text-left font-medium">Documents used</th>
-              <th className="py-2 pr-4 text-left font-medium">Status</th>
-              <th className="tnum py-2 text-right font-medium">Agents</th>
+              <th className="py-2 pr-4 text-left font-medium">Corpus</th>
+              <th className="tnum py-2 pr-4 text-right font-medium">Passes</th>
+              <th className="py-2 pr-4 text-left font-medium">Outcome</th>
+              <th className="py-2 text-left font-medium">Status</th>
             </tr>
-          </thead>
-          <tbody className="text-ink-2">
-            {runs.map((run) => (
-              <tr key={run.run_id} className="border-t border-ink-4 transition-colors hover:bg-ground-2">
-                <td className="tnum py-2.5 pr-4 font-measurement text-mono text-ink-3">{fmtDate(run.created_at)}</td>
-                <td className="max-w-[360px] py-2.5 pr-4">
-                  <Link to={`/runs/${run.run_id}`} className="block truncate text-ink hover:text-accent">
-                    {run.query}
-                  </Link>
-                </td>
-                <td className="py-2.5 pr-4 font-measurement text-mono text-ink-3">{truncateId(run.dataset_id, 8, 4)}</td>
-                <td className="py-2.5 pr-4">
-                  <StateChip state={run.status} />
-                </td>
-                <td className="tnum py-2.5 text-right font-measurement text-mono text-ink-3">{DASH}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+          }
+        >
+          {runs.map((run) => (
+            <tr key={run.run_id} className="transition-colors hover:bg-ground-2">
+              <td className="tnum py-2.5 pr-4 font-measurement text-mono text-ink-3">{fmtDate(run.created_at)}</td>
+              <td className="max-w-[360px] py-2.5 pr-4">
+                <Link to={`/runs/${run.run_id}`} className="block truncate text-ink hover:text-accent">
+                  {run.query}
+                </Link>
+              </td>
+              <td className="py-2.5 pr-4 font-measurement text-mono text-ink-3">{corpus(run)}</td>
+              <td className="tnum py-2.5 pr-4 text-right font-measurement text-mono text-ink-2">
+                {run.rounds_executed}
+              </td>
+              <td className="py-2.5 pr-4">{outcome(run)}</td>
+              <td className="py-2.5">
+                <StateChip state={run.status} />
+              </td>
+            </tr>
+          ))}
+        </Table>
       </div>
 
       {/* Under md the timeline collapses to stacked cards (§6 responsive). */}
@@ -71,18 +86,22 @@ export default function RunTable({ runs, loading = false }: { runs: RunSummary[]
               </Link>
               <StateChip state={run.status} />
             </div>
-            <dl className="mt-2 grid grid-cols-3 gap-2 text-micro">
+            <dl className="mt-2 grid grid-cols-2 gap-2 text-micro">
               <div>
                 <dt className="text-ink-3">When</dt>
                 <dd className="tnum font-measurement text-mono text-ink-2">{fmtDate(run.created_at)}</dd>
               </div>
               <div>
-                <dt className="text-ink-3">Documents</dt>
-                <dd className="font-measurement text-mono text-ink-2">{truncateId(run.dataset_id, 8, 4)}</dd>
+                <dt className="text-ink-3">Corpus</dt>
+                <dd className="font-measurement text-mono text-ink-2">{corpus(run)}</dd>
               </div>
               <div>
-                <dt className="text-ink-3">Agents</dt>
-                <dd className="tnum font-measurement text-mono text-ink-2">{DASH}</dd>
+                <dt className="text-ink-3">Passes</dt>
+                <dd className="tnum font-measurement text-mono text-ink-2">{run.rounds_executed}</dd>
+              </div>
+              <div>
+                <dt className="text-ink-3">Outcome</dt>
+                <dd>{outcome(run)}</dd>
               </div>
             </dl>
           </li>

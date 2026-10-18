@@ -12,6 +12,7 @@ const run = (patch: Partial<RunSummary> = {}): RunSummary => ({
   run_id: 'r1',
   created_at: '2026-10-01T10:00:00Z',
   query: 'Should we expand into Europe?',
+  corpus_label: null,
   dataset_id: 'ds-1',
   status: 'complete',
   rounds_executed: 3,
@@ -37,7 +38,7 @@ const render = (props: Partial<DashboardViewProps> = {}) =>
   )
 
 describe('DashboardPage — the traverse log (plan §3.3)', () => {
-  it('renders the five timeline columns from a mocked GET', async () => {
+  it('renders the six timeline columns from a mocked GET', async () => {
     vi.stubGlobal(
       'fetch',
       vi.fn().mockResolvedValue(new Response(JSON.stringify({ items: [run()], next_cursor: null }))),
@@ -46,7 +47,8 @@ describe('DashboardPage — the traverse log (plan §3.3)', () => {
     const page = await listRunsPage({ limit: 25 })
     const html = render({ runs: page.items })
 
-    for (const header of ['Timestamp', 'Question', 'Documents used', 'Status', 'Agents']) {
+    // The same RunTable (§8.4) the /runs section renders — one column set, shared.
+    for (const header of ['When', 'Question', 'Corpus', 'Passes', 'Outcome', 'Status']) {
       expect(html).toContain(header)
     }
     // Timestamp cell = `fmtDate(created_at)`, asserted as the exact local-time literal — `TZ` is
@@ -54,9 +56,10 @@ describe('DashboardPage — the traverse log (plan §3.3)', () => {
     // bug (e.g. an off-by-one day) that comparing against `fmtDate` itself would not (R48 m2).
     expect(html).toContain('1 Oct 2026 10:00')
     expect(html).toContain('Should we expand into Europe?') // question → query
-    expect(html).toContain('ds-1') // documents used → dataset_id (the corpus id)
+    expect(html).toContain('ds-1') // corpus → dataset_id when the run named no label
+    expect(html).toContain('>3<') // passes → rounds_executed
+    expect(html).toContain('POSITIVE') // outcome → the stance word beside its symbol
     expect(html).toContain('Complete') // status → StateChip
-    expect(html).toContain('—') // agent count — absent from the payload, so an honest dash
   })
 
   it('renders the empty state with the first-run CTA when there are no runs', () => {

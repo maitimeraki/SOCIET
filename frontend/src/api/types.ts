@@ -129,6 +129,8 @@ export interface RunSummary {
   run_id: string
   created_at: string
   query: string
+  /** The client's corpus name at start; null when no corpus was named (backend `run_doc._summarize`). */
+  corpus_label: string | null
   dataset_id: string
   status: 'queued' | 'running' | 'complete' | 'failed' | 'interrupted'
   rounds_executed: number
