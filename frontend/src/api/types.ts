@@ -22,6 +22,21 @@ export interface IngestedDocument extends IngestedDoc {
   upload_id: string
 }
 
+/**
+ * `GET /api/v1/uploads` — one row per caller-owned upload, newest first. `read` is
+ * `extracted_text is not None`; `dataset_name` is null until the upload joins a corpus.
+ */
+export interface UploadRow {
+  id: string
+  name: string
+  bytes: number
+  mime: string
+  read: boolean
+  dataset_id: string | null
+  dataset_name: string | null
+  created_at: string
+}
+
 /** R17: `POST /api/v1/ingest/files|url` accept the batch and enqueue — extraction is a job. */
 export interface IngestAccepted {
   job_id: string

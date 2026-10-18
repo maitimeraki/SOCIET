@@ -10,6 +10,7 @@ import type {
   RunDoc,
   RunListPage,
   RunSummary,
+  UploadRow,
   User,
 } from './types'
 import type { ConsensusInfo } from '../run/events'
@@ -146,6 +147,9 @@ export const getIngestDocuments = (uploadIds: string[]) =>
   request<{ documents: IngestedDocument[] }>(
     `/api/v1/ingest/documents?upload_ids=${encodeURIComponent(uploadIds.join(','))}`,
   )
+
+/** The caller's own uploads, newest first (§8.3 Documents) — `{ items }`, `dataset_name` null until a corpus. */
+export const listUploads = () => request<{ items: UploadRow[] }>('/api/v1/uploads')
 
 export const startOntology = (datasetId: string, docs: IngestedDoc[]) =>
   request<{ job_id: string }>(`/api/v1/simulate/ontology?dataset_id=${encodeURIComponent(datasetId)}`, jsonInit('POST', docs))
