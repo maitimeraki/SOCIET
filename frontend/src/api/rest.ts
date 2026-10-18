@@ -13,6 +13,7 @@ import type {
   User,
 } from './types'
 import type { ConsensusInfo } from '../run/events'
+import type { GraphSnapshot } from '../graph/graphStore'
 import { apiBase, apiBaseError } from '../config/env'
 
 export const API_BASE: string = apiBase ?? ''
@@ -180,6 +181,22 @@ export const listRunsPage = (options: { limit?: number; cursor?: string | null }
 export const listRuns = async (): Promise<RunSummary[]> => (await listRunsPage({ limit: 25 })).items
 
 export const getRun = (runId: string) => request<RunDoc>(`/api/v1/simulate/debates/${runId}`)
+
+/**
+ * The run's stored map — its corpus id, every entry and connection, the vocabulary (Task 1.3).
+ * Shape-checked against `GraphSnapshot`, so the reopened run seeds the one store from it.
+ */
+export interface RunGraphSnapshot extends GraphSnapshot {
+  dataset_id: string
+  chunk_count: number
+}
+
+/**
+ * A 404 is typed (`no_corpus` / `corpus_gone`): the run never named a corpus, or its corpus is gone.
+ * Either way the same ApiError — the caller's answer is the same for both.
+ */
+export const getRunGraph = (runId: string) =>
+  request<RunGraphSnapshot>(`/api/v1/simulate/debates/${runId}/graph`)
 
 export const authMe = () => request<User>('/api/v1/auth/me')
 

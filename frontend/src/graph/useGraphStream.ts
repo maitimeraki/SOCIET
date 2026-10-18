@@ -68,6 +68,8 @@ export function useGraphStream(jobId: string): GraphStreamState {
   }
 
   useEffect(() => {
+    // A caller with no build job (a run's own seeded map) opens no socket and reports no status.
+    if (!jobId) return
     const socket = connectGraphStream(jobId, {
       onStatus: (status) => setState((prev) => ({ ...prev, status })),
       onFrame: (raw) => {

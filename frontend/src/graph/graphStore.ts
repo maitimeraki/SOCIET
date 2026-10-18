@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import type Graph from 'graphology'
 import type { WrittenLink, WrittenNode } from '../run/events'
 
 /** A graph entity. Identity is `id` — the same entity in two chunks is ONE node. */
@@ -71,6 +72,14 @@ interface GraphStoreState {
   mergeExpert: (expert: ExpertIdentity) => void
   /** Fold one commit's written entries and connections into the one map, verbatim (D7). */
   mergeOpinions: (nodes: WrittenNode[], links: WrittenLink[]) => void
+  /**
+   * Replace the whole map with a composed graph — the reopened run's seed (§11.2, F36). It reads a
+   * graphology graph (the composer's output) into the record maps verbatim, so a run switch REPLACES
+   * the run before it rather than merging onto a stale one, and corpus labels ride the vocabulary.
+   * Bumps `version` — the invalidation key every derived view (the text alternative, the drawer)
+   * reads — in the same `set` that swaps the maps, so no view is left holding the run before it.
+   */
+  seedFromGraph: (graph: Graph, labels: string[]) => void
 }
 
 /**
@@ -151,6 +160,21 @@ const mergeLabels = (incoming: string[], existing: GraphLabel[]): GraphLabel[] =
   return [...byLabel.values()].map((entry) => ({ label: entry.label, color: colorByName.get(entry.label) ?? entry.color }))
 }
 
+/** A composed graph's node attributes back into a store entry — the composer's `nodeAttributes`, read backwards. */
+const fromNodeAttributes = (id: string, attributes: Record<string, unknown>): GraphNode => {
+  const node: GraphNode = { id, label: String(attributes.label), type: String(attributes.type) }
+  if (attributes.kind !== undefined) node.kind = String(attributes.kind)
+  if (attributes.properties !== undefined) node.properties = attributes.properties as GraphNode['properties']
+  return node
+}
+
+/** A composed graph's edge attributes back into a store entry — endpoints are the graph's, so only the rest rides here. */
+const fromEdgeAttributes = (source: string, target: string, attributes: Record<string, unknown>): GraphEdge => {
+  const edge: GraphEdge = { source, target, label: String(attributes.label) }
+  if (attributes.properties !== undefined) edge.properties = attributes.properties as GraphEdge['properties']
+  return edge
+}
+
 export const useGraphStore = create<GraphStoreState>((set) => ({
   nodes: {},
   edges: {},
@@ -186,4 +210,17 @@ export const useGraphStore = create<GraphStoreState>((set) => ({
       edges: upsertEdges(state.edges, links.map(asGraphEdge)),
       version: state.version + 1,
     })),
+
+  seedFromGraph: (graph, labels) =>
+    set((state) => {
+      const nodes: Record<string, GraphNode> = {}
+      graph.forEachNode((id, attributes) => {
+        nodes[id] = fromNodeAttributes(id, attributes)
+      })
+      const edges: Record<string, GraphEdge> = {}
+      graph.forEachEdge((key, attributes, source, target) => {
+        edges[key] = fromEdgeAttributes(source, target, attributes)
+      })
+      return { nodes, edges, labels: mergeLabels(labels, []), version: state.version + 1 }
+    }),
 }))

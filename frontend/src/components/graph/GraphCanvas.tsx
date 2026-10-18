@@ -17,7 +17,11 @@ import Skeleton from '../ui/Skeleton'
 
 export interface GraphCanvasProps {
   datasetId: string
-  jobId: string
+  /**
+   * The build job whose stream fills the map. Absent for a run's own map: a debate run is a run, not
+   * a build job, and its map is seeded from the run (`runStore.seedMap`) rather than streamed.
+   */
+  jobId?: string
 }
 
 const NODE_SIZE = 7
@@ -395,7 +399,7 @@ function GraphOverlay({ phase, message }: { phase: GraphStreamPhase; message: st
 }
 
 export default function GraphCanvas({ datasetId, jobId }: GraphCanvasProps) {
-  const { status, done } = useGraphStream(jobId)
+  const { status, done } = useGraphStream(jobId ?? '')
   const select = useSelectionStore((s) => s.open)
   // The map is the opener the details drawer returns focus to, so it takes focus as it opens one:
   // `tabIndex={-1}` keeps it out of the tab order, and a click does not paint a ring (`:focus-visible`).
@@ -422,8 +426,10 @@ export default function GraphCanvas({ datasetId, jobId }: GraphCanvasProps) {
   const graph = useMemo(() => new Graph({ multi: true }), [datasetId])
 
   const canvasLabel = graphAriaLabel(nodeCount, Object.keys(edges).length, labels.length)
-  const phase = graphStreamPhase(nodeCount, status, done)
-  const statusMessage = graphStatusMessage(nodeCount, status, done)
+  // With no build job there is no stream to report on: the map is seeded from the run, so neither the
+  // "waiting for the first chunk" skeleton nor the ended/failed notice belongs over it.
+  const phase = jobId === undefined ? 'streaming' : graphStreamPhase(nodeCount, status, done)
+  const statusMessage = jobId === undefined ? null : graphStatusMessage(nodeCount, status, done)
   // Keyed on the store's monotonic version, not the maps themselves: the derivation is O(edges), and
   // a re-render from any other slice (labels, selection, a whole-store re-sync) must not re-run it.
   // `version` bumps in the same `set` that swaps `nodes`/`edges`, so the closure is never stale.

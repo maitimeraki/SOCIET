@@ -1,11 +1,13 @@
 import { create } from 'zustand'
-import { getRun } from '../api/rest'
+import { getRun, getRunGraph } from '../api/rest'
 import { connectRun } from '../api/ws'
 import type { RunSocket } from '../api/ws'
 import { useGraphStore } from '../graph/graphStore'
+import type { GraphSnapshot } from '../graph/graphStore'
 import type { RunEvent } from './events'
 import { applyEvent, initialState } from './reducer'
 import type { RunState } from './reducer'
+import { composeRunGraph } from './runGraphStore'
 
 interface RunStoreState {
   run: RunState
@@ -13,10 +15,31 @@ interface RunStoreState {
   events: RunEvent[]
   connection: 'idle' | 'connecting' | 'open' | 'reconnecting' | 'closed'
   socket: RunSocket | null
+  /** The run's stored material, read on load (Task 1.3) — the map's corpus layer, which the event buffer lacks. */
+  corpus: GraphSnapshot | null
+  /** True when that read came back with nothing: the map pane says so rather than showing an empty map. */
+  corpusMissing: boolean
+  /** The run `version` the map was last built from — the key `seedMap` rebuilds against (§11.2). */
+  mapVersion: number
   loadAndConnect: (runId: string) => Promise<void>
+  /** Rebuild the one map from the run's own folded state — the reopened run's producer (§11.2, F36). */
+  seedMap: () => void
   dispatch: (event: RunEvent) => void
   reset: () => void
   disconnect: () => void
+}
+
+/**
+ * Read the run's stored material. A typed 404 — the run never named a corpus, or its corpus is gone —
+ * and any other failure read the same way here: there is no material to put on the map, which the pane
+ * says in words rather than leaving an empty map standing silently (the copy law's own rule).
+ */
+async function readCorpus(runId: string): Promise<{ snapshot: GraphSnapshot | null; missing: boolean }> {
+  try {
+    return { snapshot: await getRunGraph(runId), missing: false }
+  } catch {
+    return { snapshot: null, missing: true }
+  }
 }
 
 /** Supersession counter: every loadAndConnect/disconnect invalidates earlier in-flight loads. */
@@ -83,12 +106,30 @@ export const useRunStore = create<RunStoreState>((set, get) => {
     events: [],
     connection: 'idle',
     socket: null,
+    corpus: null,
+    corpusMissing: false,
+    mapVersion: -1,
 
     // Config rides the run doc only — the replayed event buffer carries none, so a
     // reset on (re)connect must keep it or the header/tape lose the run's settings.
+    // The map is deliberately left alone: a reconnect replays the SAME run, and the seed the load
+    // put in the store (the corpus, which the event buffer never carries) must survive the refold.
     reset: () => {
       pending = [] // pre-open arrivals belong to the old connection; the refold replaces them
       set((state) => ({ run: { ...initialState, runId: state.run.runId, config: state.run.config }, events: [] }))
+    },
+
+    /**
+     * Rebuild the one map from the run's own state (D14, F36). Keyed on `run.version`, so a frame that
+     * folds a burst of events rebuilds once, not once per event (§11.2) — and a run already mirrored
+     * is not rebuilt twice. The compose is pure; the store it lands in is the same one the live path
+     * folds into, so the reopened map IS the live map (the equality the suite pins).
+     */
+    seedMap: () => {
+      const { run, corpus, mapVersion } = get()
+      if (run.version === mapVersion) return
+      set({ mapVersion: run.version })
+      useGraphStore.getState().seedFromGraph(composeRunGraph(run, corpus), corpus?.labels ?? [])
     },
 
     dispatch: (event) => {
@@ -102,7 +143,8 @@ export const useRunStore = create<RunStoreState>((set, get) => {
       loadGeneration++
       pending = [] // a run switch discards the previous run's unfolded events; its doc refolds them
       get().socket?.close()
-      set({ socket: null, connection: 'idle' })
+      // The next load re-reads and re-seeds from scratch, so nothing of this run is left to leak into it.
+      set({ socket: null, connection: 'idle', corpus: null, corpusMissing: false, mapVersion: -1 })
     },
 
     loadAndConnect: async (runId: string) => {
@@ -115,13 +157,17 @@ export const useRunStore = create<RunStoreState>((set, get) => {
       try {
         const doc = await getRun(runId)
         if (generation !== loadGeneration) return
-        set({
-          run: doc.events.reduce<RunState>(
-            (state, event) => applyEvent(state, event, Date.now()),
-            { ...initialState, runId, config: doc.config ?? null },
-          ),
-          events: doc.events,
-        })
+        const reopened = doc.events.reduce<RunState>(
+          (state, event) => applyEvent(state, event, Date.now()),
+          { ...initialState, runId, config: doc.config ?? null },
+        )
+        // The replayed event buffer carries no corpus, so the material is read on its own.
+        const corpus = await readCorpus(runId)
+        if (generation !== loadGeneration) return
+        set({ run: reopened, events: doc.events, corpus: corpus.snapshot, corpusMissing: corpus.missing })
+        // Seed the map from the run's own state. A reopened run builds its map here; a live run seeds
+        // the same layers and the WS replay below re-adds them idempotently, so the seam is invisible.
+        get().seedMap()
         if (doc.status === 'complete' || doc.status === 'failed') {
           set({ connection: 'closed' })
           return

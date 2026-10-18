@@ -16,6 +16,14 @@ import VerdictHero from '../components/verdict/VerdictHero'
 import DivisionBars from '../components/verdict/DivisionBars'
 import FinalStanceTable from '../components/verdict/FinalStanceTable'
 import EntityChips from '../components/verdict/EntityChips'
+import GraphCanvas from '../components/graph/GraphCanvas'
+import GraphPane, { mapCounts } from '../components/workspace/GraphPane'
+import NodeDetailsDrawer from '../components/run/NodeDetailsDrawer'
+import type { MapSummary, PaneState } from '../components/workspace/Workspace'
+import { useGraphStore } from '../graph/graphStore'
+
+/** §9.4 The pane's caption — the run view has no build step to name, so it names the map itself. */
+const MAP_STEP = 'The map'
 
 const TABS = ['roster', 'floor', 'verdict', 'agents', 'artifacts'] as const
 export type RunTab = (typeof TABS)[number]
@@ -38,7 +46,15 @@ export default function RunPage() {
   const events = useRunStore((s) => s.events)
   const connection = useRunStore((s) => s.connection)
   const loadAndConnect = useRunStore((s) => s.loadAndConnect)
+  const corpusMissing = useRunStore((s) => s.corpusMissing)
   const maxRounds = run.config?.max_rounds ?? null
+
+  // §9/D14 — the one map's text alternative and its pane geometry. The map is a sibling of every tab's
+  // body (below), so switching tabs or rounds never unmounts it. Task 4.5 sets the floor beside it.
+  const nodes = useGraphStore((s) => s.nodes)
+  const edges = useGraphStore((s) => s.edges)
+  const mapSummary: MapSummary = { counts: mapCounts(nodes, edges), busiest: [], step: MAP_STEP }
+  const [paneState, setPaneState] = useState<PaneState>('split')
 
   useEffect(() => {
     if (runId) void loadAndConnect(runId)
@@ -136,6 +152,23 @@ export default function RunPage() {
           </NavLink>
         ))}
       </nav>
+
+      {/* §9/D14 — the one map. It is a sibling of the tabs' bodies, never inside one, so switching
+          tab or round cannot unmount it; Task 4.5 pairs the floor with it in this pane, not a second. */}
+      <GraphPane mapId={runId} state={paneState} onStateChange={setPaneState} summary={mapSummary}>
+        <div className="relative">
+          <GraphCanvas datasetId={run.datasetId ?? ''} />
+          {/* The material read found nothing — said in words IN the map's own region, over a map that
+              is not blank (the run's experts and opinions still stand), and never a silent empty map. */}
+          {corpusMissing && (
+            <div className="absolute inset-0 flex items-center justify-center bg-map-ground/90 p-6">
+              <p role="status" className="max-w-sm text-center text-body text-ink-2">
+                The material behind this decision is no longer available.
+              </p>
+            </div>
+          )}
+        </div>
+      </GraphPane>
 
       {tab === 'roster' && (
         <RosterStage
@@ -239,6 +272,9 @@ export default function RunPage() {
       )}
       {tab === 'agents' && <AgentsTab run={run} />}
       {tab === 'artifacts' && <ArtifactsTab run={run} events={events} />}
+      {/* §9.5 The open entry's details — a sibling of the pane, never a child of the map host (the host
+          is hidden when the pane is minimised, and a dialog inside a hidden subtree is unreachable). */}
+      <NodeDetailsDrawer />
     </div>
   )
 }
