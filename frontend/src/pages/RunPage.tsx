@@ -74,8 +74,6 @@ export interface RunWorkProps {
   onScrub: (next: number | null) => void
   onNavigate: (path: string) => void
   onReplay: () => void
-  /** Retired with the raw-JSON dump: the answer document owns its own export. Kept optional for callers. */
-  onExport?: () => void
 }
 
 /**

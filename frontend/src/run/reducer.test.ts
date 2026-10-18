@@ -71,6 +71,15 @@ describe('reducer', () => {
     const state = applyEvent(initialState, { type: 'future_thing' } as unknown as RunEvent, 1)
     expect(state.warnings).toContain('Unhandled event type: future_thing')
   })
+  it('names a failed commit by its pass, never a banned word — the composed warning reaches the page (§13, F46)', () => {
+    const state = applyEvent(
+      initialState,
+      { type: 'commit', round: 2, opinions: 0, edges: 0, failed: true, error: 'connection reset' },
+      1,
+    )
+    expect(state.warnings[0]).toBe('Pass 2: commit failed: connection reset')
+    expect(state.warnings.join(' ')).not.toMatch(/\bround\b/i)
+  })
   it('is deterministic — folding twice deep-equals (replay = live)', () => {
     expect(fold(RUN_SAMPLE, NOW)).toEqual(fold(RUN_SAMPLE, NOW))
   })

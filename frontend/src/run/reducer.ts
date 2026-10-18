@@ -147,7 +147,7 @@ function reduceEvent(state: RunState, event: RunEvent, now: number): RunState {
             writtenLinks: event.written_links ?? [],
           },
         ],
-        warnings: event.failed ? [...base.warnings, `Round ${event.round}: commit failed: ${event.error ?? 'unknown error'}`] : base.warnings,
+        warnings: event.failed ? [...base.warnings, `Pass ${event.round}: commit failed: ${event.error ?? 'unknown error'}`] : base.warnings,
       }
     case 'activation':
       return { ...base, activations: [...base.activations, { round: event.round, agents: event.agents, reasons: event.reasons }] }

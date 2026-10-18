@@ -70,7 +70,6 @@ const render = (tab: Tab, state: 'split' | 'expanded' | 'minimised' = 'split') =
         onScrub={() => {}}
         onNavigate={() => {}}
         onReplay={() => {}}
-        onExport={() => {}}
       />
     </MemoryRouter>,
   )

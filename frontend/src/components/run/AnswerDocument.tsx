@@ -152,7 +152,8 @@ export function answerText(input: AnswerInput): string {
   return `${lines.join('\n').trimEnd()}\n`
 }
 
-function blockLines(block: AnswerBlock): string[] {
+// eslint-disable-next-line react-refresh/only-export-components -- the block serializer is the export's own half of the document, asserted against the reading view by the test
+export function blockLines(block: AnswerBlock): string[] {
   switch (block.kind) {
     case 'text':
       return block.text.split('\n')
@@ -200,8 +201,8 @@ export default function AnswerDocument({ runId, question, view, sources, corpusM
         <p className="text-label uppercase text-ink-3">The decision</p>
         <p className="mt-2 font-titling text-title text-ink">{question}</p>
       </header>
-      {sections.map((section) => (
-        <section key={section.heading}>
+      {sections.map((section, index) => (
+        <section key={index}>
           <h2 className="mb-3 text-heading text-ink">{section.heading}</h2>
           <div className="max-w-[60ch] space-y-3">
             {section.blocks.map((block, index) => (

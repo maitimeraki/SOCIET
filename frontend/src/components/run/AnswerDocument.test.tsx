@@ -5,8 +5,8 @@ import { describe, expect, it } from 'vitest'
 import { renderToStaticMarkup } from 'react-dom/server'
 import type { VerdictView } from '../../run/selectors'
 import { NARRATIVE_FALLBACK_COPY } from '../verdict/NarrativeFallbackNotice'
-import AnswerDocument, { answerSections, answerText, sourceTitles } from './AnswerDocument'
-import type { AnswerInput } from './AnswerDocument'
+import AnswerDocument, { answerSections, answerText, blockLines, sourceTitles } from './AnswerDocument'
+import type { AnswerBlock, AnswerInput } from './AnswerDocument'
 
 const SOURCES = ['Market research 2026', 'Finance brief']
 const QUESTION = 'Should we expand into Europe?'
@@ -49,6 +49,23 @@ const BANNED = [
 const BANNED_WORD = new RegExp(`\\b(?:${BANNED.join('|')})s?\\b`, 'i')
 const renderedText = (html: string) => html.replace(/<[^>]*>/g, ' ')
 
+/** The strings a block carries that must survive into BOTH surfaces — derived from the block itself,
+ *  never restated as literals, so a field rendered on one side and dropped on the other fails. */
+const blockStrings = (block: AnswerBlock): string[] => {
+  switch (block.kind) {
+    case 'text':
+      return [block.text]
+    case 'listing':
+      return block.items
+    case 'stances':
+      return block.rows.flatMap((row) => [row.name, row.stance])
+    case 'entities':
+      return [...block.supporting, ...block.opposing]
+    case 'warnings':
+      return block.items
+  }
+}
+
 describe('AnswerDocument — §8.5 the outcome, readable', () => {
   it('shows the answer, the confidence, the strongest opposing case, the sources and the warnings', () => {
     const html = render()
@@ -71,25 +88,33 @@ describe('AnswerDocument — §8.5 the outcome, readable', () => {
   it('carries no banned word, authored or exported (§13)', () => {
     expect(renderedText(render())).not.toMatch(BANNED_WORD)
     expect(answerText(input())).not.toMatch(BANNED_WORD)
+    // The fallback branch carries its own authored copy (NARRATIVE_FALLBACK_COPY) — scan it too.
+    const fallback = input({ view: view({ narrative: '', narrativeStatus: 'fallback' }) })
+    expect(answerText(fallback)).toContain(NARRATIVE_FALLBACK_COPY)
+    expect(answerText(fallback)).not.toMatch(BANNED_WORD)
+    expect(renderedText(render({ view: fallback.view }))).not.toMatch(BANNED_WORD)
   })
 })
 
 describe('AnswerDocument — read and export are the same document', () => {
-  it('serializes the very sections the reading view renders', () => {
+  it('serializes the very sections and blocks the reading view renders', () => {
     const read = render()
     const text = answerText(input())
-    // Parity is checked against the builder's own output, not a second hardcoded list: every heading
-    // the one derivation produced is in the page and in the file, so a drifted list cannot pass.
+    // Parity is checked against the builder's own output, never a restated list: every section the one
+    // derivation produced is in both surfaces, and every block it produced is serialized (non-empty)
+    // with each of its strings present on BOTH sides — so a block dropped from one side cannot pass.
     for (const section of answerSections(input())) {
       expect(read, section.heading).toContain(section.heading)
       expect(text, section.heading).toContain(`## ${section.heading}`)
-    }
-    for (const value of [
-      'Expand, with care.', '0.82', 'Cash flow is too tight this year.', 'Nordic demand', 'Market research 2026',
-      'Source coverage is thin for the Baltic market.',
-    ]) {
-      expect(read, value).toContain(value)
-      expect(text, value).toContain(value)
+      for (const block of section.blocks) {
+        const lines = blockLines(block)
+        expect(lines.length, `${section.heading} serializes at least one line`).toBeGreaterThan(0)
+        for (const line of lines) expect(text, line).toContain(line)
+        for (const value of blockStrings(block)) {
+          expect(text, value).toContain(value)
+          expect(read, value).toContain(value)
+        }
+      }
     }
   })
 

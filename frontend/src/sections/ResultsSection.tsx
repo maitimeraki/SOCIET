@@ -1,7 +1,6 @@
 import { useEffect, useState } from 'react'
-import { getRun, getRunGraph, listRuns } from '../api/rest'
-import { applyEvent, initialState } from '../run/reducer'
-import type { RunState } from '../run/reducer'
+import { ApiError, getRun, getRunGraph, listRuns } from '../api/rest'
+import { fold } from '../run/reducer'
 import { verdictView } from '../run/selectors'
 import type { VerdictView } from '../run/selectors'
 import AnswerDocument, { sourceTitles } from '../components/run/AnswerDocument'
@@ -87,17 +86,20 @@ export default function ResultsSection() {
       const newest = (await listRuns()).find((run) => run.status === 'complete')
       if (!newest) return null
       const doc = await getRun(newest.run_id)
-      const folded = doc.events.reduce<RunState>(
-        (state, event) => applyEvent(state, event, Date.now()),
-        { ...initialState, runId: newest.run_id },
-      )
+      const folded = fold(doc.events)
       const view = verdictView(folded)
       if (!view) return null
       let corpusMissing = false
       try {
         await getRunGraph(newest.run_id)
-      } catch {
-        corpusMissing = true
+      } catch (error) {
+        if (error instanceof ApiError && error.status === 404) {
+          // The typed 404 is the only "material is gone" answer (rest.ts: no_corpus / corpus_gone).
+          corpusMissing = true
+        } else {
+          // A transient failure is an unknown, not a missing corpus — record it, claim nothing.
+          console.error('ResultsSection: could not read the material behind the newest decision.', error)
+        }
       }
       return { runId: newest.run_id, question: newest.query, view, sources: sourceTitles(folded.roster), corpusMissing }
     }
