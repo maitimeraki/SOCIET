@@ -68,18 +68,23 @@ export function PanelView({ experts, loading, failed, failDetail, onRetry }: Pan
       ) : experts.length === 0 ? (
         <EmptyState line="No panel yet. Start a decision and your panel is convened from your own documents." />
       ) : (
-        <ul className="divide-y divide-ink-3 border-y border-ink-3">
-          {experts.map((expert) => (
-            <li key={expert.agent_id} className="py-4">
-              <span className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
-                <span className="text-body text-ink">{expert.identity.name}</span>
-                <StanceChip stance={expert.stance} size="sm" />
-              </span>
-              <span className="mt-2 block text-body text-ink-2">{expert.bio}</span>
-              <ExpertSources profile={expert} />
-            </li>
-          ))}
-        </ul>
+        <>
+          <h2 id="panel-experts" className="text-heading text-ink">
+            Who argued it
+          </h2>
+          <ul aria-labelledby="panel-experts" className="divide-y divide-ink-3 border-y border-ink-3">
+            {experts.map((expert) => (
+              <li key={expert.agent_id} className="py-4">
+                <span className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
+                  <span className="text-body text-ink">{expert.identity.name}</span>
+                  <StanceChip stance={expert.stance} size="sm" />
+                </span>
+                <span className="mt-2 block text-body text-ink-2">{expert.bio}</span>
+                <ExpertSources profile={expert} />
+              </li>
+            ))}
+          </ul>
+        </>
       )}
     </div>
   )

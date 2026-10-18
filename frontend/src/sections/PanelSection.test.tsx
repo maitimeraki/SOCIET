@@ -57,6 +57,9 @@ describe('PanelSection — §8.6 Panel', () => {
     expect(html).toContain('Risk Lead')
     expect(html).toContain('NEGATIVE')
     expect(html).toContain('CFO memo')
+    // The list carries an accessible name (a heading it is labelled by), so it is navigable.
+    expect(html).toContain('aria-labelledby="panel-experts"')
+    expect(html).toContain('Who argued it')
   })
 
   it('lists each document once, however many links point to it', () => {
@@ -100,6 +103,7 @@ describe('PanelSection — §8.6 Panel', () => {
 
   it('renders skeletons while loading, never the empty state', () => {
     const html = render({ experts: [], loading: true })
-    expect(html).not.toContain('No panel yet')
+    expect(html).toContain('animate-pulse') // the loading placeholders are actually rendered
+    expect(html).not.toContain('No panel yet') // ...and never the empty state
   })
 })
