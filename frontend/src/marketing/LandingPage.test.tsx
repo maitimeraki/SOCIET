@@ -4,7 +4,8 @@ import { describe, expect, it } from 'vitest'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { MemoryRouter } from 'react-router-dom'
 import LandingPage from './LandingPage'
-import { hero, heroStations, meta, sections } from './copy'
+import * as copy from './copy'
+import { footer, hero, meta, sections } from './copy'
 
 const html = renderToStaticMarkup(
   <MemoryRouter>
@@ -12,54 +13,104 @@ const html = renderToStaticMarkup(
   </MemoryRouter>,
 )
 
-const count = (needle: string) => html.split(needle).length - 1
+/** The first viewport ends where the first lower section begins. */
+const FIRST_VIEWPORT_END = 'id="field-recording"'
 
-describe('the sheet — the first viewport', () => {
-  it('carries the question as the sheet title', () => {
-    expect(html).toContain(hero.question)
+const firstViewport = () => {
+  const end = html.indexOf(FIRST_VIEWPORT_END)
+  if (end < 0) throw new Error('the lower sections no longer follow the first viewport')
+  return html.slice(0, end)
+}
+
+const count = (haystack: string, needle: string) => haystack.split(needle).length - 1
+
+/** Static markup escapes entities; read the text a visitor actually reads. */
+const decode = (markup: string) =>
+  markup
+    .replace(/&#x27;/g, "'")
+    .replace(/&quot;/g, '"')
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+
+const text = (markup: string) => decode(markup.replace(/<[^>]*>/g, ' '))
+
+/** §13 — whole-word and plural-tolerant, over values only (identifiers are exempt). */
+const BANNED = [
+  'agent', 'graph', 'node', 'edge', 'round', 'retrieval', 'ontology', 'model',
+  'society', 'chunk', 'embedding', 'vector', 'llm', 'prompt', 'token', 'pipeline', 'job',
+]
+const BANNED_WORD = new RegExp(`\\b(?:${BANNED.join('|')})s?\\b`, 'i')
+
+const stringsIn = (value: unknown): string[] => {
+  if (typeof value === 'string') return [value]
+  if (Array.isArray(value)) return value.flatMap(stringsIn)
+  if (value && typeof value === 'object') return Object.values(value).flatMap(stringsIn)
+  return []
+}
+
+describe('the first viewport — the feeling, the proof, the action', () => {
+  it('names the product and offers sign in and start free', () => {
+    const viewport = firstViewport()
+    expect(text(viewport)).toContain(meta.wordmark)
+    expect(text(viewport)).toContain(hero.signIn.label)
+    expect(text(viewport)).toContain(hero.startFree.label)
+    expect(viewport).toContain(`href="${hero.signIn.to}"`)
   })
 
-  it('offers both calls to action with their real targets', () => {
-    expect(html).toContain('Begin a survey')
-    expect(html).toContain('href="/auth/signup?next=/dashboard"')
-    expect(html).toContain('See it run')
-    expect(html).toContain('href="#field-recording"')
+  it('sets the fixed headline — the feeling, not a topic', () => {
+    expect(hero.headline).toBe("A decision you can't look up.")
+    expect(hero.headline).not.toMatch(/\?$/)
+    const h1 = decode(html.match(/<h1[^>]*>([\s\S]*?)<\/h1>/)?.[1] ?? '')
+    expect(h1).toBe(hero.headline)
   })
 
-  it('labels the plot synthetic, so a scripted survey is never read as a live run', () => {
-    expect(html).toContain(hero.syntheticLabel)
+  it('supports the headline with one line', () => {
+    expect(text(firstViewport())).toContain(hero.support)
+    expect(hero.support.match(/[.!?](\s|$)/g)).toHaveLength(1)
+  })
+
+  it('offers exactly one primary action, and it points at sign-up carrying a next', () => {
+    const viewport = firstViewport()
+    expect(count(viewport, 'data-action="primary"')).toBe(1)
+
+    const actionTags = (viewport.match(/<a\b[^>]*>/g) ?? []).filter((tag) =>
+      tag.includes('data-action="primary"'),
+    )
+    expect(actionTags).toHaveLength(1)
+    // A real anchor: keyboard-reachable, and its target is sign-up with somewhere to land.
+    expect(actionTags[0]).toMatch(/href="\/auth\/signup\?next=[^"]+"/)
+
+    const after = viewport.slice(viewport.indexOf(actionTags[0]) + actionTags[0].length)
+    expect(decode(after.slice(0, after.indexOf('</a>')))).toBe(hero.primary.label)
+  })
+
+  it('reserves the capture region without drawing a fake screenshot', () => {
+    const viewport = firstViewport()
+    expect(count(viewport, 'data-capture="region"')).toBe(1)
+    expect(count(viewport, 'data-capture="map"')).toBe(1)
+    expect(count(viewport, 'data-capture="verdict"')).toBe(1)
+    expect(viewport).not.toContain('<img')
+    expect(viewport).not.toContain('<svg')
   })
 })
 
-describe('the legend law', () => {
-  // The hue each stance's symbol owns (DSPEC §3.1) — the symbol colour, never the word's.
-  const HUE: Record<string, string> = {
-    positive: 'var(--color-pos-light)',
-    neutral: 'var(--color-neu-light)',
-    ambivalent: 'var(--color-amb-light)',
-    negative: 'var(--color-neg-light)',
-  }
-
-  it('pairs every stance hue with its own word in one legend entry', () => {
-    // The stations emit the same hues, so a bare page-level `toContain` proves nothing about the
-    // legend. Scope to the legend block and check each word against the hue in its OWN entry (R52).
-    const marker = `aria-label="${hero.legendTitle}"`
-    const start = html.indexOf(marker)
-    const legend = html.slice(start, html.indexOf('</section>', start))
-    const entries = legend.split('<li').slice(1)
-    for (const [word, hue] of Object.entries(HUE)) {
-      const entry = entries.find((chunk) => chunk.includes(word))
-      expect(entry, `a legend entry for "${word}"`).toBeDefined()
-      expect(entry).toContain(hue)
-    }
-  })
-})
-
-describe('the sections compose from copy.ts', () => {
-  it('renders every section heading', () => {
-    for (const section of Object.values(sections)) {
-      expect(html).toContain(section.heading)
-    }
+describe('the page below the first viewport', () => {
+  it('renders every section heading in DSPEC §7.1 order, with a sane heading order', () => {
+    const order = [
+      sections.demo.heading,
+      sections.howItWorks.heading,
+      sections.comparison.heading,
+      sections.trust.heading,
+      sections.record.heading,
+      sections.faq.heading,
+    ]
+    // Read the real <h2>s in document order — a substring search would match one heading inside
+    // another ("The record" inside "The recording").
+    const headings = [...html.matchAll(/<h2[^>]*>([\s\S]*?)<\/h2>/g)].map((match) => decode(match[1]))
+    expect(headings).toEqual(order)
+    // The page has exactly one h1 — the first viewport's headline.
+    expect(count(html, '<h1')).toBe(1)
   })
 
   it('keeps the SOC 2 line in its one legal form — in progress, marked unverified', () => {
@@ -69,24 +120,9 @@ describe('the sections compose from copy.ts', () => {
 
   it('closes on the title block with the wordmark and the real actions', () => {
     expect(html).toContain(meta.wordmark)
-    expect(html).toContain('Talk to us')
-    expect(html).toContain('mailto:hello@societas.example')
-  })
-})
-
-describe('the sheet composes in the spec order', () => {
-  it('renders the six sections in DSPEC §7.1 order', () => {
-    const order = [
-      sections.demo.heading,
-      sections.howItWorks.heading,
-      sections.comparison.heading,
-      sections.trust.heading,
-      sections.record.heading,
-      sections.faq.heading,
-    ]
-    const positions = order.map((heading) => html.indexOf(heading))
-    expect(positions.every((position) => position >= 0)).toBe(true)
-    expect([...positions].sort((a, b) => a - b)).toEqual(positions)
+    expect(html).toContain(footer.contact.label)
+    expect(html).toContain(footer.contact.href)
+    expect(html).toContain(footer.primary.label)
   })
 
   it('leaves no unresolved value in the markup', () => {
@@ -95,18 +131,22 @@ describe('the sheet composes in the spec order', () => {
   })
 })
 
-describe('the plotting hand — reduced motion', () => {
-  it('renders the sheet complete: every station, the fix, and the closure figure', () => {
-    expect(count('data-station')).toBe(heroStations.length)
-    expect(heroStations).toHaveLength(9)
-    expect(html).toContain(`closure ${hero.closure}`)
+describe('the copy law (§13)', () => {
+  it('holds over every customer-visible string in the copy object', () => {
+    for (const [key, value] of Object.entries(copy)) {
+      for (const valueText of stringsIn(value)) {
+        expect(valueText, `${key}: ${valueText}`).not.toMatch(BANNED_WORD)
+      }
+    }
   })
 
-  it('marks the animated plot so the reduced-motion rule has its hook', () => {
-    // `marketing.css` targets `.hero-plot [data-plot]` under prefers-reduced-motion, settling each
-    // move to its finished figure — so these markers are what makes the static sheet provable.
-    expect(html).toContain('hero-plot')
-    expect(count('data-plot="draw"')).toBeGreaterThan(0)
-    expect(count('data-plot="fix"')).toBe(1)
+  it('holds over every rendered string on the page', () => {
+    expect(text(html)).not.toMatch(BANNED_WORD)
+  })
+
+  it('the pattern itself is whole-word and plural-tolerant', () => {
+    expect(BANNED_WORD.test('an agent here')).toBe(true)
+    expect(BANNED_WORD.test('Agents')).toBe(true)
+    expect(BANNED_WORD.test('bg-ground background ground')).toBe(false)
   })
 })

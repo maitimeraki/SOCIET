@@ -1,8 +1,8 @@
 import { meta, sections } from './copy'
 
 /**
- * The field recording (DSPEC §7.1 §2, §8; plan §5). Framed as a survey title block over a brass
- * bumper rule — the cold-open mark, colour as a mark and never as text (R35).
+ * The recording (DSPEC §7.1 §2, §8; plan §5). Framed as a title block over the world's one accent
+ * rule — the cold-open mark, colour as a mark and never as text (R35).
  *
  * The owner-supplied recording does not exist yet, so the honest state is a labelled poster: never a
  * broken player and never an invented mp4. The real element is wired and takes over the moment
@@ -21,9 +21,9 @@ export default function DemoVideo() {
       <p className="mt-2 max-w-[68ch] text-body-lg text-ink-2">{demo.note}</p>
 
       <figure className="mt-4">
-        {/* The survey frame: a title block, then the brass bumper (the cold-open rule). */}
-        <div className="border-t-2 border-brass pt-2">
-          <p className="font-titling text-label uppercase tracking-[0.14em] text-ink">
+        {/* The frame: a title block, then the accent rule (the cold-open mark). */}
+        <div className="border-t-2 border-accent pt-2">
+          <p className="text-label uppercase text-ink">
             {meta.wordmark}
             <span className="text-ink-3"> · {demo.frameLabel}</span>
           </p>
@@ -35,12 +35,12 @@ export default function DemoVideo() {
             <track kind="captions" src="/demo/captions.vtt" default />
           </video>
         ) : (
-          // The plate sits between the frame's rules — no enclosing card (DSPEC §6).
-          <div className="mt-3 flex aspect-video items-center justify-center border-y border-ink-4">
-            <p className="font-measurement text-mono text-ink-3">{demo.poster}</p>
+          // The plate is a card — the world's material, not a ruled gap.
+          <div className="mt-3 flex aspect-video items-center justify-center rounded-lg border border-border bg-ground-2">
+            <p className="text-micro text-ink-3">{demo.poster}</p>
           </div>
         )}
-        <figcaption className="mt-2 font-measurement text-mono text-ink-3">{demo.plateCaption}</figcaption>
+        <figcaption className="mt-2 text-micro text-ink-3">{demo.plateCaption}</figcaption>
       </figure>
 
       <details className="mt-3 border-y border-ink-4 py-2">

@@ -1,15 +1,13 @@
 /*
- * Marketing — layout and scale ONLY. Tokens, colour, type and the motion grammar all live in
- * Task 13's block in `index.css`; nothing here redefines a token or a hue.
+ * Marketing — layout and the world's one action ONLY. Tokens, colour, type and motion live in
+ * `index.css`; nothing here redefines a token or a hue.
  *
  * Imported by `LandingPage.tsx`, so it travels with the marketing chunk and leaves the app shell
  * (and the entry chunk) untouched.
  */
 
-/* The sheet is full-bleed: it IS the page, not a card inside one (DSPEC §7.1). It supplies its own
-   gutters, which the marketing frame deliberately does not. `.sheet-gutters` carries the same gutter
-   to the ruled sections and the title-block close that follow the full-bleed hero — without it those
-   sit flush against the viewport edge. */
+/* The page supplies its own gutters. `.sheet-gutters` carries the same gutter to the sections and
+   the footer that follow the full-bleed first viewport. */
 .sheet,
 .sheet-gutters {
   --sheet-gutter: 1.25rem;
@@ -37,27 +35,57 @@
   }
 }
 
-/* The plotted territory scales to the sheet's width and never below a legible minimum (DSPEC §9:
-   the plot keeps its minimum size rather than shrinking to illegibility). */
-.hero-plot svg {
-  display: block;
-  width: 100%;
-  height: auto;
-  min-width: 0;
+/* The one primary action — the §3 accent ramp, white label on indigo. Colour is meaning: this is
+   the only indigo surface in the first viewport. */
+.action {
+  display: inline-flex;
+  height: 44px;
+  align-items: center;
+  justify-content: center;
+  padding-inline: 1.5rem;
+  border-radius: var(--radius-md);
+  background: var(--gradient-action);
+  box-shadow: var(--shadow-raised);
+  color: var(--color-accent-ink);
+  font-size: var(--text-body);
+  line-height: var(--text-body--line-height);
+  font-weight: 500;
+  text-decoration: none;
+  transition:
+    background-color var(--duration-state) var(--ease-standard),
+    box-shadow var(--duration-state) var(--ease-standard);
+}
+
+.action:hover {
+  background: var(--color-accent-hover);
+  box-shadow: var(--shadow-floating);
+}
+
+.action:active {
+  background: var(--color-accent-press);
 }
 
 /*
- * Reduced motion: the sheet renders COMPLETE and STATIC. The plotting hand's moves (`draw`, `fix`)
- * animate to their finished figure, so killing the animation leaves that figure on screen — a
- * sightline fully drawn, the fix plotted — never a blank or half-drawn sheet. The delay is zeroed
- * too, because `index.css` suppresses only the duration and a staggered delay would otherwise hold
- * a sightline invisible before it snaps in.
+ * The proof region — the first viewport's layout for Task 6.3's real capture (a dark map beside a
+ * white verdict card). No content is drawn into it until the capture is real: the two surfaces are
+ * materials holding the space, not an illustration.
  */
-@media (prefers-reduced-motion: reduce) {
-  .hero-plot [data-plot] {
-    animation: none !important;
-    animation-delay: 0ms !important;
-    stroke-dasharray: none !important;
-    stroke-dashoffset: 0 !important;
-  }
+.hero-capture {
+  display: grid;
+  grid-template-columns: 1.4fr 1fr;
+  gap: 0.75rem;
+  min-height: 20rem;
+}
+
+.hero-capture__map {
+  border: 1px solid var(--color-map-rule);
+  border-radius: var(--radius-lg);
+  background: var(--gradient-map);
+}
+
+.hero-capture__verdict {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  background: var(--color-canvas);
+  box-shadow: var(--shadow-floating);
 }

@@ -1,5 +1,4 @@
 import { Link } from 'react-router-dom'
-import { buttonClasses } from '../components/ui/Button'
 import './marketing.css'
 import ComparisonTable from './ComparisonTable'
 import { footer, meta } from './copy'
@@ -43,19 +42,22 @@ export default function LandingPage() {
         </div>
       </div>
 
-      {/* The title block close — wordmark, the sheet's own coordinates, the two real actions. */}
-      <footer className="sheet-gutters mt-20 flex flex-wrap items-end justify-between gap-x-8 gap-y-4 border-t-2 border-ink pt-4">
+      {/* The close — wordmark, the real edition line, the two real actions. */}
+      <footer className="sheet-gutters mt-24 flex flex-wrap items-end justify-between gap-x-8 gap-y-4 border-t border-border pt-6">
         <div>
-          <p className="font-titling text-title uppercase tracking-[0.08em] text-ink">{meta.wordmark}</p>
-          <p className="mt-1 font-measurement text-mono text-ink-3">
+          <p className="font-titling text-title font-semibold text-ink">{meta.wordmark}</p>
+          <p className="mt-1 text-micro text-ink-3">
             {footer.edition} · v{meta.version} · {meta.descriptor.toLowerCase()}
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-3">
-          <Link to={footer.primary.to} className={buttonClasses('primary', 40)}>
+          <Link to={footer.primary.to} className="action">
             {footer.primary.label}
           </Link>
-          <a href={footer.contact.href} className={buttonClasses('secondary', 40)}>
+          <a
+            href={footer.contact.href}
+            className="inline-flex h-10 items-center rounded-md px-4 text-body text-ink-2 transition-colors duration-150 hover:bg-ground-2 hover:text-ink"
+          >
             {footer.contact.label}
           </a>
         </div>

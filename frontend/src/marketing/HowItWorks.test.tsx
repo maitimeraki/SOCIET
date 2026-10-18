@@ -16,7 +16,8 @@ describe('the traverse — four ruled steps', () => {
 
   it('keys the steps to the legend and names the mechanism honestly', () => {
     expect(html).toContain(sections.howItWorks.traverseLegendTitle)
-    expect(html).toContain('lines of sight')
+    // The third step is the argument itself — the pairing pass, named in the world's vocabulary.
+    expect(html).toContain(sections.howItWorks.steps[2].title.toLowerCase())
     // The weighting is stated as it is computed — no invented figure.
     expect(html).toContain('CIOR')
   })
