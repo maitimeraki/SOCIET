@@ -13,12 +13,14 @@ import StateChip from './StateChip'
  * Field mapping against the live `GET /api/v1/simulate/debates` item (`run_doc._summarize`):
  *   · when     → `created_at`
  *   · question → `query`
- *   · corpus   → `corpus_label`, falling back to the corpus id `dataset_id` when the run named none
+ *   · corpus   → `corpus_label`, falling back to the corpus id `dataset_id`; neither → an honest dash
  *   · passes   → `rounds_executed`
- *   · outcome  → `verdict_stance` (StanceChip: symbol + colour + word); absent → an honest "still running"
+ *   · outcome  → `verdict_stance` (StanceChip: symbol + colour + word); absent → copy that matches status
  *   · status   → `status` (StateChip)
  * Every rendered field comes from the payload — nothing is derived to fill a column.
  */
+const DASH = '—'
+
 export default function RunTable({ runs, loading = false }: { runs: RunSummary[]; loading?: boolean }) {
   if (loading) {
     return (
@@ -31,14 +33,16 @@ export default function RunTable({ runs, loading = false }: { runs: RunSummary[]
   }
   if (runs.length === 0) return null // callers own the empty state (§13)
 
-  const corpus = (run: RunSummary) => run.corpus_label ?? truncateId(run.dataset_id, 8, 4)
-  const outcome = (run: RunSummary) =>
-    run.verdict_stance ? (
-      <StanceChip stance={run.verdict_stance} />
-    ) : (
-      // No verdict yet is a fact, not a blank cell (§D7 honesty).
-      <span className="text-ink-3">still running</span>
-    )
+  // `dataset_id` can be null at runtime (`meta.get("dataset_id")`) even though the type says string.
+  const corpus = (run: RunSummary) =>
+    run.corpus_label ?? (run.dataset_id ? truncateId(run.dataset_id, 8, 4) : DASH)
+  const outcome = (run: RunSummary) => {
+    if (run.verdict_stance) return <StanceChip stance={run.verdict_stance} />
+    // No verdict, and the copy says WHY (§D7 honesty): a run still going has none yet; a run that has
+    // ENDED without one (failed, interrupted, complete with no clusters) is not "still running".
+    const stillGoing = run.status === 'running' || run.status === 'queued'
+    return <span className="text-ink-3">{stillGoing ? 'still running' : 'No outcome yet'}</span>
+  }
 
   return (
     <>

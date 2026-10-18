@@ -52,10 +52,35 @@ describe('RunTable — the decision list columns (§8.4)', () => {
     expect(render([RUN])).toContain('POSITIVE')
   })
 
-  it('renders an honest "still running" when there is no verdict yet, never a blank cell', () => {
-    const html = render([{ ...RUN, verdict_stance: null }])
+  it('says "still running" when a run is still going and has no verdict yet', () => {
+    const html = render([{ ...RUN, status: 'running', verdict_stance: null }])
     expect(html).toContain('still running')
+    expect(html).not.toContain('No outcome yet')
     expect(html).not.toContain('POSITIVE') // no outcome claimed before one exists
+  })
+
+  it('says "No outcome yet" — never "still running" — for a finished run with no verdict', () => {
+    // A failed run has ENDED without a verdict: the outcome must not claim it is still going, or it
+    // would contradict the Status chip right beside it.
+    const html = render([{ ...RUN, status: 'failed', verdict_stance: null }])
+    expect(html).toContain('No outcome yet')
+    expect(html).not.toContain('still running')
+    expect(html).toContain('Failed') // the status chip is unchanged
+  })
+
+  it('says "No outcome yet" for an interrupted run with no verdict', () => {
+    const html = render([{ ...RUN, status: 'interrupted', verdict_stance: null }])
+    expect(html).toContain('No outcome yet')
+    expect(html).not.toContain('still running')
+    expect(html).toContain('Interrupted')
+  })
+
+  it('renders an honest dash when the run names neither a corpus label nor an id', () => {
+    // `run_doc._summarize` can return `dataset_id: None`; the corpus cell must not throw or blank.
+    const html = render([{ ...RUN, corpus_label: null, dataset_id: null as unknown as string }])
+    expect(html).toContain('—')
+    expect(html).toContain('<table') // the table still renders — no throw
+    expect(html).toContain('Should we expand into Europe?')
   })
 
   it('links each row to the run', () => {
