@@ -16,8 +16,9 @@ describe('the traverse — four ruled steps', () => {
 
   it('keys the steps to the legend and names the mechanism honestly', () => {
     expect(html).toContain(sections.howItWorks.traverseLegendTitle)
-    // The third step is the argument itself — the pairing pass, named in the world's vocabulary.
-    expect(html).toContain(sections.howItWorks.steps[2].title.toLowerCase())
+    // The argument step's own claim, independent of its title: the pairing pass is a query against
+    // the map, not an authored script.
+    expect(html).toContain('Each pass pairs experts over what they share')
     // The weighting is stated as it is computed — no invented figure.
     expect(html).toContain('CIOR')
   })

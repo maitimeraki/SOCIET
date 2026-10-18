@@ -22,13 +22,13 @@ export default function Hero() {
         <nav aria-label={hero.navLabel} className="flex items-center gap-2">
           <Link
             to={hero.signIn.to}
-            className="inline-flex h-10 items-center rounded-md px-4 text-body text-ink-2 transition-colors duration-150 hover:bg-ground-2 hover:text-ink"
+            className="inline-flex h-10 items-center rounded-md px-4 font-titling text-body text-ink-2 transition-colors duration-150 hover:bg-ground-2 hover:text-ink"
           >
             {hero.signIn.label}
           </Link>
           <Link
             to={hero.startFree.to}
-            className="inline-flex h-10 items-center rounded-md border border-border bg-canvas px-4 text-body font-medium text-ink shadow-raised transition-colors duration-150 hover:border-border-strong hover:bg-ground-2"
+            className="inline-flex h-10 items-center rounded-md border border-border bg-canvas px-4 font-titling text-body font-medium text-ink shadow-raised transition-colors duration-150 hover:border-border-strong hover:bg-ground-2"
           >
             {hero.startFree.label}
           </Link>

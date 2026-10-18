@@ -23,13 +23,14 @@ export const hero = {
   /** The account bar's accessible name. */
   navLabel: 'Account',
   signIn: { label: 'Sign in', to: '/auth/signin' },
-  startFree: { label: 'Start free', to: '/auth/signup?next=/dashboard' },
+  startFree: { label: 'Start free', to: '/auth/signup?next=/new' },
   /** The fixed claim — a feeling, not a topic. */
   headline: "A decision you can't look up.",
   support:
     'A panel of experts reads your documents, argues the question, and files a verdict — with the confidence and the case against.',
-  /** The one primary action in the first viewport. `next` lands a new owner where the work begins. */
-  primary: { label: 'Start your first decision', to: '/auth/signup?next=/dashboard' },
+  /** The one primary action in the first viewport. `next` lands a new owner where the work begins:
+      `/new`, the step where the first document is added. */
+  primary: { label: 'Start your first decision', to: '/auth/signup?next=/new' },
 } as const
 
 /**
@@ -227,6 +228,6 @@ export const footer = {
    */
   // TODO(owner): replace with the real contact address before launch.
   contact: { label: 'Talk to us', href: 'mailto:hello@societas.example' },
-  primary: { label: 'Start a decision', to: '/auth/signup?next=/dashboard' },
+  primary: { label: 'Start a decision', to: '/auth/signup?next=/new' },
   edition: 'Local-first',
 } as const

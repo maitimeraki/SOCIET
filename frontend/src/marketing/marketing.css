@@ -47,6 +47,7 @@
   background: var(--gradient-action);
   box-shadow: var(--shadow-raised);
   color: var(--color-accent-ink);
+  font-family: var(--font-titling);
   font-size: var(--text-body);
   line-height: var(--text-body--line-height);
   font-weight: 500;

@@ -78,8 +78,10 @@ describe('the first viewport — the feeling, the proof, the action', () => {
       tag.includes('data-action="primary"'),
     )
     expect(actionTags).toHaveLength(1)
-    // A real anchor: keyboard-reachable, and its target is sign-up with somewhere to land.
-    expect(actionTags[0]).toMatch(/href="\/auth\/signup\?next=[^"]+"/)
+    // A real anchor: keyboard-reachable, and its target is sign-up landing on the first step —
+    // `/new`, where the first document is added (not the existing-owner dashboard).
+    expect(hero.primary.to).toBe('/auth/signup?next=/new')
+    expect(actionTags[0]).toContain(`href="${hero.primary.to}"`)
 
     const after = viewport.slice(viewport.indexOf(actionTags[0]) + actionTags[0].length)
     expect(decode(after.slice(0, after.indexOf('</a>')))).toBe(hero.primary.label)

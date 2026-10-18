@@ -4,19 +4,18 @@ import RuledBlock from '../components/ui/RuledBlock'
 import { sections } from './copy'
 
 /**
- * The traverse (DSPEC §7.1 §3) and the legend of what you get (§7.1 §4). Both are keyed ruled lines
- * about the same mechanism, so they live in one section.
+ * The mechanism (DSPEC §7.1 §3) and what you get (§7.1 §4). Both are keyed ruled lines about the
+ * same product, so they live in one section.
  *
- * §3 — the mechanism in four ruled steps (record → stations → lines of sight → the fix), each a
- * `RuledBlock` carrying a legend key (A–D) that matches a `Legend` entry. Every claim is real
+ * §3 — the mechanism in four ruled steps (the material → the panel → the argument → the verdict),
+ * each a `RuledBlock` carrying a legend key (A–D) that matches a `Legend` entry. Every claim is real
  * product behaviour, not a promise.
  *
- * §4 — the legend of what you get: five ruled lines, symbol + word, keyed 1–5.
+ * §4 — what you get: five ruled lines, symbol + word, keyed 1–5.
  *
- * The marks are authored geometry in the survey's own grammar (a ruled record, a station triangle, a
- * traced sightline, the fix ring) — never a picture, never an icon standing in for the world. Colour
- * is absent here by design, so no hue is introduced and the legend law is satisfied trivially: every
- * mark sits beside its ink word.
+ * The marks are authored geometry (a ruled document, an expert triangle, a pairing traced between
+ * two experts, the verdict ring) — never a picture, never an icon standing in for the world. Colour
+ * is absent here by design, so no hue is introduced and every mark sits beside its ink word.
  */
 
 const mark = (children: ReactNode) => (
@@ -36,11 +35,11 @@ const mark = (children: ReactNode) => (
 )
 
 const TRAVERSE_MARKS: Record<string, ReactNode> = {
-  // A · record — a ruled record: the corpus the graph is read from.
+  // A · the material — a ruled document: the pages the map is read from.
   A: mark(<path d="M3 4.5h10M3 8h10M3 11.5h6" />),
-  // B · stations — a triangulation station.
+  // B · the panel — an expert mark.
   B: mark(<path d="M8 2.6 14 13.4H2z" />),
-  // C · lines of sight — a sightline traced between two stations.
+  // C · the argument — a pairing traced between two experts.
   C: mark(
     <>
       <path d="M3.5 12.5 12.5 3.5" />
@@ -48,7 +47,7 @@ const TRAVERSE_MARKS: Record<string, ReactNode> = {
       <circle cx="12.5" cy="3.5" r="1.4" fill="currentColor" stroke="none" />
     </>,
   ),
-  // D · the fix — the closure ring and the plotted centre.
+  // D · the verdict — the ring and the plotted centre.
   D: mark(
     <>
       <circle cx="8" cy="8" r="5.2" />
@@ -58,7 +57,7 @@ const TRAVERSE_MARKS: Record<string, ReactNode> = {
 }
 
 const GAIN_MARKS: Record<string, ReactNode> = {
-  // verdict — the fix mark.
+  // verdict — the verdict ring.
   1: mark(
     <>
       <circle cx="8" cy="8" r="5.2" />

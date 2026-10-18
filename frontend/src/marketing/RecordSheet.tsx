@@ -4,12 +4,13 @@ import RuledBlock from '../components/ui/RuledBlock'
 import { sections } from './copy'
 
 /**
- * The record (DSPEC §7.1 §5) — one finished run shown as a sheet: the fix, the closure, the dissent
- * hatched, and the contents map (the provenance index). The sample run is scripted and labelled
- * synthetic, like the hero's.
+ * The record (DSPEC §7.1 §5) — one finished decision shown as a document: the verdict, the
+ * confidence, the dissent kept, and the contents map (the provenance index). The sample is scripted
+ * and labelled as such.
  *
- * The fix uses `FixMark` — the one mark that owns the word "verdict" (DSPEC §6) — so it appears
- * exactly once on the page, here. The stance word stays ink; the hue is the `StanceSymbol` beside it.
+ * The verdict uses `FixMark` — the one mark that owns the word "verdict" (DSPEC §6) — so it appears
+ * exactly once on the page, here. The position word stays ink; the hue is the `StanceSymbol` beside
+ * it.
  */
 export default function RecordSheet() {
   const record = sections.record
@@ -77,9 +78,7 @@ export default function RecordSheet() {
         </div>
       </article>
 
-      {/* TODO(Task 19): replace this plate with the real capture —
-          <img src="/img/plotting-table.webp" width={1280} height={720} loading="lazy" decoding="async"
-               alt="The plotting table mid-survey" /> */}
+      {/* The capture slot — a real capture of the map mid-argument lands here once it is taken. */}
       <figure className="mt-4">
         <div className="flex aspect-video items-center justify-center border-y border-ink-4">
           <p className="font-measurement text-mono text-ink-3">{record.captureLabel}</p>
