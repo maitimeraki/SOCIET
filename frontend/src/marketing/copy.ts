@@ -21,6 +21,37 @@ export const meta = {
   version: '0.0.0',
 } as const
 
+/**
+ * The captures. Each is a screenshot of the running product, taken from one real decision and
+ * served from `public/captures/` — never a mock, never an illustration. A capture that could not
+ * be taken does not ship and the layout is built without it, so nothing here stands in for a
+ * surface that does not work. `alt` says what the frame shows; `width`/`height` are the file's own
+ * pixels, so the space is held before the image loads.
+ */
+export const captures = {
+  /** The filed answer, from the decision it answers to the reasoning behind it. */
+  answer: {
+    src: '/captures/answer.png',
+    alt: 'The filed answer on screen: the question the panel was asked, the answer it filed, and the reasoning behind it.',
+    width: 1036,
+    height: 1390,
+  },
+  /** The same document further down: the confidence, and the opposing case kept whole beside it. */
+  opposingCase: {
+    src: '/captures/opposing-case.png',
+    alt: 'The same document further down: the confidence the panel reached and the opposing case, kept whole rather than averaged away.',
+    width: 1036,
+    height: 1372,
+  },
+  /** The workspace itself, at the step where the documents are added. */
+  workspace: {
+    src: '/captures/workspace-material.png',
+    alt: 'The workspace: the rail of Documents, Decisions, Verdicts and Panel beside three documents that were added and read.',
+    width: 2880,
+    height: 1920,
+  },
+} as const
+
 export const hero = {
   /** The account bar's accessible name. */
   navLabel: 'Account',
@@ -63,6 +94,8 @@ export const sections = {
         body: 'The decision closes on an answer, the opposing case, the position each expert took, and the sources each argued from. Nothing is summarised away to make the answer look tidier.',
       },
     ],
+    /** The workspace capture's caption — what the frame is, in the order the reader sees it. */
+    captureCaption: 'The workspace, with three documents already read — the rail on the left, the material beside it.',
     /** The recording is absent. Saying so is the honest state — never a player or a frame. */
     honesty:
       'No recording yet. When one exists it will be an unedited capture of a real decision, not a re-enactment.',

@@ -5,7 +5,7 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import { MemoryRouter } from 'react-router-dom'
 import LandingPage from './LandingPage'
 import * as copy from './copy'
-import { footer, hero, meta } from './copy'
+import { captures, footer, hero, meta } from './copy'
 
 const html = renderToStaticMarkup(
   <MemoryRouter>
@@ -87,13 +87,40 @@ describe('the first viewport — the feeling, the proof, the action', () => {
     expect(decode(after.slice(0, after.indexOf('</a>')))).toBe(hero.primary.label)
   })
 
-  it('reserves the capture region without drawing a fake screenshot', () => {
+  it('shows two real frames of the filed answer in the proof region', () => {
     const viewport = firstViewport()
     expect(count(viewport, 'data-capture="region"')).toBe(1)
-    expect(count(viewport, 'data-capture="map"')).toBe(1)
-    expect(count(viewport, 'data-capture="verdict"')).toBe(1)
-    expect(viewport).not.toContain('<img')
+    expect(count(viewport, 'data-capture="answer"')).toBe(1)
+    expect(count(viewport, 'data-capture="case"')).toBe(1)
+    // The frames are the real captures, not drawn placeholders.
+    expect(viewport).toContain(`src="${captures.answer.src}"`)
+    expect(viewport).toContain(`src="${captures.opposingCase.src}"`)
     expect(viewport).not.toContain('<svg')
+  })
+})
+
+describe('the shipped captures — real frames of the running product', () => {
+  it('renders every capture with an alt, its own pixels and a /captures/ source', () => {
+    for (const [name, capture] of Object.entries(captures)) {
+      expect(capture.alt, name).not.toBe('')
+      expect(capture.src, name).toMatch(/^\/captures\//)
+      const tag = html.match(new RegExp(`<img[^>]*src="${capture.src}"[^>]*>`))?.[0]
+      expect(tag, `${name} is not rendered`).toBeTruthy()
+      expect(tag, name).toContain(`alt="${capture.alt}"`)
+      expect(tag, name).toContain(`width="${capture.width}"`)
+      expect(tag, name).toContain(`height="${capture.height}"`)
+    }
+  })
+
+  it('gives every image on the page a non-empty alt, a size and a /captures/ source', () => {
+    const tags = html.match(/<img\b[^>]*>/g) ?? []
+    expect(tags.length).toBeGreaterThan(0)
+    for (const tag of tags) {
+      expect(tag).toMatch(/\balt="[^"]+"/)
+      expect(tag).toMatch(/\bwidth="\d+"/)
+      expect(tag).toMatch(/\bheight="\d+"/)
+      expect(tag).toMatch(/\bsrc="\/captures\/[^"]+"/)
+    }
   })
 })
 
@@ -123,8 +150,8 @@ describe('the page below the first viewport', () => {
   })
 
   it('fabricates no evidence anywhere on the page', () => {
-    // No recording, capture, sample decision or benchmark figure stands in for proof.
-    expect(html).not.toContain('<img')
+    // No recording, sample decision or benchmark figure stands in for proof. The only images are the
+    // real captures, which the shipped-captures suite checks for alt, size and source.
     expect(html).not.toContain('<video')
     expect(html).not.toContain('<source')
     expect(html).not.toContain('.mp4')

@@ -76,24 +76,20 @@
 }
 
 /*
- * The proof region — the first viewport's layout for Task 6.3's real capture (a dark map beside a
- * white verdict card). No content is drawn into it until the capture is real: the two surfaces are
- * materials holding the space, not an illustration.
+ * The proof region — the frames of the running product. `.hero-capture` stacks the first viewport's
+ * two frames; `.hero-capture__frame` is the frame itself, used by the proof section too. Each frame
+ * fills its slot and scales down without distorting, and the source's own pixels hold the space
+ * before it loads.
  */
 .hero-capture {
   display: grid;
-  grid-template-columns: 1.4fr 1fr;
   gap: 0.75rem;
-  min-height: 20rem;
 }
 
-.hero-capture__map {
-  border: 1px solid var(--color-map-rule);
-  border-radius: var(--radius-lg);
-  background: var(--gradient-map);
-}
-
-.hero-capture__verdict {
+.hero-capture__frame {
+  display: block;
+  width: 100%;
+  height: auto;
   border: 1px solid var(--color-border);
   border-radius: var(--radius-lg);
   background: var(--color-canvas);

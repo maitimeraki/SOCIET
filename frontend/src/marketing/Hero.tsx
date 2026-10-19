@@ -1,15 +1,14 @@
 import { Link } from 'react-router-dom'
-import { hero, meta } from './copy'
+import { captures, hero, meta } from './copy'
 
 /**
  * The first viewport — the whole Persuade surface in one screen. A stranger reads, in order:
  * the wordmark; the account bar (Sign in / Start free); the headline "A decision you can't look
  * up."; one supporting line; one action, "Start your first decision"; then the proof region.
  *
- * The proof region is RESERVED, not drawn. Task 6.3 fills it with a real capture — a dark map
- * beside a white verdict card — taken from the running product. Nothing here imitates that
- * capture: no synthetic plot, no mock, no placeholder that reads as a claim. The two surfaces
- * are the world's own materials (the one dark map, the white card) holding the space.
+ * The proof region is two captures of one filed answer, taken from the running product: the answer
+ * itself, and the same document's confidence and opposing case. The map capture does not ship — the
+ * map surface does not work in the shipped build — so no frame here imitates one.
  *
  * There is exactly one primary action: the secondary that used to sit beside it is gone from the
  * first viewport, and the action carries `next` so a new owner lands where the work begins.
@@ -48,10 +47,24 @@ export default function Hero() {
           </div>
         </div>
 
-        {/* The proof region — reserved for Task 6.3's real capture. Decorative until then. */}
-        <figure className="hero-capture" data-capture="region" aria-hidden="true">
-          <div className="hero-capture__map" data-capture="map" />
-          <div className="hero-capture__verdict" data-capture="verdict" />
+        {/* The proof region — two frames of one filed answer, both taken from the running product. */}
+        <figure className="hero-capture" data-capture="region">
+          <img
+            className="hero-capture__frame"
+            data-capture="answer"
+            src={captures.answer.src}
+            alt={captures.answer.alt}
+            width={captures.answer.width}
+            height={captures.answer.height}
+          />
+          <img
+            className="hero-capture__frame"
+            data-capture="case"
+            src={captures.opposingCase.src}
+            alt={captures.opposingCase.alt}
+            width={captures.opposingCase.width}
+            height={captures.opposingCase.height}
+          />
         </figure>
       </div>
     </section>

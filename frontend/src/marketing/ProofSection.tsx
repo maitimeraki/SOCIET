@@ -1,10 +1,11 @@
-import { sections } from './copy'
+import { captures, sections } from './copy'
 
 /**
  * The proof section — what used to be the recording. No recording exists and none may be mocked,
  * so the section proves the mechanism by showing it: the three moments a person can watch while a
- * decision runs. The honesty line says plainly that the recording is absent; no player and no frame
- * stand in for a capture (Task 6.3 adds the real captures).
+ * decision runs, and one capture of the workspace itself, taken at the step where the documents are
+ * added and read. The honesty line says plainly that the recording is absent; no player stands in
+ * for one.
  */
 export default function ProofSection() {
   const proof = sections.open
@@ -25,6 +26,18 @@ export default function ProofSection() {
           </li>
         ))}
       </ol>
+
+      {/* The one capture that could be taken: the workspace itself, at the step the stages describe. */}
+      <figure className="mt-6" data-capture="workspace">
+        <img
+          className="hero-capture__frame"
+          src={captures.workspace.src}
+          alt={captures.workspace.alt}
+          width={captures.workspace.width}
+          height={captures.workspace.height}
+        />
+        <figcaption className="mt-2 text-micro text-ink-3">{proof.captureCaption}</figcaption>
+      </figure>
 
       <p className="mt-4 border-t border-border pt-3 text-micro text-ink-3">{proof.honesty}</p>
     </section>
