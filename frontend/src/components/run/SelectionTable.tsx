@@ -28,11 +28,11 @@ export default function SelectionTable({
             <span className="flex items-center gap-2">
               <span className="relative hidden h-1.5 flex-1 rounded-[4px] bg-ink-4 sm:block">
                 <span
-                  className="absolute inset-y-0 left-0 rounded-[4px] bg-datum"
+                  className="absolute inset-y-0 left-0 rounded-[4px] bg-accent"
                   style={{ width: `${Math.min(1, row.blended) * 100}%` }}
                 />
                 <span
-                  className="absolute inset-y-[-3px] w-px bg-brass"
+                  className="absolute inset-y-[-3px] w-px bg-warn"
                   style={{ left: `${threshold * 100}%` }}
                   aria-hidden="true"
                 />

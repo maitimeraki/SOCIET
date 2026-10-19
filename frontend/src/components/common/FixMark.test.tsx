@@ -5,7 +5,7 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import FixMark from './FixMark'
 
 describe('FixMark', () => {
-  it('draws the ink ring, the brass centre and the vermilion plotted point', () => {
+  it('draws the ink ring, the warn centre and the vermilion plotted point', () => {
     const html = renderToStaticMarkup(<FixMark confidence={0.82} />)
     expect(html).toContain('stroke="currentColor"') // the ink ring follows its ground
     expect(html).toContain('--color-warn') // the centre

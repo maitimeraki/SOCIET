@@ -23,7 +23,7 @@ export default function ProfileCard({ profile }: { profile: AgentProfile }) {
       <div className="mt-2 text-micro">
         {sources.length > 0 ? (
           <span className="flex items-start gap-1.5 text-ink-3">
-            <SealCheck size={12} className="mt-0.5 shrink-0 text-brass" aria-hidden="true" />
+            <SealCheck size={12} className="mt-0.5 shrink-0 text-warn" aria-hidden="true" />
             sources: {sources.map((source) => `${source.title}${source.breadcrumb ? ` §${source.breadcrumb}` : ''}`).join(' · ')}
           </span>
         ) : (

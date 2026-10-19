@@ -7,7 +7,7 @@ export default function ProvenanceList({ links }: { links: ProvenanceLink[] }) {
     <ul className="space-y-2">
       {links.map((link) => (
         <li key={link.chunk_id} className="flex items-start gap-2 text-body text-ink-2">
-          <SealCheck size={14} className="mt-1 shrink-0 text-brass" aria-hidden="true" />
+          <SealCheck size={14} className="mt-1 shrink-0 text-warn" aria-hidden="true" />
           <span>
             {link.title}
             {link.breadcrumb ? ` — ${link.breadcrumb}` : ''}

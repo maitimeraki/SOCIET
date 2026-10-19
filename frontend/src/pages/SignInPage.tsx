@@ -18,7 +18,7 @@ import Input from '../components/ui/Input'
  * §7.2 Sign-in — the intake form on the sheet. Fields sit on ruled baselines (`Field`/`Input`); the
  * submit is the route button ("Open the office"). Validation runs on blur and on submit; the invalid
  * state is `Field`'s vermilion hatched margin note (never a red box), and the form-level error is the
- * brass caution line with its words in ink (R35). Success sets the store and routes to `next`.
+ * warn caution line with its words in ink (R35). Success sets the store and routes to `next`.
  */
 export default function SignInPage() {
   const signin = useAuthStore((s) => s.signin)

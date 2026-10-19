@@ -14,7 +14,7 @@ export default function CommitLine({
   if (failed) {
     return (
       <p className="flex items-center gap-2 text-micro text-ink-2">
-        <XCircle size={14} className="text-route" aria-hidden="true" /> Round {round}: commit failed
+        <XCircle size={14} className="text-edge" aria-hidden="true" /> Round {round}: commit failed
       </p>
     )
   }

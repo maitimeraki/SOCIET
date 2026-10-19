@@ -84,14 +84,14 @@ describe('authForm — `next` is a same-origin boundary', () => {
   })
 })
 
-describe('§7.2 marks — brass is the mark, ink is the word (R35)', () => {
-  it('draws the caution line in brass with the words in ink', () => {
+describe('§7.2 marks — warn is the mark, ink is the word (R35)', () => {
+  it('draws the caution line in warn with the words in ink', () => {
     const html = renderToStaticMarkup(
       <CautionLine error={{ message: 'Email or password is incorrect.', retry: false }} onRetry={() => {}} />,
     )
-    expect(html).toContain('border-brass')
+    expect(html).toContain('border-warn')
     expect(html).toContain('text-ink-2')
-    expect(html).not.toContain('text-brass')
+    expect(html).not.toContain('text-warn')
     expect(html).toContain('role="alert"')
   })
 
@@ -104,11 +104,11 @@ describe('§7.2 marks — brass is the mark, ink is the word (R35)', () => {
     expect(fatal).not.toContain('Try again')
   })
 
-  it('lands the intake stamp with a brass mark and an ink label', () => {
+  it('lands the intake stamp with a warn mark and an ink label', () => {
     const html = renderToStaticMarkup(<IntakeStamp label="Signed in" />)
-    expect(html).toContain('border-brass')
+    expect(html).toContain('border-warn')
     expect(html).toContain('text-ink')
-    expect(html).not.toContain('text-brass')
+    expect(html).not.toContain('text-warn')
     expect(html).toContain('role="status"')
     expect(html).toContain('Signed in')
   })

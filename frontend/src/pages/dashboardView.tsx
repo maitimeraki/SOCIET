@@ -30,7 +30,7 @@ export interface DashboardViewProps {
  * renders under `react-dom/server` in the node-only suite without dragging in the graph stack.
  *
  * The timeline is `RunTable` — the plan's own instruction ("reuse `RunTable.tsx` and extend its
- * columns", §3.3) — so the dashboard and `/runs` render the same five columns from one component.
+ * columns", §3.3) — so the dashboard and `/runs` render the same columns from one component.
  */
 export default function DashboardView({
   runs,
@@ -66,7 +66,7 @@ export default function DashboardView({
       <section>
         <div className="mb-4 flex items-baseline justify-between">
           <h2 className="text-heading text-ink">Recent runs</h2>
-          <Link to="/runs" className="text-body text-ink-2 hover:text-datum">
+          <Link to="/runs" className="text-body text-ink-2 hover:text-accent">
             All runs →
           </Link>
         </div>

@@ -18,7 +18,7 @@ const SAMPLE_LEGEND: LegendEntry[] = [
 /**
  * §7.2's "small honest sample of the sheet": three stations, their lines of sight, and the fix, drawn
  * in the sheet's own geometry (a graticule, station marks matching `StanceSymbol`'s stroke weights, a
- * brass-ringed fix). It is captioned as a sample, never a run — no fabricated result. The `fix` ring
+ * warn-ringed fix). It is captioned as a sample, never a run — no fabricated result. The `fix` ring
  * is drawn here, not imported from `FixMark`, whose one-mark-owns-the-word law reserves it for verdict
  * surfaces; this is a labelled illustration, and it is `aria-hidden` behind its caption.
  */
@@ -26,8 +26,8 @@ function SampleSheet() {
   return (
     <figure className="mt-10">
       <svg viewBox="0 0 260 150" className="w-full" aria-hidden="true" focusable="false">
-        {/* graticule — the sheet's own datum hairlines */}
-        <g stroke="var(--color-datum-dim)" strokeWidth="0.5" opacity="0.45">
+        {/* graticule — the sheet's own rule hairlines */}
+        <g stroke="var(--color-border)" strokeWidth="0.5" opacity="0.45">
           <line x1="0" y1="38" x2="260" y2="38" />
           <line x1="0" y1="76" x2="260" y2="76" />
           <line x1="0" y1="114" x2="260" y2="114" />
@@ -42,22 +42,22 @@ function SampleSheet() {
           <line x1="104" y1="122" x2="64" y2="44" />
         </g>
         {/* three stations — the same drawn forms as the legend key */}
-        <polygon points="64,35 74,52 54,52" fill="var(--color-stance-pos)" />
-        <g fill="none" stroke="var(--color-stance-neu)" strokeWidth="1.5">
+        <polygon points="64,35 74,52 54,52" fill="var(--color-pos-light)" />
+        <g fill="none" stroke="var(--color-neu-light)" strokeWidth="1.5">
           <rect x="169" y="89" width="14" height="14" />
           <path d="M169 96h14M176 89v14" />
         </g>
         <path
           d="M97 115 111 129M111 115 97 129"
           fill="none"
-          stroke="var(--color-stance-neg)"
+          stroke="var(--color-neg-light)"
           strokeWidth="1.8"
           strokeLinecap="round"
         />
-        {/* the fix — an ink ring, a brass centre, the plotted point */}
+        {/* the fix — an ink ring, a warn centre, the plotted point */}
         <circle cx="124" cy="70" r="12" fill="none" stroke="var(--color-ink)" strokeWidth="1.5" />
-        <circle cx="124" cy="70" r="3.8" fill="var(--color-brass)" />
-        <circle cx="133" cy="61" r="2.4" fill="var(--color-route)" />
+        <circle cx="124" cy="70" r="3.8" fill="var(--color-warn)" />
+        <circle cx="133" cy="61" r="2.4" fill="var(--color-edge)" />
       </svg>
       <figcaption className="mt-3 font-measurement text-mono text-ink-3">
         A sample sheet, not a run — three stations, their lines of sight, and the fix.
@@ -78,7 +78,7 @@ function SampleSheet() {
  */
 export default function AuthLayout() {
   return (
-    <main className="min-h-screen bg-survey-paper">
+    <main className="min-h-screen bg-ground">
       <div className="mx-auto grid min-h-screen w-full max-w-6xl grid-cols-1 lg:grid-cols-2">
         <div className="flex flex-col px-6 py-10 sm:px-10 lg:px-14">
           <Link to="/" className="inline-flex items-baseline gap-2.5 self-start">

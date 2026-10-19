@@ -5,7 +5,8 @@ import { describe, expect, it } from 'vitest'
 // assertable without a DOM — they are satisfied by construction (the map host is never conditionally
 // rendered or remounted) and stated as such, never faked with a simulated click.
 import { renderToStaticMarkup } from 'react-dom/server'
-import { WorkspaceView, paneStateFrom, paneStorageKey, type MapSummary, type PaneState } from './Workspace'
+import { WorkspaceView, type MapSummary, type PaneState } from './Workspace'
+import { paneStateFrom, paneStorageKey } from './paneState'
 
 const MAP_ID = 'run-1'
 const HOST_ID = `workspace-map-${MAP_ID}`

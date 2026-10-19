@@ -2,7 +2,7 @@ import type { InputHTMLAttributes } from 'react'
 
 // §6 Inputs — the field notebook. No box and no fill: the field sits on a single ruled baseline.
 // That rule is the control's boundary, so it takes --ink-3 (4.54:1 on the sheet) — --ink-4 is
-// decorative and never a control boundary (addendum §1). Focus turns the rule datum and raises the
+// decorative and never a control boundary (addendum §1). Focus turns the rule accent and raises the
 // corner registration tick, which the control paints itself so it registers on the control's own
 // corner whether or not a `Field` wraps it.
 const BASE =

@@ -62,7 +62,7 @@ export default function EventStream({ items, live }: { items: StreamItem[]; live
             case 'warning':
               return (
                 <p key={index} className="flex items-start gap-2 text-micro text-ink-2">
-                  <Warning size={14} className="mt-0.5 shrink-0 text-brass" aria-hidden="true" /> {item.text}
+                  <Warning size={14} className="mt-0.5 shrink-0 text-warn" aria-hidden="true" /> {item.text}
                 </p>
               )
           }
@@ -79,7 +79,7 @@ export default function EventStream({ items, live }: { items: StreamItem[]; live
             setPaused(false)
             container.current?.scrollTo({ top: container.current.scrollHeight })
           }}
-          className="sticky bottom-2 left-1/2 mt-2 -translate-x-1/2 rounded-[4px] border border-ink-4 bg-survey-paper-2 px-3 py-1.5 text-micro text-ink"
+          className="sticky bottom-2 left-1/2 mt-2 -translate-x-1/2 rounded-[4px] border border-ink-4 bg-ground-2 px-3 py-1.5 text-micro text-ink"
         >
           Jump to live ↓
         </button>

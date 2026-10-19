@@ -15,10 +15,10 @@ describe('NarrativeFallbackNotice — the narrative fallback notice (§17.3)', (
     expect(render('')).toBe('')
   })
 
-  it('marks the notice in brass while the words stay ink (R35)', () => {
+  it('marks the notice in warn while the words stay ink (R35)', () => {
     const html = render('fallback')
-    expect(html).toContain('border-brass') // the rule, the annotation
-    expect(html).toContain('text-brass') // the mark
+    expect(html).toContain('border-warn') // the rule, the annotation
+    expect(html).toContain('text-warn') // the mark
     expect(html).toContain('text-body text-ink') // the sentence
   })
 })

@@ -52,10 +52,10 @@ const surveyColor = (token: string): string =>
  * Node marks are contrast-validated against it, and the label halo is struck in it, so an edge
  * cannot cut through the label text.
  */
-const PLOT_SURFACE = surveyColor('--color-plot-ground')
+const PLOT_SURFACE = surveyColor('--color-map-ground')
 /** Node labels read luminous on the plot; edges take the muted plot ink so labels stay dominant. */
-const LABEL_INK = surveyColor('--color-plot-ink')
-const EDGE_INK = surveyColor('--color-plot-ink-3')
+const LABEL_INK = surveyColor('--color-map-ink')
+const EDGE_INK = surveyColor('--color-map-ink-2')
 /** How often the layout is allowed to run, ms — coalesces a burst of deltas into one settle. */
 const LAYOUT_THROTTLE_MS = 180
 const LAYOUT_ITERATIONS = 5
@@ -414,12 +414,12 @@ function GraphOverlay({ phase, message }: { phase: GraphStreamPhase; message: st
   return (
     <div
       role="status"
-      className={`pointer-events-none absolute inset-x-0 bottom-0 flex items-center gap-2 border-t bg-survey-paper/90 px-3 py-2 ${
-        failed ? 'border-route/40' : 'border-ink-4'
+      className={`pointer-events-none absolute inset-x-0 bottom-0 flex items-center gap-2 border-t bg-ground/90 px-3 py-2 ${
+        failed ? 'border-edge/40' : 'border-ink-4'
       }`}
     >
       {failed ? (
-        <XCircle size={16} className="shrink-0 text-route" aria-hidden="true" />
+        <XCircle size={16} className="shrink-0 text-edge" aria-hidden="true" />
       ) : (
         <CheckCircle size={16} className="shrink-0 text-ink-2" aria-hidden="true" />
       )}
@@ -502,9 +502,9 @@ export default function GraphCanvas({ datasetId, jobId }: GraphCanvasProps) {
       {notice && (
         <p
           role="status"
-          className="pointer-events-none absolute right-2 top-2 flex items-center gap-1.5 rounded-[4px] border border-brass/40 bg-survey-paper/85 px-2 py-1 text-micro text-ink-2"
+          className="pointer-events-none absolute right-2 top-2 flex items-center gap-1.5 rounded-[4px] border border-warn/40 bg-ground/85 px-2 py-1 text-micro text-ink-2"
         >
-          <Warning size={13} className="text-brass" aria-hidden="true" />
+          <Warning size={13} className="text-warn" aria-hidden="true" />
           {notice}
         </p>
       )}

@@ -14,7 +14,7 @@ export default function MeterBar({
     <span className="flex items-center gap-2" title={`${label}: ${display}`}>
       <span className="w-9 text-micro text-ink-3">{label}</span>
       <span className="h-1 w-14 rounded-[4px] bg-ink-4">
-        <span className="block h-full rounded-[4px] bg-datum" style={{ width: `${pct}%` }} />
+        <span className="block h-full rounded-[4px] bg-accent" style={{ width: `${pct}%` }} />
       </span>
       <span className="tnum font-measurement text-micro text-ink-2">{display}</span>
     </span>

@@ -13,7 +13,7 @@ export default function StageLine({
     state === 'done' ? (
       <CheckCircle size={16} className="text-ink-2" aria-hidden="true" />
     ) : state === 'active' ? (
-      <span aria-hidden="true" className="h-2.5 w-2.5 animate-pulse rounded-full bg-datum" />
+      <span aria-hidden="true" className="h-2.5 w-2.5 animate-pulse rounded-full bg-accent" />
     ) : (
       <span aria-hidden="true" className="h-2.5 w-2.5 rounded-full border border-ink-4" />
     )
