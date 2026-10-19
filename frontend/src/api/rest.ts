@@ -154,9 +154,10 @@ export const listUploads = () => request<{ items: UploadRow[] }>('/api/v1/upload
 export const startOntology = (datasetId: string, docs: IngestedDoc[]) =>
   request<{ job_id: string }>(`/api/v1/simulate/ontology?dataset_id=${encodeURIComponent(datasetId)}`, jsonInit('POST', docs))
 
-export const startGraphBuild = (datasetId: string, docs: IngestedDoc[], ontologyJobId?: string) =>
+/** The corpus becomes real on this call: its name rides along, and the server writes the row a run's dataset points at. */
+export const startGraphBuild = (datasetId: string, docs: IngestedDoc[], corpusName: string, ontologyJobId?: string) =>
   request<{ job_id: string }>(
-    `/api/v1/simulate/build_graph?dataset_id=${encodeURIComponent(datasetId)}${ontologyJobId ? `&ontology_job_id=${encodeURIComponent(ontologyJobId)}` : ''}`,
+    `/api/v1/simulate/build_graph?dataset_id=${encodeURIComponent(datasetId)}&corpus_name=${encodeURIComponent(corpusName)}${ontologyJobId ? `&ontology_job_id=${encodeURIComponent(ontologyJobId)}` : ''}`,
     jsonInit('POST', docs),
   )
 

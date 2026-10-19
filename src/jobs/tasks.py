@@ -281,6 +281,7 @@ async def _account_delete_core(job_id: str, payload: dict[str, Any]) -> None:
         await session.execute(delete(Job).where(Job.user_id == owner))
         await session.execute(delete(Run).where(Run.user_id == owner))
         await session.execute(delete(Upload).where(Upload.user_id == owner))
+        await session.execute(delete(Dataset).where(Dataset.user_id == owner))
         await session.execute(delete(UserSession).where(UserSession.user_id == owner))
         await session.commit()
 

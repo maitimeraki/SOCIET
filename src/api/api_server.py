@@ -2,6 +2,7 @@ import asyncio
 import logging
 import sys
 import time
+import uuid
 from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING, Any, AsyncGenerator, Dict, List, Optional, Set
 
@@ -17,7 +18,9 @@ from fastapi import (
 )
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
-from sqlalchemy import text
+from sqlalchemy import select, text
+from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.api import run_doc
 from src.api.config_api import (
@@ -32,8 +35,8 @@ from src.api.middleware import LoggingMiddleware, SecurityHeadersMiddleware
 from src.auth.cookies import verify_csrf
 from src.auth.deps import current_user, require_owner
 from src.config.settings import get_settings
-from src.db.engine import get_engine
-from src.db.models import User
+from src.db.engine import get_db, get_engine
+from src.db.models import Dataset, User
 from src.graph.config_graph import GraphConfig
 from src.graph.models_graph import GlobalInputDocument, LocalOntology, ProcessedChunk
 from src.graph.normalization import GraphNormalizationStage
@@ -764,6 +767,41 @@ async def run_normalize_job(job_id: str, dataset_id: str) -> None:
         raise
 
 
+async def _register_corpus(
+    db: AsyncSession, user_id: str, dataset_id: str, name: str
+) -> None:
+    """Give a corpus its ``datasets`` row.
+
+    The id is minted by the browser and reused as the graph id. Nothing else
+    writes ``datasets``, yet ``runs.dataset_id`` carries a foreign key to it —
+    without this row a decision convened over a fresh corpus fails on the run
+    insert. A non-uuid id is the legacy default and stays unregistered, the same
+    rule ``run_doc`` applies to the run's own column.
+    """
+    try:
+        key = uuid.UUID(dataset_id)
+    except (AttributeError, TypeError, ValueError):
+        return
+    owner = uuid.UUID(str(user_id))
+    await db.execute(
+        pg_insert(Dataset)
+        .values(
+            id=key, user_id=owner, name=name or "Untitled corpus", graph_id=str(key)
+        )
+        .on_conflict_do_nothing(index_elements=["id"])
+    )
+    await db.commit()
+    row = await db.get(Dataset, key)
+    if row is None or row.user_id != owner:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"code": "not_found", "message": "Corpus not found."},
+        )
+    if name and row.name != name:
+        row.name = name
+        await db.commit()
+
+
 @simulate_router.post("/ontology", status_code=status.HTTP_202_ACCEPTED)
 async def discover_ontology_async(
     dataset_id: str,
@@ -789,7 +827,9 @@ async def build_graph_async(
     documents: List[GlobalInputDocument],
     request: Request,
     ontology_job_id: Optional[str] = None,
+    corpus_name: str = "",
     user: User = Depends(current_user),
+    db: AsyncSession = Depends(get_db),
 ):
     # Ownership guard: a caller-supplied ontology job feeds its schema into this
     # run's graph build, so it must belong to the caller. A missing or foreign
@@ -797,6 +837,10 @@ async def build_graph_async(
     if ontology_job_id:
         doc = await run_doc.read_job_doc(ontology_job_id)
         await require_owner((doc or {}).get("user_id"), user)
+
+    # The corpus becomes real here — its name and its owner — and the row has to
+    # exist before any run can point at it (runs.dataset_id is a foreign key).
+    await _register_corpus(db, str(user.id), dataset_id, corpus_name)
 
     job_id = await enqueue_or_http(
         "build_graph",
