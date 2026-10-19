@@ -8,6 +8,7 @@ import {
   GraphLegend,
   MAX_ANIMATED_NODES,
   MAX_LABELLED_NODES,
+  SIGMA_SETTINGS,
   TEXT_FALLBACK_LIMIT,
   drawNodeLabel,
   graphAriaLabel,
@@ -31,6 +32,12 @@ vi.mock('@react-sigma/core', () => ({ SigmaContainer: () => null, useSigma: () =
 
 const byId = (...nodes: GraphNode[]): Record<string, GraphNode> =>
   Object.fromEntries(nodes.map((node) => [node.id, node]))
+
+describe('SIGMA_SETTINGS', () => {
+  it('allows the hidden container the minimised pane mounts, so the phone page cannot crash', () => {
+    expect(SIGMA_SETTINGS.allowInvalidContainer).toBe(true)
+  })
+})
 
 describe('syncGraph', () => {
   it('mirrors the store nodes and edges into the graphology instance', () => {

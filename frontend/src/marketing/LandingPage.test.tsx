@@ -82,15 +82,25 @@ describe('the first viewport — the feeling, the proof, the action', () => {
     expect(decode(after.slice(0, after.indexOf('</a>')))).toBe(hero.primary.label)
   })
 
-  it('shows two real frames of the filed answer in the proof region', () => {
+  it('holds the first viewport to one real frame — the filed answer', () => {
     const viewport = firstViewport()
     expect(count(viewport, 'data-capture="region"')).toBe(1)
     expect(count(viewport, 'data-capture="answer"')).toBe(1)
-    expect(count(viewport, 'data-capture="case"')).toBe(1)
-    // The frames are the real captures, not drawn placeholders.
+    expect(count(viewport, 'data-capture="case"')).toBe(0)
+    // The frame is the real capture, not a drawn placeholder.
     expect(viewport).toContain(`src="${captures.answer.src}"`)
-    expect(viewport).toContain(`src="${captures.opposingCase.src}"`)
+    expect(viewport).not.toContain(`src="${captures.opposingCase.src}"`)
     expect(viewport).not.toContain('<svg')
+  })
+
+  it('keeps the opposing case on the page, under the stage that files it', () => {
+    expect(count(html, 'data-capture="case"')).toBe(1)
+    const caseFrame = html.match(/<figure[^>]*data-capture="case"[\s\S]*?<\/figure>/)?.[0] ?? ''
+    expect(caseFrame).toContain(`src="${captures.opposingCase.src}"`)
+    expect(caseFrame).toContain(`alt="${captures.opposingCase.alt}"`)
+    // It follows the stage whose claim it shows, and the workspace still ships below it.
+    expect(html.indexOf('data-capture="case"')).toBeGreaterThan(html.indexOf('The answer, filed with its case'))
+    expect(html.indexOf('data-capture="workspace"')).toBeGreaterThan(html.indexOf('data-capture="case"'))
   })
 })
 

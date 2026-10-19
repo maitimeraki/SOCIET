@@ -3,9 +3,9 @@ import { captures, sections } from './copy'
 /**
  * The proof section — what used to be the recording. No recording exists and none may be mocked,
  * so the section proves the mechanism by showing it: the three moments a person can watch while a
- * decision runs, and one capture of the workspace itself, taken at the step where the documents are
- * added and read. The honesty line says plainly that the recording is absent; no player stands in
- * for one.
+ * decision runs, and two real frames of one filed answer — its confidence and opposing case under
+ * the stage that names them, then the workspace itself at the step where the documents are read.
+ * The honesty line says plainly that the recording is absent; no player stands in for one.
  */
 export default function ProofSection() {
   const proof = sections.open
@@ -26,6 +26,18 @@ export default function ProofSection() {
           </li>
         ))}
       </ol>
+
+      {/* Under stage 3: the same filed answer, showing the confidence and the opposing case whole. */}
+      <figure className="mt-6" data-capture="case">
+        <img
+          className="hero-capture__frame"
+          src={captures.opposingCase.src}
+          alt={captures.opposingCase.alt}
+          width={captures.opposingCase.width}
+          height={captures.opposingCase.height}
+        />
+        <figcaption className="mt-2 text-micro text-ink-3">{proof.caseCaption}</figcaption>
+      </figure>
 
       {/* The one capture that could be taken: the workspace itself, at the step the stages describe. */}
       <figure className="mt-6" data-capture="workspace">

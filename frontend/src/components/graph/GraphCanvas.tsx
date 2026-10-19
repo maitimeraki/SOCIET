@@ -314,6 +314,21 @@ function SelectionWatch({ onPick }: { onPick: (selection: MapSelection) => void 
 }
 
 /**
+ * Sigma listens to `window` resize only. A pane that mounts hidden (the minimised phone pane) or
+ * gains its box later leaves the canvas at a stale size, so observe the container itself and let
+ * Sigma re-read it. `sigma.resize()` is a no-op when the size is unchanged.
+ */
+function ContainerResizeWatch() {
+  const sigma = useSigma()
+  useEffect(() => {
+    const observer = new ResizeObserver(() => sigma.resize())
+    observer.observe(sigma.getContainer())
+    return () => observer.disconnect()
+  }, [sigma])
+  return null
+}
+
+/**
  * Draw a node label with a halo struck in the stage colour first, so an edge cannot cut the text.
  * The geometry mirrors Sigma's default (`x + size + 3`, `y + labelSize / 3`); only the halo is added.
  */
@@ -341,7 +356,10 @@ export const drawNodeLabel: NodeLabelDrawingFunction = (context, data, settings)
 // of it. Identity-stable (a module constant) so Sigma is never torn down on a delta. Edge labels are
 // never rendered — they scatter illegible rotated text over the field. Repainted for the plotting
 // table (§3.2): labels are luminous plot ink haloed in the dark ground, so an edge cannot cut the text.
-const SIGMA_SETTINGS = {
+export const SIGMA_SETTINGS = {
+  // The minimised pane mounts this canvas into a hidden (zero-width) host; a 1×1 initial size is
+  // the specified behaviour, and the ResizeObserver below gives it the real box when it opens.
+  allowInvalidContainer: true,
   labelColor: { color: LABEL_INK },
   defaultEdgeColor: EDGE_INK,
   labelFont: "'Archivo Variable', Archivo, system-ui, sans-serif",
@@ -482,6 +500,7 @@ export default function GraphCanvas({ datasetId, jobId }: GraphCanvasProps) {
         >
           <LiveGraph graph={graph} />
           <FitCamera nodeCount={nodeCount} />
+          <ContainerResizeWatch />
           <SelectionWatch onPick={pick} />
         </SigmaContainer>
       </div>

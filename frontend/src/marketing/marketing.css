@@ -76,10 +76,11 @@
 }
 
 /*
- * The proof region — the frames of the running product. `.hero-capture` stacks the first viewport's
- * two frames; `.hero-capture__frame` is the frame itself, used by the proof section too. Each frame
+ * The proof region — the frames of the running product. `.hero-capture` holds the first viewport's
+ * one frame; `.hero-capture__frame` is the frame itself, used by the proof section too. Each frame
  * fills its slot and scales down without distorting, and the source's own pixels hold the space
- * before it loads.
+ * before it loads. The hero-scoped cap keeps its single portrait frame inside the first viewport;
+ * the proof-section frames stay uncapped.
  */
 .hero-capture {
   display: grid;
@@ -94,4 +95,10 @@
   border-radius: var(--radius-lg);
   background: var(--color-canvas);
   box-shadow: var(--shadow-floating);
+}
+
+.hero-capture .hero-capture__frame {
+  max-height: calc(100dvh - 10rem);
+  object-fit: cover;
+  object-position: top center;
 }

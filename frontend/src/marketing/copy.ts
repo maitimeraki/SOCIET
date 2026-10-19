@@ -94,6 +94,9 @@ export const sections = {
         body: 'The decision closes on an answer, the opposing case, the position each expert took, and the sources each argued from. Nothing is summarised away to make the answer look tidier.',
       },
     ],
+    /** The opposing-case frame's caption — the same filed answer, further down the same document. */
+    caseCaption:
+      'The same decision further down: the confidence the panel reached, with the opposing case kept whole beside it.',
     /** The workspace capture's caption — what the frame is, in the order the reader sees it. */
     captureCaption: 'The workspace, with three documents already read — the rail on the left, the material beside it.',
     /** The recording is absent. Saying so is the honest state — never a player or a frame. */

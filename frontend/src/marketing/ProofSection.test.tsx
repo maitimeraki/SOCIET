@@ -22,6 +22,17 @@ describe('the proof section — the mechanism, never a mocked recording', () => 
     expect(html).toContain(sections.open.captureCaption)
   })
 
+  it('files the opposing case under stage 3, as a real frame with its caption', () => {
+    const caseFrame = html.match(/<figure[^>]*data-capture="case"[\s\S]*?<\/figure>/)?.[0] ?? ''
+    expect(caseFrame).toContain(`src="${captures.opposingCase.src}"`)
+    expect(caseFrame).toContain(`alt="${captures.opposingCase.alt}"`)
+    expect(caseFrame).toContain(`width="${captures.opposingCase.width}"`)
+    expect(caseFrame).toContain(`height="${captures.opposingCase.height}"`)
+    expect(caseFrame).toContain(sections.open.caseCaption)
+    // It follows the stage whose claim it shows.
+    expect(html.indexOf('data-capture="case"')).toBeGreaterThan(html.indexOf('The answer, filed with its case'))
+  })
+
   it('emits no player and no recording surface', () => {
     expect(html).not.toContain('<video')
     expect(html).not.toContain('<source')
