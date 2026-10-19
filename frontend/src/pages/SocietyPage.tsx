@@ -56,12 +56,12 @@ export default function SocietyPage() {
     try {
       const { job_id } = await startDebate(body)
       clear() // documents are done with; datasetId survives for the run views
-      toast('success', 'Run convened')
+      toast('success', 'Decision convened')
       navigate(`/runs/${job_id}/roster`)
     } catch (err) {
       setError(
         err instanceof ApiError && err.status < 500
-          ? `The server rejected this run: ${err.detail}`
+          ? `The server rejected this decision: ${err.detail}`
           : `Couldn't reach the server. Nothing ran — try again.`,
       )
       setSubmitting(false)
@@ -96,7 +96,7 @@ export default function SocietyPage() {
         <Button variant="primary" loading={submitting} disabled={!query.trim()} onClick={convene}>
           Convene the debate
         </Button>
-        <span className="text-micro text-ink-3">Runs take a few minutes — you can watch every pass live.</span>
+        <span className="text-micro text-ink-3">Decisions take a few minutes — you can watch every pass live.</span>
       </div>
     </div>
   )

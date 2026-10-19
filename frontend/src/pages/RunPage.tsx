@@ -30,6 +30,15 @@ export type RunTab = (typeof TABS)[number]
 const isRunTab = (value: string | undefined): value is RunTab =>
   (TABS as readonly string[]).includes(value ?? '')
 
+/** §13 — the rendered tab word; the path segment stays the internal identifier (`agents`). */
+const TAB_LABELS: Record<RunTab, string> = {
+  roster: 'Roster',
+  floor: 'Floor',
+  verdict: 'Verdict',
+  agents: 'Experts',
+  artifacts: 'Artifacts',
+}
+
 const RAIL_TARGETS: Record<string, RunTab> = {
   ingest: 'artifacts',
   graph: 'artifacts',
@@ -53,7 +62,7 @@ function RunTabs({ runId }: { runId: string }) {
             }`
           }
         >
-          {name}
+          {TAB_LABELS[name]}
         </NavLink>
       ))}
     </nav>
@@ -112,9 +121,9 @@ function RunWork({ run, events, tab, runId, scrubbed, latestRound, corpusMissing
                 onOpenProfile={() => onNavigate(`/runs/${runId}/agents`)}
               />
               <div className="mt-3 flex items-center justify-center gap-3 text-micro text-ink-3">
-                <button type="button" aria-label="Previous round" disabled={activeRound === null || activeRound <= 1} onClick={() => onScrub(Math.max(1, (activeRound ?? 1) - 1))} className="inline-flex min-h-6 min-w-6 items-center justify-center rounded-[4px] px-2 py-0.5 hover:bg-ground-2 disabled:opacity-40">◀</button>
-                <span className="tnum font-measurement">{activeRound === null ? 'live' : `round ${activeRound}`}</span>
-                <button type="button" aria-label="Next round" disabled={scrubbed === null} onClick={() => onScrub(scrubbed === null ? null : scrubbed >= (latestRound ?? 1) ? null : scrubbed + 1)} className="inline-flex min-h-6 min-w-6 items-center justify-center rounded-[4px] px-2 py-0.5 hover:bg-ground-2 disabled:opacity-40">▶</button>
+                <button type="button" aria-label="Previous pass" disabled={activeRound === null || activeRound <= 1} onClick={() => onScrub(Math.max(1, (activeRound ?? 1) - 1))} className="inline-flex min-h-6 min-w-6 items-center justify-center rounded-[4px] px-2 py-0.5 hover:bg-ground-2 disabled:opacity-40">◀</button>
+                <span className="tnum font-measurement">{activeRound === null ? 'live' : `pass ${activeRound}`}</span>
+                <button type="button" aria-label="Next pass" disabled={scrubbed === null} onClick={() => onScrub(scrubbed === null ? null : scrubbed >= (latestRound ?? 1) ? null : scrubbed + 1)} className="inline-flex min-h-6 min-w-6 items-center justify-center rounded-[4px] px-2 py-0.5 hover:bg-ground-2 disabled:opacity-40">▶</button>
                 <button type="button" onClick={() => onScrub(null)} className="rounded-[4px] px-2 py-0.5 text-accent hover:bg-ground-2">End — back to live</button>
               </div>
             </div>
@@ -139,7 +148,7 @@ function RunWork({ run, events, tab, runId, scrubbed, latestRound, corpusMissing
                     See what happened ↓
                   </a>
                   <Link to="/new/society" className="text-body text-ink-2 hover:text-ink">
-                    Start a new run
+                    Start a new decision
                   </Link>
                 </div>
               </div>

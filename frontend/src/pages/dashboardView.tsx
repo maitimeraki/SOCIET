@@ -53,11 +53,11 @@ export default function DashboardView({
           <p className="text-label uppercase text-ink-3">Operate</p>
           <h1 className="mt-2 font-titling text-display text-ink">The traverse log</h1>
           <p className="mt-2 max-w-[60ch] text-body text-ink-2">
-            Every run your society has deliberated, newest first.
+            Every decision your panel has deliberated, newest first.
           </p>
         </div>
         <Link to={startTarget} className={buttonClasses('primary')}>
-          Start a Society
+          Start a decision
         </Link>
       </header>
 
@@ -65,9 +65,9 @@ export default function DashboardView({
 
       <section>
         <div className="mb-4 flex items-baseline justify-between">
-          <h2 className="text-heading text-ink">Recent runs</h2>
+          <h2 className="text-heading text-ink">Recent decisions</h2>
           <Link to="/runs" className="text-body text-ink-2 hover:text-accent">
-            All runs →
+            All decisions →
           </Link>
         </div>
 
@@ -78,10 +78,10 @@ export default function DashboardView({
           />
         ) : empty ? (
           <EmptyState
-            line="No runs yet — the log fills the moment your first society deliberates."
+            line="No decisions yet — the log fills the moment your first panel deliberates."
             action={
               <Link to={startTarget} className={buttonClasses('primary', 40)}>
-                Run your first society
+                Start your first decision
               </Link>
             }
           />

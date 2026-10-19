@@ -54,7 +54,7 @@ export function railState(state: RunState): RailEntry[] {
   return [
     // A run cannot exist without ingest/graph/question — done by construction (§7.6).
     { key: 'ingest', label: 'Ingest', state: 'done', note: state.datasetId ?? undefined },
-    { key: 'graph', label: 'Graph', state: 'done' },
+    { key: 'graph', label: 'The map', state: 'done' },
     { key: 'question', label: 'Question', state: 'done' },
     { key: 'roster', label: 'Roster', state: seated ? 'done' : running ? 'running' : 'pending' },
     {

@@ -9,6 +9,8 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import { MemoryRouter } from 'react-router-dom'
 import { NewRunWorkspaceView, stepFromParam, type WorkspaceStep } from './NewRunWorkspace'
 import type { MapSummary, PaneState } from '../components/workspace/Workspace'
+// §13 — the one copy-law guard, shared with every rendered-string test.
+import { BANNED_WORD, renderedText } from '../test/copyLaw'
 
 // No jsdom / no testing-library (see GraphCanvas.test.tsx): the graph stack binds WebGL at import
 // under Node, so mock the one DOM-bound module the workspace page pulls in through `GraphCanvas`.
@@ -143,13 +145,9 @@ describe('each step renders its own activity into the work pane', () => {
 })
 
 describe('the copy law (§13) holds on the workspace at every step', () => {
-  // The whole-word, plural-tolerant pattern routes.test.tsx pins, matched against the RENDERED TEXT
-  // only (tags/attributes stripped), so `bg-ground` can never trip `\bround\b`.
-  const BANNED =
-    /\b(?:agents?|graphs?|nodes?|edges?|rounds?|retrieval|ontolog(?:y|ies)|models?|societ(?:y|ies)|chunks?|embeddings?|vectors?|llms?|prompts?|tokens?|pipelines?|jobs?)\b/i
-  const text = (html: string) => html.replace(/<[^>]*>/g, ' ')
-
+  // The shared, stem-tolerant pattern, matched against the RENDERED TEXT only (tags/attributes
+  // stripped), so `bg-ground` can never trip `\bround\b`.
   it.each(STEPS)('%s renders no banned word', (step) => {
-    expect(text(renderStep(step))).not.toMatch(BANNED)
+    expect(renderedText(renderStep(step))).not.toMatch(BANNED_WORD)
   })
 })

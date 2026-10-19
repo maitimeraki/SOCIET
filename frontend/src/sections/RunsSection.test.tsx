@@ -5,6 +5,8 @@ import { listRunsPage } from '../api/rest'
 import type { RunSummary } from '../api/types'
 import { filterRuns, RunsView } from './RunsSection'
 import type { RunsViewProps } from './RunsSection'
+// §13 — the one copy-law guard, shared with every rendered-string test.
+import { BANNED_WORD, renderedText } from '../test/copyLaw'
 
 // Moved from `pages/RunsPage.test.tsx` when Task 3.2 repointed `/runs` at `sections/RunsSection.tsx`
 // (Ruling F4): the section's behaviour coverage is unchanged, only its home moved with the code.
@@ -127,5 +129,13 @@ describe('RunsSection — §8.4 Decisions', () => {
     const html = render({ runs: [], loading: true })
     expect(html).not.toContain('Start a decision')
     expect(html).not.toContain('<table')
+  })
+})
+
+describe('the copy law (§13) holds on Decisions when loaded, empty or failed', () => {
+  it('renders no banned word in any state', () => {
+    expect(renderedText(render({ runs: [run()] }))).not.toMatch(BANNED_WORD)
+    expect(renderedText(render({ runs: [] }))).not.toMatch(BANNED_WORD)
+    expect(renderedText(render({ runs: [], failed: true }))).not.toMatch(BANNED_WORD)
   })
 })

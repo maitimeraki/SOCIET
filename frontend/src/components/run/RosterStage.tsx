@@ -66,7 +66,7 @@ export default function RosterStage({
 
   return (
     <div className="space-y-8">
-      <p className="text-label uppercase text-ink-3">Building the society</p>
+      <p className="text-label uppercase text-ink-3">Building your panel</p>
 
       <Beat number="①" title="Reading the question" meta="S3 · intent" state={intent ? 'done' : 'running'}>
         {intent ? (
@@ -129,7 +129,7 @@ export default function RosterStage({
         {floorSlot}
         {progress.phase === 'seated' ? (
           <div className="mt-3 flex items-center gap-3">
-            <p className="text-body text-ink">The floor is seated — round 1 begins.</p>
+            <p className="text-body text-ink">The floor is seated — pass 1 begins.</p>
             <Button variant="primary" size={32} onClick={onSkip}>
               Watch the floor →
             </Button>

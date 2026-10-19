@@ -7,6 +7,8 @@ import { describe, expect, it } from 'vitest'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { WorkspaceView, type MapSummary, type PaneState } from './Workspace'
 import { paneStateFrom, paneStorageKey } from './paneState'
+// §13 — the one copy-law guard, shared with every rendered-string test.
+import { BANNED_WORD, renderedText } from '../../test/copyLaw'
 
 const MAP_ID = 'run-1'
 const HOST_ID = `workspace-map-${MAP_ID}`
@@ -159,13 +161,9 @@ describe('the activity pane is the work; the map fills the region when expanded'
 })
 
 describe('the copy law (§13) governs every rendered string', () => {
-  // F21 pattern: regular plurals included, because the literal singular form is near-vacuous.
-  const BANNED =
-    /\b(?:agents?|graphs?|nodes?|edges?|rounds?|retrieval|ontolog(?:y|ies)|models?|societ(?:y|ies)|chunks?|embeddings?|vectors?|llms?|prompts?|tokens?|pipelines?|jobs?)\b/i
-
   it('renders no banned word in any of the three states', () => {
     for (const state of ['split', 'expanded', 'minimised'] as const) {
-      expect(render(state), state).not.toMatch(BANNED)
+      expect(renderedText(render(state)), state).not.toMatch(BANNED_WORD)
     }
   })
 })

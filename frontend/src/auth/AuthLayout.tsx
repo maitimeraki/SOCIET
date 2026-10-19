@@ -96,7 +96,7 @@ export default function AuthLayout() {
             belongs to the world (§7.2), and §9 keeps the hierarchy while it drops columns. */}
         <aside className="border-t border-ink-4 px-6 py-12 sm:px-10 lg:flex lg:flex-col lg:justify-center lg:border-l lg:border-t-0 lg:px-14 lg:py-16">
           <p className="max-w-[26ch] font-titling text-title text-ink">
-            A society of specialists measures a decision into a publishable sheet.
+            A panel of specialists measures a decision into a publishable sheet.
           </p>
           <SampleSheet />
         </aside>

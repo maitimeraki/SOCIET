@@ -3,6 +3,8 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import type { AgentProfile } from '../run/events'
 import { PanelView } from './PanelSection'
 import type { PanelViewProps } from './PanelSection'
+// §13 — the one copy-law guard, shared with every rendered-string test.
+import { BANNED_WORD, renderedText } from '../test/copyLaw'
 
 // Node-only (no jsdom) and `useEffect` does not run under `renderToStaticMarkup`, so the section is
 // split like `DocumentsSection`/`RunsSection`: `PanelView` is state-free and prop-driven, asserted
@@ -105,5 +107,13 @@ describe('PanelSection — §8.6 Panel', () => {
     const html = render({ experts: [], loading: true })
     expect(html).toContain('animate-pulse') // the loading placeholders are actually rendered
     expect(html).not.toContain('No panel yet') // ...and never the empty state
+  })
+})
+
+describe('the copy law (§13) holds on the Panel when loaded, empty or failed', () => {
+  it('renders no banned word in any state', () => {
+    expect(renderedText(render({ experts: [expert()] }))).not.toMatch(BANNED_WORD)
+    expect(renderedText(render({ experts: [] }))).not.toMatch(BANNED_WORD)
+    expect(renderedText(render({ experts: [], failed: true }))).not.toMatch(BANNED_WORD)
   })
 })

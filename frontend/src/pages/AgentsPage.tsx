@@ -63,12 +63,12 @@ export default function AgentsPage() {
   const profile = selected ? roster.find((entry) => entry.identity.name === selected) ?? null : null
   const note = useMemo(() => {
     const entry = datasets.find((dataset) => dataset.id === datasetId)
-    return entry ? `Showing the society from run ${entry.runId} — agents are synthesized per question.` : ''
+    return entry ? `Showing your panel from decision ${entry.runId} — experts are synthesized per question.` : ''
   }, [datasets, datasetId])
 
   return (
     <div className="space-y-6">
-      <h1 className="font-titling text-display text-ink">Agents</h1>
+      <h1 className="font-titling text-display text-ink">Experts</h1>
       {datasets.length > 1 && (
         <Select value={datasetId} onChange={(event) => setDatasetId(event.target.value)} aria-label="Choose corpus">
           {datasets.map((dataset) => (
@@ -88,10 +88,10 @@ export default function AgentsPage() {
       ) : failed ? (
         <ErrorState
           title="Couldn't reach the server"
-          detail={failed || 'The society loads when the server is back.'}
+          detail={failed || 'Your panel loads when the server is back.'}
         />
       ) : roster.length === 0 ? (
-        <EmptyState line="No society yet. Convene a run and the agents it synthesizes will be shown here." />
+        <EmptyState line="No panel yet. Convene a decision and the experts it synthesizes will be shown here." />
       ) : (
         <div className="grid gap-3 md:grid-cols-2">
           {roster.map((entry) => (

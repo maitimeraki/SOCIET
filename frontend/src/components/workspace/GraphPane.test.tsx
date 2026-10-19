@@ -19,6 +19,8 @@ import {
 } from '../graph/GraphCanvas'
 import { GraphPaneView, mapCounts } from './GraphPane'
 import type { MapSummary, PaneState } from './Workspace'
+// §13 — the one copy-law guard, shared with every rendered-string test.
+import { BANNED_WORD, renderedText } from '../../test/copyLaw'
 
 // No jsdom / no testing-library (see GraphCanvas.test.tsx): the graph stack binds WebGL at import
 // under Node, so mock the one DOM-bound module the canvas pulls in.
@@ -188,16 +190,13 @@ describe('the text alternative stays truthful as the map grows (§9.4, §12)', (
 })
 
 describe('the copy law (§13) governs the pane’s own strings, toggles included', () => {
-  const BANNED =
-    /\b(?:agents?|graphs?|nodes?|edges?|rounds?|retrieval|ontolog(?:y|ies)|models?|societ(?:y|ies)|chunks?|embeddings?|vectors?|llms?|prompts?|tokens?|pipelines?|jobs?)\b/i
-
   it('renders no banned word in any state', () => {
     for (const state of ['split', 'expanded', 'minimised'] as const) {
-      expect(render(summaryOf(corpusNodes(2)), ALL_LAYERS, state), state).not.toMatch(BANNED)
+      expect(renderedText(render(summaryOf(corpusNodes(2)), ALL_LAYERS, state)), state).not.toMatch(BANNED_WORD)
     }
   })
 
   it('names every layer without a banned word', () => {
-    expect(LAYER_NAMES.join(' ')).not.toMatch(BANNED)
+    expect(LAYER_NAMES.join(' ')).not.toMatch(BANNED_WORD)
   })
 })

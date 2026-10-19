@@ -5,6 +5,8 @@ import { listUploads } from '../api/rest'
 import type { UploadRow } from '../api/types'
 import { DocumentsView } from './DocumentsSection'
 import type { DocumentsViewProps } from './DocumentsSection'
+// §13 — the one copy-law guard, shared with every rendered-string test.
+import { BANNED_WORD, renderedText } from '../test/copyLaw'
 
 // The suite is node-only (no jsdom) and `useEffect` does not run under `renderToStaticMarkup`, so the
 // section is split like the dashboard: `DocumentsView` is state-free and prop-driven, asserted here;
@@ -67,5 +69,13 @@ describe('DocumentsSection — §8.3 Documents', () => {
     )
     // No message forwarded → the view's own copy, never an empty detail.
     expect(render({ documents: [], failed: true })).toContain('load when the server is back')
+  })
+})
+
+describe('the copy law (§13) holds on Documents when loaded, empty or failed', () => {
+  it('renders no banned word in any state', () => {
+    expect(renderedText(render({ documents: [doc()] }))).not.toMatch(BANNED_WORD)
+    expect(renderedText(render({ documents: [] }))).not.toMatch(BANNED_WORD)
+    expect(renderedText(render({ documents: [], failed: true }))).not.toMatch(BANNED_WORD)
   })
 })

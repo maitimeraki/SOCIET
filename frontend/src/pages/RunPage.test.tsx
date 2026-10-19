@@ -12,6 +12,8 @@ import { busiestEntries } from '../components/workspace/GraphPane'
 import type { MapSummary } from '../components/workspace/Workspace'
 import type { AgentProfile } from '../run/events'
 import { initialState, type RunState } from '../run/reducer'
+// §13 — the one copy-law guard, shared with every rendered-string test.
+import { BANNED_WORD, renderedText } from '../test/copyLaw'
 
 // No jsdom / no testing-library (see GraphCanvas.test.tsx): the graph stack binds WebGL at import
 // under Node, so mock the one DOM-bound module the run page pulls in through `GraphCanvas`.
@@ -146,5 +148,11 @@ describe('busiestEntries — the text alternative ranks the entries by how conne
 
   it('names no entry that carries no connection — an empty map has no busiest line', () => {
     expect(busiestEntries(nodes, {})).toEqual([])
+  })
+})
+
+describe('the copy law (§13) holds on the run view in every section', () => {
+  it.each(TABS)('%s renders no banned word', (tab) => {
+    expect(renderedText(render(tab))).not.toMatch(BANNED_WORD)
   })
 })

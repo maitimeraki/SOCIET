@@ -5,6 +5,8 @@ import { listRunsPage } from '../api/rest'
 import type { RunSummary } from '../api/types'
 import DashboardView from './dashboardView'
 import type { DashboardViewProps } from './dashboardView'
+// §13 — the one copy-law guard, shared with every rendered-string test.
+import { BANNED_WORD, renderedText } from '../test/copyLaw'
 
 afterEach(() => vi.unstubAllGlobals())
 
@@ -63,11 +65,11 @@ describe('DashboardPage — the traverse log (plan §3.3)', () => {
   })
 
   it('renders the empty state with the first-run CTA when there are no runs', () => {
-    expect(render({ runs: [] })).toContain('Run your first society')
+    expect(render({ runs: [] })).toContain('Start your first decision')
   })
 
   it('does not render the empty state while loading or after a failure', () => {
-    expect(render({ runs: [], loading: true })).not.toContain('Run your first society')
+    expect(render({ runs: [], loading: true })).not.toContain('Start your first decision')
     // The rendered apostrophe is entity-escaped by `renderToStaticMarkup`, so assert an unescaped span.
     expect(render({ runs: [], failed: true })).toContain('reach the server')
   })
@@ -110,5 +112,13 @@ describe('DashboardPage — the traverse log (plan §3.3)', () => {
     expect(render({ datasetReady: true })).toContain('/new/society')
     expect(render({ datasetReady: false })).toContain('/new/ingest')
     expect(render({ datasetReady: false })).not.toContain('/new/society')
+  })
+})
+
+describe('the copy law (§13) holds on the operate home in every state', () => {
+  it('renders no banned word, loaded, empty or failed', () => {
+    expect(renderedText(render({ runs: [run()] }))).not.toMatch(BANNED_WORD)
+    expect(renderedText(render({ runs: [] }))).not.toMatch(BANNED_WORD)
+    expect(renderedText(render({ runs: [], failed: true }))).not.toMatch(BANNED_WORD)
   })
 })

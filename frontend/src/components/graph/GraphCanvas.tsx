@@ -88,20 +88,20 @@ export function showEdgeLabels(nodeCount: number): boolean {
 export function simplifiedViewNotice(nodeCount: number): string | null {
   return shouldAnimateLayout(nodeCount) && showNodeLabels(nodeCount)
     ? null
-    : `showing simplified view (${nodeCount} nodes)`
+    : `showing simplified view (${nodeCount} entries)`
 }
 
 /** How many text-fallback lines are rendered — a graph can hold thousands of relations. */
 export const TEXT_FALLBACK_LIMIT = 120
 
-/** `1 node` / `2 nodes` — a count with its noun, pluralised. */
-function plural(count: number, noun: string): string {
-  return `${count} ${noun}${count === 1 ? '' : 's'}`
+/** `1 entry` / `2 entries` — a count with its noun, pluralised (the plural is explicit for `entry`). */
+function plural(count: number, singular: string, plural = `${singular}s`): string {
+  return `${count} ${count === 1 ? singular : plural}`
 }
 
 /** The `img` label for the graph region, carrying the live counts a screen reader can read. */
 export function graphAriaLabel(nodeCount: number, edgeCount: number, labelCount: number): string {
-  return `Knowledge graph: ${plural(nodeCount, 'node')}, ${plural(edgeCount, 'edge')}, ${plural(labelCount, 'entity type')}`
+  return `Your map: ${plural(nodeCount, 'entry', 'entries')}, ${plural(edgeCount, 'connection')}, ${plural(labelCount, 'entity type')}`
 }
 
 export type GraphStreamPhase = 'waiting' | 'streaming' | 'failed' | 'ended'
@@ -120,11 +120,11 @@ export function graphStreamPhase(nodeCount: number, status: StreamStatus, done: 
 export function graphStatusMessage(nodeCount: number, status: StreamStatus, done: boolean): string | null {
   switch (graphStreamPhase(nodeCount, status, done)) {
     case 'waiting':
-      return 'Waiting for the first chunk…'
+      return 'Waiting for the first section…'
     case 'failed':
-      return 'The live graph stream failed — the graph stays as the last snapshot.'
+      return 'The live map stream failed — the map stays as the last snapshot.'
     case 'ended':
-      return 'The live graph stream has ended.'
+      return 'The live map stream has ended.'
     case 'streaming':
       return null
   }

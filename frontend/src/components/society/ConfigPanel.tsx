@@ -5,15 +5,15 @@ import Field from '../ui/Field'
 import NumberField from '../ui/NumberField'
 
 const FIELD_LABELS: Record<keyof DebateConfig, string> = {
-  max_agents: 'Max agents',
-  max_rounds: 'Rounds',
+  max_agents: 'Max experts',
+  max_rounds: 'Passes',
   comm_radius: 'Comm radius',
   min_entity_overlap: 'Min entity overlap',
-  max_pairs_per_round: 'Max pairs per round',
+  max_pairs_per_round: 'Max pairs per pass',
   convergence_threshold: 'Convergence',
-  llm_concurrency: 'LLM concurrency',
+  llm_concurrency: 'Analysis concurrency',
   topology_score_threshold: 'Topology threshold',
-  max_new_agents_per_round: 'Max new agents / round',
+  max_new_agents_per_round: 'Max new experts / pass',
   snapshot_top_k: 'Snapshot top-k',
 }
 

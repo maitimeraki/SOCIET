@@ -26,7 +26,7 @@ export default function ConvergenceTape({
     <div className="border-t border-ink-4 pt-4">
       <div className="mb-3 flex items-center justify-between">
         <h3 className="text-label uppercase text-ink-3">The Tape</h3>
-        <span className="text-micro text-ink-3">weighted share per round vs {threshold.toFixed(2)}</span>
+        <span className="text-micro text-ink-3">weighted share per pass vs {threshold.toFixed(2)}</span>
       </div>
 
       <div className="relative">
@@ -38,13 +38,13 @@ export default function ConvergenceTape({
         )}
 
         <div className="space-y-2">
-          {ticks.length === 0 && <p className="text-body text-ink-3">Waiting for round 1…</p>}
+          {ticks.length === 0 && <p className="text-body text-ink-3">Waiting for pass 1…</p>}
           {ticks.map((tick) => {
             const present = STANCE_ORDER.filter((stance) => (tick.weights[stance] ?? 0) > 0)
             return (
               <div key={tick.round}>
                 <div className="flex items-center gap-3">
-                  <span className="tnum w-6 font-measurement text-micro text-ink-3">R{tick.round}</span>
+                  <span className="tnum w-6 font-measurement text-micro text-ink-3">P{tick.round}</span>
                   <div className="flex h-3 flex-1 overflow-hidden rounded-[4px]" aria-hidden="true">
                     {STANCE_ORDER.map((stance, index) => {
                       const share = tick.weights[stance] ?? 0
@@ -80,7 +80,7 @@ export default function ConvergenceTape({
 
       {active && (
         <p className="tnum mt-3 font-measurement text-mono text-ink-2">
-          round {active.round}{active.dominant ? ` · ${active.dominant.stance} ${fmtPct(active.dominant.weightShare)} weighted share` : ''}
+          pass {active.round}{active.dominant ? ` · ${active.dominant.stance} ${fmtPct(active.dominant.weightShare)} weighted share` : ''}
         </p>
       )}
     </div>

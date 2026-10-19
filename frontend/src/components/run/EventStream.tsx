@@ -12,7 +12,7 @@ function Announcements({ items }: { items: StreamItem[] }) {
   const lastWarning = [...items].reverse().find((item) => item.kind === 'warning')
   return (
     <div aria-live="polite" className="sr-only">
-      {lastHeader ? `Round ${lastHeader.round} begins. ` : ''}
+      {lastHeader ? `Pass ${lastHeader.round} begins. ` : ''}
       {lastWarning ? lastWarning.text : ''}
     </div>
   )
@@ -43,7 +43,7 @@ export default function EventStream({ items, live }: { items: StreamItem[]; live
             case 'round-header':
               return (
                 <h3 key={index} className="pt-2 text-heading text-ink">
-                  Round {item.round}{' '}
+                  Pass {item.round}{' '}
                   <span className="tnum font-measurement text-micro text-ink-3">{item.pairs} pairs</span>
                 </h3>
               )

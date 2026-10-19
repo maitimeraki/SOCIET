@@ -7,6 +7,8 @@ import type { VerdictView } from '../../run/selectors'
 import { NARRATIVE_FALLBACK_COPY } from '../verdict/NarrativeFallbackNotice'
 import AnswerDocument, { answerSections, answerText, blockLines, sourceTitles } from './AnswerDocument'
 import type { AnswerBlock, AnswerInput } from './AnswerDocument'
+// §13 — the one copy-law guard, shared with every rendered-string test.
+import { BANNED_WORD, renderedText } from '../../test/copyLaw'
 
 const SOURCES = ['Market research 2026', 'Finance brief']
 const QUESTION = 'Should we expand into Europe?'
@@ -40,14 +42,6 @@ const input = (patch: Partial<AnswerInput> = {}): AnswerInput => ({
 })
 
 const render = (patch: Partial<AnswerInput> = {}) => renderToStaticMarkup(<AnswerDocument runId="r1" {...input(patch)} />)
-
-/** The copy law (§13), matched on rendered text only: tags are stripped so a class never trips it. */
-const BANNED = [
-  'agent', 'graph', 'node', 'edge', 'round', 'retrieval', 'ontology', 'model',
-  'society', 'chunk', 'embedding', 'vector', 'llm', 'prompt', 'token', 'pipeline', 'job',
-]
-const BANNED_WORD = new RegExp(`\\b(?:${BANNED.join('|')})s?\\b`, 'i')
-const renderedText = (html: string) => html.replace(/<[^>]*>/g, ' ')
 
 /** The strings a block carries that must survive into BOTH surfaces — derived from the block itself,
  *  never restated as literals, so a field rendered on one side and dropped on the other fails. */

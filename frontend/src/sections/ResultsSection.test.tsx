@@ -4,6 +4,8 @@ import { MemoryRouter } from 'react-router-dom'
 import type { VerdictView } from '../run/selectors'
 import { ResultsView } from './ResultsSection'
 import type { ResultsViewProps } from './ResultsSection'
+// §13 — the one copy-law guard, shared with every rendered-string test.
+import { BANNED_WORD, renderedText } from '../test/copyLaw'
 
 // Node-only (no jsdom) and `useEffect` does not run under `renderToStaticMarkup`, so the section is
 // split like `DocumentsSection`/`RunsSection`: `ResultsView` is state-free and prop-driven, asserted
@@ -79,5 +81,15 @@ describe('ResultsSection — §8.5 Verdicts', () => {
     const html = render({ loading: true })
     expect(html).not.toContain('A verdict appears here')
     expect(html).not.toContain('Export this verdict')
+  })
+})
+
+describe('the copy law (§13) holds on Verdicts when loaded, empty or failed', () => {
+  it('renders no banned word in any state', () => {
+    expect(
+      renderedText(render({ runId: 'r1', question: 'Should we expand into Europe?', view: view(), sources: ['Market research 2026'] })),
+    ).not.toMatch(BANNED_WORD)
+    expect(renderedText(render())).not.toMatch(BANNED_WORD)
+    expect(renderedText(render({ failed: true }))).not.toMatch(BANNED_WORD)
   })
 })

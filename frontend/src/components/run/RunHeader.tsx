@@ -48,16 +48,16 @@ export default function RunHeader({
         <StateChip state={chip} />
         {round > 0 && (
           <span className="tnum font-measurement text-mono text-ink-2">
-            ROUND {round}
+            PASS {round}
             {maxRounds ? `/${maxRounds}` : ''}
           </span>
         )}
         {elapsed && <span className="tnum font-measurement text-mono text-ink-2">{elapsed} elapsed</span>}
         {run.runId && (
           <span className="flex items-center gap-1">
-            <span className="tnum font-measurement text-mono text-ink-3">run {truncateId(run.runId)}</span>
+            <span className="tnum font-measurement text-mono text-ink-3">decision {truncateId(run.runId)}</span>
             <IconButton
-              label="Copy run id"
+              label="Copy decision id"
               onClick={() => {
                 void navigator.clipboard.writeText(run.runId ?? '')
                 toast('neutral', 'Copied')

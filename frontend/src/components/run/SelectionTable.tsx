@@ -43,7 +43,7 @@ export default function SelectionTable({
         ))}
       </div>
       <p className="mt-3 text-micro text-ink-3">
-        Ranked by blended semantic + density score (weights 0.6 / 0.4). Below {threshold.toFixed(2)} the society falls
+        Ranked by blended semantic + density score (weights 0.6 / 0.4). Below {threshold.toFixed(2)} the panel falls
         back to density alone.
       </p>
     </div>

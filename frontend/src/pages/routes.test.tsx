@@ -22,6 +22,9 @@ import DocumentsSection from '../sections/DocumentsSection'
 import PanelSection from '../sections/PanelSection'
 import ResultsSection from '../sections/ResultsSection'
 import RunsSection from '../sections/RunsSection'
+// §13 — the one copy-law guard (list + stem-tolerant matcher + tag-stripping reader), shared with
+// every rendered-string test.
+import { BANNED_WORD, renderedText } from '../test/copyLaw'
 
 /** D16: the rail's label and the route's path deliberately differ — the path is exempt from §13. */
 const SECTIONS: { path: string; heading: string; Component: ComponentType }[] = [
@@ -103,22 +106,12 @@ describe('the rail marks the section the visitor is in', () => {
   })
 })
 
-/** §13 — the copy law, matched against the RENDERED TEXT only: tags and their attributes are stripped
- *  first, so a class name like `bg-ground` can never trip `\bround\b`. The patterns are whole-word and
- *  plural-tolerant — `\bagent` must catch "Agents" (the RunTable header this plan bans), while
- *  `\bround\b` still leaves "ground" and "background" alone. */
-const BANNED = [
-  'agent', 'graph', 'node', 'edge', 'round', 'retrieval', 'ontology', 'model',
-  'society', 'chunk', 'embedding', 'vector', 'llm', 'prompt', 'token', 'pipeline', 'job',
-]
-const BANNED_WORD = new RegExp(`\\b(?:${BANNED.join('|')})s?\\b`, 'i')
-const renderedText = (html: string) => html.replace(/<[^>]*>/g, ' ')
-
 describe('the copy-law pattern itself catches banned words, whole-word only', () => {
-  it('matches a banned word and its plural', () => {
+  it('matches a banned word and its inflections', () => {
     expect(BANNED_WORD.test('an agent here')).toBe(true)
     expect(BANNED_WORD.test('Agents')).toBe(true)
     expect(BANNED_WORD.test('a society of models')).toBe(true)
+    expect(BANNED_WORD.test('the chunked rounds')).toBe(true)
   })
 
   it('does not match a banned word inside a longer one', () => {
@@ -130,5 +123,11 @@ describe('the copy-law pattern itself catches banned words, whole-word only', ()
 describe('the copy law (§13) holds on every section', () => {
   it.each(SECTIONS)('$path renders no banned word', ({ path, Component }) => {
     expect(renderedText(renderGuarded('authed', path, Component))).not.toMatch(BANNED_WORD)
+  })
+})
+
+describe('the copy law (§13) holds on the shell and its rail', () => {
+  it('renders no banned word in the chrome', () => {
+    expect(renderedText(renderShell('/documents'))).not.toMatch(BANNED_WORD)
   })
 })

@@ -12,7 +12,7 @@ export default function TurnCard({ turn, round }: { turn: TurnInfo; round: numbe
   }, {})
   return (
     <article
-      aria-label={`Round ${round} — ${turn.agent_name}, ${turn.stance}`}
+      aria-label={`Pass ${round} — ${turn.agent_name}, ${turn.stance}`}
       className="border-t border-ink-4 pt-3"
     >
       <header className="flex items-center gap-2">

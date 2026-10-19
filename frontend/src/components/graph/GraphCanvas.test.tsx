@@ -21,6 +21,9 @@ import {
   simplifiedViewNotice,
   syncGraph,
 } from './GraphCanvas'
+// §13 — the one copy-law guard. The canvas binds WebGL under Node and cannot be rendered in tests,
+// so its customer-visible copy is checked through the pure string helpers it renders from instead.
+import { BANNED_WORD } from '../../test/copyLaw'
 
 // No jsdom / no testing-library in this repo: the canvas is exercised through its
 // pure sync function. React/Sigma never mount, so mock the one DOM-bound import.
@@ -172,7 +175,7 @@ describe('large-graph guard', () => {
 
   it('offers the simplified-view notice only while degrading', () => {
     expect(simplifiedViewNotice(300)).toBeNull()
-    expect(simplifiedViewNotice(1600)).toBe('showing simplified view (1600 nodes)')
+    expect(simplifiedViewNotice(1600)).toBe('showing simplified view (1600 entries)')
   })
 
   it('drops node labels from the graph attributes above the ceiling', () => {
@@ -258,15 +261,15 @@ describe('seedPosition', () => {
 
 describe('graphAriaLabel', () => {
   it('counts the nodes, edges and entity types', () => {
-    expect(graphAriaLabel(12, 8, 3)).toBe('Knowledge graph: 12 nodes, 8 edges, 3 entity types')
+    expect(graphAriaLabel(12, 8, 3)).toBe('Your map: 12 entries, 8 connections, 3 entity types')
   })
 
   it('pluralises a lone node, edge and entity type', () => {
-    expect(graphAriaLabel(1, 1, 1)).toBe('Knowledge graph: 1 node, 1 edge, 1 entity type')
+    expect(graphAriaLabel(1, 1, 1)).toBe('Your map: 1 entry, 1 connection, 1 entity type')
   })
 
   it('reads as an empty graph before anything arrives', () => {
-    expect(graphAriaLabel(0, 0, 0)).toBe('Knowledge graph: 0 nodes, 0 edges, 0 entity types')
+    expect(graphAriaLabel(0, 0, 0)).toBe('Your map: 0 entries, 0 connections, 0 entity types')
   })
 })
 
@@ -274,7 +277,7 @@ describe('graphStreamPhase / graphStatusMessage', () => {
   it('waits for the first chunk while the graph is empty', () => {
     expect(graphStreamPhase(0, 'connecting', false)).toBe('waiting')
     expect(graphStreamPhase(0, 'open', false)).toBe('waiting')
-    expect(graphStatusMessage(0, 'open', false)).toBe('Waiting for the first chunk…')
+    expect(graphStatusMessage(0, 'open', false)).toBe('Waiting for the first section…')
   })
 
   it('streams silently once a node has arrived', () => {
@@ -284,12 +287,26 @@ describe('graphStreamPhase / graphStatusMessage', () => {
 
   it('reports failure when the socket closes before done', () => {
     expect(graphStreamPhase(5, 'closed', false)).toBe('failed')
-    expect(graphStatusMessage(5, 'closed', false)).toBe('The live graph stream failed — the graph stays as the last snapshot.')
+    expect(graphStatusMessage(5, 'closed', false)).toBe('The live map stream failed — the map stays as the last snapshot.')
   })
 
   it('reports the ended state on a done frame, even with zero nodes', () => {
     expect(graphStreamPhase(0, 'closed', true)).toBe('ended')
-    expect(graphStatusMessage(0, 'closed', true)).toBe('The live graph stream has ended.')
+    expect(graphStatusMessage(0, 'closed', true)).toBe('The live map stream has ended.')
+  })
+})
+
+describe('the copy law (§13) governs every string the canvas renders (§8.5 — WebGL-free)', () => {
+  it('renders no banned word in the img label, the status overlay or the simplified-view notice', () => {
+    const rendered = [
+      graphAriaLabel(12, 8, 3),
+      graphStatusMessage(0, 'open', false),
+      graphStatusMessage(5, 'closed', false),
+      graphStatusMessage(0, 'closed', true),
+      simplifiedViewNotice(1600),
+    ].filter((line): line is string => line !== null)
+    expect(rendered).not.toHaveLength(0)
+    for (const line of rendered) expect(line).not.toMatch(BANNED_WORD)
   })
 })
 

@@ -6,6 +6,8 @@ import { MemoryRouter } from 'react-router-dom'
 import LandingPage from './LandingPage'
 import * as copy from './copy'
 import { captures, footer, hero, meta } from './copy'
+// §13 — the one copy-law guard (list + stem-tolerant matcher), shared with every rendered-string test.
+import { BANNED_WORD } from '../test/copyLaw'
 
 const html = renderToStaticMarkup(
   <MemoryRouter>
@@ -34,13 +36,6 @@ const decode = (markup: string) =>
     .replace(/&gt;/g, '>')
 
 const text = (markup: string) => decode(markup.replace(/<[^>]*>/g, ' '))
-
-/** §13 — whole-word and plural-tolerant, over values only (identifiers are exempt). */
-const BANNED = [
-  'agent', 'graph', 'node', 'edge', 'round', 'retrieval', 'ontology', 'model',
-  'society', 'chunk', 'embedding', 'vector', 'llm', 'prompt', 'token', 'pipeline', 'job',
-]
-const BANNED_WORD = new RegExp(`\\b(?:${BANNED.join('|')})s?\\b`, 'i')
 
 const stringsIn = (value: unknown): string[] => {
   if (typeof value === 'string') return [value]

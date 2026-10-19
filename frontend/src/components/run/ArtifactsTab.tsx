@@ -40,11 +40,11 @@ export default function ArtifactsTab({ run, events }: { run: RunState; events: R
       </section>
 
       <section>
-        <h2 className="mb-3 text-heading text-ink">Pairs per round</h2>
-        {run.rounds.length === 0 && <p className="text-body text-ink-3">No rounds yet.</p>}
+        <h2 className="mb-3 text-heading text-ink">Pairs per pass</h2>
+        {run.rounds.length === 0 && <p className="text-body text-ink-3">No passes yet.</p>}
         {run.rounds.map((round) => (
           <div key={round.round} className="mb-4">
-            <h3 className="text-body text-ink">Round {round.round}</h3>
+            <h3 className="text-body text-ink">Pass {round.round}</h3>
             <ul className="mt-1 space-y-1">
               {round.pairs.map((pair, index) => (
                 <li key={index} className="text-body text-ink-2">
@@ -64,7 +64,7 @@ export default function ArtifactsTab({ run, events }: { run: RunState; events: R
         {run.commits.length === 0 && <p className="text-body text-ink-3">No commits yet.</p>}
         {run.commits.map((commit) => (
           <p key={commit.round} className="tnum font-measurement text-mono text-ink-2">
-            R{commit.round} · {commit.opinions} opinions · {commit.edges} edges {commit.failed ? '✕' : '✓'}
+            P{commit.round} · {commit.opinions} opinions · {commit.edges} connections {commit.failed ? '✕' : '✓'}
           </p>
         ))}
       </section>
