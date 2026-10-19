@@ -486,4 +486,4 @@ CRITICAL RULES:
 
 - `docs/TECHNOLOGY_STACK.md` - Production tech stack and architecture (source of truth)
 - `docs/ARCHITECTURE.md` - Detailed component documentation
-- `docs/DESIGN_SPEC.md` - Frontend design specification ("The Survey", draft pending approval; supersedes the retired "Neural Observatory" demo shell)
+- `docs/DESIGN_SPEC.md` - Frontend design authority: the built world (tokens, type, wireframes, motion, component language, copy law), rewritten from the shipped frontend; the "Survey" draft and the retired "Neural Observatory" shell are both superseded by this file.
