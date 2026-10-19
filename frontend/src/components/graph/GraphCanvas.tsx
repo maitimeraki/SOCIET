@@ -414,12 +414,12 @@ function GraphOverlay({ phase, message }: { phase: GraphStreamPhase; message: st
   return (
     <div
       role="status"
-      className={`pointer-events-none absolute inset-x-0 bottom-0 flex items-center gap-2 border-t bg-ground/90 px-3 py-2 ${
+      className={`pointer-events-none absolute inset-x-0 bottom-0 flex items-center gap-2 border-t bg-map-ground/90 px-3 py-2 ${
         failed ? 'border-edge/40' : 'border-ink-4'
       }`}
     >
       {failed ? (
-        <XCircle size={16} className="shrink-0 text-edge" aria-hidden="true" />
+        <XCircle size={16} className="shrink-0 text-ink-2" aria-hidden="true" />
       ) : (
         <CheckCircle size={16} className="shrink-0 text-ink-2" aria-hidden="true" />
       )}
@@ -502,7 +502,7 @@ export default function GraphCanvas({ datasetId, jobId }: GraphCanvasProps) {
       {notice && (
         <p
           role="status"
-          className="pointer-events-none absolute right-2 top-2 flex items-center gap-1.5 rounded-[4px] border border-warn/40 bg-ground/85 px-2 py-1 text-micro text-ink-2"
+          className="pointer-events-none absolute right-2 top-2 flex items-center gap-1.5 rounded-[4px] border border-warn/40 bg-map-ground-2 px-2 py-1 text-micro text-ink-2"
         >
           <Warning size={13} className="text-warn" aria-hidden="true" />
           {notice}
