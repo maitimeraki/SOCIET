@@ -437,7 +437,7 @@ function GraphOverlay({ phase, message }: { phase: GraphStreamPhase; message: st
     <div
       role="status"
       className={`pointer-events-none absolute inset-x-0 bottom-0 flex items-center gap-2 border-t bg-map-ground/90 px-3 py-2 ${
-        failed ? 'border-edge/40' : 'border-ink-4'
+        failed ? 'border-map-rule' : 'border-ink-4'
       }`}
     >
       {failed ? (

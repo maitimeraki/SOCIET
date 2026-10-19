@@ -16,7 +16,7 @@ const RULED =
 export default function Table({ head, children, foot, className = '' }: { head: ReactNode; children: ReactNode; foot?: ReactNode; className?: string }) {
   return (
     <table className={`tnum w-full border-collapse text-body ${RULED} ${className}`}>
-      <thead className="sticky top-0 bg-ground-2 text-label uppercase text-ink-3">{head}</thead>
+      <thead className="sticky top-0 bg-ground-2 text-label uppercase text-ink-2">{head}</thead>
       <tbody className="text-ink-2">{children}</tbody>
       {foot ? <tfoot>{foot}</tfoot> : null}
     </table>

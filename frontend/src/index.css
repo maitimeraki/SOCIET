@@ -36,7 +36,6 @@
   /* §2.4 Map entry colours — one per entry kind. */
   --color-corpus: #3b82f6; /* the material — informational, neutral */
   --color-expert: #e2e8f0; /* an expert — luminous on the dark ground */
-  --color-edge: #334155;   /* connection — recedes; the entries dominate */
 
   /* §2.4/§2.5 The four positions — frozen order POSITIVE, NEUTRAL, AMBIVALENT, NEGATIVE.
         A position renders shape + colour + word at every size; a colour with no visible shape is banned. */

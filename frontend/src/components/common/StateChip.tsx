@@ -7,7 +7,7 @@ export default function StateChip({ state }: { state: RunStateWord }) {
   switch (state) {
     case 'queued':
       return (
-        <span className={`${base} text-ink-3`}>
+        <span className={`${base} text-ink-2`}>
           <Circle size={14} aria-hidden="true" /> Queued
         </span>
       )

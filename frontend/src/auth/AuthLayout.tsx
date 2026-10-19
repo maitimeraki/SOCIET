@@ -57,7 +57,7 @@ function SampleSheet() {
         {/* the fix — an ink ring, a warn centre, the plotted point */}
         <circle cx="124" cy="70" r="12" fill="none" stroke="var(--color-ink)" strokeWidth="1.5" />
         <circle cx="124" cy="70" r="3.8" fill="var(--color-warn)" />
-        <circle cx="133" cy="61" r="2.4" fill="var(--color-edge)" />
+        <circle cx="133" cy="61" r="2.4" fill="var(--color-ink-2)" />
       </svg>
       <figcaption className="mt-3 font-measurement text-mono text-ink-3">
         A sample sheet, not a run — three stations, their lines of sight, and the fix.
