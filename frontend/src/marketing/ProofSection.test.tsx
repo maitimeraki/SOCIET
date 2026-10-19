@@ -12,9 +12,10 @@ describe('the proof section — the mechanism, never a mocked recording', () => 
     expect(html).toContain('unedited capture of a real decision')
   })
 
-  it('shows the one real frame — the workspace — with its caption', () => {
-    // The recording is absent; the single frame is a real capture of the running workspace, never a
-    // mock. It carries its alt, its own pixels and a `/captures/` source.
+  it('shows the real workspace frame with its caption', () => {
+    // The recording is absent; the workspace is one of the section's two real frames (the other is
+    // the opposing case under stage 3), never a mock. It carries its alt, its own pixels and a
+    // `/captures/` source.
     expect(html).toContain(`src="${captures.workspace.src}"`)
     expect(html).toContain(`alt="${captures.workspace.alt}"`)
     expect(html).toContain(`width="${captures.workspace.width}"`)

@@ -8,8 +8,8 @@ import { captures, hero, meta } from './copy'
  *
  * The proof region is one capture of a filed answer, taken from the running product, held inside the
  * first viewport by a height cap (`marketing.css`). The same document's opposing case ships further
- * down, under the proof section's third stage. The map capture does not ship — the map surface does
- * not work in the shipped build — so no frame here imitates one.
+ * down, under the proof section's third stage. The map capture is not among the hero's shipped
+ * frames, so no frame here imitates one.
  *
  * There is exactly one primary action: the secondary that used to sit beside it is gone from the
  * first viewport, and the action carries `next` so a new owner lands where the work begins.
