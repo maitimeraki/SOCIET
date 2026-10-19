@@ -1,5 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+// No jsdom / no testing-library in this repo (see AppErrorBoundary.test.tsx): render to static
+// markup in Node instead.
+import { renderToStaticMarkup } from 'react-dom/server'
 import { runFileIngest, runUrlIngest } from '../api/ingestFlow'
+import DocCard from '../components/ingest/DocCard'
+import { BANNED_WORD, renderedText } from '../test/copyLaw'
+import type { DraftDoc } from '../wizard/draftStore'
 
 // vitest runs in the node environment; poll.ts sleeps via window.setTimeout.
 beforeEach(() => {
@@ -78,7 +84,7 @@ describe('the R17 ingest transport (202 → poll → documents)', () => {
     vi.stubGlobal('fetch', fetchMock)
 
     const outcome = await runFileIngest([new File(['x'], 'a.txt')])
-    expect(outcome).toEqual({ kind: 'failed', reason: 'the extraction job returned no upload ids' })
+    expect(outcome).toEqual({ kind: 'failed', reason: 'the extraction returned no sections' })
     expect(paths(fetchMock)).toHaveLength(2)
   })
 
@@ -109,5 +115,46 @@ describe('the R17 ingest transport (202 → poll → documents)', () => {
     const outcome = await runUrlIngest('https://example.com/report')
     expect(outcome.kind).toBe('documents')
     expect(paths(fetchMock)[0]).toContain('/api/v1/ingest/url')
+  })
+})
+
+// §13(copy law): the failure reason reaches the customer verbatim — IngestPage renders it as
+// `Extraction failed: {reason}` and DocCard renders it as `Failed — {doc.error}`. Both must be free
+// of the banned vocabulary (a "job" leaked here before the fix).
+describe('the ingest failure speaks the customer’s language (§13)', () => {
+  const failure = async (jobOverrides: Record<string, unknown>) => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(json(ACCEPTED, { status: 202 }))
+      .mockResolvedValueOnce(json({ ...DONE, result: null, ...jobOverrides }))
+    vi.stubGlobal('fetch', fetchMock)
+    const outcome = await runFileIngest([new File(['x'], 'a.pdf')])
+    if (outcome.kind !== 'failed') throw new Error(`expected a failure, got ${outcome.kind}`)
+    return outcome.reason
+  }
+
+  const docCardWith = (reason: string) => {
+    const doc: DraftDoc = {
+      document_id: 'd1',
+      title: 'a.pdf',
+      text: '',
+      word_count: 0,
+      source_type: 'file',
+      status: 'failed',
+      error: reason,
+    }
+    return renderToStaticMarkup(<DocCard doc={doc} onRemove={() => {}} onRetry={() => {}} />)
+  }
+
+  it('the stall reason is clean, and clean once DocCard renders it', async () => {
+    const reason = await failure({ status: 'failed' })
+    expect(reason).not.toMatch(BANNED_WORD)
+    expect(renderedText(docCardWith(reason))).not.toMatch(BANNED_WORD)
+  })
+
+  it('the no-sections reason is clean, and clean once DocCard renders it', async () => {
+    const reason = await failure({ status: 'completed', result: {} })
+    expect(reason).not.toMatch(BANNED_WORD)
+    expect(renderedText(docCardWith(reason))).not.toMatch(BANNED_WORD)
   })
 })

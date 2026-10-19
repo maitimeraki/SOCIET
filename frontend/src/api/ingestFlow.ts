@@ -29,11 +29,11 @@ async function attempt(
     const job = await pollJob<IngestJobResult>(accepted.job_id, onTick ?? (() => {}))
     if (job.status !== 'completed') {
       const reason =
-        job.error || (job.status === 'cancelled' ? 'the extraction was cancelled' : `the extraction job ${job.status}`)
+        job.error || (job.status === 'cancelled' ? 'the extraction was cancelled' : 'the extraction did not finish')
       return { kind: 'failed', reason }
     }
     const ids = uploadIds(job.result)
-    if (ids.length === 0) return { kind: 'failed', reason: 'the extraction job returned no upload ids' }
+    if (ids.length === 0) return { kind: 'failed', reason: 'the extraction returned no sections' }
     const { documents } = await getIngestDocuments(ids)
     return { kind: 'documents', documents }
   } catch (error) {

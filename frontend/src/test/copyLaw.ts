@@ -6,8 +6,8 @@
  * cannot slip past a singular-only pattern.
  *
  * The law governs RENDERED TEXT only: identifiers, route paths, API field names, `data-*`
- * attributes and log lines are exempt. `renderedText` strips the tags (and their attributes) first,
- * so a class like `bg-ground` can never trip `\bround\b`.
+ * attributes and log lines are exempt. `renderedText` strips the tags first (splicing back only the
+ * customer-visible attribute values), so a class like `bg-ground` can never trip `\bround\b`.
  */
 export const BANNED = [
   'agent', 'graph', 'node', 'edge', 'round', 'retrieval', 'ontology', 'model',
@@ -37,5 +37,20 @@ const STEMS: Record<(typeof BANNED)[number], string> = {
 
 export const BANNED_WORD = new RegExp(`\\b(?:${BANNED.map((word) => STEMS[word]).join('|')})\\b`, 'i')
 
-/** Rendered text with tags (and the attributes inside them) removed — identifiers never trip the law. */
-export const renderedText = (markup: string): string => markup.replace(/<[^>]*>/g, ' ')
+/**
+ * The attributes that are RENDERED to the customer (screen readers, tooltips, placeholders, image
+ * text). `className`/`data-*` are identifiers and stay out — `className="rounded-md"` would
+ * false-positive on the `round` stem. Captures the quoted value of whichever quote style is used.
+ */
+const RENDERED_ATTRIBUTE = /\b(?:aria-label|title|placeholder|alt)\s*=\s*(?:"([^"]*)"|'([^']*)')/gi
+
+/**
+ * Rendered text: the text content BETWEEN tags plus the values of the rendered attributes. Tags
+ * themselves (and their other attributes) are dropped, so identifiers never trip the law.
+ */
+export const renderedText = (markup: string): string =>
+  markup.replace(/<[^>]*>/g, (tag) => {
+    let spliced = ''
+    for (const match of tag.matchAll(RENDERED_ATTRIBUTE)) spliced += ` ${match[1] ?? match[2]} `
+    return spliced
+  })
