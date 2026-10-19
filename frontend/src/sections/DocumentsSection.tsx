@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
+import { UploadSimple } from '@phosphor-icons/react'
 import { listUploads } from '../api/rest'
 import type { UploadRow } from '../api/types'
 import Button, { buttonClasses } from '../components/ui/Button'
@@ -45,11 +46,7 @@ export function DocumentsView({ documents, loading, failed, failDetail, onRetry 
         </div>
       ) : documents.length === 0 ? (
         <EmptyState
-          icon={
-            <span aria-hidden="true" className="text-title leading-none">
-              ⇣
-            </span>
-          }
+          icon={<UploadSimple size={28} aria-hidden="true" />}
           line="Add your first document. Drop a PDF, paste a URL, or connect a source — everything your panel argues from comes from here."
           action={
             <Link to="/new/ingest" className={buttonClasses('primary', 40)}>

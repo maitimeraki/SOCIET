@@ -1,4 +1,5 @@
 import { Link, NavLink } from 'react-router-dom'
+import { Files, Gavel, SealCheck, UsersThree } from '@phosphor-icons/react'
 import { useAuthStore } from '../../auth/authStore'
 import HealthDot from './HealthDot'
 
@@ -11,10 +12,10 @@ import HealthDot from './HealthDot'
  * active item is correct without a pathname comparison here.
  */
 const SECTIONS = [
-  { to: '/documents', label: 'Documents', glyph: '▤' },
-  { to: '/runs', label: 'Decisions', glyph: '▷' },
-  { to: '/results', label: 'Verdicts', glyph: '✓' },
-  { to: '/panel', label: 'Panel', glyph: '◇' },
+  { to: '/documents', label: 'Documents', Icon: Files },
+  { to: '/runs', label: 'Decisions', Icon: Gavel },
+  { to: '/results', label: 'Verdicts', Icon: SealCheck },
+  { to: '/panel', label: 'Panel', Icon: UsersThree },
 ]
 
 // §7 Rail item states — resting ink-2; hover a ground fill; active an accent-soft fill with a 3px
@@ -54,8 +55,8 @@ export default function Rail() {
           {SECTIONS.map((s) => (
             <li key={s.to}>
               <NavLink to={s.to} className={itemClass}>
-                <span aria-hidden="true" className="w-4 shrink-0 text-center">
-                  {s.glyph}
+                <span className="flex w-4 shrink-0 justify-center">
+                  <s.Icon size={16} aria-hidden="true" />
                 </span>
                 <span className={LABEL}>{s.label}</span>
               </NavLink>

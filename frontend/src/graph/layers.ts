@@ -64,14 +64,6 @@ export const POSITION_COLORS: Record<Stance, string> = {
 /** The frozen order the legend draws the four positions in (§2.5). */
 export const POSITION_ORDER: readonly Stance[] = ['POSITIVE', 'NEUTRAL', 'AMBIVALENT', 'NEGATIVE']
 
-/** §2.5 The shape each position carries, so its colour is never the only signal. */
-export const POSITION_GLYPHS: Record<Stance, string> = {
-  POSITIVE: '●',
-  NEUTRAL: '□',
-  AMBIVALENT: '◇',
-  NEGATIVE: '⊗',
-}
-
 /**
  * The colour an opinion draws in when the stored events carry no position for it — a stream that
  * dropped a pass's turns, say. It is the neutral family's darker step (`--color-ink-3`, and the
@@ -80,9 +72,6 @@ export const POSITION_GLYPHS: Record<Stance, string> = {
  * one (D7).
  */
 export const UNPOSITIONED_COLOR = '#64748B'
-
-/** The glyph an entry of an unresolved position carries in the legend. */
-export const UNPOSITIONED_GLYPH = '◌'
 
 /**
  * The colour an entry draws in (§2.4, §9.2): the material's blue, an expert's luminous white, or —

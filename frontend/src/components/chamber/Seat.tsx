@@ -4,11 +4,12 @@ import type { AgentProfile, Stance } from '../../run/events'
 export const SEAT_W = 14
 export const SEAT_H = 10
 
+/** The floor is a light surface, so seats take the light-ground variants (all clear 3:1 on canvas). */
 const STANCE_VAR: Record<Stance, string> = {
-  POSITIVE: 'var(--color-pos)',
-  NEUTRAL: 'var(--color-neu)',
-  AMBIVALENT: 'var(--color-amb)',
-  NEGATIVE: 'var(--color-neg)',
+  POSITIVE: 'var(--color-pos-light)',
+  NEUTRAL: 'var(--color-neu-light)',
+  AMBIVALENT: 'var(--color-amb-light)',
+  NEGATIVE: 'var(--color-neg-light)',
 }
 
 export interface SeatSpec {

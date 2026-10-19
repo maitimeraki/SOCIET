@@ -1,23 +1,20 @@
 /* eslint-disable react-refresh/only-export-components -- this module deliberately exports its pure helpers (the gating predicates, the label drawing and syncGraph) so the unit test can drive them without a renderer. */
 import { useCallback, useEffect, useMemo, useRef } from 'react'
-import type { CSSProperties } from 'react'
+import type { CSSProperties, ReactNode } from 'react'
 import Graph from 'graphology'
 import forceAtlas2 from 'graphology-layout-forceatlas2'
 import { SigmaContainer, useSigma } from '@react-sigma/core'
 import type { NodeLabelDrawingFunction } from 'sigma/rendering'
-import { CheckCircle, CircleNotch, Warning, XCircle } from '@phosphor-icons/react'
+import { CheckCircle, CircleDashed, CircleNotch, CirclesThreePlus, UsersThree, Warning, XCircle } from '@phosphor-icons/react'
 import type { StreamStatus } from '../../api/ws'
 import { useGraphStore } from '../../graph/graphStore'
 import type { GraphEdge, GraphNode } from '../../graph/graphStore'
 import {
   CORPUS_COLOR,
   EXPERT_COLOR,
-  LAYER_GLYPHS,
   POSITION_COLORS,
-  POSITION_GLYPHS,
   POSITION_ORDER,
   UNPOSITIONED_COLOR,
-  UNPOSITIONED_GLYPH,
   entryColor,
   useVisibleLayers,
   visibleSlice,
@@ -26,6 +23,7 @@ import { useSelectionStore } from '../../graph/selectionStore'
 import type { MapSelection } from '../../graph/selectionStore'
 import { useGraphStream } from '../../graph/useGraphStream'
 import Skeleton from '../ui/Skeleton'
+import StanceSymbol from '../common/StanceSymbol'
 
 export interface GraphCanvasProps {
   datasetId: string
@@ -375,7 +373,7 @@ const CANVAS_STYLE = { '--sigma-background-color': 'transparent' } as CSSPropert
 
 /** One legend row: the mark, the hue and the word — a hue never stands alone (§2.5, §6). */
 interface LegendRow {
-  glyph: string
+  mark: ReactNode
   color: string
   word: string
 }
@@ -388,10 +386,14 @@ interface LegendRow {
  * not entity type.
  */
 export const LEGEND_ROWS: readonly LegendRow[] = [
-  { glyph: LAYER_GLYPHS.corpus, color: CORPUS_COLOR, word: 'Corpus' },
-  { glyph: LAYER_GLYPHS.experts, color: EXPERT_COLOR, word: 'Experts' },
-  ...POSITION_ORDER.map((stance) => ({ glyph: POSITION_GLYPHS[stance], color: POSITION_COLORS[stance], word: stance })),
-  { glyph: UNPOSITIONED_GLYPH, color: UNPOSITIONED_COLOR, word: 'No position' },
+  { mark: <CirclesThreePlus size={12} aria-hidden="true" />, color: CORPUS_COLOR, word: 'Corpus' },
+  { mark: <UsersThree size={12} aria-hidden="true" />, color: EXPERT_COLOR, word: 'Experts' },
+  ...POSITION_ORDER.map((stance) => ({
+    mark: <StanceSymbol stance={stance} size={12} color={POSITION_COLORS[stance]} />,
+    color: POSITION_COLORS[stance],
+    word: stance,
+  })),
+  { mark: <CircleDashed size={12} aria-hidden="true" />, color: UNPOSITIONED_COLOR, word: 'No position' },
 ]
 
 /** The map's key, drawn over the plot while the map holds anything. `hasEntries` is false only when nothing is drawn. */
@@ -401,7 +403,9 @@ export function GraphLegend({ hasEntries }: { hasEntries: boolean }) {
     <ul className="pointer-events-none absolute left-2 top-2 inline-flex max-w-[70%] flex-wrap gap-x-3 gap-y-1 rounded-[4px] border border-map-rule bg-map-ground/85 px-2.5 py-1.5">
       {LEGEND_ROWS.map((row) => (
         <li key={row.word} className="flex items-center gap-1.5 text-micro text-ink-3">
-          <span aria-hidden="true">{row.glyph}</span>
+          <span aria-hidden="true" className="inline-flex items-center" style={{ color: row.color }}>
+            {row.mark}
+          </span>
           <span aria-hidden="true" className="inline-block size-2.5 rounded-[2px]" style={{ backgroundColor: row.color }} />
           {row.word}
         </li>

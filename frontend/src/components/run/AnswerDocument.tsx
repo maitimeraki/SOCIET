@@ -223,7 +223,7 @@ export default function AnswerDocument({ runId, question, view, sources, corpusM
 function Block({ block }: { block: AnswerBlock }) {
   switch (block.kind) {
     case 'text':
-      return <p className="whitespace-pre-line text-body text-ink-2">{block.text}</p>
+      return <p className="whitespace-pre-line font-record text-body-lg text-ink-2">{block.text}</p>
     case 'listing':
       return (
         <ul className="space-y-1 text-body text-ink-2">

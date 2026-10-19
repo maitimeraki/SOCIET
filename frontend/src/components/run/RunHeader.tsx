@@ -40,7 +40,7 @@ export default function RunHeader({
 
   return (
     <div className="space-y-2">
-      <p className="font-titling text-title text-ink">{run.query || 'Waiting for the floor…'}</p>
+      <p className="font-titling text-title text-ink">{run.query || 'Waiting for the panel…'}</p>
       {run.intent?.core_question && (
         <p className="tnum font-measurement text-mono text-ink-3">reading as: {run.intent.core_question}</p>
       )}

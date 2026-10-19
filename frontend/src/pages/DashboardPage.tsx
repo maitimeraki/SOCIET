@@ -42,7 +42,7 @@ function LiveInset({ run }: { run: RunSummary }) {
   return (
     <section className="border-y border-ink-4 py-3">
       <header className="mb-2 flex flex-wrap items-baseline justify-between gap-2">
-        <h2 className="text-heading text-ink">On the floor now</h2>
+        <h2 className="text-heading text-ink">Debating now</h2>
         <Link to={`/runs/${run.run_id}`} className="text-body text-ink-2 hover:text-accent">
           Open the run →
         </Link>

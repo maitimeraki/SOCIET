@@ -363,6 +363,10 @@ describe('GraphLegend — the map’s key (§6, §9)', () => {
     for (const color of [CORPUS_COLOR, EXPERT_COLOR, UNPOSITIONED_COLOR, ...Object.values(POSITION_COLORS)]) {
       expect(html).toContain(color)
     }
+    // Every symbol is a drawn mark — an authored SVG for the stances, a Phosphor icon otherwise —
+    // never a typographic glyph, and every mark is decorative beside its word.
+    expect(html).toContain('<svg')
+    expect(html).toContain('aria-hidden="true"')
   })
 
   it('draws nothing over a map holding no entry', () => {

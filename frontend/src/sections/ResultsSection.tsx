@@ -1,18 +1,23 @@
 import { useEffect, useState } from 'react'
+import { Link } from 'react-router-dom'
 import { ApiError, getRun, getRunGraph, listRuns } from '../api/rest'
 import { fold } from '../run/reducer'
 import { verdictView } from '../run/selectors'
 import type { VerdictView } from '../run/selectors'
 import AnswerDocument, { sourceTitles } from '../components/run/AnswerDocument'
-import Button from '../components/ui/Button'
+import StanceChip from '../components/common/StanceChip'
+import Button, { buttonClasses } from '../components/ui/Button'
 import EmptyState from '../components/ui/EmptyState'
 import ErrorState from '../components/ui/ErrorState'
 import Skeleton from '../components/ui/Skeleton'
+import { fmtDate, fmtScore } from '../utils/format'
 
 /** What the section hands the view: the newest completed decision's answer, or nothing yet. */
 interface AnswerSlice {
   runId: string
   question: string
+  /** The decision's own date, read off the payload — never derived from the rendered events. */
+  createdAt: string
   view: VerdictView
   sources: string[]
   corpusMissing: boolean
@@ -21,6 +26,7 @@ interface AnswerSlice {
 export interface ResultsViewProps {
   runId: string | null
   question: string
+  createdAt: string
   view: VerdictView | null
   sources: string[]
   corpusMissing: boolean
@@ -37,7 +43,7 @@ export interface ResultsViewProps {
  * empty document. Presentational: the data and the retry arrive as props (the default export owns the
  * fetch), so this renders under `react-dom/server` in the node-only suite where `useEffect` never fires.
  */
-export function ResultsView({ runId, question, view, sources, corpusMissing, loading, failed, failDetail, onRetry }: ResultsViewProps) {
+export function ResultsView({ runId, question, createdAt, view, sources, corpusMissing, loading, failed, failDetail, onRetry }: ResultsViewProps) {
   return (
     <div className="space-y-6">
       <h1 className="font-titling text-display text-ink">Verdicts</h1>
@@ -59,9 +65,35 @@ export function ResultsView({ runId, question, view, sources, corpusMissing, loa
           ))}
         </div>
       ) : view && runId ? (
-        <AnswerDocument runId={runId} question={question} view={view} sources={sources} corpusMissing={corpusMissing} />
+        <div className="space-y-6">
+          {/* §8.5/§4 the verdict opens with what it concluded: the stance as shape + word, the
+              confidence as the reading's numeral, and the decision's own date. */}
+          <header className="flex flex-wrap items-end justify-between gap-4 border-b border-ink-4 pb-4">
+            <div className="space-y-2">
+              <p className="text-label uppercase text-ink-3">The outcome</p>
+              <StanceChip stance={view.stance} />
+            </div>
+            <div>
+              <p className="tnum font-measurement text-numeral text-ink">
+                {view.confidence === null ? '—' : fmtScore(view.confidence)}
+              </p>
+              <p className="text-label uppercase text-ink-3">Weighted confidence</p>
+            </div>
+            <p className="tnum font-measurement text-mono text-ink-3">
+              Decided <time dateTime={createdAt}>{fmtDate(createdAt)}</time>
+            </p>
+          </header>
+          <AnswerDocument runId={runId} question={question} view={view} sources={sources} corpusMissing={corpusMissing} />
+        </div>
       ) : (
-        <EmptyState line="The outcome of each decision — its stance, its confidence, and the strongest case against it. A verdict appears here when a decision finishes." />
+        <EmptyState
+          line="The outcome of each decision — its stance, its confidence, and the strongest case against it. A verdict appears here when a decision finishes."
+          action={
+            <Link to="/new" className={buttonClasses('primary', 40)}>
+              Start a decision
+            </Link>
+          }
+        />
       )}
     </div>
   )
@@ -101,7 +133,14 @@ export default function ResultsSection() {
           console.error('ResultsSection: could not read the material behind the newest decision.', error)
         }
       }
-      return { runId: newest.run_id, question: newest.query, view, sources: sourceTitles(folded.roster), corpusMissing }
+      return {
+        runId: newest.run_id,
+        question: newest.query,
+        createdAt: newest.created_at,
+        view,
+        sources: sourceTitles(folded.roster),
+        corpusMissing,
+      }
     }
     load()
       .then((slice) => {
@@ -135,6 +174,7 @@ export default function ResultsSection() {
     <ResultsView
       runId={answer?.runId ?? null}
       question={answer?.question ?? ''}
+      createdAt={answer?.createdAt ?? ''}
       view={answer?.view ?? null}
       sources={answer?.sources ?? []}
       corpusMissing={answer?.corpusMissing ?? false}

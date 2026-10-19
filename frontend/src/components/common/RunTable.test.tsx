@@ -23,12 +23,13 @@ const render = (runs: RunSummary[], loading = false) =>
     </MemoryRouter>,
   )
 
-describe('RunTable — the decision list columns (§8.4)', () => {
-  it('renders the six columns: when · question · corpus · passes · outcome · status', () => {
+describe('RunTable — the decision list (§8.4)', () => {
+  it('leads with the question as a heading inside the card link', () => {
     const html = render([RUN])
-    for (const header of ['When', 'Question', 'Corpus', 'Passes', 'Outcome', 'Status']) {
-      expect(html).toContain(header)
-    }
+    expect(html).toContain('<h3')
+    expect(html).toMatch(/<h3[^>]*>Should we expand into Europe\?<\/h3>/)
+    expect(html).toContain('href="/runs/r1"')
+    expect(html).not.toContain('<table') // a list of decisions, not a data table
   })
 
   it('maps the real payload fields — created_at, query, rounds_executed, status', () => {
@@ -37,7 +38,7 @@ describe('RunTable — the decision list columns (§8.4)', () => {
     // vite.config.ts) — a formatter bug is caught, not just a comparison against `fmtDate` itself.
     expect(html).toContain('1 Oct 2026 10:00')
     expect(html).toContain('Should we expand into Europe?') // question → query
-    expect(html).toContain('>3<') // passes → rounds_executed, the payload's own count
+    expect(html).toContain('3 passes') // passes → rounds_executed, the payload's own count
     expect(html).toContain('Complete') // status → StateChip's word
   })
 
@@ -76,35 +77,35 @@ describe('RunTable — the decision list columns (§8.4)', () => {
   })
 
   it('renders an honest dash when the run names neither a corpus label nor an id', () => {
-    // `run_doc._summarize` can return `dataset_id: None`; the corpus cell must not throw or blank.
+    // `run_doc._summarize` can return `dataset_id: None`; the corpus line must not throw or blank.
     const html = render([{ ...RUN, corpus_label: null, dataset_id: null as unknown as string }])
     expect(html).toContain('—')
-    expect(html).toContain('<table') // the table still renders — no throw
-    expect(html).toContain('Should we expand into Europe?')
+    expect(html).toContain('Should we expand into Europe?') // the card still renders — no throw
   })
 
-  it('links each row to the run', () => {
+  it('links the whole card to the run', () => {
     expect(render([RUN])).toContain('href="/runs/r1"')
   })
 
-  it('never renders an "Agents" column', () => {
-    // The column set above replaces the old agent-count dash (§13 bans the word itself).
+  it('never renders an "Agents" word', () => {
+    // The card fields above replace the old agent-count dash (§13 bans the word itself).
     expect(render([RUN])).not.toContain('Agents')
   })
 
-  it('collapses to stacked cards under md — the same rows, a second layout', () => {
+  it('uses the same card list at every width — no separate table for desktop', () => {
     const html = render([RUN])
-    expect(html).toContain('md:hidden') // the card list
-    expect(html).toContain('hidden overflow-x-auto md:block') // the table
+    expect(html).not.toContain('<table')
+    expect(html).not.toContain('md:hidden')
+    expect(html).toContain('Should we expand into Europe?')
   })
 
   it('renders nothing for an empty list — the caller owns the empty state', () => {
     expect(render([])).toBe('')
   })
 
-  it('renders skeletons while loading, not an empty table', () => {
+  it('renders skeletons while loading, not an empty list', () => {
     const html = render([], true)
-    expect(html).not.toContain('<table')
+    expect(html).not.toContain('Should we expand into Europe?')
     expect(html.length).toBeGreaterThan(0)
   })
 })

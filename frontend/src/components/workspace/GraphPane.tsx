@@ -1,6 +1,7 @@
 /* eslint-disable react-refresh/only-export-components -- this module deliberately exports its pure helpers (the counts by kind and the state-free view) so the no-DOM suite can drive every toggle state and every map size without a renderer. */
 import { useState } from 'react'
 import type { ReactNode } from 'react'
+import { ArrowsInSimple, ArrowsOutSimple, CaretUp, Minus } from '@phosphor-icons/react'
 import IconButton from '../ui/IconButton'
 import { ALL_LAYERS, LAYER_GLYPHS, LAYER_NAMES, LayerVisibilityContext, nodeLayer } from '../../graph/layers'
 import type { LayerName } from '../../graph/layers'
@@ -174,7 +175,7 @@ export function GraphPaneView({
             onClick={() => onStateChange(minimised ? 'split' : 'minimised')}
             className={CONTROL}
           >
-            <span aria-hidden="true">{minimised ? '▲' : '–'}</span>
+            {minimised ? <CaretUp size={14} aria-hidden="true" /> : <Minus size={14} aria-hidden="true" />}
           </IconButton>
           {!minimised && (
             <IconButton
@@ -184,7 +185,7 @@ export function GraphPaneView({
               onClick={() => onStateChange(expanded ? 'split' : 'expanded')}
               className={CONTROL}
             >
-              <span aria-hidden="true">{expanded ? '↙' : '↗'}</span>
+              {expanded ? <ArrowsInSimple size={14} aria-hidden="true" /> : <ArrowsOutSimple size={14} aria-hidden="true" />}
             </IconButton>
           )}
         </div>

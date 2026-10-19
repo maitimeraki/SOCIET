@@ -40,7 +40,7 @@ const render = (props: Partial<DashboardViewProps> = {}) =>
   )
 
 describe('DashboardPage — the traverse log (plan §3.3)', () => {
-  it('renders the six timeline columns from a mocked GET', async () => {
+  it('renders the decision cards from a mocked GET', async () => {
     vi.stubGlobal(
       'fetch',
       vi.fn().mockResolvedValue(new Response(JSON.stringify({ items: [run()], next_cursor: null }))),
@@ -49,19 +49,18 @@ describe('DashboardPage — the traverse log (plan §3.3)', () => {
     const page = await listRunsPage({ limit: 25 })
     const html = render({ runs: page.items })
 
-    // The same RunTable (§8.4) the /runs section renders — one column set, shared.
-    for (const header of ['When', 'Question', 'Corpus', 'Passes', 'Outcome', 'Status']) {
-      expect(html).toContain(header)
-    }
-    // Timestamp cell = `fmtDate(created_at)`, asserted as the exact local-time literal — `TZ` is
+    // The same RunTable (§8.4) the /runs section renders — one question-led card list, shared.
+    expect(html).toMatch(/<h3[^>]*>Should we expand into Europe\?<\/h3>/)
+    expect(html).toContain('href="/runs/r1"')
+    // Timestamp = `fmtDate(created_at)`, asserted as the exact local-time literal — `TZ` is
     // pinned to UTC in `vite.config.ts`, so this is deterministic and still catches a formatter
     // bug (e.g. an off-by-one day) that comparing against `fmtDate` itself would not (R48 m2).
     expect(html).toContain('1 Oct 2026 10:00')
-    expect(html).toContain('Should we expand into Europe?') // question → query
     expect(html).toContain('ds-1') // corpus → dataset_id when the run named no label
-    expect(html).toContain('>3<') // passes → rounds_executed
+    expect(html).toContain('3 passes') // passes → rounds_executed
     expect(html).toContain('POSITIVE') // outcome → the stance word beside its symbol
     expect(html).toContain('Complete') // status → StateChip
+    expect(html).not.toContain('<table')
   })
 
   it('renders the empty state with the first-run CTA when there are no runs', () => {

@@ -32,6 +32,7 @@ const render = (props: Partial<ResultsViewProps> = {}) =>
       <ResultsView
         runId={null}
         question=""
+        createdAt=""
         view={null}
         sources={[]}
         corpusMissing={false}
@@ -44,21 +45,35 @@ const render = (props: Partial<ResultsViewProps> = {}) =>
   )
 
 describe('ResultsSection — §8.5 Verdicts', () => {
-  it('renders the newest completed decision’s answer', () => {
+  it('opens with the verdict header and then the newest completed decision’s answer', () => {
     const html = render({
       runId: 'r1',
       question: 'Should we expand into Europe?',
+      createdAt: '2026-10-01T10:00:00Z',
       view: view(),
       sources: ['Market research 2026'],
     })
+    // §8.5/§4 — the verdict opens with stance (shape + word), confidence numeral and the date.
+    expect(html).toContain('POSITIVE')
+    expect(html).toContain('0.82')
+    expect(html).toContain('Weighted confidence')
+    expect(html).toContain('1 Oct 2026 10:00')
     expect(html).toContain('Should we expand into Europe?') // the decision
     expect(html).toContain('Cash flow is too tight this year.') // the case against
     expect(html).toContain('Market research 2026') // a source
   })
 
-  it('shows an honest empty state when nothing has completed', () => {
+  it('reads the document prose in the reading face', () => {
+    const html = render({ runId: 'r1', question: 'Q', view: view(), sources: [] })
+    expect(html).toContain('font-record')
+    expect(html).toContain('text-body-lg')
+  })
+
+  it('shows an honest empty state with the one next action when nothing has completed', () => {
     const html = render()
     expect(html).toContain('A verdict appears here when a decision finishes.')
+    expect(html).toContain('href="/new"') // the primitive's action slot, not a bare paragraph
+    expect(html).toContain('Start a decision')
     expect(html).not.toContain('Export this verdict') // never a document with nothing in it
   })
 

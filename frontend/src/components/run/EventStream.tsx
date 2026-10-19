@@ -67,7 +67,7 @@ export default function EventStream({ items, live }: { items: StreamItem[]; live
               )
           }
         })}
-        {items.length === 0 && <p className="text-body text-ink-3">Waiting for the floor…</p>}
+        {items.length === 0 && <p className="text-body text-ink-3">Waiting for the panel…</p>}
         {items.length > MAX_ROWS && (
           <p className="text-micro text-ink-3">Showing the last {MAX_ROWS} rows — the full record is in Artifacts.</p>
         )}

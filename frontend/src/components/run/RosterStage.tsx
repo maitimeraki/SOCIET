@@ -122,16 +122,16 @@ export default function RosterStage({
 
       <Beat
         number="④"
-        title="The floor is seated"
+        title="The panel is seated"
         meta={progress.phase === 'seated' ? `${profiles.length} seated` : ''}
         state={progress.phase === 'seated' ? 'done' : 'pending'}
       >
         {floorSlot}
         {progress.phase === 'seated' ? (
           <div className="mt-3 flex items-center gap-3">
-            <p className="text-body text-ink">The floor is seated — pass 1 begins.</p>
+            <p className="text-body text-ink">The panel is seated — pass 1 begins.</p>
             <Button variant="primary" size={32} onClick={onSkip}>
-              Watch the floor →
+              Watch the debate →
             </Button>
           </div>
         ) : (

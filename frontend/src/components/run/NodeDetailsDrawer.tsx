@@ -1,5 +1,6 @@
 /* eslint-disable react-refresh/only-export-components -- this module deliberately exports its pure derivations (entryDetails, resolveSelection) so the no-DOM suite can read every kind of entry without a renderer. */
 import type { ReactNode } from 'react'
+import { FileText, X } from '@phosphor-icons/react'
 import Drawer from '../ui/Drawer'
 import IconButton from '../ui/IconButton'
 import StanceChip from '../common/StanceChip'
@@ -207,9 +208,7 @@ export function NodeDetailsView({ details, onClose }: { details: MapDetails; onC
             {details.kindLabel}
           </p>
           <IconButton label="Close" onClick={onClose}>
-            <span aria-hidden="true" className="text-heading">
-              ×
-            </span>
+            <X size={16} aria-hidden="true" />
           </IconButton>
         </div>
 
@@ -221,7 +220,7 @@ export function NodeDetailsView({ details, onClose }: { details: MapDetails; onC
                   {details.sources.map((doc) => (
                     <li key={doc.title} className="text-body text-ink-2">
                       <span className="flex items-center gap-2">
-                        <span aria-hidden="true">▤</span>
+                        <FileText size={14} aria-hidden="true" className="shrink-0" />
                         {doc.title}
                       </span>
                       {doc.where.length > 0 && <p className="ml-6 text-micro text-ink-2">{doc.where.join(' · ')}</p>}

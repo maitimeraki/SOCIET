@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import type { ReactNode } from 'react'
 import { Link, NavLink, Navigate, useLocation, useNavigate, useParams } from 'react-router-dom'
+import { CaretLeft, CaretRight } from '@phosphor-icons/react'
 import { useRunStore } from '../run/runStore'
 import { convergenceSeries, isLive, railState, rosterProgress, streamItems, verdictView } from '../run/selectors'
 import Button from '../components/ui/Button'
@@ -33,7 +34,7 @@ const isRunTab = (value: string | undefined): value is RunTab =>
 /** §13 — the rendered tab word; the path segment stays the internal identifier (`agents`). */
 const TAB_LABELS: Record<RunTab, string> = {
   roster: 'Roster',
-  floor: 'Floor',
+  floor: 'Debate',
   verdict: 'Verdict',
   agents: 'Experts',
   artifacts: 'Artifacts',
@@ -112,7 +113,7 @@ function RunWork({ run, events, tab, runId, scrubbed, latestRound, corpusMissing
       {tab === 'floor' && (
         <div className="grid gap-6 min-[900px]:grid-cols-[3fr_2fr]">
           <div className="space-y-4">
-            <div className={`plot-ground p-4 ${run.status === 'failed' ? 'opacity-40' : ''}`}>
+            <div className={`rounded-md border border-border bg-canvas p-4 ${run.status === 'failed' ? 'opacity-40' : ''}`}>
               <ChamberFloor
                 roster={run.roster}
                 rounds={run.rounds}
@@ -121,9 +122,9 @@ function RunWork({ run, events, tab, runId, scrubbed, latestRound, corpusMissing
                 onOpenProfile={() => onNavigate(`/runs/${runId}/agents`)}
               />
               <div className="mt-3 flex items-center justify-center gap-3 text-micro text-ink-3">
-                <button type="button" aria-label="Previous pass" disabled={activeRound === null || activeRound <= 1} onClick={() => onScrub(Math.max(1, (activeRound ?? 1) - 1))} className="inline-flex min-h-6 min-w-6 items-center justify-center rounded-[4px] px-2 py-0.5 hover:bg-ground-2 disabled:opacity-40">◀</button>
+                <button type="button" aria-label="Previous pass" disabled={activeRound === null || activeRound <= 1} onClick={() => onScrub(Math.max(1, (activeRound ?? 1) - 1))} className="inline-flex min-h-6 min-w-6 items-center justify-center rounded-[4px] px-2 py-0.5 hover:bg-ground-2 disabled:opacity-40"><CaretLeft size={14} aria-hidden="true" /></button>
                 <span className="tnum font-measurement">{activeRound === null ? 'live' : `pass ${activeRound}`}</span>
-                <button type="button" aria-label="Next pass" disabled={scrubbed === null} onClick={() => onScrub(scrubbed === null ? null : scrubbed >= (latestRound ?? 1) ? null : scrubbed + 1)} className="inline-flex min-h-6 min-w-6 items-center justify-center rounded-[4px] px-2 py-0.5 hover:bg-ground-2 disabled:opacity-40">▶</button>
+                <button type="button" aria-label="Next pass" disabled={scrubbed === null} onClick={() => onScrub(scrubbed === null ? null : scrubbed >= (latestRound ?? 1) ? null : scrubbed + 1)} className="inline-flex min-h-6 min-w-6 items-center justify-center rounded-[4px] px-2 py-0.5 hover:bg-ground-2 disabled:opacity-40"><CaretRight size={14} aria-hidden="true" /></button>
                 <button type="button" onClick={() => onScrub(null)} className="rounded-[4px] px-2 py-0.5 text-accent hover:bg-ground-2">End — back to live</button>
               </div>
             </div>

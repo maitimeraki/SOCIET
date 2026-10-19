@@ -87,7 +87,7 @@ const hostId = (html: string) => tagAround(html, `id="${HOST_ID}"`).match(/id="[
 
 describe('the debate step shows the floor AND the map, side by side (§9.4, D14)', () => {
   it('renders the floor in the activity pane during the debate step', () => {
-    expect(render('floor')).toContain('aria-label="Chamber floor"')
+    expect(render('floor')).toContain('aria-label="The panel&#x27;s debate"')
   })
 
   it('renders the one map host beside it', () => {
@@ -98,12 +98,12 @@ describe('the debate step shows the floor AND the map, side by side (§9.4, D14)
     const html = render('floor')
     const work = html.slice(html.indexOf('aria-label="The work"'))
     const mapPane = html.slice(html.indexOf('aria-label="The map"'))
-    expect(work).toContain('aria-label="Chamber floor"')
+    expect(work).toContain('aria-label="The panel&#x27;s debate"')
     expect(mapPane).toContain(`id="${HOST_ID}"`)
   })
 
   it('does not render the floor on a tab that is not the debate step', () => {
-    expect(render('verdict')).not.toContain('aria-label="Chamber floor"')
+    expect(render('verdict')).not.toContain('aria-label="The panel&#x27;s debate"')
   })
 })
 
