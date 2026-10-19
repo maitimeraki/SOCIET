@@ -35,6 +35,49 @@
   }
 }
 
+/*
+ * §3 use 2 — the first viewport's one gesture of atmosphere: a single accent wash over the ground
+ * (6%) and one soft bloom behind the capture. Both are inert pseudo-elements behind the content;
+ * the wash ends with the hero, and nothing else on the page is tinted.
+ */
+.hero-atmosphere {
+  position: relative;
+  isolation: isolate;
+}
+
+.hero-atmosphere::before,
+.hero-atmosphere::after {
+  content: "";
+  position: absolute;
+  z-index: -1;
+  pointer-events: none;
+}
+
+.hero-atmosphere::before {
+  inset: 0;
+  background: color-mix(in srgb, var(--color-accent) 6%, transparent);
+}
+
+/* The bloom is a radial falloff of the same accent, so it never bleeds past the section. */
+.hero-atmosphere::after {
+  top: 45%;
+  right: 0;
+  width: min(34rem, 70%);
+  aspect-ratio: 1;
+  background: radial-gradient(
+    circle,
+    color-mix(in srgb, var(--color-accent) 7%, transparent) 0%,
+    transparent 70%
+  );
+}
+
+@media (min-width: 1024px) {
+  .hero-atmosphere::after {
+    top: 28%;
+    width: min(34rem, 55%);
+  }
+}
+
 /* The card — the world's one material: white stock, a hairline edge, a low shadow. Used by the
    lower sections, where the mechanism is shown as structure rather than as a screenshot. */
 .m-card {

@@ -13,7 +13,7 @@ export default function ComparisonTable() {
       <h2 id="comparison-heading" className="font-titling text-title text-ink">
         {comparison.heading}
       </h2>
-      <p className="mt-2 max-w-[68ch] text-body-lg text-ink-2">{comparison.note}</p>
+      <p className="mt-2 max-w-[68ch] font-record text-[18px] leading-[28px] text-ink-2">{comparison.note}</p>
 
       {/* The ruled columns scroll horizontally rather than crushing under 640px (DSPEC §9). */}
       <div className="mt-4 overflow-x-auto">
@@ -32,7 +32,7 @@ export default function ComparisonTable() {
           }
           foot={
             <tr>
-              <td colSpan={comparison.columns.length + 1} className="px-3 py-2 text-ink-2">
+              <td colSpan={comparison.columns.length + 1} className="px-3 py-2 font-record text-[18px] leading-[28px] text-ink-2">
                 {comparison.reconciliation}
               </td>
             </tr>

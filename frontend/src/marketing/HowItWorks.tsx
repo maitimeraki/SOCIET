@@ -12,7 +12,7 @@ export default function HowItWorks() {
       <h2 id="how-heading" className="font-titling text-title text-ink">
         {how.heading}
       </h2>
-      <p className="mt-2 max-w-[68ch] text-body-lg text-ink-2">{how.note}</p>
+      <p className="mt-2 max-w-[68ch] font-record text-[18px] leading-[28px] text-ink-2">{how.note}</p>
 
       <h3 className="mt-6 font-titling text-label uppercase text-ink-3">{how.orderTitle}</h3>
       <ol className="mt-3 grid gap-4 sm:grid-cols-2">
@@ -20,7 +20,7 @@ export default function HowItWorks() {
           <li key={step.key} className="m-card p-5">
             <p className="font-measurement text-mono text-ink-3">{step.key}</p>
             <h4 className="mt-2 font-titling text-heading text-ink">{step.title}</h4>
-            <p className="mt-2 text-body text-ink-2">{step.body}</p>
+            <p className="mt-2 font-record text-[18px] leading-[28px] text-ink-2">{step.body}</p>
           </li>
         ))}
       </ol>
@@ -31,7 +31,7 @@ export default function HowItWorks() {
           {how.gains.map((gain) => (
             <li key={gain.key} className="flex gap-3 py-3 first:pt-0 last:pb-0">
               <span className="mt-0.5 shrink-0 font-measurement text-mono text-ink-3">{gain.key}</span>
-              <p className="max-w-[68ch] text-body text-ink-2">
+              <p className="max-w-[68ch] font-record text-[18px] leading-[28px] text-ink-2">
                 <span className="font-titling font-medium text-ink">{gain.label}</span> — {gain.body}
               </p>
             </li>

@@ -1,3 +1,5 @@
+/// <reference types="node" />
+import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 // No jsdom / no testing-library in this repo (see AppErrorBoundary.test.tsx): render to static
 // markup in Node instead.
@@ -87,6 +89,8 @@ describe('the first viewport — the feeling, the proof, the action', () => {
     expect(count(viewport, 'data-capture="region"')).toBe(1)
     expect(count(viewport, 'data-capture="answer"')).toBe(1)
     expect(count(viewport, 'data-capture="case"')).toBe(0)
+    // F62: the hero carries the answer capture alone — the map is proof, not first-viewport decoration.
+    expect(count(viewport, 'data-capture="map"')).toBe(0)
     // The frame is the real capture, not a drawn placeholder.
     expect(viewport).toContain(`src="${captures.answer.src}"`)
     expect(viewport).not.toContain(`src="${captures.opposingCase.src}"`)
@@ -102,6 +106,17 @@ describe('the first viewport — the feeling, the proof, the action', () => {
     expect(html.indexOf('data-capture="case"')).toBeGreaterThan(html.indexOf('The answer, filed with its case'))
     expect(html.indexOf('data-capture="workspace"')).toBeGreaterThan(html.indexOf('data-capture="case"'))
   })
+
+  it('ships the real map under stage 2, before the case and workspace frames', () => {
+    expect(count(html, 'data-capture="map"')).toBe(1)
+    const mapFrame = html.match(/<figure[^>]*data-capture="map"[\s\S]*?<\/figure>/)?.[0] ?? ''
+    expect(mapFrame).toContain(`src="${captures.map.src}"`)
+    expect(mapFrame).toContain(`alt="${captures.map.alt}"`)
+    // It follows the stage whose claim it shows, and the filed answer still ships below it.
+    expect(html.indexOf('data-capture="map"')).toBeGreaterThan(html.indexOf('The panel, arguing in passes'))
+    expect(html.indexOf('data-capture="case"')).toBeGreaterThan(html.indexOf('data-capture="map"'))
+    expect(html.indexOf('data-capture="workspace"')).toBeGreaterThan(html.indexOf('data-capture="map"'))
+  })
 })
 
 describe('the shipped captures — real frames of the running product', () => {
@@ -115,6 +130,12 @@ describe('the shipped captures — real frames of the running product', () => {
       expect(tag, name).toContain(`width="${capture.width}"`)
       expect(tag, name).toContain(`height="${capture.height}"`)
     }
+  })
+
+  it('declares the map at the capture file’s own pixels', () => {
+    // vitest runs from `frontend/`, where the public tree is served from.
+    const png = readFileSync(`${process.cwd()}/public/captures/map-material.png`)
+    expect([png.readUInt32BE(16), png.readUInt32BE(20)]).toEqual([captures.map.width, captures.map.height])
   })
 
   it('gives every image on the page a non-empty alt, a size and a /captures/ source', () => {

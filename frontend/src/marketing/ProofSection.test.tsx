@@ -23,6 +23,19 @@ describe('the proof section — the mechanism, never a mocked recording', () => 
     expect(html).toContain(sections.open.captureCaption)
   })
 
+  it('shows the real map under stage 2, with its caption', () => {
+    const mapFrame = html.match(/<figure[^>]*data-capture="map"[\s\S]*?<\/figure>/)?.[0] ?? ''
+    expect(mapFrame).toContain(`src="${captures.map.src}"`)
+    expect(mapFrame).toContain(`alt="${captures.map.alt}"`)
+    expect(mapFrame).toContain(`width="${captures.map.width}"`)
+    expect(mapFrame).toContain(`height="${captures.map.height}"`)
+    expect(mapFrame).toContain(sections.open.mapCaption)
+    // It follows the stage whose claim it shows and precedes the filed answer.
+    expect(html.indexOf('data-capture="map"')).toBeGreaterThan(html.indexOf('The panel, arguing in passes'))
+    expect(html.indexOf('data-capture="case"')).toBeGreaterThan(html.indexOf('data-capture="map"'))
+    expect(html.indexOf('data-capture="workspace"')).toBeGreaterThan(html.indexOf('data-capture="map"'))
+  })
+
   it('files the opposing case under stage 3, as a real frame with its caption', () => {
     const caseFrame = html.match(/<figure[^>]*data-capture="case"[\s\S]*?<\/figure>/)?.[0] ?? ''
     expect(caseFrame).toContain(`src="${captures.opposingCase.src}"`)

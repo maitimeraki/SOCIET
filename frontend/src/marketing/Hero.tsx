@@ -16,7 +16,7 @@ import { captures, hero, meta } from './copy'
  */
 export default function Hero() {
   return (
-    <section aria-labelledby="hero-headline" className="sheet">
+    <section aria-labelledby="hero-headline" className="sheet hero-atmosphere">
       <header className="flex items-center justify-between gap-6">
         <p className="font-titling text-[18px] font-semibold tracking-[-0.01em] text-ink">{meta.wordmark}</p>
         <nav aria-label={hero.navLabel} className="flex items-center gap-2">
@@ -40,7 +40,7 @@ export default function Hero() {
           <h1 id="hero-headline" className="max-w-[16ch] font-titling text-hero text-ink">
             {hero.headline}
           </h1>
-          <p className="mt-6 max-w-[52ch] text-body-lg text-ink-2">{hero.support}</p>
+          <p className="mt-6 max-w-[52ch] font-record text-[18px] leading-[28px] text-ink-2">{hero.support}</p>
           <div className="mt-8">
             <Link to={hero.primary.to} data-action="primary" className="action">
               {hero.primary.label}

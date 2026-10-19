@@ -13,7 +13,7 @@ export default function RecordSheet() {
       <h2 id="record-heading" className="font-titling text-title text-ink">
         {record.heading}
       </h2>
-      <p className="mt-2 max-w-[68ch] text-body-lg text-ink-2">{record.note}</p>
+      <p className="mt-2 max-w-[68ch] font-record text-[18px] leading-[28px] text-ink-2">{record.note}</p>
 
       <article className="m-card mt-4 p-5">
         <header className="flex flex-wrap items-baseline justify-between gap-x-6 gap-y-1 border-b border-border pb-3">
@@ -25,14 +25,14 @@ export default function RecordSheet() {
           {record.fields.map((field) => (
             <div key={field.key} className="grid gap-1 py-3 sm:grid-cols-[10rem_1fr] sm:gap-4">
               <dt className="font-titling font-medium text-ink">{field.label}</dt>
-              <dd className="text-body text-ink-2">{field.body}</dd>
+              <dd className="font-record text-[18px] leading-[28px] text-ink-2">{field.body}</dd>
             </div>
           ))}
         </dl>
 
         <footer className="mt-2 border-t border-border pt-3">
           <p className="font-titling font-medium text-ink">{record.keepLabel}</p>
-          <p className="mt-1 text-body text-ink-2">{record.keepNote}</p>
+          <p className="mt-1 font-record text-[18px] leading-[28px] text-ink-2">{record.keepNote}</p>
         </footer>
       </article>
     </section>

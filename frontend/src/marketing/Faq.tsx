@@ -14,7 +14,7 @@ export default function Faq() {
       <h2 id="faq-heading" className="font-titling text-title text-ink">
         {faq.heading}
       </h2>
-      <p className="mt-2 max-w-[68ch] text-body-lg text-ink-2">{faq.note}</p>
+      <p className="mt-2 max-w-[68ch] font-record text-[18px] leading-[28px] text-ink-2">{faq.note}</p>
 
       <div className="m-card mt-4 px-5">
         {/* Disclosure draws its own bottom rule per item; the last one is dropped so the card edge
@@ -26,7 +26,7 @@ export default function Faq() {
               summary={<span className="font-titling">{item.q}</span>}
               defaultOpen={index === 0}
             >
-              <p className="max-w-[68ch] text-body text-ink-2">{item.a}</p>
+              <p className="max-w-[68ch] font-record text-[18px] leading-[28px] text-ink-2">{item.a}</p>
             </Disclosure>
           ))}
         </div>

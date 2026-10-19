@@ -12,7 +12,7 @@ export default function TrustSection() {
       <h2 id="trust-heading" className="font-titling text-title text-ink">
         {trust.heading}
       </h2>
-      <p className="mt-2 max-w-[68ch] text-body-lg text-ink-2">{trust.note}</p>
+      <p className="mt-2 max-w-[68ch] font-record text-[18px] leading-[28px] text-ink-2">{trust.note}</p>
 
       <div className="mt-6 grid gap-4 md:grid-cols-2">
         <div className="m-card p-5">
@@ -21,7 +21,7 @@ export default function TrustSection() {
             {trust.does.map((line) => (
               <li key={line.label} className="py-3 first:pt-0 last:pb-0">
                 <p className="font-titling font-medium text-ink">{line.label}</p>
-                <p className="mt-1 max-w-[68ch] text-body text-ink-2">{line.body}</p>
+                <p className="mt-1 max-w-[68ch] font-record text-[18px] leading-[28px] text-ink-2">{line.body}</p>
               </li>
             ))}
           </ul>
@@ -32,7 +32,7 @@ export default function TrustSection() {
             {trust.doesNot.map((line) => (
               <li key={line.label} className="py-3 first:pt-0 last:pb-0">
                 <p className="font-titling font-medium text-ink">{line.label}</p>
-                <p className="mt-1 max-w-[68ch] text-body text-ink-2">{line.body}</p>
+                <p className="mt-1 max-w-[68ch] font-record text-[18px] leading-[28px] text-ink-2">{line.body}</p>
               </li>
             ))}
           </ul>

@@ -50,6 +50,13 @@ export const captures = {
     width: 2880,
     height: 1920,
   },
+  /** The map itself, while a decision runs: entries, connections, the legend and the pane's counts. */
+  map: {
+    src: '/captures/map-material.png',
+    alt: 'The map on a running decision: the material and the experts drawn as entries and connections, with the legend and the pane’s counts.',
+    width: 2274,
+    height: 904,
+  },
 } as const
 
 export const hero = {
@@ -97,6 +104,9 @@ export const sections = {
     /** The opposing-case frame's caption — the same filed answer, further down the same document. */
     caseCaption:
       'The same decision further down: the confidence the panel reached, with the opposing case kept whole beside it.',
+    /** The map capture's caption — the surface the passes read from and write back to. */
+    mapCaption:
+      'The map while the panel argues: the material and the experts, their connections, and the counts the pane carries.',
     /** The workspace capture's caption — what the frame is, in the order the reader sees it. */
     captureCaption: 'The workspace, with three documents already read — the rail on the left, the material beside it.',
     /** The recording is absent. Saying so is the honest state — never a player or a frame. */
