@@ -3,7 +3,8 @@ import { useState } from 'react'
 import type { ReactNode } from 'react'
 import { ArrowsInSimple, ArrowsOutSimple, CaretUp, Minus } from '@phosphor-icons/react'
 import IconButton from '../ui/IconButton'
-import { ALL_LAYERS, LAYER_GLYPHS, LAYER_NAMES, LayerVisibilityContext, nodeLayer } from '../../graph/layers'
+import { LayerIcon } from '../../graph/layerIcons'
+import { ALL_LAYERS, LAYER_NAMES, LayerVisibilityContext, nodeLayer } from '../../graph/layers'
 import type { LayerName } from '../../graph/layers'
 import type { GraphEdge, GraphNode } from '../../graph/graphStore'
 import type { MapCounts, MapSummary, PaneState } from './Workspace'
@@ -80,7 +81,7 @@ export function busiestEntries(
  * a shape, so the state reads to the eye without hue and never leans on a dimmed colour: `ink-2`
  * measures 13.7:1 on the map ground and `ink-3` 6.7:1, both clear of AA for the control's own label.
  */
-function LayerButton({ label, glyph, on, onClick }: { label: string; glyph?: string; on: boolean; onClick: () => void }) {
+function LayerButton({ label, layer, on, onClick }: { label: string; layer?: LayerName; on: boolean; onClick: () => void }) {
   return (
     <button
       type="button"
@@ -90,7 +91,7 @@ function LayerButton({ label, glyph, on, onClick }: { label: string; glyph?: str
         on ? 'bg-map-ground-2 text-ink-2' : 'text-ink-3 line-through'
       }`}
     >
-      {glyph !== undefined && <span aria-hidden="true">{glyph}</span>}
+      {layer !== undefined && <LayerIcon layer={layer} size={16} />}
       {label}
     </button>
   )
@@ -148,7 +149,7 @@ export function GraphPaneView({
           <LayerButton
             key={name}
             label={LAYER_LABELS[name]}
-            glyph={LAYER_GLYPHS[name]}
+            layer={name}
             on={layers.has(name)}
             onClick={() => onToggleLayer(name)}
           />

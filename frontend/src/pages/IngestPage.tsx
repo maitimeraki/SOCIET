@@ -159,12 +159,12 @@ export default function IngestPage() {
         )}
       </section>
 
-      <div className="flex items-end justify-between gap-6">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between sm:gap-6">
         <Field label="Name this corpus">
           <Input value={corpusName} onChange={(event) => setCorpusName(event.target.value)} placeholder="Untitled corpus" />
         </Field>
-        <div className="text-right">
-          <Button variant="primary" disabled={!canContinue} onClick={buildGraph}>
+        <div className="sm:text-right">
+          <Button className="w-full sm:w-auto" variant="primary" disabled={!canContinue} onClick={buildGraph}>
             Build the map
             <ArrowRight size={16} aria-hidden="true" />
           </Button>

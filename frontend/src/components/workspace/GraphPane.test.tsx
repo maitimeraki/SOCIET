@@ -63,6 +63,15 @@ function toggleTag(html: string, label: string): string {
   return html.slice(open, html.indexOf('>', open) + 1)
 }
 
+/** The whole button whose text is `label`, mark and word together — for assertions about its icon. */
+function toggleMarkup(html: string, label: string): string {
+  const word = html.indexOf(`${label}</button>`)
+  if (word < 0) return ''
+  const open = html.lastIndexOf('<button', word)
+  const close = html.indexOf('</button>', word)
+  return html.slice(open, close + '</button>'.length)
+}
+
 /** The opening tag of the toggle group — so a `hidden` assertion lands on the group, not the map host. */
 function groupTag(html: string): string {
   const at = html.indexOf('role="group"')
@@ -80,6 +89,19 @@ describe('the layer toggles — §9.1, every layer is a real button (§12)', () 
       expect(toggleTag(html, label), label).toContain('<button')
       expect(toggleTag(html, label), label).toContain('aria-pressed=')
     }
+  })
+
+  it('draws a decorative icon per layer, never a typographic glyph', () => {
+    const html = render(summaryOf(corpusNodes(2)))
+    for (const label of ['Corpus', 'Experts', 'Opinions', 'Connections']) {
+      const markup = toggleMarkup(html, label)
+      expect(markup, label).toContain('<svg')
+      expect(markup, label).toContain('aria-hidden="true"')
+      expect(markup, label).toContain(`${label}</button>`)
+    }
+    expect(html).not.toMatch(/[⊕◉⊗]/)
+    // The master toggle is words only — it has no kind of its own to mark.
+    expect(toggleMarkup(html, 'All')).not.toContain('<svg')
   })
 
   it('opens with every layer on, so All reads as pressed', () => {

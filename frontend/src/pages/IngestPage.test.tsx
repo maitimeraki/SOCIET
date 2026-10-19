@@ -2,10 +2,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 // No jsdom / no testing-library in this repo (see AppErrorBoundary.test.tsx): render to static
 // markup in Node instead.
 import { renderToStaticMarkup } from 'react-dom/server'
+import { MemoryRouter } from 'react-router-dom'
 import { runFileIngest, runUrlIngest } from '../api/ingestFlow'
 import DocCard from '../components/ingest/DocCard'
 import { BANNED_WORD, renderedText } from '../test/copyLaw'
 import type { DraftDoc } from '../wizard/draftStore'
+import IngestPage from './IngestPage'
 
 // vitest runs in the node environment; poll.ts sleeps via window.setTimeout.
 beforeEach(() => {
@@ -115,6 +117,25 @@ describe('the R17 ingest transport (202 → poll → documents)', () => {
     const outcome = await runUrlIngest('https://example.com/report')
     expect(outcome.kind).toBe('documents')
     expect(paths(fetchMock)[0]).toContain('/api/v1/ingest/url')
+  })
+})
+
+// The phone layout: at 390 px the field and the build button used to sit in one row and the button
+// overlapped the field. They stack below `sm`; the row only returns at `sm` and up.
+describe('the corpus form stacks on a phone', () => {
+  it('stacks the field and the button below sm, and spreads them only at sm and up', () => {
+    const html = renderToStaticMarkup(
+      <MemoryRouter>
+        <IngestPage />
+      </MemoryRouter>,
+    )
+
+    // Stacked below sm; the row only returns at sm and up. The unqualified row classes are gone —
+    // that is the 390 px collision.
+    expect(html).toContain('class="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between sm:gap-6"')
+    expect(html).not.toContain('class="flex items-end justify-between gap-6"')
+    // The button fills the column on a phone and goes back to its own width at sm.
+    expect(html).toContain('w-full sm:w-auto')
   })
 })
 

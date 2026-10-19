@@ -6,7 +6,9 @@ import IconButton from '../ui/IconButton'
 import StanceChip from '../common/StanceChip'
 import { useGraphStore } from '../../graph/graphStore'
 import type { GraphEdge, GraphNode } from '../../graph/graphStore'
-import { LAYER_GLYPHS, nodeLayer } from '../../graph/layers'
+import { LayerIcon } from '../../graph/layerIcons'
+import { nodeLayer } from '../../graph/layers'
+import type { LayerName } from '../../graph/layers'
 import { useSelectionStore } from '../../graph/selectionStore'
 import type { MapSelection } from '../../graph/selectionStore'
 import { asStance } from '../../run/events'
@@ -36,8 +38,8 @@ export interface HeldView {
 export interface EntryDetails {
   kind: 'entry'
   name: string
-  /** The kind's glyph — the same mark the map pane's toggle for that layer carries. */
-  glyph: string
+  /** The layer whose mark the drawer carries — the same mark the map pane's toggle for it draws. */
+  layer: LayerName
   /** The kind, as a phrase a customer reads ("an entry from your material"). */
   kindLabel: string
   sources: SourceDoc[]
@@ -48,7 +50,7 @@ export interface EntryDetails {
 export interface ConnectionDetails {
   kind: 'connection'
   name: string
-  glyph: string
+  layer: LayerName
   kindLabel: string
 }
 
@@ -142,7 +144,7 @@ export function entryDetails(run: RunState, node: GraphNode): EntryDetails {
     return {
       kind: 'entry',
       name: node.label,
-      glyph: LAYER_GLYPHS.corpus,
+      layer,
       kindLabel: 'an entry from your material',
       sources: [],
       referencedBy: referencingExperts(run, node.label),
@@ -156,7 +158,7 @@ export function entryDetails(run: RunState, node: GraphNode): EntryDetails {
   return {
     kind: 'entry',
     name: node.label,
-    glyph: LAYER_GLYPHS[layer],
+    layer,
     kindLabel: layer === 'experts' ? 'an expert in your panel' : holder ? `an opinion held by ${holder}` : 'an opinion',
     // An expert's own sources; an opinion's are its holder's — the material the position was read from.
     sources: sourceDocs(profile?.summary_provenance ?? []),
@@ -180,7 +182,7 @@ export function resolveSelection(
   if (!edge) return null
   const from = nodes[edge.source]?.label ?? edge.source
   const to = nodes[edge.target]?.label ?? edge.target
-  return { kind: 'connection', name: `${from} —${edge.label}→ ${to}`, glyph: LAYER_GLYPHS.connections, kindLabel: 'a connection between two entries' }
+  return { kind: 'connection', name: `${from} —${edge.label}→ ${to}`, layer: 'connections', kindLabel: 'a connection between two entries' }
 }
 
 /** `pass 1, 2` — the passes an expert cited an entry in, in the words the customer reads them in. */
@@ -202,9 +204,7 @@ export function NodeDetailsView({ details, onClose }: { details: MapDetails; onC
       <div className="space-y-6">
         <div className="flex items-start justify-between gap-4">
           <p className="flex items-center gap-2 text-body text-ink-2">
-            <span aria-hidden="true" className="text-heading">
-              {details.glyph}
-            </span>
+            <LayerIcon layer={details.layer} size={16} />
             {details.kindLabel}
           </p>
           <IconButton label="Close" onClick={onClose}>
@@ -238,7 +238,7 @@ export function NodeDetailsView({ details, onClose }: { details: MapDetails; onC
                   {details.referencedBy.map((row) => (
                     <li key={row.expert} className="flex items-baseline justify-between gap-4 text-body text-ink-2">
                       <span className="flex items-center gap-2">
-                        <span aria-hidden="true">{LAYER_GLYPHS.experts}</span>
+                        <LayerIcon layer="experts" size={14} />
                         {row.expert}
                       </span>
                       <span className="tnum text-micro text-ink-2">{passes(row.passes)}</span>

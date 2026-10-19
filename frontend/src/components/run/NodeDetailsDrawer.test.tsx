@@ -115,18 +115,18 @@ function sectionOf(html: string, heading: string): string {
 }
 
 describe('one entry, as the drawer reads it (§9.5)', () => {
-  it('names every entry and says which kind it is, with the kind’s own glyph', () => {
+  it('names every entry and says which kind it is, with the kind’s own layer', () => {
     const material = entryDetails(run, MATERIAL)
     expect(material.name).toBe('Distribution capacity')
-    expect(material.glyph).toBe('⊕')
+    expect(material.layer).toBe('corpus')
     expect(material.kindLabel).toBe('an entry from your material')
 
     const expert = entryDetails(run, EXPERT)
-    expect(expert.glyph).toBe('◉')
+    expect(expert.layer).toBe('experts')
     expect(expert.kindLabel).toBe('an expert in your panel')
 
     const opinion = entryDetails(run, OPINION)
-    expect(opinion.glyph).toBe('⊗')
+    expect(opinion.layer).toBe('opinions')
     expect(opinion.kindLabel).toBe('an opinion held by Market Analyst')
   })
 
@@ -185,7 +185,7 @@ describe('one entry, as the drawer reads it (§9.5)', () => {
     expect(details).toEqual({
       kind: 'connection',
       name: 'Market Analyst —MENTIONS→ Distribution capacity',
-      glyph: '—',
+      layer: 'connections',
       kindLabel: 'a connection between two entries',
     })
   })
@@ -197,13 +197,27 @@ describe('one entry, as the drawer reads it (§9.5)', () => {
 })
 
 describe('the drawer’s panel (§9.5)', () => {
-  it('draws its heading, its glyph, its kind and its two readings of the entry', () => {
+  it('draws its heading, its decorative kind icon, its kind and its two readings of the entry', () => {
     const html = drawn(MATERIAL)
     expect(html).toContain('Distribution capacity')
-    expect(html).toContain('⊕')
     expect(html).toContain('an entry from your material')
     expect(html).toContain('>From<')
     expect(html).toContain('>Referenced by<')
+
+    // The kind line carries the mark and the word: the icon is hidden, the phrase is the reading.
+    const at = html.indexOf('an entry from your material')
+    const open = html.lastIndexOf('<p ', at)
+    const line = html.slice(open, html.indexOf('</p>', open))
+    expect(line).toContain('<svg')
+    expect(line).toContain('aria-hidden="true"')
+    expect(html).not.toMatch(/[⊕◉⊗]/)
+  })
+
+  it('marks each citing expert with the same decorative icon, never a typographic glyph', () => {
+    const cited = sectionOf(drawn(MATERIAL), 'Referenced by')
+    expect(cited).toContain('Market Analyst')
+    expect(cited).toContain('<svg')
+    expect(cited).toContain('aria-hidden="true"')
   })
 
   it('shows the held view with the app’s stance rendering and its confidence figure', () => {
