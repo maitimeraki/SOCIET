@@ -3,15 +3,17 @@
 @theme {
   /* ── §2 Colour. Neutral ground, one accent, colour-as-meaning: a hue with no job does not exist. */
 
-  /* §2.2 Light surfaces — the ground, the canvas, the edges. */
-  --color-ground: #f8fafc;        /* app background */
-  --color-ground-2: #f1f5f9;      /* rail, bands, table heads */
+  /* §2.2 Light surfaces — the ground, the canvas, the edges. The ground and the band ALIAS the
+        named surfaces below, so the app and the marketing page are ONE colour system (D8). */
+  --color-ground: var(--color-page);   /* #ECEFF4 — the page ground */
+  --color-ground-2: var(--color-band); /* #DFE4EC — the rail, table heads, bands */
   --color-canvas: #ffffff;        /* cards, sheets */
   --color-border: #e2e8f0;        /* card edges, dividers */
   --color-border-strong: #cbd5e1; /* inputs, hover */
+  --color-rule: #6b7a8d;          /* a record's edge — ≥ 3:1 on every light surface */
   --color-ink: #0f172a;           /* headings */
   --color-ink-2: #334155;         /* body */
-  --color-ink-3: #64748b;         /* secondary, captions */
+  --color-ink-3: #556070;         /* secondary, captions — ≥ 4.5:1 on every light surface */
   --color-ink-4: #94a3b8;         /* rules and disabled fills ONLY, never text */
 
   /* §2.2 The one accent — a plum. It is the one hue that reads against both grounds the product
@@ -43,8 +45,8 @@
                                     is 3.6:1 on a tinted band and fails AA for a label */
 
   /* §2.3 The map surface — the ONE dark surface, because the map must stay in view. */
-  --color-map-ground: #0b1220;
-  --color-map-ground-2: #111c33;
+  --color-map-ground: #070c16;   /* the map's deep floor */
+  --color-map-ground-2: #16223d; /* the map's lit centre — the near end of the ramp */
   --color-map-ink: #e2e8f0;
   --color-map-ink-2: #94a3b8;
   --color-map-rule: #1e293b;
@@ -76,8 +78,13 @@
     var(--color-accent) 50%,
     var(--color-accent-base)
   );
-  /* §3 use 3 — the map, so the luminous plot sits in depth rather than on a flat rectangle. */
-  --gradient-map: linear-gradient(to bottom, var(--color-map-ground), var(--color-map-ground-2));
+  /* §3 use 3 — the map, so the luminous plot sits in depth rather than on a flat rectangle. The
+     geometry and the hexes land TOGETHER: the old ramp measured ΔL* 4.98, this one 10.23. */
+  --gradient-map: radial-gradient(
+    120% 100% at 50% 0%,
+    var(--color-map-ground-2) 0%,
+    var(--color-map-ground) 72%
+  );
 
   /* ── §3 Elevation — shadow is not gradient. Each shadow is a pair: a tight contact shadow that
         seats the surface on the plane, and a soft ambient shadow that lifts it off. A surface
@@ -87,6 +94,8 @@
   --shadow-floating: 0 2px 4px rgb(15 23 42 / 0.05), 0 10px 24px rgb(15 23 42 / 0.09);
   --shadow-panel: 0 1px 2px rgb(15 23 42 / 0.07), 0 14px 32px rgb(15 23 42 / 0.12);
   --shadow-overlay: 0 4px 10px rgb(15 23 42 / 0.07), 0 18px 44px rgb(15 23 42 / 0.17);
+  /* the accent rule the active tab draws — the one shadow that is not an elevation */
+  --shadow-accent-inset: inset 0 -2px 0 0 var(--color-accent);
 
   /* ── §4 Typography — three installed families, each with one job. No new font dependency. */
   --font-titling: "Archivo Variable", Archivo, system-ui, sans-serif;
@@ -133,12 +142,14 @@
 
   /* ── §5 Space, radius, elevation. Spacing is a single 4px-based scale (Tailwind's default
         `--spacing`), so only the radii need naming. */
+  --radius-xs: 4px;  /* chips, ticks — Tailwind's built-in xs is 2px */
   --radius-sm: 6px;  /* chips, inputs */
   --radius-md: 10px; /* cards, buttons */
   --radius-lg: 16px; /* panels, dialogs, auth card */
 
   /* ── §6 Motion. One grammar, one easing curve for the whole product. */
   --ease-standard: cubic-bezier(0.2, 0, 0, 1);
+  --default-transition-duration: 120ms; /* closes every bare `transition-colors` at 150ms */
   --default-transition-timing-function: var(--ease-standard);
   --duration-state: 120ms;  /* state change — hover, focus, press */
   --duration-enter: 180ms;  /* enter — content appearing */

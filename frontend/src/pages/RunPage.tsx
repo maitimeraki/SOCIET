@@ -59,7 +59,7 @@ function RunTabs({ runId }: { runId: string }) {
           to={`/runs/${runId}/${name}`}
           className={({ isActive }) =>
             `px-3 py-2 text-body capitalize transition-colors ${
-              isActive ? 'text-ink shadow-[inset_0_-2px_0_0_var(--color-accent)]' : 'text-ink-2 hover:text-ink'
+              isActive ? 'text-ink shadow-accent-inset' : 'text-ink-2 hover:text-ink'
             }`
           }
         >

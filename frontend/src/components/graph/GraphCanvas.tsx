@@ -498,7 +498,7 @@ export default function GraphCanvas({ datasetId, jobId }: GraphCanvasProps) {
     <div
       ref={root}
       tabIndex={-1}
-      className="relative flex min-h-0 flex-1 flex-col overflow-hidden rounded-[6px] plot-ground"
+      className="relative flex min-h-0 flex-1 flex-col overflow-hidden rounded-[6px]"
       style={CANVAS_STYLE}
     >
       <GraphLegend hasEntries={nodeCount > 0} />
