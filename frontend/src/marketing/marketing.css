@@ -78,17 +78,18 @@
   }
 }
 
-/* The card — the world's one material: white stock, a hairline edge, a low shadow. Used by the
-   lower sections, where the mechanism is shown as structure rather than as a screenshot. */
+/* The card — the world's one material: white stock and a low shadow, no border. A hairline under
+   a soft shadow is a ghost card; the shadow declares the surface once. Used by the lower sections,
+   where the mechanism is shown as structure rather than as a screenshot. */
 .m-card {
-  border: 1px solid var(--color-border);
   border-radius: var(--radius-lg);
   background: var(--color-canvas);
   box-shadow: var(--shadow-raised);
 }
 
-/* The one primary action — the §3 accent ramp, white label on indigo. Colour is meaning: this is
-   the only indigo surface in the first viewport. */
+/* The one primary action — the §3 accent ramp, white label on plum. Colour is meaning: this is
+   the only accent-filled surface in the first viewport, and the ramp stays on hover while the
+   shadow lifts it, so the fill never breaks. */
 .action {
   display: inline-flex;
   height: 44px;
@@ -105,17 +106,17 @@
   font-weight: 500;
   text-decoration: none;
   transition:
-    background-color var(--duration-state) var(--ease-standard),
-    box-shadow var(--duration-state) var(--ease-standard);
+    box-shadow var(--duration-state) var(--ease-standard),
+    transform var(--duration-state) var(--ease-standard);
 }
 
 .action:hover {
-  background: var(--color-accent-hover);
   box-shadow: var(--shadow-floating);
+  transform: translateY(-1px);
 }
 
 .action:active {
-  background: var(--color-accent-press);
+  transform: translateY(0);
 }
 
 /*
@@ -134,7 +135,6 @@
   display: block;
   width: 100%;
   height: auto;
-  border: 1px solid var(--color-border);
   border-radius: var(--radius-lg);
   background: var(--color-canvas);
   box-shadow: var(--shadow-floating);

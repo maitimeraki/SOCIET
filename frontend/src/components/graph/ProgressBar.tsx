@@ -3,7 +3,10 @@ export default function ProgressBar({ value, label }: { value: number; label?: s
   return (
     <div>
       <div className="h-1 w-full overflow-hidden rounded-[4px] bg-ink-4">
-        <div className="h-full rounded-[4px] bg-accent transition-[width] duration-200" style={{ width: `${pct}%` }} />
+        <div
+          className="h-full w-full origin-left rounded-[4px] bg-accent transition-transform duration-layout"
+          style={{ transform: `scaleX(${pct / 100})` }}
+        />
       </div>
       {label && <div className="tnum mt-2 font-measurement text-mono text-ink-3">{label}</div>}
     </div>

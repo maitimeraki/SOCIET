@@ -51,13 +51,13 @@ export default function LandingPage() {
         <div className="flex flex-wrap items-center gap-3">
           <Link
             to={footer.primary.to}
-            className="inline-flex h-10 items-center rounded-md px-4 font-titling text-body text-ink-2 transition-colors duration-150 hover:bg-ground-2 hover:text-ink"
+            className="inline-flex h-10 items-center rounded-md px-4 font-titling text-body text-ink-2 transition-colors duration-state hover:bg-ground-2 hover:text-ink"
           >
             {footer.primary.label}
           </Link>
           <a
             href={footer.contact.href}
-            className="inline-flex h-10 items-center rounded-md px-4 font-titling text-body text-ink-2 transition-colors duration-150 hover:bg-ground-2 hover:text-ink"
+            className="inline-flex h-10 items-center rounded-md px-4 font-titling text-body text-ink-2 transition-colors duration-state hover:bg-ground-2 hover:text-ink"
           >
             {footer.contact.label}
           </a>

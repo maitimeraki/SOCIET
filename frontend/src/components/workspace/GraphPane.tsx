@@ -130,9 +130,9 @@ export function GraphPaneView({
   return (
     <section
       aria-label="The map"
-      className={`plot-ground order-2 flex flex-col overflow-hidden rounded-md border border-map-rule lg:order-1 ${SIZE[state]}`}
+      className={`plot-ground order-2 flex flex-col overflow-hidden rounded-md shadow-panel transition-[min-height] duration-layout lg:order-1 ${SIZE[state]}`}
     >
-      <div id={hostId} className="min-h-0 flex-1" hidden={minimised} aria-hidden={minimised || undefined}>
+      <div id={hostId} className="flex min-h-0 flex-1 flex-col" hidden={minimised} aria-hidden={minimised || undefined}>
         <LayerVisibilityContext.Provider value={layers}>{children}</LayerVisibilityContext.Provider>
       </div>
 

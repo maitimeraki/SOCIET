@@ -12,9 +12,10 @@ export default function ActivityPane({ hidden, children }: { hidden?: boolean; c
     <section
       aria-label="The work"
       hidden={hidden}
-      className="order-1 min-w-0 rounded-lg border border-border bg-canvas p-4 lg:order-2"
+      className="order-1 min-w-0 rounded-lg bg-canvas p-4 shadow-raised lg:order-2"
     >
-      {children}
+      {/* §6.2 Enter — the work fades and rises once each time the pane is restored. */}
+      <div className="enter">{children}</div>
     </section>
   )
 }

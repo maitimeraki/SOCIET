@@ -52,7 +52,7 @@ export default function RunTable({ runs, loading = false }: { runs: RunSummary[]
         <li key={run.run_id}>
           <Link
             to={`/runs/${run.run_id}`}
-            className="block rounded-md border border-border bg-canvas p-4 transition-colors hover:border-border-strong hover:bg-ground-2"
+            className="block rounded-md bg-canvas p-4 shadow-raised transition-[box-shadow,transform] duration-state hover:-translate-y-px hover:shadow-floating"
           >
             <h3 className="text-heading text-ink">{run.query}</h3>
             <p className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-micro text-ink-3">

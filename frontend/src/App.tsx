@@ -11,6 +11,10 @@ import NotFoundPage from './pages/NotFoundPage'
 // computed path would defeat Vite's deterministic split. NotFoundPage stays eager (12 lines, no heavy
 // imports) so a mistyped URL never waits on a chunk fetch to say "not found".
 const LandingPage = lazy(() => import('./marketing/LandingPage'))
+// The homepage DEMO — the target design from `docs/FRONTEND_DESIGN_REVIEW.md` §2.1, built as a
+// preview and not as a migration. It is scoped to its own tokens (`marketing/home-demo.css`), so
+// it changes nothing about the shipped `/` or any other surface.
+const HomeDemo = lazy(() => import('./marketing/HomeDemo'))
 const NewRunWorkspace = lazy(() => import('./pages/NewRunWorkspace'))
 const RunPage = lazy(() => import('./pages/RunPage'))
 const DocumentsSection = lazy(() => import('./sections/DocumentsSection'))
@@ -40,6 +44,7 @@ export default function App() {
         <Routes>
           <Route element={<MarketingLayout />}>
             <Route path="/" element={<LandingPage />} />
+            <Route path="/demo-home" element={<HomeDemo />} />
           </Route>
 
           <Route path="/auth" element={<AuthLayout />}>

@@ -396,11 +396,12 @@ export const LEGEND_ROWS: readonly LegendRow[] = [
   { mark: <CircleDashed size={12} aria-hidden="true" />, color: UNPOSITIONED_COLOR, word: 'No position' },
 ]
 
-/** The map's key, drawn over the plot while the map holds anything. `hasEntries` is false only when nothing is drawn. */
+/** The map's key, ruled above the plot while the map holds anything, so it never covers an entry.
+ *  `hasEntries` is false only when nothing is drawn. */
 export function GraphLegend({ hasEntries }: { hasEntries: boolean }) {
   if (!hasEntries) return null
   return (
-    <ul className="pointer-events-none absolute left-2 top-2 inline-flex max-w-[70%] flex-wrap gap-x-3 gap-y-1 rounded-[4px] border border-map-rule bg-map-ground/85 px-2.5 py-1.5">
+    <ul className="pointer-events-none flex shrink-0 flex-wrap gap-x-3 gap-y-1 border-b border-map-rule px-2.5 py-1.5">
       {LEGEND_ROWS.map((row) => (
         <li key={row.word} className="flex items-center gap-1.5 text-micro text-ink-3">
           <span aria-hidden="true" className="inline-flex items-center" style={{ color: row.color }}>
@@ -492,10 +493,18 @@ export default function GraphCanvas({ datasetId, jobId }: GraphCanvasProps) {
   )
 
   return (
-    <div ref={root} tabIndex={-1} className="relative h-[360px] overflow-hidden rounded-[6px] plot-ground" style={CANVAS_STYLE}>
-      <div role="img" aria-label={canvasLabel} className="h-full w-full">
-        {/* The height chain is explicit here: the wrapper is a fixed box, this is full-height, and Sigma's
-            own `.sigma-container` fills it — its sizing rule ships in @react-sigma/core/lib/style.css (imported in main.tsx). */}
+    // The canvas fills its host: the pane owns the height, and the plot fills the box rather than
+    // sitting in the top third of a fixed 360px with dead dark ground under it (§9.2).
+    <div
+      ref={root}
+      tabIndex={-1}
+      className="relative flex min-h-0 flex-1 flex-col overflow-hidden rounded-[6px] plot-ground"
+      style={CANVAS_STYLE}
+    >
+      <GraphLegend hasEntries={nodeCount > 0} />
+      <div role="img" aria-label={canvasLabel} className="relative min-h-0 flex-1">
+        {/* The height chain is explicit here: this box is the flex item that grows, Sigma's own
+            `.sigma-container` fills it — its sizing rule ships in @react-sigma/core/lib/style.css (imported in main.tsx). */}
         <SigmaContainer
           graph={graph}
           settings={SIGMA_SETTINGS}
@@ -507,8 +516,17 @@ export default function GraphCanvas({ datasetId, jobId }: GraphCanvasProps) {
           <ContainerResizeWatch />
           <SelectionWatch onPick={pick} />
         </SigmaContainer>
+        {notice && (
+          <p
+            role="status"
+            className="pointer-events-none absolute right-2 top-2 flex items-center gap-1.5 rounded-[4px] border border-warn/40 bg-map-ground-2 px-2 py-1 text-micro text-ink-2"
+          >
+            <Warning size={13} className="text-warn" aria-hidden="true" />
+            {notice}
+          </p>
+        )}
+        <GraphOverlay phase={phase} message={statusMessage} />
       </div>
-      <GraphLegend hasEntries={nodeCount > 0} />
       {/* The counts grow on every delta; role="img" alone is read on demand, so mirror the label into a live region. */}
       <div aria-live="polite" className="sr-only">
         {canvasLabel}
@@ -522,16 +540,6 @@ export default function GraphCanvas({ datasetId, jobId }: GraphCanvasProps) {
           {fallback.omitted > 0 && <li>and {fallback.omitted} more</li>}
         </ul>
       )}
-      {notice && (
-        <p
-          role="status"
-          className="pointer-events-none absolute right-2 top-2 flex items-center gap-1.5 rounded-[4px] border border-warn/40 bg-map-ground-2 px-2 py-1 text-micro text-ink-2"
-        >
-          <Warning size={13} className="text-warn" aria-hidden="true" />
-          {notice}
-        </p>
-      )}
-      <GraphOverlay phase={phase} message={statusMessage} />
     </div>
   )
 }

@@ -113,7 +113,7 @@ function RunWork({ run, events, tab, runId, scrubbed, latestRound, corpusMissing
       {tab === 'floor' && (
         <div className="grid gap-6 min-[900px]:grid-cols-[3fr_2fr]">
           <div className="space-y-4">
-            <div className={`rounded-md border border-border bg-canvas p-4 ${run.status === 'failed' ? 'opacity-40' : ''}`}>
+            <div className={`rounded-md bg-canvas p-4 shadow-raised ${run.status === 'failed' ? 'opacity-40' : ''}`}>
               <ChamberFloor
                 roster={run.roster}
                 rounds={run.rounds}

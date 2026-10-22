@@ -1,0 +1,293 @@
+/*
+ * The homepage demo — `/demo-home`.
+ *
+ * A redesign of the marketing homepage, built as a preview and not as a migration: `/` and every
+ * shipped surface are untouched, and everything this page needs is scoped to `.demo-home` here.
+ *
+ * THE PLAN (the brief: a homepage has to say what the product IS, what it does for me, and how it
+ * improves my work — and it must not read as a gallery of output screenshots).
+ *
+ *   1. The page is a sequence of BANDS, each on its own named surface, and no two neighbouring
+ *      bands share one. The ground is grey, not white: a white page has no plane and no edge.
+ *      Colour is meaning — warm is the fear, sky is the mechanism, plum is the answer, and the
+ *      map's own near-black is the work.
+ *   2. The hero is a SPLIT: the text on one side, the NOISE on the other. The noise is the product
+ *      as it actually runs — the map with the material and the experts on it, the panel's turns
+ *      arguing underneath it, and the filed answer overlapping the corner. That composition IS the
+ *      promise: it argues the decision and shows me its work.
+ *   3. Feeling before topic. The first line names what the visitor feels — a decision they cannot
+ *      look up — and the use cases come AFTER the mechanism, never before it.
+ *   4. Every claim is either true of the product or labelled as a worked example. There are no
+ *      customers, no logos and no benchmarks, because none exist.
+ *
+ * The five named surfaces live in `index.css` as global tokens, so any other page or component can
+ * take the same ones. This file only scopes them to this page and adds what the page needs.
+ *
+ * Every ratio quoted here is measured against THESE values (WCAG 2.2 relative luminance):
+ *   ink-3  #556070 ≥ 4.5 on every band   |   rule #6b7a8d ≥ 3 on every band
+ *   accent #823a86 ≥ 5.1 on every band   |   caution #92400e ≥ 5.0 on every band
+ */
+
+.demo-home {
+  /* ── The page's own ground, scoped. The tokens below are the page's; the surfaces themselves
+        are global, so a component elsewhere can take the same sky or warm. */
+  --color-ground: var(--color-page);
+  --color-ground-2: var(--color-band);
+  --color-canvas: #ffffff;
+  --color-ink: #0f172a;
+  --color-ink-2: #334155;
+  --color-ink-3: #556070; /* the app's #64748b is 3.9:1 on a tinted band and fails AA for a label */
+  --color-rule: #6b7a8d; /* a record's edge — 3.12 on the plum wash, 3.80 on the ground */
+  --color-accent: #823a86; /* the one accent — the action, and only the action */
+  --color-accent-soft: #f6eefa;
+
+  /* ── The map's own surface — the one dark surface on the page, because the work lives there. */
+  --color-map-ground: #070c16;
+  --color-map-ground-2: #16223d;
+  --color-map-ink: #e2e8f0;
+  --color-map-ink-2: #94a3b8;
+  --color-map-rule: #263450;
+  --gradient-map: radial-gradient(
+    120% 100% at 50% 0%,
+    var(--color-map-ground-2) 0%,
+    var(--color-map-ground) 72%
+  );
+
+  --radius-xs: 4px; /* Tailwind v4 ships 2px; the design's chip radius is 4px */
+  --default-transition-duration: 120ms; /* closes every bare `transition-colors` at 150ms */
+}
+
+/* ── The bands. Each section flips the surface, so the eye can rest and the page has rhythm. */
+.demo-home .band {
+  padding-block: 96px;
+}
+
+.demo-home .band--dense {
+  padding-block: 64px;
+}
+
+.demo-home .band--ground {
+  background: var(--color-ground);
+}
+
+.demo-home .band--grey {
+  background: var(--color-ground-2);
+}
+
+.demo-home .band--sky {
+  background: var(--color-surface-sky);
+}
+
+.demo-home .band--warm {
+  background: var(--color-surface-warm);
+}
+
+.demo-home .band--plum {
+  background: var(--color-surface-plum);
+}
+
+.demo-home .band--dark {
+  background: var(--gradient-map);
+  color: var(--color-map-ink);
+}
+
+.demo-home .shell {
+  margin-inline: auto;
+  width: 100%;
+  /* 1440, not 1344: the shell's CONTENT box has to be 1344 wide for the hero's two columns
+     (560 + 64 + 720). 1440 minus the 48px gutters is exactly that. */
+  max-width: 1440px;
+  padding-inline: 1.25rem;
+}
+
+@media (min-width: 640px) {
+  .demo-home .shell {
+    padding-inline: 2rem;
+  }
+}
+
+@media (min-width: 1024px) {
+  .demo-home .shell {
+    padding-inline: 3rem;
+  }
+}
+
+/* ── The floating nav card. The reference floats its nav as a rounded, bordered white card over
+      the ground; it is the cheapest way to make a page look composed rather than stacked. */
+.demo-nav {
+  border: 1px solid var(--color-ground-2);
+  border-radius: var(--radius-lg);
+  background: var(--color-canvas);
+  box-shadow: var(--shadow-raised);
+}
+
+/* ── The one action (review §2.1): 44px, the §3 accent ramp, a 14px Archivo 500 label in white.
+      Hover lifts the shadow by 1px on the 120ms state curve; the ramp never breaks. The focus
+      ring is the INK, not the accent — an accent ring on an accent fill is the accent on the
+      accent. */
+.demo-action {
+  display: inline-flex;
+  height: 44px;
+  align-items: center;
+  justify-content: center;
+  padding-inline: 24px;
+  border-radius: var(--radius-md);
+  background: var(--gradient-action);
+  box-shadow: var(--shadow-raised);
+  color: var(--color-accent-ink);
+  font-family: var(--font-titling);
+  font-size: 14px;
+  line-height: 21px;
+  font-weight: 500;
+  text-decoration: none;
+  transition:
+    box-shadow var(--duration-state) var(--ease-standard),
+    transform var(--duration-state) var(--ease-standard);
+}
+
+.demo-action:hover {
+  box-shadow: var(--shadow-floating);
+  transform: translateY(-1px);
+}
+
+.demo-action:active {
+  transform: translateY(0);
+}
+
+.demo-action:focus-visible {
+  outline-color: var(--color-ink);
+}
+
+/* ── THE NOISE. The right half of the hero: the product as it actually runs. Three layers, one
+      over the other — the map (a real capture), the panel arguing on it, and the filed answer
+      overlapping the corner. This is the fix for "someone took a screenshot and pasted it": the
+      capture is a LAYER in a composition the page designed, not a picture of a result. */
+.demo-noise {
+  position: relative;
+  border-radius: var(--radius-lg);
+  background: var(--gradient-map);
+  box-shadow: var(--shadow-panel);
+  /* the room the overlapping answer card occupies */
+  padding-bottom: 140px;
+}
+
+/* The map band — the real capture. The window is the map's own frame (its legend and its graph)
+   with the chrome rows below it dropped; a narrower window would cut a label in half. */
+.demo-noise__map {
+  overflow: hidden;
+  border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+  background: var(--color-map-ground-2);
+}
+
+.demo-noise__strip {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 20px 0;
+}
+
+.demo-noise__chip {
+  border: 1px solid var(--color-map-rule);
+  border-radius: var(--radius-sm);
+  padding: 3px 8px;
+  color: var(--color-map-ink-2);
+  font-family: var(--font-measurement);
+  font-size: 10px;
+  line-height: 14px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+/* One turn of the argument. Position is shape + colour + word, never colour alone. */
+.demo-noise__row {
+  border-top: 1px solid var(--color-map-rule);
+  padding: 8px 20px;
+}
+
+.demo-noise__row:first-of-type {
+  border-top: none;
+}
+
+.demo-noise__note {
+  margin-left: auto;
+  max-width: 300px;
+  text-align: right;
+}
+
+/* The filed answer — the white card that overlaps the panel's bottom-left corner and breaks its
+   edge. It is the only white object inside the dark surface, which is what makes it read first. */
+.demo-verdict {
+  position: absolute;
+  left: -28px;
+  bottom: -32px;
+  width: 320px;
+  border-radius: var(--radius-lg);
+  background: var(--color-canvas);
+  box-shadow: var(--shadow-overlay);
+}
+
+/* ── The separation vocabulary (review §3.4). The app hand-rolls the record divider in 17 files
+      because there is no rule primitive; here the rule is one token and one class. */
+.demo-home .rule-t {
+  border-top: 1px solid var(--color-rule);
+}
+
+.demo-home .rule-b {
+  border-bottom: 1px solid var(--color-rule);
+}
+
+.demo-home .rule-y {
+  border-block: 1px solid var(--color-rule);
+}
+
+.demo-home .divide-rule > * + * {
+  border-top: 1px solid var(--color-rule);
+}
+
+/* On the dark band the rule is the map's own rule — the light one disappears into the map. */
+.demo-home .band--dark .rule-t,
+.demo-home .band--dark .rule-b,
+.demo-home .band--dark .rule-y,
+.demo-home .band--dark .divide-rule > * + * {
+  border-color: var(--color-map-rule);
+}
+
+/* The shared Disclosure draws its own hairline. On this page the separator is the page's rule
+   token, so the shared one is dropped and the rule is drawn between the items instead. */
+.demo-home .demo-faq > div {
+  border-bottom: 0;
+}
+
+.demo-home .demo-faq > div + div {
+  border-top: 1px solid var(--color-rule);
+}
+
+/*
+ * Motion (review §2.1). The page carries three intentional motions: the hero stagger, the
+ * section reveals, and the caret (legalised to 120ms).
+ *
+ * The section reveal RISES and does not fade, and that is deliberate. The product's own `enter`
+ * fades from opacity 0, which is right for content that appears in place — but a section that is
+ * faded out is INVISIBLE in a full-page capture (nothing scrolls, so nothing intersects) and in
+ * any print or screenshot pass. The demo must always show its whole page. The section sits 8px
+ * low until it enters the viewport and rises into place: a reveal that reads the same and hides
+ * nothing.
+ */
+@keyframes demo-rise {
+  from {
+    transform: translateY(8px);
+  }
+  to {
+    transform: none;
+  }
+}
+
+.demo-home .reveal {
+  transform: translateY(8px);
+}
+
+.demo-home .reveal.is-revealed {
+  animation: demo-rise var(--duration-enter) var(--ease-standard) both;
+}

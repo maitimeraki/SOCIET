@@ -1,6 +1,7 @@
 import type { AgentProfile } from '../../run/events'
 import Drawer from '../ui/Drawer'
 import StanceChip from '../common/StanceChip'
+import Emphasis from '../common/Emphasis'
 import MeterBar from './MeterBar'
 import ProvenanceList from './ProvenanceList'
 
@@ -24,7 +25,7 @@ export default function AgentDrawer({
           <span className="text-body text-ink-2">{profile.identity.archetype}</span>
         </div>
         <p className="max-w-[60ch] text-body text-ink-2">{profile.bio}</p>
-        <p className="max-w-[60ch] whitespace-pre-wrap text-body-lg text-ink">{profile.detailed_perspective}</p>
+        <Emphasis text={profile.detailed_perspective} className="max-w-[60ch] whitespace-pre-wrap text-body-lg text-ink" />
 
         <section>
           <h3 className="mb-2 text-label uppercase text-ink-3">Confidence breakdown</h3>

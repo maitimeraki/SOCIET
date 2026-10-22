@@ -2,6 +2,7 @@ import type { TurnInfo } from '../../run/events'
 import { asStance } from '../../run/events'
 import { fmtScore } from '../../utils/format'
 import StanceChip from '../common/StanceChip'
+import Emphasis from '../common/Emphasis'
 import Tag from '../ui/Tag'
 
 export default function TurnCard({ turn, round }: { turn: TurnInfo; round: number }) {
@@ -20,7 +21,7 @@ export default function TurnCard({ turn, round }: { turn: TurnInfo; round: numbe
         <StanceChip stance={asStance(turn.stance)} size="sm" />
         <span className="tnum font-measurement text-micro text-ink-3">{fmtScore(turn.confidence)}</span>
       </header>
-      <p className="mt-2 max-w-[66ch] select-text text-body-lg text-ink-2">{turn.content}</p>
+      <Emphasis text={turn.content} className="mt-2 max-w-[66ch] select-text text-body-lg text-ink-2" />
       {references.length > 0 && (
         <div className="mt-2 flex flex-wrap items-center gap-1">
           <span className="text-micro text-ink-3">cited:</span>

@@ -14,17 +14,33 @@
   --color-ink-3: #64748b;         /* secondary, captions */
   --color-ink-4: #94a3b8;         /* rules and disabled fills ONLY, never text */
 
-  /* §2.2 The one accent — action, links, "live". */
-  --color-accent: #4f46e5;
-  --color-accent-hover: #4338ca;
-  --color-accent-press: #3730a3;
-  --color-accent-soft: #eef2ff; /* selected row, tinted band */
-  --color-accent-ink: #ffffff;  /* on-accent */
+  /* §2.2 The one accent — a plum. It is the one hue that reads against both grounds the product
+        has (a daylight ground and the near-black map) and it collides with none of the four
+        position hues or with the map's corpus blue. Every token hangs off this one accent and
+        one ground, so the palette is one variable wide. */
+  --color-accent: #823a86;        /* action, links, "live" */
+  --color-accent-hover: #75327b;   /* the accent-filled action hovered */
+  --color-accent-press: #612665;   /* the accent-filled action pressed */
+  --color-accent-soft: #f6eefa;   /* selected row, tinted band */
+  --color-accent-ink: #ffffff;    /* on-accent */
 
   /* §2.2 Status. */
   --color-ok: #15803d;     /* complete, converged */
   --color-warn: #b45309;   /* caution, partial */
   --color-danger: #b91c1c; /* failure, destructive */
+
+  /* ── §2.2 The NAMED SURFACES. These five are shared, and they are the ones a marketing surface
+        is built from: the page is a plane, a band is a step down, and sky / warm / plum each mean
+        one thing (the mechanism, the caution, the answer). Any page or component may take the same
+        named surface, so the product keeps ONE colour system instead of one per screen.
+        The homepage scopes these to its own ground; nothing else is affected by them. */
+  --color-page: #eceff4;         /* the page — a marketing ground, a step below white */
+  --color-band: #dfe4ec;         /* the deeper grey band */
+  --color-surface-sky: #dbe9f7;  /* the mechanism */
+  --color-surface-warm: #f8ecc9; /* the caution */
+  --color-surface-plum: #e5d4ec; /* the answer */
+  --color-caution: #92400e;      /* the case against AS TEXT — the app's --color-warn (#b45309)
+                                    is 3.6:1 on a tinted band and fails AA for a label */
 
   /* §2.3 The map surface — the ONE dark surface, because the map must stay in view. */
   --color-map-ground: #0b1220;
@@ -32,6 +48,7 @@
   --color-map-ink: #e2e8f0;
   --color-map-ink-2: #94a3b8;
   --color-map-rule: #1e293b;
+  --color-map-accent: #d9a8e2; /* the accent, rebound for the dark ground (9.49:1) */
 
   /* §2.4 Map entry colours — one per entry kind. */
   --color-corpus: #3b82f6; /* the material — informational, neutral */
@@ -48,10 +65,11 @@
   --color-amb-light: #d97706;
   --color-neg-light: #dc2626;
 
-  /* ── §3 The gradient law. Gradients are material, not wallpaper: three permitted uses, no others. */
-  --color-accent-top: #5a52e8;  /* §3 use 1 — the action ramp, top */
-  --color-accent-base: #453dc9; /* §3 use 1 — the action ramp, base (label contrast unchanged) */
-  /* §3 use 1 — the action, and nothing else (never secondary, ghost, destructive or disabled). */
+  /* ── §3 The gradient law. Gradients are material, not wallpaper: four permitted uses, no others. */
+  --color-accent-top: #8f3f97;  /* §3 use 1 — the action ramp, top */
+  --color-accent-base: #6e2f74; /* §3 use 1 — the action ramp, base (label contrast unchanged) */
+  /* §3 use 1 — the action, and nothing else (never secondary, ghost, destructive or disabled).
+     One ramp, two heights: the marketing `.action` (44px) and the app's `primary` button (40px). */
   --gradient-action: linear-gradient(
     to bottom,
     var(--color-accent-top),
@@ -61,10 +79,14 @@
   /* §3 use 3 — the map, so the luminous plot sits in depth rather than on a flat rectangle. */
   --gradient-map: linear-gradient(to bottom, var(--color-map-ground), var(--color-map-ground-2));
 
-  /* §3 Elevation — shadow is not gradient. Soft, low-opacity, never coloured. */
-  --shadow-raised: 0 1px 2px rgb(15 23 42 / 0.06);
-  --shadow-floating: 0 4px 12px rgb(15 23 42 / 0.08);
-  --shadow-overlay: 0 12px 32px rgb(15 23 42 / 0.14);
+  /* ── §3 Elevation — shadow is not gradient. Each shadow is a pair: a tight contact shadow that
+        seats the surface on the plane, and a soft ambient shadow that lifts it off. A surface
+        declares itself once — a card carries a shadow and no border; a record carries a rule and
+        no shadow. Never coloured. */
+  --shadow-raised: 0 1px 2px rgb(15 23 42 / 0.05), 0 3px 8px rgb(15 23 42 / 0.06);
+  --shadow-floating: 0 2px 4px rgb(15 23 42 / 0.05), 0 10px 24px rgb(15 23 42 / 0.09);
+  --shadow-panel: 0 1px 2px rgb(15 23 42 / 0.07), 0 14px 32px rgb(15 23 42 / 0.12);
+  --shadow-overlay: 0 4px 10px rgb(15 23 42 / 0.07), 0 18px 44px rgb(15 23 42 / 0.17);
 
   /* ── §4 Typography — three installed families, each with one job. No new font dependency. */
   --font-titling: "Archivo Variable", Archivo, system-ui, sans-serif;
@@ -102,6 +124,8 @@
   --text-micro--line-height: 14px;
   --text-mono: 12px; /* identifiers */
   --text-mono--line-height: 18px;
+  --text-mono-lg: 20px; /* a measured figure at card scale */
+  --text-mono-lg--line-height: 26px;
   --text-numeral: 56px; /* the confidence figure */
   --text-numeral--line-height: 56px;
   --text-numeral--letter-spacing: -0.02em;
@@ -199,6 +223,27 @@
   animation: plot-bloom var(--duration-bloom) var(--ease-standard) both;
 }
 
+/* §6.2 Fix — the verdict's plotted point arrives once and settles. It is the product's single
+   "this is the finding" signal, so it fires once and never repeats. */
+@keyframes fix-settle {
+  from {
+    transform: scale(0);
+    opacity: 0;
+  }
+  60% {
+    transform: scale(1.4);
+    opacity: 1;
+  }
+  to {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
+@utility fix {
+  animation: fix-settle var(--duration-bloom) var(--ease-standard) both;
+}
+
 /* §6/§11 The registration mark — the corner tick a field shows when it takes focus. It is painted as
    a background ON THE CONTROL ITSELF, not on a wrapper: an input/textarea/select is a replaced
    element and cannot host a ::after, and any wrapper would register against the row rather than the
@@ -244,10 +289,25 @@
   background: var(--gradient-map);
   color: var(--color-map-ink);
   --focus-ring: var(--color-map-ink);
+  --color-accent: var(--color-map-accent);
   --color-ink: var(--color-map-ink);
   --color-ink-2: var(--color-map-ink);
   --color-ink-3: var(--color-map-ink-2);
   --color-ink-4: var(--color-map-rule);
+}
+
+/* The accent-filled action — §3 use 1. One ramp, both surfaces: the marketing `.action` and the
+   app's `primary` button. The label is the on-accent ink; nothing on this surface is grey. */
+@utility action-fill {
+  background-image: var(--gradient-action);
+  color: var(--color-accent-ink);
+}
+
+/* The focus ring on an accent-filled control is the ink, not the accent: an accent ring on an
+   accent fill is the accent on the accent. The ring is drawn outside the control, on the page
+   ground, so ink reads against every ground the action sits on. */
+.action-fill:focus-visible {
+  outline-color: var(--color-ink);
 }
 
 @utility tnum {

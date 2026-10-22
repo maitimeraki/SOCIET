@@ -58,7 +58,7 @@ export default function Seat({ seat, tabIndex, onKeyNav }: { seat: SeatSpec; tab
       <title>{`${profile.identity.name} · ${profile.identity.archetype} · ${stance} · conf ${profile.confidence.toFixed(2)}`}</title>
       <rect
         aria-hidden="true"
-        className="opacity-0 transition-opacity duration-150 group-focus-visible:opacity-100"
+        className="opacity-0 transition-opacity duration-state group-focus-visible:opacity-100"
         x={x - SEAT_W / 2 - 2}
         y={y - SEAT_H / 2 - 2}
         width={SEAT_W + 4}
