@@ -149,7 +149,7 @@
 
   /* ── §6 Motion. One grammar, one easing curve for the whole product. */
   --ease-standard: cubic-bezier(0.2, 0, 0, 1);
-  --default-transition-duration: 120ms; /* closes every bare `transition-colors` at 150ms */
+  --default-transition-duration: 120ms; /* closes every bare `transition-colors` at 120ms — Tailwind's own default is 150ms */
   --default-transition-timing-function: var(--ease-standard);
   --duration-state: 120ms;  /* state change — hover, focus, press */
   --duration-enter: 180ms;  /* enter — content appearing */

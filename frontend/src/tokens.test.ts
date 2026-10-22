@@ -1,5 +1,6 @@
 /// <reference types="node" />
-import { readFileSync } from 'node:fs'
+import { readFileSync, readdirSync } from 'node:fs'
+import { basename, join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 
 /**
@@ -17,18 +18,17 @@ const css = readFileSync('src/index.css', 'utf8')
 const themeStart = css.indexOf('@theme {')
 const theme = css.slice(themeStart, css.indexOf('\n}', themeStart))
 
-/** The `--color-*` declarations, exactly as written. */
+/** Every declaration in the block, exactly as written. */
 const declared = new Map<string, string>()
-for (const line of theme.split('\n')) {
-  const match = line.match(/^\s*(--color-[a-z0-9-]+):\s*(.+?);/)
-  if (match) declared.set(match[1], match[2].trim())
+for (const match of theme.matchAll(/(--[a-z0-9-]+)\s*:\s*([^;]+);/g)) {
+  declared.set(match[1], match[2].trim())
 }
 
 /** One level of aliasing: `--color-ground` → `var(--color-page)` → the page's hex. */
 function resolve(token: string): string {
   const value = declared.get(token)
   if (value === undefined) throw new Error(`${token} is not declared in @theme`)
-  const alias = value.match(/^var\((--color-[a-z0-9-]+)\)$/)
+  const alias = value.match(/^var\((--[a-z0-9-]+)\)$/)
   if (!alias) return value
   const target = declared.get(alias[1])
   if (target === undefined) throw new Error(`${alias[1]} is not declared in @theme`)
@@ -63,6 +63,23 @@ function contrast(fg: string, bg: string): number {
 function lightness(token: string): number {
   const y = luminance(token)
   return y > 0.008856 ? 116 * Math.cbrt(y) - 16 : 903.3 * y
+}
+
+/** The hand-written literal the `--shadow-accent-inset` token replaced. */
+const LEGACY_ACCENT_INSET = 'shadow-[inset_0_-2px_0_0_var(--color-accent)]'
+
+/** This file names the literal so it can look for it; it is not app source. */
+const GUARD_FILE = 'tokens.test.ts'
+
+/** Every file under `src` — the hand-written literal must never come back. */
+function sourceFiles(dir: string): string[] {
+  const found: string[] = []
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    const full = join(dir, entry.name)
+    if (entry.isDirectory()) found.push(...sourceFiles(full))
+    else found.push(full)
+  }
+  return found
 }
 
 /** The pairs §13.6 Wave 1 sets a floor on, and what each floor is for. */
@@ -100,5 +117,29 @@ describe('the tonal ladder — the app sits on the page ground', () => {
   it('spreads the map ramp at least 8 L* apart', () => {
     const spread = Math.abs(lightness('--color-map-ground-2') - lightness('--color-map-ground'))
     expect(spread).toBeGreaterThanOrEqual(8)
+  })
+})
+
+describe('the tokens the layer stands on', () => {
+  it('declares the accent inset, the transition duration and the extra-small radius', () => {
+    const missing = ['--shadow-accent-inset', '--default-transition-duration', '--radius-xs'].filter(
+      (token) => !declared.has(token),
+    )
+    expect(missing).toEqual([])
+  })
+
+  it('closes every bare transition at 120ms', () => {
+    expect(resolve('--default-transition-duration')).toBe('120ms')
+  })
+
+  it('keeps the extra-small radius at 4px, not Tailwind 2px', () => {
+    expect(resolve('--radius-xs')).toBe('4px')
+  })
+
+  it('never carries the hand-written accent inset again', () => {
+    const offenders = sourceFiles('src')
+      .filter((file) => basename(file) !== GUARD_FILE)
+      .filter((file) => readFileSync(file, 'utf8').includes(LEGACY_ACCENT_INSET))
+    expect(offenders).toEqual([])
   })
 })
