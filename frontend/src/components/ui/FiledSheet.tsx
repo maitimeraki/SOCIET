@@ -40,7 +40,7 @@ export default function FiledSheet({
       <div className="flex items-start justify-between gap-3">
         <p className="font-measurement text-mono uppercase tracking-[0.14em] text-ink-3">The decision</p>
         {sample ? (
-          <Chip tone="neutral" className="uppercase">
+          <Chip tone="neutral" className="uppercase tracking-[0.14em]">
             Worked example
           </Chip>
         ) : null}

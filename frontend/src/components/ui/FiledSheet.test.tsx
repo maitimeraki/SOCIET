@@ -42,6 +42,12 @@ describe('FiledSheet', () => {
     expect(html).toContain('A worked example')
   })
 
+  it('keeps the chip’s caps tracking — the label face declares none', () => {
+    // `text-micro` declares no letter-spacing, so the caps treatment is the call site’s to give.
+    const html = renderToStaticMarkup(<FiledSheet decision={DECISION} sample />)
+    expect(html).toContain('uppercase tracking-[0.14em]')
+  })
+
   it('carries no worked-example label when the sheet is the customer’s own', () => {
     const html = renderToStaticMarkup(<FiledSheet decision={DECISION} />)
     expect(html).not.toContain('Worked example')
