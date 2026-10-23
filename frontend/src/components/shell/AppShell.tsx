@@ -35,7 +35,7 @@ export default function AppShell() {
     <div className="flex min-h-screen bg-ground text-ink">
       <a
         href="#content"
-        className="sr-only focus:not-sr-only focus:absolute focus:left-4 focus:top-4 focus:z-[70] focus:rounded-sm focus:bg-canvas focus:px-3 focus:py-2 focus:text-body focus:text-ink"
+        className="sr-only focus:not-sr-only focus:absolute focus:left-4 focus:top-4 focus:z-[70] focus:inline-flex focus:min-h-11 focus:min-w-11 focus:items-center focus:rounded-sm focus:bg-canvas focus:px-3 focus:py-2 focus:text-body focus:text-ink"
       >
         Skip to content
       </a>

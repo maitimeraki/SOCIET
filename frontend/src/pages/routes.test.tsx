@@ -3,14 +3,11 @@ import { describe, expect, it } from 'vitest'
 // to static markup in Node. `App` itself cannot render here — `BrowserRouter` needs a window and the
 // pages are `lazy` — so the tree is exercised the way AppShell.test.tsx and RequireAuth.test.tsx
 // already do: replicate the guard + route shape under `MemoryRouter` and render the real elements.
+//
 // App.tsx's own nesting — which element sits under which route — is confirmed by reading App.tsx, not
 // by rendering it (no test renders `App`; it would suspend on its `lazy()` chunks and emit only the
-// fallback), so this file proves the section+guard composition and the guard's contract.
-//
-// `<Navigate>` does not navigate under SSR (RequireAuth.test.tsx:2), so the guard's next-preserving
-// redirect cannot be asserted by rendering it. It is pinned through the guard's OWN contract —
-// `resolveGuard`/`signInTarget` in src/auth/guard.ts — for the section paths, and the static-markup
-// pass proves each path renders its section inside the guard.
+// fallback). The four retired routes are redirects now: `<Navigate>` does not navigate under SSR, so
+// the redirect table itself is pinned here and the browser capture proves where each one lands.
 import type { ComponentType } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
@@ -18,23 +15,13 @@ import type { AuthStatus } from '../auth/authStore'
 import { resolveGuard, signInTarget } from '../auth/guard'
 import { GuardView } from '../auth/RequireAuth'
 import AppShell from '../components/shell/AppShell'
-import DocumentsSection from '../sections/DocumentsSection'
-import PanelSection from '../sections/PanelSection'
-import ResultsSection from '../sections/ResultsSection'
-import RunsSection from '../sections/RunsSection'
+import DashboardPage from './DashboardPage'
+import { dashboardHref, DASHBOARD_ANCHORS, LEGACY_SECTION_REDIRECTS } from './dashboardAnchors'
 // §13 — the one copy-law guard (list + stem-tolerant matcher + tag-stripping reader), shared with
 // every rendered-string test.
 import { BANNED_WORD, renderedText } from '../test/copyLaw'
 
-/** D16: the rail's label and the route's path deliberately differ — the path is exempt from §13. */
-const SECTIONS: { path: string; heading: string; Component: ComponentType }[] = [
-  { path: '/documents', heading: 'Documents', Component: DocumentsSection },
-  { path: '/runs', heading: 'Decisions', Component: RunsSection },
-  { path: '/results', heading: 'Verdicts', Component: ResultsSection },
-  { path: '/panel', heading: 'Panel', Component: PanelSection },
-]
-
-/** The section rendered through the real guard, its decision supplied as a prop (zustand v5's SSR
+/** The section rendered through the real guard, its data supplied as a prop (zustand v5's SSR
  *  snapshot is the initial `unknown` state, so a store-driven render could only be asserted as a
  *  splash). */
 const renderGuarded = (status: AuthStatus, path: string, Component: ComponentType) =>
@@ -72,21 +59,48 @@ function currentHref(html: string): string | undefined {
   return marked?.match(/href="([^"]*)"/)?.[1]
 }
 
-describe.each(SECTIONS)('$path — the $heading section', ({ path, heading, Component }) => {
-  it('renders its section inside the guard when the visitor is authed', () => {
-    expect(renderGuarded('authed', path, Component)).toContain(heading)
+describe('the dashboard inside the guard', () => {
+  it('renders the one surface when the visitor is authed', () => {
+    const html = renderGuarded('authed', '/dashboard', DashboardPage)
+    expect(html).toContain('Your account')
+    expect(html).toContain('Your material')
+    expect(html).toContain('Your decisions')
+    expect(html).toContain('The last answer')
+    expect(html).toContain('Your panel')
   })
 
-  it('renders neither the section nor a sign-in page while the session is unknown', () => {
-    const html = renderGuarded('unknown', path, Component)
-    expect(html).not.toContain(heading)
+  it('renders neither the dashboard nor a sign-in page while the session is unknown', () => {
+    const html = renderGuarded('unknown', '/dashboard', DashboardPage)
+    expect(html).not.toContain('Your account')
     expect(html).toContain('Checking your session')
   })
 
-  it('renders no section for an anon visitor — the guard redirects (a Navigate, inert under SSR)', () => {
-    const html = renderGuarded('anon', path, Component)
-    expect(html).not.toContain(heading)
+  it('renders no dashboard for an anon visitor — the guard redirects (a Navigate, inert under SSR)', () => {
+    const html = renderGuarded('anon', '/dashboard', DashboardPage)
+    expect(html).not.toContain('Your account')
     expect(html).not.toContain('Checking your session')
+  })
+})
+
+describe('the four retired routes redirect to the dashboard at their anchor (D1)', () => {
+  it('maps all four paths, and each lands on its own section', () => {
+    expect(LEGACY_SECTION_REDIRECTS.map((entry) => entry.path)).toEqual([
+      '/documents',
+      '/runs',
+      '/results',
+      '/panel',
+    ])
+    expect(LEGACY_SECTION_REDIRECTS.map((entry) => dashboardHref(entry.anchor))).toEqual([
+      '/dashboard#material',
+      '/dashboard#decisions',
+      '/dashboard#last-answer',
+      '/dashboard#panel',
+    ])
+  })
+
+  it('uses the anchors the dashboard actually carries', () => {
+    expect(new Set(Object.values(DASHBOARD_ANCHORS)).size).toBe(4)
+    expect(dashboardHref(DASHBOARD_ANCHORS.lastAnswer)).toBe('/dashboard#last-answer')
   })
 })
 
@@ -95,14 +109,26 @@ describe('the guard preserves the path a signed-out visitor was reaching for', (
     expect(resolveGuard('anon')).toBe('redirect')
   })
 
-  it.each(SECTIONS)('$path → sign-in carrying next=$path', ({ path }) => {
-    expect(signInTarget(path, '')).toBe(`/auth/signin?next=${encodeURIComponent(path)}`)
-  })
+  it.each([...LEGACY_SECTION_REDIRECTS.map((entry) => entry.path), '/dashboard'])(
+    '%s → sign-in carrying next',
+    (path) => {
+      expect(signInTarget(path, '')).toBe(`/auth/signin?next=${encodeURIComponent(path)}`)
+    },
+  )
 })
 
-describe('the rail marks the section the visitor is in', () => {
-  it.each(SECTIONS)('$path marks its own item current', ({ path }) => {
-    expect(currentHref(renderShell(path))).toBe(path)
+describe('the rail is one item — "Your work"', () => {
+  it('marks the dashboard current on /dashboard', () => {
+    expect(currentHref(renderShell('/dashboard'))).toBe('/dashboard')
+  })
+
+  it('renders exactly one item inside the sections nav', () => {
+    const html = renderShell('/dashboard')
+    const nav = html.match(/<nav[^>]*aria-label="Sections"[^>]*>[\s\S]*?<\/nav>/)?.[0] ?? ''
+    expect(nav.match(/<li>/g) ?? []).toHaveLength(1)
+    expect(nav).toContain('Your work')
+    expect(nav).not.toContain('Documents')
+    expect(nav).not.toContain('Verdicts')
   })
 })
 
@@ -120,14 +146,12 @@ describe('the copy-law pattern itself catches banned words, whole-word only', ()
   })
 })
 
-describe('the copy law (§13) holds on every section', () => {
-  it.each(SECTIONS)('$path renders no banned word', ({ path, Component }) => {
-    expect(renderedText(renderGuarded('authed', path, Component))).not.toMatch(BANNED_WORD)
+describe('the copy law (§13) holds on the dashboard and the shell', () => {
+  it('the dashboard renders no banned word', () => {
+    expect(renderedText(renderGuarded('authed', '/dashboard', DashboardPage))).not.toMatch(BANNED_WORD)
   })
-})
 
-describe('the copy law (§13) holds on the shell and its rail', () => {
   it('renders no banned word in the chrome', () => {
-    expect(renderedText(renderShell('/documents'))).not.toMatch(BANNED_WORD)
+    expect(renderedText(renderShell('/dashboard'))).not.toMatch(BANNED_WORD)
   })
 })

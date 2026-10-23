@@ -5,6 +5,7 @@ import RequireAuth from './auth/RequireAuth'
 import AppShell, { RouteFallback } from './components/shell/AppShell'
 import MarketingLayout from './components/shell/MarketingLayout'
 import NotFoundPage from './pages/NotFoundPage'
+import { dashboardHref, LEGACY_SECTION_REDIRECTS } from './pages/dashboardAnchors'
 
 // Each page is its own chunk, so the initial bundle carries only the layouts, the router and the 404 —
 // Sigma/graphology/framer-motion leave the entry chunk entirely. Specifiers stay static literals: a
@@ -16,10 +17,6 @@ const Hero = lazy(() => import('./marketing/Hero'))
 const HomeDemo = lazy(() => import('./marketing/HomeDemo'))
 const NewRunWorkspace = lazy(() => import('./pages/NewRunWorkspace'))
 const RunPage = lazy(() => import('./pages/RunPage'))
-const DocumentsSection = lazy(() => import('./sections/DocumentsSection'))
-const RunsSection = lazy(() => import('./sections/RunsSection'))
-const ResultsSection = lazy(() => import('./sections/ResultsSection'))
-const PanelSection = lazy(() => import('./sections/PanelSection'))
 const AgentsPage = lazy(() => import('./pages/AgentsPage'))
 const DashboardPage = lazy(() => import('./pages/DashboardPage'))
 const SignInPage = lazy(() => import('./pages/SignInPage'))
@@ -55,13 +52,13 @@ export default function App() {
           <Route element={<RequireAuth />}>
             <Route element={<AppShell />}>
               <Route path="/dashboard" element={<DashboardPage />} />
-              {/* The rail's four destinations (D16): the label differs from the path on purpose. */}
-              <Route path="/documents" element={<DocumentsSection />} />
-              <Route path="/runs" element={<RunsSection />} />
+              {/* D1: the four old rail pages are sections of the dashboard now, so their routes
+                  redirect to it with the section's anchor. A decision is still its own deep view. */}
+              {LEGACY_SECTION_REDIRECTS.map(({ path, anchor }) => (
+                <Route key={path} path={path} element={<Navigate to={dashboardHref(anchor)} replace />} />
+              ))}
               <Route path="/runs/:runId" element={<RunPage />} />
               <Route path="/runs/:runId/:tab" element={<RunPage />} />
-              <Route path="/results" element={<ResultsSection />} />
-              <Route path="/panel" element={<PanelSection />} />
               {/* §9 one workspace, three steps (Ruling F22). `/new` renders the workspace; the old
                   per-step paths stay valid routes as redirects into it, carrying the step as `?step=`
                   — eight existing call sites navigate to them, and nothing may 404. */}

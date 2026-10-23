@@ -8,10 +8,10 @@ import AppShell from './AppShell'
 
 const render = () =>
   renderToStaticMarkup(
-    <MemoryRouter initialEntries={['/documents']}>
+    <MemoryRouter initialEntries={['/dashboard']}>
       <Routes>
         <Route element={<AppShell />}>
-          <Route path="/documents" element={<p>the child region</p>} />
+          <Route path="/dashboard" element={<p>the child region</p>} />
         </Route>
       </Routes>
     </MemoryRouter>,
@@ -39,7 +39,7 @@ describe('AppShell', () => {
   })
 
   it('marks the current section with aria-current', () => {
-    expect(openingTag(render(), 'href="/documents"')).toContain('aria-current="page"')
+    expect(openingTag(render(), 'href="/dashboard"')).toContain('aria-current="page"')
   })
 
   it('keeps the account foot outside the sections landmark', () => {

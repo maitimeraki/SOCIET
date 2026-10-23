@@ -53,6 +53,12 @@ describe('FiledSheet', () => {
     expect(html).not.toContain('Worked example')
   })
 
+  it('states an absent share rather than inventing one', () => {
+    const html = renderToStaticMarkup(<FiledSheet decision={{ ...DECISION, share: null }} />)
+    expect(html).toContain('—')
+    expect(html).not.toContain('0.00')
+  })
+
   it('renders no banned word — the copy law holds over the kit', () => {
     const html = renderToStaticMarkup(<FiledSheet decision={DECISION} sample />)
     expect(renderedText(html)).not.toMatch(BANNED_WORD)

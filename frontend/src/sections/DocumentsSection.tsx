@@ -3,10 +3,12 @@ import { Link } from 'react-router-dom'
 import { UploadSimple } from '@phosphor-icons/react'
 import { listUploads } from '../api/rest'
 import type { UploadRow } from '../api/types'
-import Button, { buttonClasses } from '../components/ui/Button'
+import { buttonClasses } from '../components/ui/Button'
 import EmptyState from '../components/ui/EmptyState'
 import ErrorState from '../components/ui/ErrorState'
+import { ruleClasses } from '../components/ui/Rule'
 import Skeleton from '../components/ui/Skeleton'
+import { DASHBOARD_COPY } from '../pages/dashboardCopy'
 import { fmtDate, fmtInt } from '../utils/format'
 
 export interface DocumentsViewProps {
@@ -19,24 +21,21 @@ export interface DocumentsViewProps {
 }
 
 /**
- * §8.3 Documents — everything the panel argues from, presentational. The data and the retry arrive as
- * props (the default export owns the fetch), so this renders under `react-dom/server` in the node-only
- * suite where `useEffect` never fires.
+ * Your material (§14.3) — everything the panel argues from. The section's heading lives on the
+ * dashboard, so this renders its content only. The data and the retry arrive as props (the default
+ * export owns the fetch), so it renders under `react-dom/server` in the node-only suite where
+ * `useEffect` never fires.
  */
 export function DocumentsView({ documents, loading, failed, failDetail, onRetry }: DocumentsViewProps) {
   return (
-    <div className="space-y-6">
-      <h1 className="font-titling text-display text-ink">Documents</h1>
+    <div className="mt-6">
       {failed ? (
         // A failure is never an empty list: it is surfaced, with a retry.
         <ErrorState
-          title="Couldn't reach the server"
-          detail={failDetail || 'Your documents load when the server is back.'}
-          actions={
-            <Button type="button" variant="secondary" onClick={onRetry}>
-              Try again
-            </Button>
-          }
+          title={DASHBOARD_COPY.error.title}
+          detail={failDetail || DASHBOARD_COPY.error.material}
+          onRetry={onRetry}
+          retryLabel={DASHBOARD_COPY.actions.retry}
         />
       ) : loading ? (
         <div className="space-y-2">
@@ -47,15 +46,15 @@ export function DocumentsView({ documents, loading, failed, failDetail, onRetry 
       ) : documents.length === 0 ? (
         <EmptyState
           icon={<UploadSimple size={28} aria-hidden="true" />}
-          line="Add your first document. Drop a PDF, paste a URL, or connect a source — everything your panel argues from comes from here."
+          line={DASHBOARD_COPY.empty.material}
           action={
-            <Link to="/new/ingest" className={buttonClasses('primary', 40)}>
-              Upload documents
+            <Link to="/new/ingest" className={buttonClasses('primary', 40, 'min-h-11')}>
+              {DASHBOARD_COPY.actions.upload}
             </Link>
           }
         />
       ) : (
-        <ul className="divide-y divide-ink-3 border-y border-ink-3">
+        <ul className={`${ruleClasses('around')} ${ruleClasses('both')}`}>
           {documents.map((document) => (
             <li key={document.id} className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 py-3">
               <span className="text-body text-ink">{document.name}</span>
@@ -75,11 +74,19 @@ export function DocumentsView({ documents, loading, failed, failDetail, onRetry 
   )
 }
 
+export interface DocumentsSectionProps {
+  /** Bumped by the dashboard when any section's retry asks the page to refresh. */
+  refreshKey?: number
+  /** The page's refresh; when absent the section retries on its own. */
+  onRefresh?: () => void
+}
+
 /**
- * The section's container: it owns the fetch and the retry counter the view never sees. Bumping
- * `attempt` re-runs the effect — the retry affordance without a second code path.
+ * The section's container: it owns the fetch and the retry counter the view never sees. A retry
+ * either bumps the page's refresh key (one refresh for the whole surface) or, standalone, this
+ * section's own attempt.
  */
-export default function DocumentsSection() {
+export default function DocumentsSection({ refreshKey = 0, onRefresh }: DocumentsSectionProps = {}) {
   const [documents, setDocuments] = useState<UploadRow[]>([])
   const [loading, setLoading] = useState(true)
   const [failed, setFailed] = useState(false)
@@ -107,13 +114,14 @@ export default function DocumentsSection() {
     return () => {
       cancelled = true
     }
-  }, [attempt])
+  }, [attempt, refreshKey])
 
   const retry = () => {
     setLoading(true)
     setFailed(false)
     setFailDetail(undefined)
-    setAttempt((n) => n + 1)
+    if (onRefresh) onRefresh()
+    else setAttempt((n) => n + 1)
   }
 
   return (

@@ -1,3 +1,5 @@
+/// <reference types="node" />
+import { readFileSync } from 'node:fs'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { MemoryRouter } from 'react-router-dom'
@@ -8,8 +10,9 @@ import type { RunsViewProps } from './RunsSection'
 // §13 — the one copy-law guard, shared with every rendered-string test.
 import { BANNED_WORD, renderedText } from '../test/copyLaw'
 
-// Moved from `pages/RunsPage.test.tsx` when Task 3.2 repointed `/runs` at `sections/RunsSection.tsx`
-// (Ruling F4): the section's behaviour coverage is unchanged, only its home moved with the code.
+// Moved from `pages/RunsPage.test.tsx` when `/runs` was repointed at `sections/RunsSection.tsx`
+// (Ruling F4), then moved onto the dashboard's one surface (D1). The section now owns the keyset
+// walk: the first page, then Load more over `next_cursor`.
 //
 // The suite is node-only (no jsdom) and `useEffect` does not run under `renderToStaticMarkup`, so the
 // section is split like `DocumentsSection`: `RunsView` is state-free and prop-driven, asserted here;
@@ -61,6 +64,13 @@ describe('RunsSection — the v1 paginated shape', () => {
     )
     await expect(listRunsPage({ cursor: 'forged' })).rejects.toThrowError('The pagination cursor is not valid.')
   })
+
+  it('owns the walk — the section reads the keyset page, never the capped listRuns helper', () => {
+    const source = readFileSync('src/sections/RunsSection.tsx', 'utf8')
+    expect(source).toContain('listRunsPage')
+    expect(source).not.toContain('listRuns()')
+    expect(source).toContain('next_cursor')
+  })
 })
 
 describe('filterRuns', () => {
@@ -91,12 +101,21 @@ describe('filterRuns', () => {
 const render = (props: Partial<RunsViewProps> = {}) =>
   renderToStaticMarkup(
     <MemoryRouter>
-      <RunsView runs={[]} loading={false} failed={false} onRetry={() => {}} {...props} />
+      <RunsView
+        runs={[]}
+        loading={false}
+        failed={false}
+        hasMore={false}
+        loadingMore={false}
+        onLoadMore={() => {}}
+        onRetry={() => {}}
+        {...props}
+      />
     </MemoryRouter>,
   )
 
-describe('RunsSection — §8.4 Decisions', () => {
-  it('lists the decisions when there are runs, each linking to the run', () => {
+describe('RunsSection — Your decisions', () => {
+  it('lists the decisions when there are runs, each linking to the decision', () => {
     const html = render({ runs: [run()] })
     expect(html).toContain('Should we expand into Europe?')
     expect(html).toContain('href="/runs/r1"')
@@ -105,8 +124,8 @@ describe('RunsSection — §8.4 Decisions', () => {
 
   it('names the single next action when there are no decisions', () => {
     const html = render({ runs: [] })
-    expect(html).toContain('Start a decision')
-    expect(html).toContain('/new/ingest')
+    expect(html).toContain('Start free')
+    expect(html).toContain('href="/new"')
   })
 
   it('renders a real error with a retry on failure, never an empty list', () => {
@@ -114,7 +133,7 @@ describe('RunsSection — §8.4 Decisions', () => {
     const html = render({ runs: [], failed: true })
     expect(html).toContain('reach the server')
     expect(html).toContain('Try again') // the retry affordance
-    expect(html).not.toContain('Start a decision') // never the empty state on failure
+    expect(html).not.toContain('Start free') // never the empty state on failure
   })
 
   it('carries the server message into the failure detail, standing copy when there is none', () => {
@@ -127,12 +146,17 @@ describe('RunsSection — §8.4 Decisions', () => {
 
   it('renders skeletons while loading, never the empty state or an empty table', () => {
     const html = render({ runs: [], loading: true })
-    expect(html).not.toContain('Start a decision')
+    expect(html).not.toContain('Start free')
     expect(html).not.toContain('<table')
+  })
+
+  it('offers Load more only while a cursor remains', () => {
+    expect(render({ runs: [run()], hasMore: true })).toContain('Load more')
+    expect(render({ runs: [run()], hasMore: false })).not.toContain('Load more')
   })
 })
 
-describe('the copy law (§13) holds on Decisions when loaded, empty or failed', () => {
+describe('the copy law (§13) holds on Your decisions when loaded, empty or failed', () => {
   it('renders no banned word in any state', () => {
     expect(renderedText(render({ runs: [run()] }))).not.toMatch(BANNED_WORD)
     expect(renderedText(render({ runs: [] }))).not.toMatch(BANNED_WORD)

@@ -1,104 +1,136 @@
 import type { ReactNode } from 'react'
 import { Link } from 'react-router-dom'
-import type { RunSummary } from '../api/types'
-// Imported by path, not through the `../components/ui` barrel: the barrel also re-exports Dialog and
-// Drawer, whose framer-motion import would otherwise ride into this module — and this module is what
-// the node-only dashboard test renders (R45: framer-motion in a test is a measured cost).
-import RunTable from '../components/common/RunTable'
-import Button, { buttonClasses } from '../components/ui/Button'
+// Imported by path, and there is no `../ui` barrel any more: Drawer's framer-motion import would
+// otherwise ride into this module — and this module is what the node-only dashboard test renders
+// (R45: framer-motion in a test is a measured cost).
+import Band from '../components/ui/Band'
+import { StateChip } from '../components/ui/Chip'
+import { buttonClasses } from '../components/ui/Button'
 import EmptyState from '../components/ui/EmptyState'
-import ErrorState from '../components/ui/ErrorState'
+import { ruleClasses } from '../components/ui/Rule'
+import SectionHeading from '../components/ui/SectionHeading'
+import { DASHBOARD_ANCHORS } from './dashboardAnchors'
+import { DASHBOARD_COPY } from './dashboardCopy'
 
 export interface DashboardViewProps {
-  runs: RunSummary[]
-  loading: boolean
-  failed: boolean
-  /** The server's own failure message, when the page has one; the standing copy stands in otherwise. */
-  failDetail?: string
-  hasMore: boolean
-  loadingMore: boolean
-  onLoadMore: () => void
-  /** True when the client still holds the wizard's corpus — the primary action then skips ingest. */
-  datasetReady: boolean
-  /** The live-debate inset, injected by the page so this module stays free of the graph stack. */
-  liveInset?: ReactNode
+  /** True when the account holds no material and no decisions: one state, one action (§14.3). */
+  accountEmpty: boolean
+  /** The running decision, when there is one: the live band is this one line, never a floor. */
+  live: { runId: string; question: string } | null
+  material: ReactNode
+  decisions: ReactNode
+  lastAnswer: ReactNode
+  panel: ReactNode
 }
 
 /**
- * The operate home (plan §3.3), presentational: the title block, the primary action, the traverse log
- * (the run timeline) and the honest empty state. The data and the live inset arrive as props, so this
- * renders under `react-dom/server` in the node-only suite without dragging in the graph stack.
+ * The dashboard's one surface (§14.3), presentational: the page title, the one action, the live
+ * line, and the four sections in the lifecycle's own order — Your material · Your decisions · The
+ * last answer · Your panel. Each section is separated by a rule; only The last answer takes a
+ * band, the plum one, because plum means *the answer*.
  *
- * The timeline is `RunTable` — the plan's own instruction ("reuse `RunTable.tsx` and extend its
- * columns", §3.3) — so the dashboard and `/runs` render the same columns from one component.
+ * The sections arrive as slots so this module stays free of their data flow (and of the graph
+ * stack), and so the node-only suite can render the page's own structure without a browser.
  */
 export default function DashboardView({
-  runs,
-  loading,
-  failed,
-  failDetail,
-  hasMore,
-  loadingMore,
-  onLoadMore,
-  datasetReady,
-  liveInset,
+  accountEmpty,
+  live,
+  material,
+  decisions,
+  lastAnswer,
+  panel,
 }: DashboardViewProps) {
-  const startTarget = datasetReady ? '/new/society' : '/new/ingest'
-  const empty = !loading && !failed && runs.length === 0
-
   return (
-    <div className="space-y-10">
-      <header className="flex flex-wrap items-end justify-between gap-4">
+    <div>
+      <header className={`${ruleClasses('bottom')} flex flex-wrap items-end justify-between gap-4 pb-8`}>
         <div>
-          <p className="text-label uppercase text-ink-3">Operate</p>
-          <h1 className="mt-2 font-titling text-display text-ink">The traverse log</h1>
-          <p className="mt-2 max-w-[60ch] text-body text-ink-2">
-            Every decision your panel has deliberated, newest first.
-          </p>
+          <h1 className="font-titling text-display text-ink">{DASHBOARD_COPY.title}</h1>
+          <p className="mt-2 max-w-[60ch] text-body text-ink-2">{DASHBOARD_COPY.lead}</p>
+          <p className="mt-1 text-micro text-ink-3">{DASHBOARD_COPY.trust}</p>
         </div>
-        <Link to={startTarget} className={buttonClasses('primary')}>
-          Start a decision
-        </Link>
+        {/* The one action. On an empty account it lives in the empty block, so there is exactly one. */}
+        {!accountEmpty && (
+          <Link to="/new" className={buttonClasses('primary', 40, 'min-h-11')}>
+            {DASHBOARD_COPY.startFree}
+          </Link>
+        )}
       </header>
 
-      {liveInset}
-
-      <section>
-        <div className="mb-4 flex items-baseline justify-between">
-          <h2 className="text-heading text-ink">Recent decisions</h2>
-          <Link to="/runs" className="text-body text-ink-2 hover:text-accent">
-            All decisions →
+      {live && (
+        <div data-capture="live" className={`${ruleClasses('bottom')} flex items-center gap-3 py-3`}>
+          <StateChip state="running" />
+          <Link
+            to={`/runs/${live.runId}`}
+            className="inline-flex min-h-11 min-w-0 items-center truncate text-body text-ink-2 hover:text-accent"
+          >
+            {live.question}
           </Link>
         </div>
+      )}
 
-        {failed ? (
-          <ErrorState
-            title="Couldn't reach the server"
-            detail={failDetail || 'The traverse log loads when the server is back.'}
-          />
-        ) : empty ? (
+      {accountEmpty ? (
+        <div className="pt-10">
           <EmptyState
-            line="No decisions yet — the log fills the moment your first panel deliberates."
+            line={DASHBOARD_COPY.empty.account}
             action={
-              <Link to={startTarget} className={buttonClasses('primary', 40)}>
-                Start your first decision
+              <Link to="/new" className={buttonClasses('primary', 40, 'min-h-11')}>
+                {DASHBOARD_COPY.startFree}
               </Link>
             }
           />
-          // TODO(Task 17): the demo video lands here, inside the first-run empty state (plan §3.3).
-        ) : (
-          <>
-            <RunTable runs={runs} loading={loading} />
-            {hasMore && (
-              <div className="mt-4 flex justify-center">
-                <Button onClick={onLoadMore} loading={loadingMore}>
-                  Load more
-                </Button>
-              </div>
-            )}
-          </>
-        )}
-      </section>
+        </div>
+      ) : (
+        <>
+          <section id={DASHBOARD_ANCHORS.material} aria-labelledby="material-heading" className="py-10">
+            <SectionHeading
+              id="material-heading"
+              title={DASHBOARD_COPY.sections.material.title}
+              lead={DASHBOARD_COPY.sections.material.lead}
+            />
+            {material}
+          </section>
+
+          <section
+            id={DASHBOARD_ANCHORS.decisions}
+            aria-labelledby="decisions-heading"
+            className={`${ruleClasses('both')} py-10`}
+          >
+            <SectionHeading
+              id="decisions-heading"
+              title={DASHBOARD_COPY.sections.decisions.title}
+              lead={DASHBOARD_COPY.sections.decisions.lead}
+            />
+            {decisions}
+          </section>
+
+          <Band
+            tone="plum"
+            dense
+            id={DASHBOARD_ANCHORS.lastAnswer}
+            aria-labelledby="last-answer-heading"
+          >
+            <SectionHeading
+              id="last-answer-heading"
+              title={DASHBOARD_COPY.sections.lastAnswer.title}
+              lead={DASHBOARD_COPY.sections.lastAnswer.lead}
+            />
+            {lastAnswer}
+          </Band>
+
+          <section
+            id={DASHBOARD_ANCHORS.panel}
+            aria-labelledby="panel-heading"
+            className={`${ruleClasses('both')} py-10`}
+          >
+            <SectionHeading
+              id="panel-heading"
+              title={DASHBOARD_COPY.sections.panel.title}
+              lead={DASHBOARD_COPY.sections.panel.lead}
+            />
+            {panel}
+          </section>
+        </>
+      )}
     </div>
   )
 }

@@ -5,6 +5,8 @@ import { NARRATIVE_FALLBACK_COPY } from '../verdict/NarrativeFallbackNotice'
 import { splitSections } from '../verdict/narrative'
 import EntityChips from '../verdict/EntityChips'
 import PositionMark from '../ui/PositionMark'
+import FiledSheet from '../ui/FiledSheet'
+import type { FiledDecision } from '../ui/FiledSheet'
 import Emphasis from '../common/Emphasis'
 import WarningList from '../common/WarningList'
 import Button from '../ui/Button'
@@ -184,6 +186,16 @@ export interface AnswerDocumentProps extends AnswerInput {
  */
 export default function AnswerDocument({ runId, question, view, sources, corpusMissing }: AnswerDocumentProps) {
   const sections = answerSections({ question, view, sources, corpusMissing })
+  // The outcome header is the kit's FiledSheet — the same sheet the homepage's comparison panel
+  // and the auth page's right column render — so the three surfaces rhyme by construction (§14.3).
+  const filed: FiledDecision = {
+    question,
+    position: view.stance,
+    share: view.confidence,
+    caseAgainst: view.dissentingViews[0]?.view ?? 'No dissent was recorded.',
+    sources:
+      sources.length > 0 ? sources.join(' · ') : 'No sources were recorded for this decision.',
+  }
 
   const download = () => {
     const blob = new Blob([answerText({ question, view, sources, corpusMissing })], { type: 'text/markdown' })
@@ -198,13 +210,10 @@ export default function AnswerDocument({ runId, question, view, sources, corpusM
 
   return (
     <article className="space-y-8">
-      <header className="border-b border-ink-4 pb-4">
-        <p className="text-label uppercase text-ink-3">The decision</p>
-        <p className="mt-2 font-titling text-title text-ink">{question}</p>
-      </header>
+      <FiledSheet decision={filed} />
       {sections.map((section, index) => (
         <section key={index}>
-          <h2 className="mb-3 text-heading text-ink">{section.heading}</h2>
+          <h3 className="mb-3 text-heading text-ink">{section.heading}</h3>
           <div className="max-w-[60ch] space-y-3">
             {section.blocks.map((block, index) => (
               <Block key={index} block={block} />
@@ -213,7 +222,7 @@ export default function AnswerDocument({ runId, question, view, sources, corpusM
         </section>
       ))}
       <div className="print:hidden">
-        <Button type="button" variant="secondary" onClick={download}>
+        <Button type="button" variant="secondary" onClick={download} className="min-h-11">
           Export this verdict
         </Button>
       </div>

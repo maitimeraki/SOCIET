@@ -1,20 +1,24 @@
 import { useEffect, useState } from 'react'
-import { getRun, listRuns } from '../api/rest'
+import { Link } from 'react-router-dom'
+import { getRun } from '../api/rest'
 import type { AgentProfile } from '../run/events'
 import { sourceTitles } from '../components/run/AnswerDocument'
-import PositionMark from '../components/ui/PositionMark'
-import Button from '../components/ui/Button'
+import { buttonClasses } from '../components/ui/Button'
 import EmptyState from '../components/ui/EmptyState'
 import ErrorState from '../components/ui/ErrorState'
+import PositionMark from '../components/ui/PositionMark'
+import { ruleClasses } from '../components/ui/Rule'
 import RuledBlock from '../components/ui/RuledBlock'
 import Skeleton from '../components/ui/Skeleton'
+import { DASHBOARD_COPY } from '../pages/dashboardCopy'
+import { sharedDecisionSubject } from '../pages/dashboardSubject'
 
 /**
- * §8.6 Panel — the experts a decision is argued by. Experts exist only inside a decision (each seated
- * per decision, keyed by its corpus and name), so the honesty notice leads and says what the section
- * cannot yet show; the experts of the most recent decision — their positions and their documents —
- * render below it. Presentational: the data and the retry arrive as props (the default export owns the
- * fetch), so this renders under `react-dom/server` in the node-only suite where `useEffect` never fires.
+ * Your panel (§14.3) — the experts a decision is argued by. Experts exist only inside a decision
+ * (each seated per decision, keyed by its corpus and name), so the honesty notice leads and says
+ * what the section cannot yet show; the experts of the newest answered decision — the same subject
+ * "The last answer" describes — render below it. The heading lives on the dashboard, so this
+ * renders its content only.
  */
 
 /** The documents one expert argued from — the distinct titles off its own source links (D7). */
@@ -28,8 +32,10 @@ function ExpertSources({ profile }: { profile: AgentProfile }) {
 }
 
 export interface PanelViewProps {
-  /** The experts of the most recent decision, in the order the payload seated them. */
+  /** The experts of the newest answered decision, in the order the payload seated them. */
   experts: AgentProfile[]
+  /** The newest decision, when it has not filed an answer — named and linked, never guessed at. */
+  pendingRunId: string | null
   loading: boolean
   failed: boolean
   /** The server's own failure message, when there is one; the standing copy stands in otherwise. */
@@ -37,10 +43,9 @@ export interface PanelViewProps {
   onRetry: () => void
 }
 
-export function PanelView({ experts, loading, failed, failDetail, onRetry }: PanelViewProps) {
+export function PanelView({ experts, pendingRunId, loading, failed, failDetail, onRetry }: PanelViewProps) {
   return (
-    <div className="space-y-6">
-      <h1 className="font-titling text-display text-ink">Panel</h1>
+    <div className="mt-6 space-y-6">
       <RuledBlock>
         Your panel is convened fresh for each decision, from your own documents. This section shows the panel of
         your most recent decision — every expert who argued it, the position each took, and the documents each
@@ -51,13 +56,10 @@ export function PanelView({ experts, loading, failed, failDetail, onRetry }: Pan
       {failed ? (
         // A failure is never an empty panel: it is surfaced, with a retry.
         <ErrorState
-          title="Couldn't reach the server"
-          detail={failDetail || 'Your panel loads when the server is back.'}
-          actions={
-            <Button type="button" variant="secondary" onClick={onRetry}>
-              Try again
-            </Button>
-          }
+          title={DASHBOARD_COPY.error.title}
+          detail={failDetail || DASHBOARD_COPY.error.panel}
+          onRetry={onRetry}
+          retryLabel={DASHBOARD_COPY.actions.retry}
         />
       ) : loading ? (
         <div className="space-y-2">
@@ -66,13 +68,34 @@ export function PanelView({ experts, loading, failed, failDetail, onRetry }: Pan
           ))}
         </div>
       ) : experts.length === 0 ? (
-        <EmptyState line="No panel yet. Start a decision and your panel is convened from your own documents." />
+        pendingRunId ? (
+          <EmptyState
+            line={DASHBOARD_COPY.empty.notAnswered}
+            action={
+              <Link to={`/runs/${pendingRunId}`} className={buttonClasses('secondary', 40, 'min-h-11')}>
+                {DASHBOARD_COPY.actions.openDecision}
+              </Link>
+            }
+          />
+        ) : (
+          <EmptyState
+            line={DASHBOARD_COPY.empty.panel}
+            action={
+              <Link to="/new" className={buttonClasses('primary', 40, 'min-h-11')}>
+                {DASHBOARD_COPY.startFree}
+              </Link>
+            }
+          />
+        )
       ) : (
         <>
-          <h2 id="panel-experts" className="text-heading text-ink">
+          <h3 id="panel-experts" className="text-heading text-ink">
             Who argued it
-          </h2>
-          <ul aria-labelledby="panel-experts" className="divide-y divide-ink-3 border-y border-ink-3">
+          </h3>
+          <ul
+            aria-labelledby="panel-experts"
+            className={`${ruleClasses('around')} ${ruleClasses('both')}`}
+          >
             {experts.map((expert) => (
               <li key={expert.agent_id} className="py-4">
                 <span className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
@@ -90,14 +113,28 @@ export function PanelView({ experts, loading, failed, failDetail, onRetry }: Pan
   )
 }
 
+export interface PanelSectionProps {
+  /** Bumped by the dashboard when any section's retry asks the page to refresh. */
+  refreshKey?: number
+  /** The page's refresh; when absent the section retries on its own. */
+  onRefresh?: () => void
+  /** The dashboard visit's shared-walk epoch, so this section and The last answer read one subject. */
+  subjectEpoch?: number
+}
+
 /**
- * The section's container: it owns the fetch and the retry counter the view never sees. The experts of
- * the newest decision are read the way the experts list reads them — the keyset list (newest first),
- * then that decision's stored events. Bumping `attempt` re-runs the effect — the retry affordance
- * without a second code path.
+ * The section's container: the experts of the newest answered decision — the same subject "The
+ * last answer" describes, read from the one shared walk — then that decision's stored events. A
+ * retry either bumps the page's refresh key (one refresh for the whole surface) or, standalone,
+ * this section's own attempt.
  */
-export default function PanelSection() {
+export default function PanelSection({
+  refreshKey = 0,
+  onRefresh,
+  subjectEpoch,
+}: PanelSectionProps = {}) {
   const [experts, setExperts] = useState<AgentProfile[]>([])
+  const [pendingRunId, setPendingRunId] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [failed, setFailed] = useState(false)
   const [failDetail, setFailDetail] = useState<string>()
@@ -105,16 +142,21 @@ export default function PanelSection() {
 
   useEffect(() => {
     let cancelled = false
-    const load = async (): Promise<AgentProfile[]> => {
-      const newest = (await listRuns())[0]
-      if (!newest) return []
-      const doc = await getRun(newest.run_id)
-      return doc.events.flatMap((event) => (event.type === 'agent' ? [event.profile] : []))
+    const load = async (): Promise<{ profiles: AgentProfile[]; pendingRunId: string | null }> => {
+      const subject = await sharedDecisionSubject(subjectEpoch)
+      const target = subject.answered
+      if (!target) return { profiles: [], pendingRunId: subject.newest?.run_id ?? null }
+      const doc = await getRun(target.run_id)
+      return {
+        profiles: doc.events.flatMap((event) => (event.type === 'agent' ? [event.profile] : [])),
+        pendingRunId: null,
+      }
     }
     load()
-      .then((profiles) => {
+      .then((loaded) => {
         if (cancelled) return
-        setExperts(profiles)
+        setExperts(loaded.profiles)
+        setPendingRunId(loaded.pendingRunId)
         setFailed(false)
         setFailDetail(undefined)
       })
@@ -123,6 +165,7 @@ export default function PanelSection() {
         setFailed(true)
         setFailDetail(error instanceof Error ? error.message : undefined)
         setExperts([])
+        setPendingRunId(null)
       })
       .finally(() => {
         if (!cancelled) setLoading(false)
@@ -130,14 +173,24 @@ export default function PanelSection() {
     return () => {
       cancelled = true
     }
-  }, [attempt])
+  }, [attempt, refreshKey, subjectEpoch])
 
   const retry = () => {
     setLoading(true)
     setFailed(false)
     setFailDetail(undefined)
-    setAttempt((n) => n + 1)
+    if (onRefresh) onRefresh()
+    else setAttempt((n) => n + 1)
   }
 
-  return <PanelView experts={experts} loading={loading} failed={failed} failDetail={failDetail} onRetry={retry} />
+  return (
+    <PanelView
+      experts={experts}
+      pendingRunId={pendingRunId}
+      loading={loading}
+      failed={failed}
+      failDetail={failDetail}
+      onRetry={retry}
+    />
+  )
 }

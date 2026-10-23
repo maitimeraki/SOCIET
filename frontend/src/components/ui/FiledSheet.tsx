@@ -20,7 +20,8 @@ import { ruleClasses } from './Rule'
 export type FiledDecision = {
   question: string
   position: Position
-  share: number
+  /** The weighted share; `null` when the decision recorded no confidence — stated, never invented. */
+  share: number | null
   caseAgainst: string
   sources: string
 }
@@ -34,7 +35,7 @@ export default function FiledSheet({
   sample?: boolean
   className?: string
 }) {
-  const share = decision.share.toFixed(2)
+  const share = decision.share === null ? '—' : decision.share.toFixed(2)
   return (
     <Card as="article" pad={24} radius="lg" className={className}>
       <div className="flex items-start justify-between gap-3">
@@ -53,7 +54,7 @@ export default function FiledSheet({
           <PositionMark position={decision.position} size="sm" ground="light" />
         </p>
         <Meter
-          value={decision.share}
+          value={decision.share ?? 0}
           label="share"
           display={share}
           tone="ink"

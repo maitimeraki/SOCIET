@@ -1,22 +1,18 @@
 import { Link, NavLink } from 'react-router-dom'
-import { Files, Gavel, SealCheck, UsersThree } from '@phosphor-icons/react'
+import { SquaresFour } from '@phosphor-icons/react'
 import { useAuthStore } from '../../auth/authStore'
 import HealthDot from './HealthDot'
 
 /**
- * §7 The rail — the persistent left column: brand at its head, the four section items in the middle,
- * the account reading at its foot. 240px on wide screens, 64px and icon-only below `lg`.
+ * §7 The rail — the persistent left column: brand at its head, the account's one item in the
+ * middle, the account reading at its foot. 240px on wide screens, 64px and icon-only below `lg`.
  *
- * The label and the path deliberately differ (D16): "Documents" is customer copy, `/documents` is an
- * internal identifier exempt from the copy law (§13). `NavLink` sets `aria-current` for us, so the
- * active item is correct without a pathname comparison here.
+ * D1: the dashboard absorbs the four former rail pages, so the rail carries **one** item — "Your
+ * work" — and the four section names live on the page, where their order is the lifecycle's.
+ * `NavLink` sets `aria-current` for us, so the active item is correct without a pathname
+ * comparison here.
  */
-const SECTIONS = [
-  { to: '/documents', label: 'Documents', Icon: Files },
-  { to: '/runs', label: 'Decisions', Icon: Gavel },
-  { to: '/results', label: 'Verdicts', Icon: SealCheck },
-  { to: '/panel', label: 'Panel', Icon: UsersThree },
-]
+const ITEMS = [{ to: '/dashboard', label: 'Your work', Icon: SquaresFour }]
 
 // §7 Rail item states — resting ink-2; hover a ground fill; active an accent-soft fill with a 3px
 // accent left rule and ink at weight 500. The rule is a `::before` flush to the rail's own edge, so
@@ -24,7 +20,7 @@ const SECTIONS = [
 //
 // The active item's ICON takes the accent too: the accent-soft fill alone measures 1.035:1 against
 // the rail, which the eye cannot find. The accent is on the mark, and the word stays ink.
-const ITEM = 'relative flex items-center gap-3 px-3 py-2 font-titling text-body transition-colors'
+const ITEM = 'relative flex min-h-11 items-center gap-3 px-3 py-2 font-titling text-body transition-colors'
 const itemClass = ({ isActive }: { isActive: boolean }) =>
   isActive
     ? `${ITEM} bg-accent-soft font-medium text-ink before:absolute before:inset-y-0 before:left-0 before:w-[3px] before:bg-accent`
@@ -42,8 +38,11 @@ export default function Rail() {
     // child — a landmark jump to "Sections" must not land on account or health chrome.
     <div className="flex w-16 shrink-0 flex-col border-r border-border bg-ground-2 lg:w-60">
       <nav aria-label="Sections" className="flex flex-1 flex-col">
-        <div className="flex h-14 shrink-0 items-center gap-2 px-4">
-          <Link to="/" className="flex items-center gap-2 text-ink">
+        <div className="flex h-14 shrink-0 items-center gap-2 px-2 lg:px-4">
+          <Link
+            to="/"
+            className="flex min-h-11 min-w-11 items-center justify-center gap-2 text-ink lg:justify-start"
+          >
             {/* §7 draws a diamond, not a logo — the glyph is the mark, the wordmark names the product. */}
             <span aria-hidden="true" className="font-titling text-title leading-none">
               ◆
@@ -55,15 +54,15 @@ export default function Rail() {
         </div>
 
         <ul className="flex flex-1 flex-col gap-1">
-          {SECTIONS.map((s) => (
-            <li key={s.to}>
-              <NavLink to={s.to} className={itemClass}>
+          {ITEMS.map((item) => (
+            <li key={item.to}>
+              <NavLink to={item.to} className={itemClass}>
                 {({ isActive }) => (
                   <>
                     <span className={`flex w-4 shrink-0 justify-center ${isActive ? 'text-accent' : ''}`}>
-                      <s.Icon size={16} aria-hidden="true" />
+                      <item.Icon size={16} aria-hidden="true" />
                     </span>
-                    <span className={LABEL}>{s.label}</span>
+                    <span className={LABEL}>{item.label}</span>
                   </>
                 )}
               </NavLink>

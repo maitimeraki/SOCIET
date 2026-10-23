@@ -1,118 +1,108 @@
-import { useEffect, useState } from 'react'
-import { Link } from 'react-router-dom'
-import { listRunsPage } from '../api/rest'
+import { useCallback, useEffect, useState } from 'react'
+import { useLocation } from 'react-router-dom'
+import { listRunsPage, listUploads } from '../api/rest'
 import type { RunSummary } from '../api/types'
-import ChamberFloor from '../components/chamber/ChamberFloor'
-import { toast } from '../components/ui/Toast'
-import { useRunStore } from '../run/runStore'
-import { useDraftStore } from '../wizard/draftStore'
+import DocumentsSection from '../sections/DocumentsSection'
+import PanelSection from '../sections/PanelSection'
+import ResultsSection from '../sections/ResultsSection'
+import RunsSection from '../sections/RunsSection'
 import DashboardView from './dashboardView'
+import { beginDecisionSubject, sharedDecisionSubject } from './dashboardSubject'
 
-/** The v1 page size (plan §6): one keyset page of 25, then Load more walks `next_cursor`. */
+/** The v1 page size: one keyset page of 25, the same page every section's first read uses. */
 const PAGE_SIZE = 25
 
-/** The newest run still on the floor — the inset's subject; null when nothing is deliberating. */
-function liveRun(runs: RunSummary[]): RunSummary | null {
-  return runs.find((run) => run.status === 'running') ?? null
-}
-
 /**
- * The live-debate inset (plan §3.3). It drives the same `ChamberFloor` and the same run store the
- * full `/runs/:runId` view uses — one subscription for the one live run, never one per timeline row —
- * so the inset is bounded exactly as the full view is: the floor is bounded by the roster (≤
- * `max_agents`), and its seat arcs reuse the chamber's existing geometry. Hidden below `lg`; the
- * heading links to the run.
- *
- * Not `GraphCanvas`: that surface streams `/api/v1/simulate/{id}/graph_stream`, which resolves a
- * *job* doc to a dataset snapshot — a debate run is a run, not a graph job, and the dashboard holds no
- * graph job id — so the running debate's graph is the floor, not the corpus graph.
+ * Keep a deep-linked section in view while its content settles (§14.3). The four sections fetch
+ * independently, so a section above the target can grow after the first scroll; the browser's own
+ * hash jump alone lands at the top, which is not the contract. The scroll is `auto` under
+ * `prefers-reduced-motion: reduce` and `smooth` otherwise. The observer stays just long enough for
+ * the page to stop moving and then lets go.
  */
-function LiveInset({ run }: { run: RunSummary }) {
-  const roster = useRunStore((s) => s.run.roster)
-  const rounds = useRunStore((s) => s.run.rounds)
-  const livePairs = useRunStore((s) => s.run.livePairs)
-  const loadAndConnect = useRunStore((s) => s.loadAndConnect)
-  const disconnect = useRunStore((s) => s.disconnect)
-
+function useAnchorScroll(hash: string, ready: boolean) {
   useEffect(() => {
-    void loadAndConnect(run.run_id)
-    return () => disconnect()
-  }, [run.run_id, loadAndConnect, disconnect])
-
-  return (
-    <section className="border-y border-ink-4 py-3">
-      <header className="mb-2 flex flex-wrap items-baseline justify-between gap-2">
-        <h2 className="text-heading text-ink">Debating now</h2>
-        <Link to={`/runs/${run.run_id}`} className="text-body text-ink-2 hover:text-accent">
-          Open the run →
-        </Link>
-      </header>
-      <p className="mb-3 truncate text-body text-ink-2">{run.query}</p>
-      <div className="hidden lg:block">
-        <ChamberFloor roster={roster} rounds={rounds} activeRound={null} livePairs={livePairs} />
-      </div>
-    </section>
-  )
+    if (!ready) return
+    const id = decodeURIComponent(hash.replace(/^#/, ''))
+    if (!id) return
+    const target = document.getElementById(id)
+    if (!target) return
+    const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches
+    target.scrollIntoView({ behavior: reduce ? 'auto' : 'smooth', block: 'start' })
+    const observer = new ResizeObserver(() => {
+      target.scrollIntoView({ behavior: 'auto', block: 'start' })
+    })
+    observer.observe(document.body)
+    const timer = window.setTimeout(() => observer.disconnect(), 1500)
+    return () => {
+      observer.disconnect()
+      window.clearTimeout(timer)
+    }
+  }, [hash, ready])
 }
 
 /**
- * The operate home (plan §3.3). It owns the data flow — the first keyset page, Load more over
- * `next_cursor`, the wizard's corpus for the primary action — and the live inset; the presentation
- * lives in `dashboardView`, which the node-only suite renders directly.
+ * The dashboard (§14.3, D1): the account's one surface. It renders the four sections in the
+ * lifecycle's order and owns only what the page itself needs — whether the whole account is empty,
+ * the running decision for the one-line live band, one refresh for the whole surface, and the
+ * anchor scroll. Each section owns its own fetch.
  */
 export default function DashboardPage() {
-  const [runs, setRuns] = useState<RunSummary[]>([])
-  const [cursor, setCursor] = useState<string | null>(null)
-  const [loading, setLoading] = useState(true)
-  const [loadingMore, setLoadingMore] = useState(false)
-  const [failed, setFailed] = useState(false)
-  // The server's own message, forwarded so the failure state is never silent (CLAUDE.md: never
-  // swallow exceptions). Absent (a non-Error throw) the view falls back to its standing copy.
-  const [failDetail, setFailDetail] = useState<string>()
-  // The client's own corpus knowledge: the wizard draft (sessionStorage). Absent in a fresh session,
-  // so the primary action defaults to the ingest step.
-  const datasetId = useDraftStore((s) => s.datasetId)
+  const { hash } = useLocation()
+  // A fresh visit begins a fresh subject walk; the sections share this epoch.
+  const [subjectEpoch] = useState(beginDecisionSubject)
+  const [live, setLive] = useState<RunSummary | null>(null)
+  const [accountEmpty, setAccountEmpty] = useState(false)
+  const [settled, setSettled] = useState(false)
+  const [refreshKey, setRefreshKey] = useState(0)
 
   useEffect(() => {
-    listRunsPage({ limit: PAGE_SIZE })
-      .then((page) => {
-        setRuns(page.items)
-        setCursor(page.next_cursor)
-      })
-      .catch((error: unknown) => {
-        setFailed(true)
-        setFailDetail(error instanceof Error ? error.message : undefined)
-      })
-      .finally(() => setLoading(false))
-  }, [])
-
-  const loadMore = async () => {
-    if (!cursor) return
-    setLoadingMore(true)
-    try {
-      const page = await listRunsPage({ limit: PAGE_SIZE, cursor })
-      setRuns((previous) => [...previous, ...page.items])
-      setCursor(page.next_cursor)
-    } catch (error) {
-      toast('error', error instanceof Error ? error.message : "Couldn't load more runs")
-    } finally {
-      setLoadingMore(false)
+    let cancelled = false
+    // The account's emptiness and the live decision are page-level facts. The subject walk is
+    // started here too (and cached), so the first anchor scroll waits for the answer's subject
+    // rather than for a skeleton that is about to change height.
+    Promise.allSettled([
+      listUploads(),
+      listRunsPage({ limit: PAGE_SIZE }),
+      sharedDecisionSubject(subjectEpoch),
+    ]).then(
+      ([uploads, runs]) => {
+        if (cancelled) return
+        if (uploads.status === 'fulfilled' && runs.status === 'fulfilled') {
+          setAccountEmpty(uploads.value.items.length === 0 && runs.value.items.length === 0)
+        }
+        if (runs.status === 'fulfilled') {
+          setLive(runs.value.items.find((run) => run.status === 'running') ?? null)
+        }
+        for (const result of [uploads, runs]) {
+          if (result.status === 'rejected') {
+            // The sections surface their own failures; the page probe must not swallow its own.
+            console.error('DashboardPage: could not read the account state.', result.reason)
+          }
+        }
+        setSettled(true)
+      },
+    )
+    return () => {
+      cancelled = true
     }
-  }
+  }, [refreshKey, subjectEpoch])
 
-  const live = liveRun(runs)
+  useAnchorScroll(hash, settled)
+
+  // One retry refreshes the whole surface (§14.3's ERROR row): every section re-reads, and the
+  // subject walk starts over because the failed read cleared its cache.
+  const refresh = useCallback(() => setRefreshKey((key) => key + 1), [])
 
   return (
     <DashboardView
-      runs={runs}
-      loading={loading}
-      failed={failed}
-      failDetail={failDetail}
-      hasMore={cursor !== null}
-      loadingMore={loadingMore}
-      onLoadMore={loadMore}
-      datasetReady={datasetId !== null}
-      liveInset={live ? <LiveInset run={live} /> : undefined}
+      accountEmpty={accountEmpty}
+      live={live ? { runId: live.run_id, question: live.query } : null}
+      material={<DocumentsSection refreshKey={refreshKey} onRefresh={refresh} />}
+      decisions={<RunsSection refreshKey={refreshKey} onRefresh={refresh} />}
+      lastAnswer={
+        <ResultsSection refreshKey={refreshKey} onRefresh={refresh} subjectEpoch={subjectEpoch} />
+      }
+      panel={<PanelSection refreshKey={refreshKey} onRefresh={refresh} subjectEpoch={subjectEpoch} />}
     />
   )
 }

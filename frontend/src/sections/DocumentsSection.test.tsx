@@ -68,7 +68,7 @@ describe('DocumentsSection — §8.3 Documents', () => {
       'API 500: the list is unavailable',
     )
     // No message forwarded → the view's own copy, never an empty detail.
-    expect(render({ documents: [], failed: true })).toContain('load when the server is back')
+    expect(render({ documents: [], failed: true })).toContain('loads when the server is back')
   })
 })
 
