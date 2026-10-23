@@ -1,11 +1,13 @@
 import { useEffect, useState, type FormEvent } from 'react'
-import { useNavigate, useSearchParams } from 'react-router-dom'
-import { CautionLine, IntakeStamp } from '../auth/authForm'
+import { Link, useNavigate, useSearchParams } from 'react-router-dom'
+import { SIGN_IN } from '../auth/authCopy'
+import { CautionLine, IntakeStamp, PasswordField } from '../auth/authForm'
 import {
   STAMP_MS,
   type AuthError,
   authErrorCopy,
   emailError,
+  fieldProblem,
   passwordError,
   safeNext,
 } from '../auth/authRules'
@@ -15,10 +17,10 @@ import Field from '../components/ui/Field'
 import Input from '../components/ui/Input'
 
 /**
- * §7.2 Sign-in — the intake form on the sheet. Fields sit on ruled baselines (`Field`/`Input`); the
- * submit is the route button ("Open the office"). Validation runs on blur and on submit; the invalid
- * state is `Field`'s vermilion hatched margin note (never a red box), and the form-level error is the
- * warn caution line with its words in ink (R35). Success sets the store and routes to `next`.
+ * §14.2 Sign-in — the intake form on the sheet. Fields sit on ruled baselines (`Field`/`Input`); the
+ * submit is the route button ("Sign in"). Validation runs on blur and on submit; the invalid state
+ * is the field's hatched margin note (never a red box), and the form-level error is the warn
+ * caution line with its words in ink (R35). Success sets the store and routes to `next`.
  */
 export default function SignInPage() {
   const signin = useAuthStore((s) => s.signin)
@@ -42,8 +44,15 @@ export default function SignInPage() {
     return () => clearTimeout(id)
   }, [redirectTo, navigate])
 
-  const emailProblem = touched.email || submitted ? emailError(email) : null
-  const passwordProblem = touched.password || submitted ? passwordError(password) : null
+  // The mark is derived from the value, not stored: a paste or an autofill clears it as surely as
+  // a keystroke, and a submit does not freeze the other fields red while one is corrected.
+  const emailProblem = fieldProblem(email, touched.email, submitted, emailError)
+  const passwordProblem = fieldProblem(password, touched.password, submitted, passwordError)
+
+  // The other door carries the same destination, so the round trip keeps where the visitor was
+  // heading. `safeNext` runs on it first: only a same-origin path ever travels in the URL.
+  const next = params.get('next')
+  const nextSuffix = next ? `?next=${encodeURIComponent(safeNext(next))}` : ''
 
   async function submit() {
     if (submitting || redirectTo !== null) return
@@ -68,8 +77,8 @@ export default function SignInPage() {
   return (
     <form onSubmit={onSubmit} noValidate aria-busy={submitting} className="space-y-6">
       <header>
-        <h1 className="font-titling text-title text-ink">Sign in</h1>
-        <p className="mt-1 text-body text-ink-2">Open the office and pick up where you left off.</p>
+        <h1 className="font-titling text-title text-ink">{SIGN_IN.heading}</h1>
+        <p className="mt-1 text-body text-ink-2">{SIGN_IN.lead}</p>
       </header>
 
       <Field label="Email" error={emailProblem ?? undefined}>
@@ -81,32 +90,42 @@ export default function SignInPage() {
           value={email}
           onChange={(e) => setEmail(e.target.value)}
           onBlur={() => setTouched((t) => ({ ...t, email: true }))}
+          disabled={submitting}
           aria-invalid={emailProblem ? true : undefined}
         />
       </Field>
 
-      <Field label="Password" error={passwordProblem ?? undefined}>
-        <Input
-          id="signin-password"
-          name="password"
-          type="password"
-          autoComplete="current-password"
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
-          onBlur={() => setTouched((t) => ({ ...t, password: true }))}
-          aria-invalid={passwordProblem ? true : undefined}
-        />
-      </Field>
+      <PasswordField
+        id="signin-password"
+        name="password"
+        label="Password"
+        error={passwordProblem ?? undefined}
+        value={password}
+        onChange={setPassword}
+        onBlur={() => setTouched((t) => ({ ...t, password: true }))}
+        autoComplete="current-password"
+        disabled={submitting}
+      />
 
       {error && <CautionLine error={error} onRetry={submit} />}
 
       {redirectTo !== null ? (
-        <IntakeStamp label="Signed in" />
+        <IntakeStamp label={SIGN_IN.stamp} />
       ) : (
-        <Button type="submit" variant="primary" loading={submitting}>
-          Open the office
+        <Button type="submit" variant="primary" loading={submitting} className="max-lg:min-h-11">
+          {SIGN_IN.action}
         </Button>
       )}
+
+      <p className="text-body text-ink-3">
+        {SIGN_IN.crossQuestion}{' '}
+        <Link
+          to={`/auth/signup${nextSuffix}`}
+          className="inline-flex min-h-11 min-w-11 items-center font-titling text-body text-ink-2 underline decoration-ink-3 underline-offset-4 transition-colors duration-state hover:text-ink hover:decoration-accent lg:min-h-0 lg:min-w-0"
+        >
+          {SIGN_IN.crossAction}
+        </Link>
+      </p>
     </form>
   )
 }

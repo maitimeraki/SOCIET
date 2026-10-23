@@ -279,7 +279,11 @@
 /* §8.2 Invalid — a monochrome danger rule at the left edge, never a red box. `Field` applies this to
    the field entry whenever `error` is set. The margin it sits in is reserved unconditionally by
    `Field` (`pl-2.5`), so the mark never moves the control — the rule appears, the layout does not.
-   The message itself stays Field's `role="alert"` line in ink; the hue is the mark, never the text. */
+   The message itself stays Field's `role="alert"` line in ink; the hue is the mark, never the text.
+
+   The density is measured, not asserted: 2px of `--color-danger` in a 3px period composites to
+   #D06868 over the white sheet, which is 3.585:1 — clear of the 3:1 floor. At 1px in 3px the
+   composite was #E5ACAC and 1.941:1, under the floor. The stripe's own colour is 6.470:1. */
 @utility field-invalid {
   position: relative;
 
@@ -290,7 +294,7 @@
     bottom: 0;
     left: 0;
     width: 3px;
-    background: repeating-linear-gradient(-45deg, var(--color-danger) 0 1px, transparent 1px 3px);
+    background: repeating-linear-gradient(-45deg, var(--color-danger) 0 2px, transparent 0 3px);
   }
 }
 

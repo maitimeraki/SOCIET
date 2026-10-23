@@ -8,7 +8,7 @@ import { ApiError, ConfigError, NetworkError } from '../api/rest'
 
 /** How long the intake stamp holds before the page routes on. The `plot-fix` move it rides runs 560 ms
  *  and only reaches full opacity at 60% (~336 ms), so a shorter hold was a blink on a normal-motion
- *  machine. 640 ms lets the mark complete (560 ms) and settle for a beat before the office opens. */
+ *  machine. 640 ms lets the mark complete (560 ms) and settle for a beat before the page moves on. */
 export const STAMP_MS = 640
 
 const DEFAULT_NEXT = '/dashboard'
@@ -106,4 +106,25 @@ export function confirmError(password: string, confirm: string): string | null {
   if (confirm === '') return 'Re-enter your password.'
   if (confirm !== password) return 'Passwords do not match.'
   return null
+}
+
+/**
+ * The invalid mark for one field: **derived from the field's current value, on every render**.
+ *
+ * `touched` says *when* the mark first appears — on blur, or on submit — and the field's own value
+ * says *whether* it is there. So the mark clears the moment that field's value becomes valid, a
+ * paste or an autofill as much as a keystroke, and a submit does not leave the other fields red
+ * while one of them is being corrected.
+ *
+ * It is a function of the value rather than stored state on purpose: a stored flag can only be
+ * cleared by a keystroke in that field, which is the cascade bug §14.2 names.
+ */
+export function fieldProblem(
+  value: string,
+  touched: boolean,
+  submitted: boolean,
+  validate: (value: string) => string | null,
+): string | null {
+  if (!touched && !submitted) return null
+  return validate(value)
 }
