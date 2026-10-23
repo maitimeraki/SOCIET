@@ -10,10 +10,10 @@ import NotFoundPage from './pages/NotFoundPage'
 // Sigma/graphology/framer-motion leave the entry chunk entirely. Specifiers stay static literals: a
 // computed path would defeat Vite's deterministic split. NotFoundPage stays eager (12 lines, no heavy
 // imports) so a mistyped URL never waits on a chunk fetch to say "not found".
-const LandingPage = lazy(() => import('./marketing/LandingPage'))
+const Hero = lazy(() => import('./marketing/Hero'))
 // The homepage DEMO — the target design from `docs/FRONTEND_DESIGN_REVIEW.md` §2.1, built as a
-// preview and not as a migration. It is scoped to its own tokens (`marketing/home-demo.css`), so
-// it changes nothing about the shipped `/` or any other surface.
+// preview and kept until the owner signs off. It is scoped to its own tokens
+// (`marketing/home-demo.css`), so it changes nothing about the shipped `/` or any other surface.
 const HomeDemo = lazy(() => import('./marketing/HomeDemo'))
 const NewRunWorkspace = lazy(() => import('./pages/NewRunWorkspace'))
 const RunPage = lazy(() => import('./pages/RunPage'))
@@ -29,7 +29,7 @@ const SignUpPage = lazy(() => import('./pages/SignUpPage'))
 /**
  * The route tree (plan §1). Three layout routes, so `/` and `/auth/*` render without shell chrome:
  *
- *   MarketingLayout  — public; `/` renders the survey sheet (LandingPage).
+ *   MarketingLayout  — public; `/` renders the homepage (Hero).
  *   AuthLayout       — public; the sign-in/up surfaces.
  *   RequireAuth      — the guard; wraps AppShell (the chrome) around the authed pages.
  *
@@ -43,7 +43,7 @@ export default function App() {
       <Suspense fallback={<RouteFallback />}>
         <Routes>
           <Route element={<MarketingLayout />}>
-            <Route path="/" element={<LandingPage />} />
+            <Route path="/" element={<Hero />} />
             <Route path="/demo-home" element={<HomeDemo />} />
           </Route>
 

@@ -1,8 +1,10 @@
 import { Link } from 'react-router-dom'
 import { useEffect, useRef } from 'react'
 import type { ReactNode } from 'react'
+import Band from '../components/ui/Band'
 import { buttonClasses } from '../components/ui/Button'
 import Disclosure from '../components/ui/Disclosure'
+import { ruleClasses } from '../components/ui/Rule'
 import './hero.css'
 
 /**
@@ -10,10 +12,10 @@ import './hero.css'
  * whole page: the split hero, then the twelve parts of §13.3 of `docs/FRONTEND_PRODUCTION_PLAN.md`.
  *
  * It replaced the retired landing sheet (`LandingPage` and its family), which is the world's
- * old voice. Everything this page needs is scoped to `.hero-page` (`hero.css`), so it changes
- * nothing about any other surface. The five named surfaces it is built from (`--color-page`,
- * `--color-band`, `--color-surface-sky`, `--color-surface-warm`, `--color-surface-plum`) are
- * global tokens, so any other page or component may take the same ones.
+ * old voice. The bands and the rules it is built from are the kit's (`components/ui/Band.tsx`,
+ * `components/ui/Rule.tsx`), so any other surface can take the same named surfaces instead of
+ * copying this page's CSS. The five named surfaces (`--color-page`, `--color-band`,
+ * `--color-surface-sky`, `--color-surface-warm`, `--color-surface-plum`) are global tokens.
  *
  * The order of the page is the order a stranger decides in, and every band has one job:
  *
@@ -29,8 +31,8 @@ import './hero.css'
  *   · nothing is claimed that the product does not do, and the one piece of authored material on
  *     the page (the panel's turns) is labelled a worked example.
  *
- * The copy lives inline here on purpose: these strings move to `marketing/copy.ts` with the rest
- * of the surface when the copy is finalised.
+ * The copy lives inline here on purpose: the strings are the page's, and the page is the only
+ * place they are rendered.
  */
 
 const CAPTURES = {
@@ -242,7 +244,7 @@ function NoisePanel() {
             the weighted share
           </span>
         </p>
-        <div className="rule-t mt-3 pt-3">
+        <div className={`${ruleClasses('top')} mt-3 pt-3`}>
           <p className="font-measurement text-mono uppercase tracking-[0.14em] text-caution">
             The case against
           </p>
@@ -262,7 +264,7 @@ function NoisePanel() {
  */
 function HeroSection() {
   return (
-    <section className="band band--ground pt-16" aria-labelledby="demo-hero-headline">
+    <Band tone="page" className="pt-16" aria-labelledby="demo-hero-headline">
       <div className="shell">
         <div className="grid gap-14 xl:grid-cols-[560px_minmax(0,1fr)] xl:items-start xl:gap-16">
           <div>
@@ -311,7 +313,7 @@ function HeroSection() {
           </div>
         </div>
       </div>
-    </section>
+    </Band>
   )
 }
 
@@ -336,18 +338,18 @@ function Facts() {
   ]
 
   return (
-    <section className="band band--grey band--dense" aria-label="What is true of the product">
+    <Band tone="band" dense aria-label="What is true of the product">
       <div className="shell">
         <ul className="grid gap-8 md:grid-cols-3 md:gap-10">
           {facts.map((fact) => (
-            <li key={fact.label} className="rule-t pt-4">
+            <li key={fact.label} className={`${ruleClasses('top')} pt-4`}>
               <p className="font-measurement text-mono uppercase tracking-[0.14em] text-ink-3">{fact.label}</p>
               <p className="mt-2 max-w-[42ch] font-titling text-[15px] leading-[24px] text-ink-2">{fact.body}</p>
             </li>
           ))}
         </ul>
       </div>
-    </section>
+    </Band>
   )
 }
 
@@ -364,7 +366,7 @@ function Problem() {
   ]
 
   return (
-    <section aria-labelledby="demo-problem-heading" className="band band--warm">
+    <Band tone="warm" aria-labelledby="demo-problem-heading">
       <div ref={ref} className="shell reveal">
         <div className="grid gap-10 lg:grid-cols-[1fr_1fr] lg:gap-20">
           <div>
@@ -380,14 +382,14 @@ function Problem() {
 
           <ul className="self-end">
             {lines.map((line) => (
-              <li key={line} className="rule-t py-4 font-titling text-[17px] leading-[26px] text-ink">
+              <li key={line} className={`${ruleClasses('top')} py-4 font-titling text-[17px] leading-[26px] text-ink`}>
                 {line}
               </li>
             ))}
           </ul>
         </div>
       </div>
-    </section>
+    </Band>
   )
 }
 
@@ -418,7 +420,7 @@ function HowItWorks() {
   ]
 
   return (
-    <section id="how-it-works" aria-labelledby="demo-how-heading" className="band band--sky">
+    <Band tone="sky" id="how-it-works" aria-labelledby="demo-how-heading">
       <div ref={ref} className="shell reveal">
         <h2 id="demo-how-heading" className="font-record text-[40px] font-semibold leading-[1.1] tracking-[-0.02em] text-ink">
           How it works
@@ -430,7 +432,7 @@ function HowItWorks() {
 
         <ol className="mt-10 grid gap-8 md:grid-cols-4 md:gap-10">
           {steps.map((step) => (
-            <li key={step.key} className="rule-t pt-4">
+            <li key={step.key} className={`${ruleClasses('top')} pt-4`}>
               <p className="font-measurement text-mono text-ink-3">{step.key}</p>
               <h3 className="mt-3 font-titling text-title text-ink">{step.title}</h3>
               <p className="mt-2 max-w-[38ch] font-titling text-[15px] leading-[24px] text-ink-2">{step.body}</p>
@@ -438,7 +440,7 @@ function HowItWorks() {
           ))}
         </ol>
       </div>
-    </section>
+    </Band>
   )
 }
 
@@ -469,13 +471,13 @@ function TheAnswer() {
   ]
 
   return (
-    <section id="answer" aria-labelledby="demo-answer-heading" className="band band--plum">
+    <Band tone="plum" id="answer" aria-labelledby="demo-answer-heading">
       <div ref={ref} className="shell reveal">
         <h2 id="demo-answer-heading" className="font-record text-[40px] font-semibold leading-[1.1] tracking-[-0.02em] text-ink">
           What you get back
         </h2>
         <p className="mt-3 max-w-[56ch] font-titling text-[15px] leading-[24px] text-ink-2">
-          Four objects, every time — and none of them is a chat you have to keep prompting.
+          Four objects, every time — and none of them is a chat you have to keep asking.
         </p>
 
         <ul className="mt-10 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
@@ -500,7 +502,7 @@ function TheAnswer() {
           Not a transcript. A document you can read on screen and take away.
         </p>
       </div>
-    </section>
+    </Band>
   )
 }
 
@@ -536,7 +538,7 @@ function FiledSheet() {
         Should Ridgeline Coffee open a second location on Mill Street this spring?
       </p>
 
-      <div className="rule-t mt-4 flex items-baseline justify-between pt-4">
+      <div className={`${ruleClasses('top')} mt-4 flex items-baseline justify-between pt-4`}>
         <p className="flex items-center gap-2 font-measurement text-[11px] uppercase tracking-[0.14em] text-ink">
           <PositionMark position="NEGATIVE" size={12} />
           Negative
@@ -547,14 +549,14 @@ function FiledSheet() {
         <div className="h-1.5 rounded-full bg-ink" style={{ width: '82%' }} />
       </div>
 
-      <div className="rule-t mt-4 pt-4">
+      <div className={`${ruleClasses('top')} mt-4 pt-4`}>
         <p className="font-measurement text-mono uppercase tracking-[0.14em] text-caution">The case against</p>
         <p className="mt-1 font-titling text-[13px] leading-[20px] text-ink-2">
           If the grease-trap work lands on time, the Mill Street economics hold.
         </p>
       </div>
 
-      <div className="rule-t mt-4 pt-4">
+      <div className={`${ruleClasses('top')} mt-4 pt-4`}>
         <p className="font-measurement text-mono uppercase tracking-[0.14em] text-ink-3">Sources</p>
         <p className="mt-1 font-measurement text-[11px] leading-[18px] text-ink-3">
           Mill Street lease · economics · grease-trap certification · Alder Lane lease
@@ -568,7 +570,7 @@ function Difference() {
   const ref = useReveal<HTMLDivElement>()
 
   return (
-    <section aria-labelledby="demo-difference-heading" className="band band--grey">
+    <Band tone="band" aria-labelledby="demo-difference-heading">
       <div ref={ref} className="shell reveal">
         <h2 id="demo-difference-heading" className="font-record text-[40px] font-semibold leading-[1.1] tracking-[-0.02em] text-ink">
           Not a conversation. A filed decision.
@@ -624,7 +626,7 @@ function Difference() {
           The difference is not the interface. It is what you are holding at the end.
         </p>
       </div>
-    </section>
+    </Band>
   )
 }
 
@@ -658,7 +660,7 @@ function UseCases() {
   ]
 
   return (
-    <section id="use-cases" aria-labelledby="demo-cases-heading" className="band band--ground">
+    <Band tone="page" id="use-cases" aria-labelledby="demo-cases-heading">
       <div ref={ref} className="shell reveal">
         <div className="grid gap-8 lg:grid-cols-[380px_1fr] lg:gap-16">
           <div>
@@ -682,7 +684,7 @@ function UseCases() {
           </ul>
         </div>
       </div>
-    </section>
+    </Band>
   )
 }
 
@@ -701,7 +703,7 @@ function Limits() {
   ]
 
   return (
-    <section aria-labelledby="demo-limits-heading" className="band band--grey">
+    <Band tone="band" aria-labelledby="demo-limits-heading">
       <div ref={ref} className="shell reveal">
         <h2 id="demo-limits-heading" className="font-record text-[40px] font-semibold leading-[1.1] tracking-[-0.02em] text-ink">
           What this tool does — and does not
@@ -714,7 +716,7 @@ function Limits() {
         <div className="mt-10 grid gap-10 md:grid-cols-2 md:gap-16">
           <div>
             <h3 className="font-titling text-heading text-ink">What it does</h3>
-            <ul className="divide-rule mt-4">
+            <ul className={`${ruleClasses('around')} mt-4`}>
               {does.map((line) => (
                 <li key={line.label} className="py-4">
                   <p className="font-titling font-medium text-ink">{line.label}</p>
@@ -725,7 +727,7 @@ function Limits() {
           </div>
           <div>
             <h3 className="font-titling text-heading text-ink">What it does not do</h3>
-            <ul className="divide-rule mt-4">
+            <ul className={`${ruleClasses('around')} mt-4`}>
               {doesNot.map((line) => (
                 <li key={line.label} className="py-4">
                   <p className="font-titling font-medium text-ink">{line.label}</p>
@@ -736,7 +738,7 @@ function Limits() {
           </div>
         </div>
       </div>
-    </section>
+    </Band>
   )
 }
 
@@ -747,7 +749,7 @@ function Limits() {
 function FiledAnswer() {
   const ref = useReveal<HTMLDivElement>()
   return (
-    <section aria-labelledby="demo-filed-heading" className="band band--dark">
+    <Band tone="dark" aria-labelledby="demo-filed-heading">
       <div ref={ref} className="shell reveal">
         <div className="grid gap-12 lg:grid-cols-[1fr_440px] lg:items-center lg:gap-20">
           <div>
@@ -780,7 +782,7 @@ function FiledAnswer() {
           </figure>
         </div>
       </div>
-    </section>
+    </Band>
   )
 }
 
@@ -831,7 +833,7 @@ function Questions() {
   ]
 
   return (
-    <section id="questions" aria-labelledby="demo-faq-heading" className="band band--ground band--dense">
+    <Band tone="page" dense id="questions" aria-labelledby="demo-faq-heading">
       <div ref={ref} className="shell reveal">
         <div className="grid gap-10 lg:grid-cols-[360px_1fr] lg:gap-20">
           <div>
@@ -844,7 +846,7 @@ function Questions() {
             </p>
           </div>
 
-          <div className="demo-faq">
+          <div className="hero-faq">
             {items.map((item, index) => (
               <Disclosure key={item.q} summary={item.q} defaultOpen={index === 0}>
                 <p className="max-w-[68ch] font-titling text-[14px] leading-[22px] text-ink-2">{item.a}</p>
@@ -853,7 +855,7 @@ function Questions() {
           </div>
         </div>
       </div>
-    </section>
+    </Band>
   )
 }
 
@@ -861,7 +863,7 @@ function Questions() {
 function Close() {
   const ref = useReveal<HTMLDivElement>()
   return (
-    <section className="band band--plum" aria-labelledby="demo-close-heading">
+    <Band tone="plum" aria-labelledby="demo-close-heading">
       <div ref={ref} className="shell reveal text-center">
         <h2 id="demo-close-heading" className="mx-auto max-w-[18ch] font-record text-[44px] font-semibold leading-[1.08] tracking-[-0.02em] text-ink">
           Bring a question you can&rsquo;t look up.
@@ -876,16 +878,20 @@ function Close() {
         </div>
         <p className="mt-6 font-measurement text-mono text-ink-3">Free to use · No card, no tier</p>
       </div>
-    </section>
+    </Band>
   )
 }
 
 /** The footer — wordmark, the real actions, the edition line. */
 function Footer() {
   return (
-    <footer className="band band--grey band--dense">
+    // The page's last band. It keeps its own `<footer>` element: `Band`'s vocabulary is
+    // `section | div`, and the signed-off page's footer is part of its DOM.
+    <footer className="band band--band band--dense">
       <div className="shell">
-        <div className="flex flex-wrap items-end justify-between gap-x-8 gap-y-6 rule-t pt-6">
+        <div
+          className={`flex flex-wrap items-end justify-between gap-x-8 gap-y-6 ${ruleClasses('top')} pt-6`}
+        >
           <div>
             <div className="flex items-center gap-2.5 text-ink">
               <BrandMark />
@@ -908,8 +914,8 @@ function Footer() {
 }
 
 /**
- * `/hero-page` — the homepage demo. The real `/` is untouched; this route exists so the target
- * design can be looked at, measured and tested before any of it is migrated.
+ * The homepage, at `/`. The design was built and signed off as the review preview (`/demo-home`,
+ * `marketing/HomeDemo.tsx`); this file is the transfer of it, and `/` renders it.
  */
 export default function Hero() {
   return (

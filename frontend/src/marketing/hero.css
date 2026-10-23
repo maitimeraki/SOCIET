@@ -1,8 +1,9 @@
 /*
- * The homepage demo — `/demo-home`.
+ * The homepage — `/`.
  *
- * A redesign of the marketing homepage, built as a preview and not as a migration: `/` and every
- * shipped surface are untouched, and everything this page needs is scoped to `.hero-page` here.
+ * A redesign of the marketing homepage: the design was built as a review preview and signed off
+ * there, and this stylesheet is the page's own. Everything the page needs that is not a named
+ * surface is scoped to `.hero-page` here.
  *
  * THE PLAN (the brief: a homepage has to say what the product IS, what it does for me, and how it
  * improves my work — and it must not read as a gallery of output screenshots).
@@ -46,7 +47,6 @@
   --color-map-ground-2: #16223d;
   --color-map-ink: #e2e8f0;
   --color-map-ink-2: #94a3b8;
-  --color-map-rule: #263450;
   --gradient-map: radial-gradient(
     120% 100% at 50% 0%,
     var(--color-map-ground-2) 0%,
@@ -54,42 +54,11 @@
   );
 
   --radius-xs: 4px; /* Tailwind v4 ships 2px; the design's chip radius is 4px */
-  --default-transition-duration: 120ms; /* closes every bare `transition-colors` at 150ms */
+  --default-transition-duration: 120ms; /* closes every bare `transition-colors` at 120ms — Tailwind's own default is 150ms */
 }
 
-/* ── The bands. Each section flips the surface, so the eye can rest and the page has rhythm. */
-.hero-page .band {
-  padding-block: 96px;
-}
-
-.hero-page .band--dense {
-  padding-block: 64px;
-}
-
-.hero-page .band--ground {
-  background: var(--color-ground);
-}
-
-.hero-page .band--grey {
-  background: var(--color-ground-2);
-}
-
-.hero-page .band--sky {
-  background: var(--color-surface-sky);
-}
-
-.hero-page .band--warm {
-  background: var(--color-surface-warm);
-}
-
-.hero-page .band--plum {
-  background: var(--color-surface-plum);
-}
-
-.hero-page .band--dark {
-  background: var(--gradient-map);
-  color: var(--color-map-ink);
-}
+/* ── The bands and the rules are the kit's (`components/ui/Band.tsx`, `components/ui/Rule.tsx`),
+      so any surface can take the same named surfaces instead of copying this page's CSS. */
 
 .hero-page .shell {
   margin-inline: auto;
@@ -228,39 +197,17 @@
   box-shadow: var(--shadow-overlay);
 }
 
-/* ── The separation vocabulary (review §3.4). The app hand-rolls the record divider in 17 files
-      because there is no rule primitive; here the rule is one token and one class. */
-.hero-page .rule-t {
-  border-top: 1px solid var(--color-rule);
-}
-
-.hero-page .rule-b {
-  border-bottom: 1px solid var(--color-rule);
-}
-
-.hero-page .rule-y {
-  border-block: 1px solid var(--color-rule);
-}
-
-.hero-page .divide-rule > * + * {
-  border-top: 1px solid var(--color-rule);
-}
-
-/* On the dark band the rule is the map's own rule — the light one disappears into the map. */
-.hero-page .band--dark .rule-t,
-.hero-page .band--dark .rule-b,
-.hero-page .band--dark .rule-y,
-.hero-page .band--dark .divide-rule > * + * {
-  border-color: var(--color-map-rule);
-}
+/* ── The separation vocabulary (review §3.4) is the kit's (`components/ui/Rule.tsx`): the app
+      hand-rolls the record divider in 17 files because there is no rule primitive; here the rule
+      is one token and one class, and the dashboard can take the same one. */
 
 /* The shared Disclosure draws its own hairline. On this page the separator is the page's rule
    token, so the shared one is dropped and the rule is drawn between the items instead. */
-.hero-page .demo-faq > div {
+.hero-page .hero-faq > div {
   border-bottom: 0;
 }
 
-.hero-page .demo-faq > div + div {
+.hero-page .hero-faq > div + div {
   border-top: 1px solid var(--color-rule);
 }
 
@@ -271,11 +218,11 @@
  * The section reveal RISES and does not fade, and that is deliberate. The product's own `enter`
  * fades from opacity 0, which is right for content that appears in place — but a section that is
  * faded out is INVISIBLE in a full-page capture (nothing scrolls, so nothing intersects) and in
- * any print or screenshot pass. The demo must always show its whole page. The section sits 8px
+ * any print or screenshot pass. The page must always show its whole page. The section sits 8px
  * low until it enters the viewport and rises into place: a reveal that reads the same and hides
  * nothing.
  */
-@keyframes demo-rise {
+@keyframes hero-rise {
   from {
     transform: translateY(8px);
   }
@@ -289,5 +236,5 @@
 }
 
 .hero-page .reveal.is-revealed {
-  animation: demo-rise var(--duration-enter) var(--ease-standard) both;
+  animation: hero-rise var(--duration-enter) var(--ease-standard) both;
 }

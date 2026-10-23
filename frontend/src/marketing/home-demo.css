@@ -54,7 +54,7 @@
   );
 
   --radius-xs: 4px; /* Tailwind v4 ships 2px; the design's chip radius is 4px */
-  --default-transition-duration: 120ms; /* closes every bare `transition-colors` at 150ms */
+  --default-transition-duration: 120ms; /* closes every bare `transition-colors` at 120ms — Tailwind's own default is 150ms */
 }
 
 /* ── The bands. Each section flips the surface, so the eye can rest and the page has rhythm. */
