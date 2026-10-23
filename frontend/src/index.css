@@ -1,4 +1,9 @@
 @import "tailwindcss";
+/* The rule vocabulary enters through THE CSS ENTRY, not through `Rule.tsx`: a stylesheet imported
+   from a component module is emitted as its own chunk linked BEFORE this sheet, so its `components`
+   layer would be declared first — and low — and `base`'s reset would erase every hairline in the
+   built bundle. One entry, one layer order. */
+@import "./components/ui/rules.css";
 
 @theme {
   /* ── §2 Colour. Neutral ground, one accent, colour-as-meaning: a hue with no job does not exist. */

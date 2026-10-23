@@ -1,5 +1,3 @@
-import './rules.css'
-
 /**
  * §14.1 — the rule vocabulary. The rule is a **border on the content itself**, not a divider
  * element: the boundary belongs to the thing it separates, so the record's edge is one hairline
