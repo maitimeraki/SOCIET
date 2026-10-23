@@ -38,8 +38,8 @@ export default function Band({
   const classes = ['band', `band--${tone}`, dense ? 'band--dense' : '', className]
     .filter(Boolean)
     .join(' ')
-  // The class comes first so the rendered element reads `class="band band--sky" id="…"`, the shape
-  // the signed-off homepage renders.
+  // The class comes first because that is the shape §14.1 and the brief specify:
+  // `class="band band--sky" id="…"`.
   const props = { className: classes, id, 'aria-labelledby': labelledBy, 'aria-label': label }
 
   return as === 'div' ? <div {...props}>{children}</div> : <section {...props}>{children}</section>

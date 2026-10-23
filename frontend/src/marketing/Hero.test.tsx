@@ -106,14 +106,32 @@ describe('the twelve parts — in order, each on its own surface', () => {
 })
 
 describe('the kit — the vocabulary the page is built from', () => {
-  it('takes its separation from the kit, not a hand-rolled hairline', () => {
+  it('names the four sides of the rule', () => {
     expect(ruleClasses('top')).toBe('rule-t')
     expect(ruleClasses('bottom')).toBe('rule-b')
     expect(ruleClasses('both')).toBe('rule-y')
     expect(ruleClasses('around')).toBe('divide-rule')
-    // The page's own containers take the kit's classes; the shared Disclosure keeps its own.
-    expect(html).toContain('class="rule-t mt-3 pt-3"')
+  })
+
+  it('takes every one of the page’s top rules from the kit', () => {
+    // Eight call sites; three of them map over a list — the 3 facts, the 3 lines and the 4 steps —
+    // so the page renders fifteen hairlines, and one fewer would mean a site went hand-rolled.
+    expect(count(html, 'rule-t')).toBe(15)
+  })
+
+  it('takes every one of the page’s divided lists from the kit', () => {
     expect(count(html, 'divide-rule')).toBe(2)
+  })
+
+  it('hands no hand-rolled top hairline to a page container', () => {
+    // §14.1’s sweep pattern, `border-t border-ink-4`: zero on this page.
+    expect(count(html, 'border-t border-ink-4')).toBe(0)
+  })
+
+  it('leaves the shared Disclosure the only ink-4 hairline', () => {
+    // The Disclosure draws its own bottom rule; the page drops it in CSS (`.hero-faq > div`) and
+    // draws the page’s own rule between the items instead. Nothing else may carry one.
+    expect(count(html, 'border-ink-4')).toBe(10)
   })
 })
 

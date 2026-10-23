@@ -8,6 +8,10 @@
  *
  * The class name follows the tone, and a band never fades: it is a flat fill, so the page has
  * rhythm rather than wallpaper.
+ *
+ * These rules are UNSCOPED, so `.band--dark` also reaches the review demo at `/demo-home`; it is
+ * currently invisible there, because the demo's own scoped rules out-specify these with the same
+ * values.
  */
 
 .band {

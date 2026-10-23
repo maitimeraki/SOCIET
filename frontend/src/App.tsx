@@ -11,9 +11,8 @@ import NotFoundPage from './pages/NotFoundPage'
 // computed path would defeat Vite's deterministic split. NotFoundPage stays eager (12 lines, no heavy
 // imports) so a mistyped URL never waits on a chunk fetch to say "not found".
 const Hero = lazy(() => import('./marketing/Hero'))
-// The homepage DEMO — the target design from `docs/FRONTEND_DESIGN_REVIEW.md` §2.1, built as a
-// preview and kept until the owner signs off. It is scoped to its own tokens
-// (`marketing/home-demo.css`), so it changes nothing about the shipped `/` or any other surface.
+// The homepage DEMO — the review copy of the page, from `docs/FRONTEND_DESIGN_REVIEW.md` §2.1,
+// kept behind its own route until the owner signs off and it is retired.
 const HomeDemo = lazy(() => import('./marketing/HomeDemo'))
 const NewRunWorkspace = lazy(() => import('./pages/NewRunWorkspace'))
 const RunPage = lazy(() => import('./pages/RunPage'))
