@@ -18,7 +18,7 @@ describe('SignUpPage — the door in (§14.2)', () => {
   })
 
   it('offers one door label', () => {
-    expect(page).toContain('Start free')
+    expect(page).toMatch(/<button[^>]*>Start free<\/button>/)
   })
 
   it('states the cost once, and only here', () => {

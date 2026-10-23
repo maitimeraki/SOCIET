@@ -32,7 +32,7 @@ export default function AuthLayout() {
             className="inline-flex min-h-11 items-center gap-2.5 self-start lg:min-h-0 lg:items-baseline"
           >
             <span className="font-titling text-[18px] uppercase leading-none tracking-[0.08em] text-ink">Societas</span>
-            <span className="hidden font-measurement text-mono uppercase tracking-[0.06em] text-ink-3 sm:inline">
+            <span className="font-measurement text-mono uppercase tracking-[0.06em] text-ink-3">
               {DESCRIPTOR}
             </span>
           </Link>
@@ -48,13 +48,13 @@ export default function AuthLayout() {
             page belongs to the world (§7.2), and §9 keeps the hierarchy while it drops columns.
             The one hairline turns with the layout — vertical between the columns, horizontal across
             the stack — so it is always one rule, and each one is the edge of the thing it separates:
-            the column boundary on the aside, the content block's top edge in the phone stack. The
-            `!` modifiers are needed because `rules.css` is plain CSS and an unlayered rule outranks
-            a Tailwind utility of the same specificity. */}
+            the column boundary on the aside, the content block's top edge in the phone stack.
+            `rules.css` speaks in `@layer components` and the utilities layer follows it, so the
+            plain responsive utilities below turn the hairline without a `!` to outrank it. */}
         <aside
-          className={`${ruleClasses('left')} px-6 py-12 sm:px-10 lg:flex lg:flex-col lg:justify-center lg:px-14 lg:py-16 max-lg:border-l-0!`}
+          className={`${ruleClasses('left')} px-6 py-12 sm:px-10 lg:flex lg:flex-col lg:justify-center lg:px-14 lg:py-16 max-lg:border-l-0`}
         >
-          <div className={`${ruleClasses('top')} lg:border-t-0!`}>
+          <div className={`${ruleClasses('top')} lg:border-t-0`}>
             <p className="max-w-[26ch] font-titling text-title text-ink">{THESIS}</p>
             <div className="mt-10">
               <FiledSheet decision={WORKED_EXAMPLE} sample />

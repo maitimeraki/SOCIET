@@ -72,6 +72,14 @@ describe('the auth surface speaks the new world', () => {
     expect(signUp).toContain('href="/auth/signin"')
   })
 
+  it('shows the wordmark’s descriptor at every width — the phone draws it too (§14.2)', () => {
+    for (const html of [signIn, signUp]) {
+      const descriptor = html.match(/<span class="([^"]*)">Decision panel<\/span>/)
+      expect(descriptor).not.toBeNull()
+      expect(descriptor![1].split(' ')).not.toContain('hidden')
+    }
+  })
+
   it('has one FiledSheet implementation, and the auth column renders it', () => {
     // A primitive is defined in a source file, never in a test — so the tests are out of the sweep.
     const definitions = sourceFiles('src').filter(

@@ -8,6 +8,7 @@ import {
   authErrorCopy,
   emailError,
   fieldProblem,
+  nextSuffix,
   passwordError,
   safeNext,
 } from '../auth/authRules'
@@ -48,11 +49,6 @@ export default function SignInPage() {
   // a keystroke, and a submit does not freeze the other fields red while one is corrected.
   const emailProblem = fieldProblem(email, touched.email, submitted, emailError)
   const passwordProblem = fieldProblem(password, touched.password, submitted, passwordError)
-
-  // The other door carries the same destination, so the round trip keeps where the visitor was
-  // heading. `safeNext` runs on it first: only a same-origin path ever travels in the URL.
-  const next = params.get('next')
-  const nextSuffix = next ? `?next=${encodeURIComponent(safeNext(next))}` : ''
 
   async function submit() {
     if (submitting || redirectTo !== null) return
@@ -120,7 +116,7 @@ export default function SignInPage() {
       <p className="text-body text-ink-3">
         {SIGN_IN.crossQuestion}{' '}
         <Link
-          to={`/auth/signup${nextSuffix}`}
+          to={`/auth/signup${nextSuffix(params)}`}
           className="inline-flex min-h-11 min-w-11 items-center font-titling text-body text-ink-2 underline decoration-ink-3 underline-offset-4 transition-colors duration-state hover:text-ink hover:decoration-accent lg:min-h-0 lg:min-w-0"
         >
           {SIGN_IN.crossAction}

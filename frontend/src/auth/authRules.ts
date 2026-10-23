@@ -55,6 +55,12 @@ export function safeNext(raw: string | null | undefined): string {
   return raw
 }
 
+/** The other door's carried destination — `safeNext` runs before anything enters the URL. */
+export function nextSuffix(params: URLSearchParams): string {
+  const next = params.get('next')
+  return next ? `?next=${encodeURIComponent(safeNext(next))}` : ''
+}
+
 export interface AuthError {
   /** The sentence shown to the user. It is honest about the failure and never reveals which field. */
   message: string

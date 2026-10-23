@@ -10,37 +10,39 @@
  * disappears into the map.
  */
 
-.rule-t {
-  border-top: 1px solid var(--rule-color, var(--color-rule));
-}
+@layer components {
+  .rule-t {
+    border-top: 1px solid var(--rule-color, var(--color-rule));
+  }
 
-.rule-b {
-  border-bottom: 1px solid var(--rule-color, var(--color-rule));
-}
+  .rule-b {
+    border-bottom: 1px solid var(--rule-color, var(--color-rule));
+  }
 
-.rule-y {
-  border-block: 1px solid var(--rule-color, var(--color-rule));
-}
+  .rule-y {
+    border-block: 1px solid var(--rule-color, var(--color-rule));
+  }
 
-/* The column hairline — the auth layout's two columns are separated by one rule, not a band. */
-.rule-l {
-  border-left: 1px solid var(--rule-color, var(--color-rule));
-}
+  /* The column hairline — the auth layout's two columns are separated by one rule, not a band. */
+  .rule-l {
+    border-left: 1px solid var(--rule-color, var(--color-rule));
+  }
 
-.rule-r {
-  border-right: 1px solid var(--rule-color, var(--color-rule));
-}
+  .rule-r {
+    border-right: 1px solid var(--rule-color, var(--color-rule));
+  }
 
-.divide-rule > * + * {
-  border-top: 1px solid var(--rule-color, var(--color-rule));
-}
+  .divide-rule > * + * {
+    border-top: 1px solid var(--rule-color, var(--color-rule));
+  }
 
-/* The dark tone — the map's own rule, named by the caller. */
-.rule-dark {
-  --rule-color: var(--color-map-rule);
-}
+  /* The dark tone — the map's own rule, named by the caller. */
+  .rule-dark {
+    --rule-color: var(--color-map-rule);
+  }
 
-/* On the dark band the rule is the map's own rule — the light one disappears into the map. */
-.band--dark {
-  --rule-color: var(--color-map-rule);
+  /* On the dark band the rule is the map's own rule — the light one disappears into the map. */
+  .band--dark {
+    --rule-color: var(--color-map-rule);
+  }
 }

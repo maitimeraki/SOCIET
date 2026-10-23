@@ -10,6 +10,7 @@ import {
   confirmError,
   emailError,
   fieldProblem,
+  nextSuffix,
   passwordError,
   safeNext,
 } from '../auth/authRules'
@@ -54,11 +55,6 @@ export default function SignUpPage() {
   const confirmProblem = fieldProblem(confirm, touched.confirm, submitted, (value) =>
     confirmError(password, value),
   )
-
-  // The other door carries the same destination, so the round trip keeps where the visitor was
-  // heading. `safeNext` runs on it first: only a same-origin path ever travels in the URL.
-  const next = params.get('next')
-  const nextSuffix = next ? `?next=${encodeURIComponent(safeNext(next))}` : ''
 
   async function submit() {
     if (submitting || redirectTo !== null) return
@@ -141,7 +137,7 @@ export default function SignUpPage() {
       <p className="text-body text-ink-3">
         {SIGN_UP.crossQuestion}{' '}
         <Link
-          to={`/auth/signin${nextSuffix}`}
+          to={`/auth/signin${nextSuffix(params)}`}
           className="inline-flex min-h-11 min-w-11 items-center font-titling text-body text-ink-2 underline decoration-ink-3 underline-offset-4 transition-colors duration-state hover:text-ink hover:decoration-accent lg:min-h-0 lg:min-w-0"
         >
           {SIGN_UP.crossAction}

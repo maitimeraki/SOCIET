@@ -25,7 +25,9 @@ describe('SignInPage — the door back in (§14.2)', () => {
     expect(page).toContain('corner-tick') // Input's registration mark, on the control itself
     expect(page).toContain('type="email"')
     expect(page).toContain('type="password"')
-    expect(page).toContain('Sign in')
+    // The door label is the submit control's own text, not a page-wide substring the heading
+    // already satisfies — a regression to another label must fail here.
+    expect(page).toMatch(/<button[^>]*>Sign in<\/button>/)
   })
 
   it('names the act of returning', () => {
