@@ -17,7 +17,7 @@ export interface LegendEntry {
  * A legend is a ruled block like any other new surface — bounded top and bottom by hairlines, never
  * an enclosed box — and every label is ink: a legend *describes* colour, it does not set text in it.
  *
- * `entries` is generic on purpose. Stances are the common case (`<StanceSymbol>` gives the glyph),
+ * `entries` is generic on purpose. Stances are the common case (`<PositionGlyph>` gives the glyph),
  * but the same block keys entity types on the graph, states on the traverse, and anything else the
  * map needs to explain.
  */

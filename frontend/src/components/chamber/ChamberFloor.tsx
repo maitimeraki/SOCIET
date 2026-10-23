@@ -6,7 +6,7 @@ import { FLOOR_VIEWBOX, RADIUS_FRONT, SECTORS, arcSlots, pointAt } from './geome
 import Seat from './Seat'
 import type { SeatSpec } from './Seat'
 import PairArc from './PairArc'
-import StanceChip from '../common/StanceChip'
+import PositionMark from '../ui/PositionMark'
 
 const SLOTS_PER_SECTOR = 12
 
@@ -150,7 +150,7 @@ export default function ChamberFloor({ roster, rounds, activeRound, livePairs, o
           </div>
           <p className="text-micro text-ink-3">{seated.profile.identity.archetype}</p>
           <div className="mt-2">
-            <StanceChip stance={seated.profile.stance} size="sm" />
+            <PositionMark position={seated.profile.stance} size="sm" ground="light" />
           </div>
           <p className="tnum mt-2 font-measurement text-micro text-ink-2">conf {seated.profile.confidence.toFixed(2)}</p>
           {onOpenProfile && (
@@ -165,7 +165,7 @@ export default function ChamberFloor({ roster, rounds, activeRound, livePairs, o
       <ul className="space-y-1 sm:hidden">
         {roster.map((profile) => (
           <li key={profile.agent_id} className="flex items-center gap-2 text-body text-ink-2">
-            <StanceChip stance={profile.stance} size="sm" />
+            <PositionMark position={profile.stance} size="sm" ground="light" />
             {profile.identity.name}
           </li>
         ))}

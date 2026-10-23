@@ -21,6 +21,9 @@ const SECTIONS = [
 // §7 Rail item states — resting ink-2; hover a ground fill; active an accent-soft fill with a 3px
 // accent left rule and ink at weight 500. The rule is a `::before` flush to the rail's own edge, so
 // it does not indent with the item's padding.
+//
+// The active item's ICON takes the accent too: the accent-soft fill alone measures 1.035:1 against
+// the rail, which the eye cannot find. The accent is on the mark, and the word stays ink.
 const ITEM = 'relative flex items-center gap-3 px-3 py-2 font-titling text-body transition-colors'
 const itemClass = ({ isActive }: { isActive: boolean }) =>
   isActive
@@ -55,10 +58,14 @@ export default function Rail() {
           {SECTIONS.map((s) => (
             <li key={s.to}>
               <NavLink to={s.to} className={itemClass}>
-                <span className="flex w-4 shrink-0 justify-center">
-                  <s.Icon size={16} aria-hidden="true" />
-                </span>
-                <span className={LABEL}>{s.label}</span>
+                {({ isActive }) => (
+                  <>
+                    <span className={`flex w-4 shrink-0 justify-center ${isActive ? 'text-accent' : ''}`}>
+                      <s.Icon size={16} aria-hidden="true" />
+                    </span>
+                    <span className={LABEL}>{s.label}</span>
+                  </>
+                )}
               </NavLink>
             </li>
           ))}

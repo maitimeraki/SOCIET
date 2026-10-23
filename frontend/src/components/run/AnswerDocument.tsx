@@ -4,7 +4,7 @@ import { fmtScore } from '../../utils/format'
 import { NARRATIVE_FALLBACK_COPY } from '../verdict/NarrativeFallbackNotice'
 import { splitSections } from '../verdict/narrative'
 import EntityChips from '../verdict/EntityChips'
-import StanceChip from '../common/StanceChip'
+import PositionMark from '../ui/PositionMark'
 import Emphasis from '../common/Emphasis'
 import WarningList from '../common/WarningList'
 import Button from '../ui/Button'
@@ -241,7 +241,7 @@ function Block({ block }: { block: AnswerBlock }) {
           {block.rows.map((row) => (
             <li key={row.name} className="flex items-baseline gap-2 text-body text-ink-2">
               <span className="text-ink">{row.name}</span>
-              <StanceChip stance={row.stance} size="sm" />
+              <PositionMark position={row.stance} size="sm" ground="light" />
             </li>
           ))}
         </ul>

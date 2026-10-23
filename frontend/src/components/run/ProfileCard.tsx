@@ -1,7 +1,7 @@
 import { SealCheck } from '@phosphor-icons/react'
 import type { AgentProfile } from '../../run/events'
-import StanceChip from '../common/StanceChip'
-import Tag from '../ui/Tag'
+import PositionMark from '../ui/PositionMark'
+import Chip from '../ui/Chip'
 
 export default function ProfileCard({ profile }: { profile: AgentProfile }) {
   const sources = profile.summary_provenance ?? []
@@ -11,13 +11,13 @@ export default function ProfileCard({ profile }: { profile: AgentProfile }) {
         <span className="text-body text-ink">
           {profile.identity.name} · {profile.identity.archetype.toLowerCase()}
         </span>
-        <StanceChip stance={profile.stance} size="sm" />
+        <PositionMark position={profile.stance} size="sm" ground="light" />
       </header>
       <p className="mt-2 line-clamp-2 text-body text-ink-2">{profile.bio}</p>
       <div className="mt-2 flex flex-wrap items-center gap-1">
         <span className="text-micro text-ink-3">from cluster:</span>
         {profile.domain_tags.map((tag) => (
-          <Tag key={tag}>{tag}</Tag>
+          <Chip key={tag}>{tag}</Chip>
         ))}
       </div>
       <div className="mt-2 text-micro">

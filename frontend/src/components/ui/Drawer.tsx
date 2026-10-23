@@ -2,7 +2,7 @@ import { useEffect, useRef } from 'react'
 import type { ReactNode, RefObject } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
 
-// eslint-disable-next-line react-refresh/only-export-components -- useModalA11y is shared by Drawer and Dialog
+// eslint-disable-next-line react-refresh/only-export-components -- useModalA11y is exported beside the component, for the surfaces that own their own modal
 export function useModalA11y(panel: RefObject<HTMLElement | null>, open: boolean, onClose: () => void) {
   // Latest-ref: callers pass inline closures, so keying the effect on onClose would
   // re-run it every parent render and steal focus back to the panel.

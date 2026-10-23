@@ -169,14 +169,11 @@
   white-space: nowrap;
 }
 
-/* One turn of the argument. Position is shape + colour + word, never colour alone. */
+/* One turn of the argument. Position is shape + colour + word, never colour alone. The hairline
+   above each turn is the kit's own rule in its dark tone — the map's rule, the same one the
+   dark band draws — so the page takes the vocabulary instead of copying it. */
 .hero-noise__row {
-  border-top: 1px solid var(--color-map-rule);
   padding: 8px 20px;
-}
-
-.hero-noise__row:first-of-type {
-  border-top: none;
 }
 
 .hero-noise__note {

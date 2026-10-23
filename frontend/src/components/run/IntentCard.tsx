@@ -1,6 +1,6 @@
 import { motion, useReducedMotion } from 'framer-motion'
 import type { QueryIntent } from '../../run/events'
-import Tag from '../ui/Tag'
+import Chip from '../ui/Chip'
 
 export default function IntentCard({ intent, question }: { intent: QueryIntent; question: string }) {
   const reduced = useReducedMotion()
@@ -20,7 +20,7 @@ export default function IntentCard({ intent, question }: { intent: QueryIntent; 
             variants={reduced ? undefined : { hidden: { opacity: 0, y: 4 }, show: { opacity: 1, y: 0 } }}
             transition={{ duration: 0.15, ease: [0.2, 0, 0, 1] }}
           >
-            <Tag>{keyword}</Tag>
+            <Chip>{keyword}</Chip>
           </motion.span>
         ))}
       </motion.div>

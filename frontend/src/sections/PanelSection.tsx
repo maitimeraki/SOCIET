@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { getRun, listRuns } from '../api/rest'
 import type { AgentProfile } from '../run/events'
 import { sourceTitles } from '../components/run/AnswerDocument'
-import StanceChip from '../components/common/StanceChip'
+import PositionMark from '../components/ui/PositionMark'
 import Button from '../components/ui/Button'
 import EmptyState from '../components/ui/EmptyState'
 import ErrorState from '../components/ui/ErrorState'
@@ -77,7 +77,7 @@ export function PanelView({ experts, loading, failed, failDetail, onRetry }: Pan
               <li key={expert.agent_id} className="py-4">
                 <span className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
                   <span className="text-body text-ink">{expert.identity.name}</span>
-                  <StanceChip stance={expert.stance} size="sm" />
+                  <PositionMark position={expert.stance} size="sm" ground="light" />
                 </span>
                 <span className="mt-2 block text-body text-ink-2">{expert.bio}</span>
                 <ExpertSources profile={expert} />

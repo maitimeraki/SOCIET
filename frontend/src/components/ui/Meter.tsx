@@ -1,0 +1,42 @@
+/**
+ * §14.1 — one measured share, **drawn**, with its figure beside it. A claim the visitor can look
+ * at: house style rule 8. The track is the ground, the fill is the share, and the figure is set
+ * in the measurement face so a number never competes with prose.
+ *
+ * `tone` chooses the fill: `accent` is the live accent, `ink` is the quiet fill for a share
+ * already stated in ink beside it. `width` chooses the track's length: `sm` is the measure beside
+ * a label, `full` is the share across the width of a sheet.
+ */
+export type MeterTone = 'accent' | 'ink'
+export type MeterWidth = 'sm' | 'full'
+
+export default function Meter({
+  value,
+  max = 1,
+  label,
+  display,
+  tone = 'accent',
+  width = 'sm',
+  className = '',
+}: {
+  value: number
+  max?: number
+  label: string
+  display: string
+  tone?: MeterTone
+  width?: MeterWidth
+  className?: string
+}) {
+  const pct = max > 0 ? Math.max(0, Math.min(1, value / max)) * 100 : 0
+  const fill = tone === 'accent' ? 'bg-accent' : 'bg-ink'
+  const full = width === 'full'
+  return (
+    <span className={`flex items-center gap-2 ${full ? 'w-full' : ''} ${className}`} title={`${label}: ${display}`}>
+      <span className="w-9 text-micro text-ink-3">{label}</span>
+      <span className={`h-1 ${full ? 'flex-1' : 'w-14'} rounded-xs bg-ink-4`}>
+        <span className={`block h-full rounded-xs ${fill}`} style={{ width: `${pct}%` }} />
+      </span>
+      <span className="tnum font-measurement text-micro text-ink-2">{display}</span>
+    </span>
+  )
+}

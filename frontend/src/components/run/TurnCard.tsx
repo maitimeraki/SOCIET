@@ -1,9 +1,9 @@
 import type { TurnInfo } from '../../run/events'
 import { asStance } from '../../run/events'
 import { fmtScore } from '../../utils/format'
-import StanceChip from '../common/StanceChip'
+import PositionMark from '../ui/PositionMark'
 import Emphasis from '../common/Emphasis'
-import Tag from '../ui/Tag'
+import Chip from '../ui/Chip'
 
 export default function TurnCard({ turn, round }: { turn: TurnInfo; round: number }) {
   const references = turn.references ?? []
@@ -18,7 +18,7 @@ export default function TurnCard({ turn, round }: { turn: TurnInfo; round: numbe
     >
       <header className="flex items-center gap-2">
         <span className="text-body text-ink">{turn.agent_name}</span>
-        <StanceChip stance={asStance(turn.stance)} size="sm" />
+        <PositionMark position={asStance(turn.stance)} size="sm" ground="light" />
         <span className="tnum font-measurement text-micro text-ink-3">{fmtScore(turn.confidence)}</span>
       </header>
       <Emphasis text={turn.content} className="mt-2 max-w-[66ch] select-text text-body-lg text-ink-2" />
@@ -26,7 +26,7 @@ export default function TurnCard({ turn, round }: { turn: TurnInfo; round: numbe
         <div className="mt-2 flex flex-wrap items-center gap-1">
           <span className="text-micro text-ink-3">cited:</span>
           {Object.entries(counts).map(([name, count]) => (
-            <Tag key={name}>{count > 1 ? `${name} ×${count}` : name}</Tag>
+            <Chip key={name}>{count > 1 ? `${name} ×${count}` : name}</Chip>
           ))}
         </div>
       )}

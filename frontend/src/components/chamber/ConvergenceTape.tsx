@@ -1,7 +1,7 @@
 import { STANCE_ORDER } from '../../run/selectors'
 import type { TapeTick } from '../../run/selectors'
 import type { Stance } from '../../run/events'
-import StanceChip from '../common/StanceChip'
+import PositionMark from '../ui/PositionMark'
 import { fmtPct } from '../../utils/format'
 
 const SEGMENT_FILL: Record<Stance, string> = {
@@ -65,7 +65,7 @@ export default function ConvergenceTape({
                 <ul className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 pl-9">
                   {present.map((stance) => (
                     <li key={stance} className="flex items-center gap-1.5">
-                      <StanceChip stance={stance} size="sm" />
+                      <PositionMark position={stance} size="sm" ground="light" />
                       <span className="tnum font-measurement text-micro text-ink-3">
                         {fmtPct(tick.weights[stance] ?? 0)}
                       </span>

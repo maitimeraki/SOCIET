@@ -3,7 +3,7 @@ import type { ReactNode } from 'react'
 import { FileText, X } from '@phosphor-icons/react'
 import Drawer from '../ui/Drawer'
 import IconButton from '../ui/IconButton'
-import StanceChip from '../common/StanceChip'
+import PositionMark from '../ui/PositionMark'
 import Emphasis from '../common/Emphasis'
 import { useGraphStore } from '../../graph/graphStore'
 import type { GraphEdge, GraphNode } from '../../graph/graphStore'
@@ -254,7 +254,7 @@ export function NodeDetailsView({ details, onClose }: { details: MapDetails; onC
             {details.held && (
               <Reading heading="Argued as">
                 <div className="flex items-baseline gap-3">
-                  <StanceChip stance={details.held.stance} />
+                  <PositionMark position={details.held.stance} ground="light" />
                   <span className="tnum font-measurement text-mono text-ink">{details.held.confidence.toFixed(2)}</span>
                 </div>
                 <Emphasis text={details.held.view} className="mt-2 text-body-lg text-ink-2" />

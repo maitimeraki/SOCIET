@@ -4,6 +4,9 @@ import type { ReactNode } from 'react'
 import Band from '../components/ui/Band'
 import { buttonClasses } from '../components/ui/Button'
 import Disclosure from '../components/ui/Disclosure'
+import FiledSheet from '../components/ui/FiledSheet'
+import PositionMark from '../components/ui/PositionMark'
+import type { Position } from '../components/ui/PositionMark'
 import { ruleClasses } from '../components/ui/Rule'
 import './hero.css'
 
@@ -51,28 +54,6 @@ const CAPTURES = {
 } as const
 
 const WORDMARK = 'Societas'
-
-/** The four positions, frozen order. A position is shape + colour + word, never colour alone. */
-type Position = 'POSITIVE' | 'NEUTRAL' | 'AMBIVALENT' | 'NEGATIVE'
-
-const POSITION_COLOR: Record<Position, string> = {
-  POSITIVE: '#4ade80',
-  NEUTRAL: '#94a3b8',
-  AMBIVALENT: '#fbbf24',
-  NEGATIVE: '#f87171',
-}
-
-function PositionMark({ position, size = 12 }: { position: Position; size?: number }) {
-  const color = POSITION_COLOR[position]
-  return (
-    <svg width={size} height={size} viewBox="0 0 16 16" aria-hidden="true" className="shrink-0">
-      {position === 'POSITIVE' && <path d="M8 2.5 14 13.5H2Z" fill={color} />}
-      {position === 'NEUTRAL' && <circle cx="8" cy="8" r="5.5" fill={color} />}
-      {position === 'AMBIVALENT' && <path d="M8 1.5 14.5 8 8 14.5 1.5 8Z" fill={color} />}
-      {position === 'NEGATIVE' && <path d="M2 2.5h12L8 13.5Z" fill={color} />}
-    </svg>
-  )
-}
 
 /**
  * The reveal: a band rises 8px into place when it first enters the viewport. It never hides
@@ -215,10 +196,9 @@ function NoisePanel() {
       </div>
 
       {TURNS.map((turn) => (
-        <div key={turn.who} className="hero-noise__row">
+        <div key={turn.who} className={`hero-noise__row ${ruleClasses('top', 'dark')}`}>
           <p className="flex items-center gap-2 font-measurement text-[10px] uppercase tracking-[0.14em]">
-            <PositionMark position={turn.position} />
-            <span style={{ color: POSITION_COLOR[turn.position] }}>{turn.position}</span>
+            <PositionMark position={turn.position} size="sm" ground="map" />
             <span className="text-map-ink-2">{turn.who}</span>
           </p>
           <p className="mt-1 font-titling text-[13px] leading-[20px] text-map-ink">{turn.said}</p>
@@ -234,8 +214,7 @@ function NoisePanel() {
         <div className="flex items-center justify-between gap-3">
           <p className="font-measurement text-mono uppercase tracking-[0.14em] text-ink-3">Filed</p>
           <p className="flex items-center gap-2 font-measurement text-[11px] uppercase tracking-[0.14em] text-ink">
-            <PositionMark position="NEGATIVE" size={12} />
-            Negative
+            <PositionMark position="NEGATIVE" size="sm" ground="light" />
           </p>
         </div>
         <p className="mt-2 flex items-baseline gap-2">
@@ -529,41 +508,17 @@ function ChatBubble({ from, children }: { from: 'you' | 'them'; children: ReactN
   )
 }
 
-/** The filed decision, as the customer receives it: a sheet, not a summary. */
-function FiledSheet() {
-  return (
-    <div className="rounded-lg bg-canvas p-6 shadow-raised">
-      <p className="font-measurement text-mono uppercase tracking-[0.14em] text-ink-3">The decision</p>
-      <p className="mt-2 font-record text-[19px] leading-[26px] text-ink">
-        Should Ridgeline Coffee open a second location on Mill Street this spring?
-      </p>
-
-      <div className={`${ruleClasses('top')} mt-4 flex items-baseline justify-between pt-4`}>
-        <p className="flex items-center gap-2 font-measurement text-[11px] uppercase tracking-[0.14em] text-ink">
-          <PositionMark position="NEGATIVE" size={12} />
-          Negative
-        </p>
-        <p className="font-measurement text-mono tnum text-ink">0.82</p>
-      </div>
-      <div className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-ink-4" aria-hidden="true">
-        <div className="h-1.5 rounded-full bg-ink" style={{ width: '82%' }} />
-      </div>
-
-      <div className={`${ruleClasses('top')} mt-4 pt-4`}>
-        <p className="font-measurement text-mono uppercase tracking-[0.14em] text-caution">The case against</p>
-        <p className="mt-1 font-titling text-[13px] leading-[20px] text-ink-2">
-          If the grease-trap work lands on time, the Mill Street economics hold.
-        </p>
-      </div>
-
-      <div className={`${ruleClasses('top')} mt-4 pt-4`}>
-        <p className="font-measurement text-mono uppercase tracking-[0.14em] text-ink-3">Sources</p>
-        <p className="mt-1 font-measurement text-[11px] leading-[18px] text-ink-3">
-          Mill Street lease · economics · grease-trap certification · Alder Lane lease
-        </p>
-      </div>
-    </div>
-  )
+/** The filed decision, as the customer receives it: a sheet, not a summary.
+ *
+ * The sheet is the kit's own `FiledSheet`, so the homepage, the auth page's right column and the
+ * dashboard's "The last answer" are one composed document. This one is AUTHORED material about a
+ * named other party, so it is labelled a worked example — house style rule 9. */
+const FILED_DECISION = {
+  question: 'Should Ridgeline Coffee open a second location on Mill Street this spring?',
+  position: 'NEGATIVE' as const,
+  share: 0.82,
+  caseAgainst: 'If the grease-trap work lands on time, the Mill Street economics hold.',
+  sources: 'Mill Street lease · economics · grease-trap certification · Alder Lane lease',
 }
 
 function Difference() {
@@ -611,7 +566,7 @@ function Difference() {
               A filed decision
             </p>
             <div className="mt-4">
-              <FiledSheet />
+              <FiledSheet decision={FILED_DECISION} sample />
             </div>
             <p className="mt-5 font-measurement text-mono uppercase tracking-[0.14em] text-ink-3">
               One sheet · the answer, the share behind it, the case against, the sources
@@ -885,9 +840,9 @@ function Close() {
 /** The footer — wordmark, the real actions, the edition line. */
 function Footer() {
   return (
-    // The page's last band. It keeps its own `<footer>` element: `Band`'s vocabulary is
-    // `section | div`, and the signed-off page's footer is part of its DOM.
-    <footer className="band band--band band--dense">
+    // The page's last band. It keeps its own `<footer>` element — the signed-off page's footer is
+    // part of its DOM — so the band vocabulary carries `as="footer"`.
+    <Band as="footer" tone="band" dense>
       <div className="shell">
         <div
           className={`flex flex-wrap items-end justify-between gap-x-8 gap-y-6 ${ruleClasses('top')} pt-6`}
@@ -909,7 +864,7 @@ function Footer() {
           </div>
         </div>
       </div>
-    </footer>
+    </Band>
   )
 }
 

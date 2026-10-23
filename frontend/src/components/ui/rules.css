@@ -2,30 +2,45 @@
  * The rule vocabulary — §14.1 of `docs/FRONTEND_PRODUCTION_PLAN.md`.
  *
  * The rule is a border on the content itself, not a divider element: one hairline, on the thing
- * it separates, in the rule token. The dark band swaps the hairline for the map's own rule — the
- * light one disappears into the map.
+ * it separates, in the rule token.
+ *
+ * The colour comes from `--rule-color`, so one hairline serves both grounds: the light surfaces
+ * leave it unset and it falls back to the light rule token, and a dark ground — the map's own
+ * surface — binds the map's rule instead. The dark band binds it the same way, so the light rule
+ * disappears into the map.
  */
 
 .rule-t {
-  border-top: 1px solid var(--color-rule);
+  border-top: 1px solid var(--rule-color, var(--color-rule));
 }
 
 .rule-b {
-  border-bottom: 1px solid var(--color-rule);
+  border-bottom: 1px solid var(--rule-color, var(--color-rule));
 }
 
 .rule-y {
-  border-block: 1px solid var(--color-rule);
+  border-block: 1px solid var(--rule-color, var(--color-rule));
+}
+
+/* The column hairline — the auth layout's two columns are separated by one rule, not a band. */
+.rule-l {
+  border-left: 1px solid var(--rule-color, var(--color-rule));
+}
+
+.rule-r {
+  border-right: 1px solid var(--rule-color, var(--color-rule));
 }
 
 .divide-rule > * + * {
-  border-top: 1px solid var(--color-rule);
+  border-top: 1px solid var(--rule-color, var(--color-rule));
+}
+
+/* The dark tone — the map's own rule, named by the caller. */
+.rule-dark {
+  --rule-color: var(--color-map-rule);
 }
 
 /* On the dark band the rule is the map's own rule — the light one disappears into the map. */
-.band--dark .rule-t,
-.band--dark .rule-b,
-.band--dark .rule-y,
-.band--dark .divide-rule > * + * {
-  border-color: var(--color-map-rule);
+.band--dark {
+  --rule-color: var(--color-map-rule);
 }

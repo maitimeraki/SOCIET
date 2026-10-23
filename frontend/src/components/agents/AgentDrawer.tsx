@@ -1,8 +1,8 @@
 import type { AgentProfile } from '../../run/events'
 import Drawer from '../ui/Drawer'
-import StanceChip from '../common/StanceChip'
+import PositionMark from '../ui/PositionMark'
 import Emphasis from '../common/Emphasis'
-import MeterBar from './MeterBar'
+import Meter from '../ui/Meter'
 import ProvenanceList from './ProvenanceList'
 
 export default function AgentDrawer({
@@ -21,7 +21,7 @@ export default function AgentDrawer({
     <Drawer open={open} onClose={onClose} title={profile.identity.name}>
       <div className="space-y-6">
         <div className="flex items-center gap-3">
-          <StanceChip stance={profile.stance} />
+          <PositionMark position={profile.stance} ground="light" />
           <span className="text-body text-ink-2">{profile.identity.archetype}</span>
         </div>
         <p className="max-w-[60ch] text-body text-ink-2">{profile.bio}</p>
@@ -30,9 +30,9 @@ export default function AgentDrawer({
         <section>
           <h3 className="mb-2 text-label uppercase text-ink-3">Confidence breakdown</h3>
           <div className="space-y-2">
-            <MeterBar label="src" value={breakdown.source_breadth} max={breakdownMax} display={String(breakdown.source_breadth)} />
-            <MeterBar label="nnd" value={breakdown.node_density} max={breakdownMax} display={String(breakdown.node_density)} />
-            <MeterBar label="rlc" value={breakdown.relationship_connectivity} display={breakdown.relationship_connectivity.toFixed(2)} />
+            <Meter label="src" value={breakdown.source_breadth} max={breakdownMax} display={String(breakdown.source_breadth)} />
+            <Meter label="nnd" value={breakdown.node_density} max={breakdownMax} display={String(breakdown.node_density)} />
+            <Meter label="rlc" value={breakdown.relationship_connectivity} display={breakdown.relationship_connectivity.toFixed(2)} />
           </div>
         </section>
 

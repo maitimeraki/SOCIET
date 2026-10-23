@@ -18,7 +18,7 @@ describe('RuledBlock', () => {
 
   it('is bounded top and bottom by hairlines, and is not an enclosed box', () => {
     const html = renderToStaticMarkup(<RuledBlock>body</RuledBlock>)
-    expect(html).toContain('border-y border-ink-4')
+    expect(html).toContain('rule-y') // the kit's own rule, both sides
     expect(html).not.toContain('rounded-')
     expect(html).not.toContain('border-l')
     expect(html).not.toContain('border-r')

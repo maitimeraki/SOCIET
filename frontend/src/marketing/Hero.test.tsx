@@ -115,8 +115,15 @@ describe('the kit — the vocabulary the page is built from', () => {
 
   it('takes every one of the page’s top rules from the kit', () => {
     // Eight call sites; three of them map over a list — the 3 facts, the 3 lines and the 4 steps —
-    // so the page renders fifteen hairlines, and one fewer would mean a site went hand-rolled.
-    expect(count(html, 'rule-t')).toBe(15)
+    // so the page renders fifteen hairlines there, and one fewer would mean a site went
+    // hand-rolled. The filed sheet draws four more, and the panel's four turns draw the rule in
+    // its dark tone — the same class, on the map's own hairline.
+    expect(count(html, 'rule-t')).toBe(20)
+  })
+
+  it('takes the panel’s hairlines from the kit in the map’s own rule', () => {
+    // The noise panel is a dark surface outside the dark band, so its rows name the dark tone.
+    expect(count(html, 'rule-dark')).toBe(4)
   })
 
   it('takes every one of the page’s divided lists from the kit', () => {

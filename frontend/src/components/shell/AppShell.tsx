@@ -1,8 +1,8 @@
 import { Suspense } from 'react'
 import { Outlet, useLocation } from 'react-router-dom'
 import AppErrorBoundary from '../AppErrorBoundary'
-// Imported by path, not through the `../ui` barrel: the barrel also re-exports Dialog/Drawer, whose
-// framer-motion import would otherwise ride into the eagerly-loaded shell and the initial chunk.
+// Imported by path, and there is no `../ui` barrel any more: Drawer's framer-motion import
+// would otherwise ride into the eagerly-loaded shell and the initial chunk.
 import Skeleton from '../ui/Skeleton'
 import { ToastHost } from '../ui/Toast'
 import Rail from './Rail'

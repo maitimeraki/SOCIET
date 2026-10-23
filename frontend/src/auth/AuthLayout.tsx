@@ -1,6 +1,6 @@
 import { Link, Outlet } from 'react-router-dom'
 import Legend, { type LegendEntry } from '../components/common/Legend'
-import StanceSymbol from '../components/common/StanceSymbol'
+import { PositionGlyph } from '../components/ui/PositionMark'
 
 /* ── the auth surface's frame ─────────────────────────────────────────────────────────────────────
    A layout is structure: the sheet, the ruled half-sheet and its sample, `<main>` and the wordmark.
@@ -10,14 +10,14 @@ import StanceSymbol from '../components/common/StanceSymbol'
 /** The legend law (§3/§9): the three stations in the sample are keyed, symbol + word, so the hue is
  *  never the only carrier. Reuses the surface's own glyphs rather than redrawing them. */
 const SAMPLE_LEGEND: LegendEntry[] = [
-  { key: 'POS', symbol: <StanceSymbol stance="POSITIVE" />, label: 'positive' },
-  { key: 'NEU', symbol: <StanceSymbol stance="NEUTRAL" />, label: 'neutral' },
-  { key: 'NEG', symbol: <StanceSymbol stance="NEGATIVE" />, label: 'negative' },
+  { key: 'POS', symbol: <PositionGlyph position="POSITIVE" ground="light" />, label: 'positive' },
+  { key: 'NEU', symbol: <PositionGlyph position="NEUTRAL" ground="light" />, label: 'neutral' },
+  { key: 'NEG', symbol: <PositionGlyph position="NEGATIVE" ground="light" />, label: 'negative' },
 ]
 
 /**
  * §7.2's "small honest sample of the sheet": three stations, their lines of sight, and the fix, drawn
- * in the sheet's own geometry (a graticule, station marks matching `StanceSymbol`'s stroke weights, a
+ * in the sheet's own geometry (a graticule, station marks matching `PositionGlyph`'s stroke weights, a
  * warn-ringed fix). It is captioned as a sample, never a run — no fabricated result. The `fix` ring
  * is drawn here, not imported from `FixMark`, whose one-mark-owns-the-word law reserves it for verdict
  * surfaces; this is a labelled illustration, and it is `aria-hidden` behind its caption.

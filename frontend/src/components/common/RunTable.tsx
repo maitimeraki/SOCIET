@@ -1,9 +1,10 @@
 import { Link } from 'react-router-dom'
 import type { RunSummary } from '../../api/types'
 import { fmtDate, truncateId } from '../../utils/format'
+import Card from '../ui/Card'
 import Skeleton from '../ui/Skeleton'
-import StanceChip from './StanceChip'
-import StateChip from './StateChip'
+import PositionMark from '../ui/PositionMark'
+import { StateChip } from '../ui/Chip'
 
 /**
  * §8.4 Decisions — a list of the decisions themselves, question first: the question is the heading
@@ -39,7 +40,7 @@ export default function RunTable({ runs, loading = false }: { runs: RunSummary[]
   const corpus = (run: RunSummary) =>
     run.corpus_label ?? (run.dataset_id ? truncateId(run.dataset_id, 8, 4) : DASH)
   const outcome = (run: RunSummary) => {
-    if (run.verdict_stance) return <StanceChip stance={run.verdict_stance} />
+    if (run.verdict_stance) return <PositionMark position={run.verdict_stance} ground="light" />
     // No verdict, and the copy says WHY (§D7 honesty): a run still going has none yet; a run that has
     // ENDED without one (failed, interrupted, complete with no clusters) is not "still running".
     const stillGoing = run.status === 'running' || run.status === 'queued'
@@ -50,18 +51,17 @@ export default function RunTable({ runs, loading = false }: { runs: RunSummary[]
     <ul className="space-y-3">
       {runs.map((run) => (
         <li key={run.run_id}>
-          <Link
-            to={`/runs/${run.run_id}`}
-            className="block rounded-md bg-canvas p-4 shadow-raised transition-[box-shadow,transform] duration-state hover:-translate-y-px hover:shadow-floating"
-          >
-            <h3 className="text-heading text-ink">{run.query}</h3>
-            <p className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-micro text-ink-3">
-              {outcome(run)}
-              <span className="tnum font-measurement text-mono">{fmtDate(run.created_at)}</span>
-              <span className="tnum font-measurement text-mono">{passes(run.rounds_executed)}</span>
-              <span className="font-measurement text-mono">{corpus(run)}</span>
-              <StateChip state={run.status} />
-            </p>
+          <Link to={`/runs/${run.run_id}`} className="block">
+            <Card hover>
+              <h3 className="text-heading text-ink">{run.query}</h3>
+              <p className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-micro text-ink-3">
+                {outcome(run)}
+                <span className="tnum font-measurement text-mono">{fmtDate(run.created_at)}</span>
+                <span className="tnum font-measurement text-mono">{passes(run.rounds_executed)}</span>
+                <span className="font-measurement text-mono">{corpus(run)}</span>
+                <StateChip state={run.status} />
+              </p>
+            </Card>
           </Link>
         </li>
       ))}

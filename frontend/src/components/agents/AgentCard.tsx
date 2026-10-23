@@ -1,7 +1,7 @@
 import type { AgentProfile } from '../../run/events'
-import StanceChip from '../common/StanceChip'
-import Tag from '../ui/Tag'
-import MeterBar from './MeterBar'
+import PositionMark from '../ui/PositionMark'
+import Chip from '../ui/Chip'
+import Meter from '../ui/Meter'
 
 export default function AgentCard({ profile, onOpen }: { profile: AgentProfile; onOpen: () => void }) {
   return (
@@ -14,17 +14,17 @@ export default function AgentCard({ profile, onOpen }: { profile: AgentProfile; 
         <span className="text-body text-ink">
           {profile.identity.name} · {profile.identity.archetype.toLowerCase()}
         </span>
-        <StanceChip stance={profile.stance} size="sm" />
+        <PositionMark position={profile.stance} size="sm" ground="light" />
       </span>
       <span className="mt-2 line-clamp-2 block text-body text-ink-2">{profile.bio}</span>
       <span className="mt-3 flex flex-wrap gap-x-4 gap-y-1">
-        <MeterBar label="conf" value={profile.confidence} display={profile.confidence.toFixed(2)} />
-        <MeterBar label="conv" value={profile.conviction} display={profile.conviction.toFixed(2)} />
-        <MeterBar label="cior" value={(profile.cior + 1) / 2} display={profile.cior.toFixed(1)} />
+        <Meter label="conf" value={profile.confidence} display={profile.confidence.toFixed(2)} />
+        <Meter label="conv" value={profile.conviction} display={profile.conviction.toFixed(2)} />
+        <Meter label="cior" value={(profile.cior + 1) / 2} display={profile.cior.toFixed(1)} />
       </span>
       <span className="mt-3 flex flex-wrap gap-1">
         {profile.domain_tags.map((tag) => (
-          <Tag key={tag}>{tag}</Tag>
+          <Chip key={tag}>{tag}</Chip>
         ))}
       </span>
     </button>

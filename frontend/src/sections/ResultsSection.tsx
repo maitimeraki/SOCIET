@@ -5,7 +5,7 @@ import { fold } from '../run/reducer'
 import { verdictView } from '../run/selectors'
 import type { VerdictView } from '../run/selectors'
 import AnswerDocument, { sourceTitles } from '../components/run/AnswerDocument'
-import StanceChip from '../components/common/StanceChip'
+import PositionMark from '../components/ui/PositionMark'
 import Button, { buttonClasses } from '../components/ui/Button'
 import EmptyState from '../components/ui/EmptyState'
 import ErrorState from '../components/ui/ErrorState'
@@ -71,7 +71,7 @@ export function ResultsView({ runId, question, createdAt, view, sources, corpusM
           <header className="flex flex-wrap items-end justify-between gap-4 border-b border-ink-4 pb-4">
             <div className="space-y-2">
               <p className="text-label uppercase text-ink-3">The outcome</p>
-              <StanceChip stance={view.stance} />
+              <PositionMark position={view.stance} ground="light" />
             </div>
             <div>
               <p className="tnum font-measurement text-numeral text-ink">

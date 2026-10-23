@@ -14,10 +14,17 @@ import './bands.css'
  */
 export type BandTone = 'page' | 'band' | 'sky' | 'warm' | 'plum' | 'dark'
 
+/**
+ * The element the band is drawn as. A band is a page's own block, so `section` is the default;
+ * `footer` is the page's last band — a real element, part of the signed-off DOM — and `div` is
+ * for a band that is not a section of the page.
+ */
+export type BandElement = 'section' | 'div' | 'footer'
+
 export type BandProps = {
   tone?: BandTone
   dense?: boolean
-  as?: 'section' | 'div'
+  as?: BandElement
   id?: string
   'aria-labelledby'?: string
   'aria-label'?: string
@@ -42,5 +49,5 @@ export default function Band({
   // `class="band band--sky" id="…"`.
   const props = { className: classes, id, 'aria-labelledby': labelledBy, 'aria-label': label }
 
-  return as === 'div' ? <div {...props}>{children}</div> : <section {...props}>{children}</section>
+  return as === 'div' ? <div {...props}>{children}</div> : as === 'footer' ? <footer {...props}>{children}</footer> : <section {...props}>{children}</section>
 }

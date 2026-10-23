@@ -1,5 +1,9 @@
 import type { InputHTMLAttributes } from 'react'
 
+// The one field baseline — `Input`'s ruled treatment (`border-b border-ink-3 bg-transparent`): no
+// box, no fill, and no radius to round, because a ruled baseline has no corners. The padding is
+// this control's own: a compact number field is not the text field.
+
 type NumberFieldProps = {
   value: number
   onChange: (value: number) => void
@@ -34,7 +38,7 @@ export default function NumberField({
         const next = Number(event.target.value)
         if (!Number.isNaN(next)) onChange(clamp(next))
       }}
-      className="corner-tick tnum h-9 w-24 rounded-[4px] border border-ink-3 bg-ground-2 px-2 text-mono text-ink focus:border-accent"
+      className="corner-tick tnum h-9 w-24 border-b border-ink-3 bg-transparent px-2 text-mono text-ink focus:border-accent"
     />
   )
 }

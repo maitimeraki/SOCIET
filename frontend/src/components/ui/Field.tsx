@@ -1,4 +1,5 @@
 import { cloneElement, isValidElement, useId, type ReactElement, type ReactNode } from 'react'
+import Label from './Label'
 
 export default function Field({
   label,
@@ -28,7 +29,7 @@ export default function Field({
     // row — a stretched row would register the mark against the grid cell, not the field.
     <div className={`relative block pl-2.5 ${error ? 'field-invalid' : ''}`}>
       <label className="block">
-        <span className="mb-1 block text-label uppercase text-ink-3">{label}</span>
+        <Label className="mb-1 block">{label}</Label>
         {control}
       </label>
       {error ? (

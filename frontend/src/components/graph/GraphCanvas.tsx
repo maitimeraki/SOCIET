@@ -23,7 +23,7 @@ import { useSelectionStore } from '../../graph/selectionStore'
 import type { MapSelection } from '../../graph/selectionStore'
 import { useGraphStream } from '../../graph/useGraphStream'
 import Skeleton from '../ui/Skeleton'
-import StanceSymbol from '../common/StanceSymbol'
+import { PositionGlyph } from '../ui/PositionMark'
 
 export interface GraphCanvasProps {
   datasetId: string
@@ -389,7 +389,7 @@ export const LEGEND_ROWS: readonly LegendRow[] = [
   { mark: <CirclesThreePlus size={12} aria-hidden="true" />, color: CORPUS_COLOR, word: 'Corpus' },
   { mark: <UsersThree size={12} aria-hidden="true" />, color: EXPERT_COLOR, word: 'Experts' },
   ...POSITION_ORDER.map((stance) => ({
-    mark: <StanceSymbol stance={stance} size={12} color={POSITION_COLORS[stance]} />,
+    mark: <PositionGlyph position={stance} size={12} ground="map" />,
     color: POSITION_COLORS[stance],
     word: stance,
   })),
