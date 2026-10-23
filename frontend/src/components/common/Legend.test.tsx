@@ -5,6 +5,7 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import { STANCE_ORDER } from '../../run/selectors'
 import { PositionGlyph } from '../ui/PositionMark'
 import Legend from './Legend'
+import { BANNED_WORD, renderedText } from '../../test/copyLaw'
 
 describe('Legend', () => {
   it('renders a symbol beside every word, so a colour is never the only carrier', () => {
@@ -23,5 +24,12 @@ describe('Legend', () => {
 
   it('renders nothing when there is nothing to key', () => {
     expect(renderToStaticMarkup(<Legend entries={[]} />)).toBe('')
+  })
+
+  it('renders no banned word — the copy law holds over the kit', () => {
+    const html = renderToStaticMarkup(
+      <Legend entries={STANCE_ORDER.map((stance) => ({ symbol: <PositionGlyph position={stance} ground="light" />, label: stance }))} />,
+    )
+    expect(renderedText(html)).not.toMatch(BANNED_WORD)
   })
 })

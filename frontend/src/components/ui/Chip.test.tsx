@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 // No jsdom / no testing-library in this repo (see AppErrorBoundary.test.tsx): render to static
 // markup in Node instead.
 import { renderToStaticMarkup } from 'react-dom/server'
+import { BANNED_WORD, renderedText } from '../../test/copyLaw'
 import Chip, { StateChip } from './Chip'
 
 describe('Chip', () => {
@@ -44,5 +45,10 @@ describe('StateChip', () => {
   it('takes the accent while the run is live, and the status ink when it is not', () => {
     expect(renderToStaticMarkup(<StateChip state="running" />)).toContain('text-accent')
     expect(renderToStaticMarkup(<StateChip state="complete" />)).not.toContain('text-accent')
+  })
+
+  it('renders no banned word — the copy law holds over the kit', () => {
+    const html = renderToStaticMarkup(<Chip tone="status">Complete</Chip>)
+    expect(renderedText(html)).not.toMatch(BANNED_WORD)
   })
 })

@@ -116,8 +116,9 @@ describe('the kit — the vocabulary the page is built from', () => {
   it('takes every one of the page’s top rules from the kit', () => {
     // Eight call sites; three of them map over a list — the 3 facts, the 3 lines and the 4 steps —
     // so the page renders fifteen hairlines there, and one fewer would mean a site went
-    // hand-rolled. The filed sheet draws four more, and the panel's four turns draw the rule in
-    // its dark tone — the same class, on the map's own hairline.
+    // hand-rolled. The page's own FiledSheet drew three of those rules; the kit's FiledSheet
+    // draws four, and the panel's four turns draw the rule in its dark tone — the same class,
+    // on the map's own hairline. 15 − 3 + 4 + 4 = 20.
     expect(count(html, 'rule-t')).toBe(20)
   })
 

@@ -6,13 +6,21 @@ import { CheckCircle, Circle, CircleNotch, Warning, WarningOctagon } from '@phos
  * the state chip, and `accent` is the one chip that means something is live.
  *
  * The 4px radius is the `--radius-xs` token, so the chip owns the only 4px radius in the kit.
+ *
+ * The merge is of two chips that were NOT the same size, and the merge must not restyle the app:
+ * `ui/Tag.tsx` was `px-1.5 py-0.5 text-micro` and `common/StateChip.tsx` was `px-2 py-1
+ * text-label`. So the **padding and the type are the tone's**, and each tone keeps the chip it
+ * absorbed. The radius and the fill are the chip's, and they are shared.
  */
 export type ChipTone = 'neutral' | 'status' | 'accent'
 
 const TONE: Record<ChipTone, string> = {
-  neutral: 'border-ink-3 bg-ground-2 text-ink-2',
-  status: 'border-ink-3 bg-ground-2 text-ink',
-  accent: 'border-accent bg-accent-soft text-accent',
+  // neutral — the quiet tag: `ui/Tag.tsx`'s metrics, unchanged.
+  neutral: 'border-ink-3 bg-ground-2 text-ink-2 px-1.5 py-0.5 text-micro',
+  // status — the state chip: `common/StateChip.tsx`'s metrics, unchanged.
+  status: 'border-ink-3 bg-ground-2 text-ink px-2 py-1 text-label',
+  // accent — the live state chip: the status chip's metrics on the accent.
+  accent: 'border-accent bg-accent-soft text-accent px-2 py-1 text-label',
 }
 
 export default function Chip({
@@ -27,7 +35,7 @@ export default function Chip({
   className?: string
 }) {
   return (
-    <span className={`inline-flex items-center gap-1.5 rounded-xs border px-2 py-1.5 text-label ${TONE[tone]} ${className}`}>
+    <span className={`inline-flex items-center gap-1.5 rounded-xs border ${TONE[tone]} ${className}`}>
       {icon}
       {children}
     </span>

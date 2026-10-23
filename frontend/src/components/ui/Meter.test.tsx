@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 // No jsdom / no testing-library in this repo (see AppErrorBoundary.test.tsx): render to static
 // markup in Node instead.
 import { renderToStaticMarkup } from 'react-dom/server'
+import { BANNED_WORD, renderedText } from '../../test/copyLaw'
 import Meter from './Meter'
 
 describe('Meter', () => {
@@ -34,5 +35,10 @@ describe('Meter', () => {
 
   it('rounds its track on the radius token, never a literal', () => {
     expect(renderToStaticMarkup(<Meter value={1} label="s" display="1" />)).toContain('rounded-xs')
+  })
+
+  it('renders no banned word — the copy law holds over the kit', () => {
+    const html = renderToStaticMarkup(<Meter value={0.82} label="share" display="0.82" />)
+    expect(renderedText(html)).not.toMatch(BANNED_WORD)
   })
 })

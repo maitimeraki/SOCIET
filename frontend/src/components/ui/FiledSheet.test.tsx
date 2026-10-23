@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 // No jsdom / no testing-library in this repo (see AppErrorBoundary.test.tsx): render to static
 // markup in Node instead.
 import { renderToStaticMarkup } from 'react-dom/server'
+import { BANNED_WORD, renderedText } from '../../test/copyLaw'
 import FiledSheet from './FiledSheet'
 
 const DECISION = {
@@ -30,7 +31,8 @@ describe('FiledSheet', () => {
 
   it('draws the share as a meter, with its figure beside it', () => {
     const html = renderToStaticMarkup(<FiledSheet decision={DECISION} />)
-    expect(html).toContain('h-1')
+    // The track's own class string, not a prefix: `h-1` alone would also match `h-1.5`.
+    expect(html).toContain('class="h-1 flex-1 rounded-xs bg-ink-4"')
     expect(html).toContain('width:82%')
   })
 
@@ -43,5 +45,10 @@ describe('FiledSheet', () => {
   it('carries no worked-example label when the sheet is the customer’s own', () => {
     const html = renderToStaticMarkup(<FiledSheet decision={DECISION} />)
     expect(html).not.toContain('Worked example')
+  })
+
+  it('renders no banned word — the copy law holds over the kit', () => {
+    const html = renderToStaticMarkup(<FiledSheet decision={DECISION} sample />)
+    expect(renderedText(html)).not.toMatch(BANNED_WORD)
   })
 })

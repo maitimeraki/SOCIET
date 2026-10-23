@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 // No jsdom / no testing-library in this repo (see AppErrorBoundary.test.tsx): render to static
 // markup in Node instead.
 import { renderToStaticMarkup } from 'react-dom/server'
+import { BANNED_WORD, renderedText } from '../../test/copyLaw'
 import type { Stance } from '../../run/events'
 import { STANCE_ORDER } from '../../run/selectors'
 import PositionMark, { PositionGlyph } from './PositionMark'
@@ -67,6 +68,13 @@ describe('PositionMark — the legend law', () => {
     for (const stance of STANCE_ORDER) {
       const html = renderToStaticMarkup(<PositionMark position={stance} ground="light" />)
       expect(html).toContain(`>${stance}<`)
+    }
+  })
+
+  it('renders no banned word — the copy law holds over the kit', () => {
+    for (const stance of STANCE_ORDER) {
+      const html = renderToStaticMarkup(<PositionMark position={stance} ground="light" />)
+      expect(renderedText(html)).not.toMatch(BANNED_WORD)
     }
   })
 })

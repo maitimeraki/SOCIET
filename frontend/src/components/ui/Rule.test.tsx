@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 // No jsdom / no testing-library in this repo (see AppErrorBoundary.test.tsx): render to static
 // markup in Node instead.
 import ruleClasses, { ruleClasses as named } from './Rule'
+import { BANNED_WORD } from '../../test/copyLaw'
 
 describe('Rule — the record vocabulary', () => {
   it('names every side it can draw', () => {
@@ -28,5 +29,13 @@ describe('Rule — the record vocabulary', () => {
 
   it('exports the vocabulary itself as the default, so every kit file has one', () => {
     expect(named).toBe(ruleClasses)
+  })
+
+  it('renders no banned word — the copy law holds over the kit', () => {
+    // A class vocabulary renders no text of its own, so the assertion is over its own names.
+    const names = (['top', 'bottom', 'both', 'around', 'left', 'right'] as const)
+      .map((side) => ruleClasses(side))
+      .join(' ')
+    expect(names).not.toMatch(BANNED_WORD)
   })
 })
