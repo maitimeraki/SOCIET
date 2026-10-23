@@ -44,9 +44,9 @@ export interface ResultsViewProps {
 
 /**
  * The last answer (§14.3) — the newest decision that has filed one, rendered as the filed sheet
- * (through `AnswerDocument`, the same document the run page reads and exports). With no answer
- * yet, the section says so plainly and links the decision that owes one, rather than showing an
- * older answer as if it were the newest.
+ * alone (through `AnswerDocument`'s sheet mode, so the sheet stays the kit's one FiledSheet). With
+ * no answer yet, the section says so plainly and links the decision that owes one, rather than
+ * showing an older answer as if it were the newest.
  */
 export function ResultsView({
   runId,
@@ -73,7 +73,14 @@ export function ResultsView({
       ) : loading ? (
         <Skeleton className="h-64 w-full" />
       ) : view && runId ? (
-        <AnswerDocument runId={runId} question={question} view={view} sources={sources} corpusMissing={corpusMissing} />
+        <AnswerDocument
+          runId={runId}
+          question={question}
+          view={view}
+          sources={sources}
+          corpusMissing={corpusMissing}
+          variant="sheet"
+        />
       ) : pendingRunId ? (
         <EmptyState
           line={DASHBOARD_COPY.empty.notAnswered}
@@ -112,12 +119,15 @@ export interface ResultsSectionProps {
   onRefresh?: () => void
   /** The dashboard visit's shared-walk epoch, so this section and Your panel read one subject. */
   subjectEpoch?: number
+  /** The first read settled (success or failure) — the page may now scroll to an anchor. */
+  onSettled?: () => void
 }
 
 export default function ResultsSection({
   refreshKey = 0,
   onRefresh,
   subjectEpoch,
+  onSettled,
 }: ResultsSectionProps = {}) {
   const [answer, setAnswer] = useState<AnswerSlice | null>(null)
   const [pendingRunId, setPendingRunId] = useState<string | null>(null)
@@ -175,12 +185,14 @@ export default function ResultsSection({
         setPendingRunId(null)
       })
       .finally(() => {
-        if (!cancelled) setLoading(false)
+        if (cancelled) return
+        setLoading(false)
+        onSettled?.()
       })
     return () => {
       cancelled = true
     }
-  }, [attempt, refreshKey, subjectEpoch])
+  }, [attempt, refreshKey, subjectEpoch, onSettled])
 
   const retry = () => {
     setLoading(true)

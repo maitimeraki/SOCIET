@@ -177,6 +177,12 @@ export function blockLines(block: AnswerBlock): string[] {
 
 export interface AnswerDocumentProps extends AnswerInput {
   runId: string
+  /**
+   * `full` (default) is the run page's reading view and export. `sheet` is the dashboard's last
+   * answer: the filed sheet alone — the document the customer takes away — with no second copy of
+   * the confidence, the case against and the sources beneath it (§14.3's wireframe).
+   */
+  variant?: 'full' | 'sheet'
 }
 
 /**
@@ -184,8 +190,14 @@ export interface AnswerDocumentProps extends AnswerInput {
  * markup or serialized to a file. Static by construction — no motion, no interaction but the export
  * affordance — because this is the surface an analyst prints. (§8.5)
  */
-export default function AnswerDocument({ runId, question, view, sources, corpusMissing }: AnswerDocumentProps) {
-  const sections = answerSections({ question, view, sources, corpusMissing })
+export default function AnswerDocument({
+  runId,
+  question,
+  view,
+  sources,
+  corpusMissing,
+  variant = 'full',
+}: AnswerDocumentProps) {
   // The outcome header is the kit's FiledSheet — the same sheet the homepage's comparison panel
   // and the auth page's right column render — so the three surfaces rhyme by construction (§14.3).
   const filed: FiledDecision = {
@@ -193,9 +205,15 @@ export default function AnswerDocument({ runId, question, view, sources, corpusM
     position: view.stance,
     share: view.confidence,
     caseAgainst: view.dissentingViews[0]?.view ?? 'No dissent was recorded.',
-    sources:
-      sources.length > 0 ? sources.join(' · ') : 'No sources were recorded for this decision.',
+    sources: corpusMissing
+      ? 'The material behind this decision is no longer available.'
+      : sources.length > 0
+        ? sources.join(' · ')
+        : 'No sources were recorded for this decision.',
   }
+  if (variant === 'sheet') return <FiledSheet decision={filed} />
+
+  const sections = answerSections({ question, view, sources, corpusMissing })
 
   const download = () => {
     const blob = new Blob([answerText({ question, view, sources, corpusMissing })], { type: 'text/markdown' })

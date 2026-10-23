@@ -1,8 +1,11 @@
 import { listRunsPage } from '../api/rest'
 import type { RunListPage, RunSummary } from '../api/types'
 
-/** The v1 keyset page size: one page of 25, then `next_cursor` walks the rest. */
-export const SUBJECT_PAGE_SIZE = 25
+/**
+ * The v1 keyset page size: one page of 25, then `next_cursor` walks the rest. One export for the
+ * whole dashboard — the page probe, the decisions section and the subject walk all read this page.
+ */
+export const PAGE_SIZE = 25
 
 export type RunPageReader = (options: { limit?: number; cursor?: string | null }) => Promise<RunListPage>
 
@@ -23,24 +26,32 @@ export interface DecisionSubject {
  */
 export async function findDecisionSubject(
   readPage: RunPageReader = listRunsPage,
-  limit: number = SUBJECT_PAGE_SIZE,
+  limit: number = PAGE_SIZE,
 ): Promise<DecisionSubject> {
   let cursor: string | null = null
   let newest: RunSummary | null = null
+  const seen = new Set<string>()
   for (;;) {
     const page = await readPage({ limit, cursor })
     if (newest === null && page.items.length > 0) newest = page.items[0] ?? null
     const answered = page.items.find((run) => run.verdict_stance !== null)
     if (answered) return { answered, newest }
     if (page.next_cursor === null) return { answered: null, newest }
+    // A server that repeats a cursor must not trap the walk: stop at the repeat and report what
+    // the pages so far held.
+    if (seen.has(page.next_cursor)) return { answered: null, newest }
+    seen.add(page.next_cursor)
     cursor = page.next_cursor
   }
 }
 
 /**
  * The one walk both "The last answer" and "Your panel" read. The promise is cached for the page's
- * lifetime, so the two sections cannot each pick their own subject out of a changing list; a
- * failure clears the cache so a retry can walk again.
+ * lifetime, so the two sections cannot each pick their own subject out of a changing list. A
+ * **successful** walk is reused on retry — the retry refreshes the decision's own document, not
+ * the choice of subject; an answer filed while the customer is on the page is picked up on the
+ * next mount (a new epoch), never on a retry. A **failed** walk clears the cache so the retry can
+ * walk again.
  */
 let pending: { epoch: number; promise: Promise<DecisionSubject> } | null = null
 let epoch = 0

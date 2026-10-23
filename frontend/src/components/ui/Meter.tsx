@@ -19,7 +19,8 @@ export default function Meter({
   width = 'sm',
   className = '',
 }: {
-  value: number
+  /** The share drawn; `null` is an unrecorded share — an empty track, never a zero-width fill. */
+  value: number | null
   max?: number
   label: string
   display: string
@@ -27,14 +28,14 @@ export default function Meter({
   width?: MeterWidth
   className?: string
 }) {
-  const pct = max > 0 ? Math.max(0, Math.min(1, value / max)) * 100 : 0
+  const pct = value === null || max <= 0 ? null : Math.max(0, Math.min(1, value / max)) * 100
   const fill = tone === 'accent' ? 'bg-accent' : 'bg-ink'
   const full = width === 'full'
   return (
     <span className={`flex items-center gap-2 ${full ? 'w-full' : ''} ${className}`} title={`${label}: ${display}`}>
       <span className="w-9 text-micro text-ink-3">{label}</span>
       <span className={`h-1 ${full ? 'flex-1' : 'w-14'} rounded-xs bg-ink-4`}>
-        <span className={`block h-full rounded-xs ${fill}`} style={{ width: `${pct}%` }} />
+        {pct === null ? null : <span className={`block h-full rounded-xs ${fill}`} style={{ width: `${pct}%` }} />}
       </span>
       <span className="tnum font-measurement text-micro text-ink-2">{display}</span>
     </span>

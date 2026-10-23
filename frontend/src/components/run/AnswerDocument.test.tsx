@@ -112,6 +112,18 @@ describe('AnswerDocument — read and export are the same document', () => {
     }
   })
 
+  it('sheet mode renders the filed sheet alone — no reading view, no export', () => {
+    const html = renderToStaticMarkup(<AnswerDocument runId="r1" {...input()} variant="sheet" />)
+    expect(html).toContain(QUESTION)
+    expect(html).toContain('POSITIVE') // the position, as symbol + word
+    expect(html).toContain('0.82') // the weighted share
+    expect(html).toContain('Cash flow is too tight this year.') // the case against
+    expect(html).toContain('Market research 2026') // a source
+    expect(html).not.toContain('Weighted confidence')
+    expect(html).not.toContain('The answer') // no document sections
+    expect(html).not.toContain('Export this verdict')
+  })
+
   it('is self-contained: the answer names the decision it answers', () => {
     expect(answerText(input()).startsWith(`# ${QUESTION}`)).toBe(true)
   })

@@ -7,7 +7,7 @@ import {
   findDecisionSubject,
   resetDecisionSubject,
   sharedDecisionSubject,
-  SUBJECT_PAGE_SIZE,
+  PAGE_SIZE,
 } from './dashboardSubject'
 import type { RunPageReader } from './dashboardSubject'
 
@@ -73,8 +73,8 @@ describe('findDecisionSubject — the newest decision that filed an answer', () 
     const subject = await findDecisionSubject(read)
     expect(subject.answered?.run_id).toBe('r25')
     expect(calls).toHaveLength(2)
-    expect(calls[0]).toEqual({ limit: SUBJECT_PAGE_SIZE, cursor: null })
-    expect(calls[1]).toEqual({ limit: SUBJECT_PAGE_SIZE, cursor: 'page-2' })
+    expect(calls[0]).toEqual({ limit: PAGE_SIZE, cursor: null })
+    expect(calls[1]).toEqual({ limit: PAGE_SIZE, cursor: 'page-2' })
   })
 
   it('reads every page when no decision has answered, and names the newest', async () => {
@@ -90,6 +90,18 @@ describe('findDecisionSubject — the newest decision that filed an answer', () 
     expect(calls).toHaveLength(2)
   })
 
+  it('stops on a repeated cursor instead of looping forever', async () => {
+    const decisions = twentySix([])
+    const { read, calls } = pagesReader([
+      { items: decisions.slice(0, 25), next_cursor: 'same' },
+      { items: decisions.slice(25), next_cursor: 'same' },
+    ])
+
+    const subject = await findDecisionSubject(read)
+    expect(subject).toEqual({ answered: null, newest: decisions[0] })
+    expect(calls).toHaveLength(2) // the repeat is recognised, not followed a third time
+  })
+
   it('returns two nulls for an account with no decisions', async () => {
     const { read, calls } = pagesReader([{ items: [], next_cursor: null }])
     const subject = await findDecisionSubject(read)
@@ -98,7 +110,7 @@ describe('findDecisionSubject — the newest decision that filed an answer', () 
   })
 
   it('is fixed at the v1 page size of 25', () => {
-    expect(SUBJECT_PAGE_SIZE).toBe(25)
+    expect(PAGE_SIZE).toBe(25)
   })
 })
 

@@ -5,7 +5,7 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import { MemoryRouter } from 'react-router-dom'
 import DashboardView from './dashboardView'
 import type { DashboardViewProps } from './dashboardView'
-import { DASHBOARD_ANCHORS } from './dashboardAnchors'
+import { anchorIdFromHash, DASHBOARD_ANCHORS } from './dashboardAnchors'
 // §13 — the one copy-law guard, shared with every rendered-string test.
 import { BANNED_WORD, renderedText } from '../test/copyLaw'
 
@@ -83,6 +83,20 @@ describe('the dashboard — one surface, four sections in the lifecycle order', 
     // The one-line live band replaced the second ChamberFloor (§14.3's LIVE row).
     const source = readFileSync('src/pages/DashboardPage.tsx', 'utf8')
     expect(source).not.toContain('ChamberFloor')
+  })
+})
+
+describe('the anchor hash', () => {
+  it('reads the four anchors', () => {
+    expect(anchorIdFromHash('#material')).toBe('material')
+    expect(anchorIdFromHash('#last-answer')).toBe('last-answer')
+  })
+
+  it('treats a malformed escape as no anchor, never a throw', () => {
+    expect(anchorIdFromHash('#%')).toBeNull()
+    expect(anchorIdFromHash('#%zz')).toBeNull()
+    expect(anchorIdFromHash('')).toBeNull()
+    expect(anchorIdFromHash('#')).toBeNull()
   })
 })
 

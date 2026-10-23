@@ -28,7 +28,8 @@ export default function ErrorState({
         <div className="mt-4 flex items-center gap-3">
           {actions}
           {onRetry && (
-            <Button type="button" variant="secondary" onClick={onRetry}>
+            // 44px at the phone (§14.5 row 10): the kit's 40px control needs one step of tap height.
+            <Button type="button" variant="secondary" className="min-h-11" onClick={onRetry}>
               {retryLabel}
             </Button>
           )}

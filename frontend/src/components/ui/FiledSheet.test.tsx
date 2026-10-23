@@ -53,10 +53,13 @@ describe('FiledSheet', () => {
     expect(html).not.toContain('Worked example')
   })
 
-  it('states an absent share rather than inventing one', () => {
+  it('states an absent share rather than inventing one — and draws no fill', () => {
     const html = renderToStaticMarkup(<FiledSheet decision={{ ...DECISION, share: null }} />)
     expect(html).toContain('—')
     expect(html).not.toContain('0.00')
+    // No zero-width fill: an unrecorded share is an empty track, not a claim of zero.
+    expect(html).not.toContain('style="width:')
+    expect(html).toContain('bg-ink-4') // the track remains
   })
 
   it('renders no banned word — the copy law holds over the kit', () => {

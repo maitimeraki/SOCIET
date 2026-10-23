@@ -54,7 +54,7 @@ export default function FiledSheet({
           <PositionMark position={decision.position} size="sm" ground="light" />
         </p>
         <Meter
-          value={decision.share ?? 0}
+          value={decision.share}
           label="share"
           display={share}
           tone="ink"

@@ -48,10 +48,10 @@ export function PanelView({ experts, pendingRunId, loading, failed, failDetail, 
     <div className="mt-6 space-y-6">
       <RuledBlock>
         Your panel is convened fresh for each decision, from your own documents. This section shows the panel of
-        your most recent decision — every expert who argued it, the position each took, and the documents each
-        argued from. What it cannot yet show: a panel that persists across decisions. The same expert does not
-        carry over from one decision to the next, and no history of how any one of them has argued over time is
-        kept.
+        the decision that filed the answer on this page — every expert who argued it, the position each took,
+        and the documents each argued from. What it cannot yet show: a panel that persists across decisions. The
+        same expert does not carry over from one decision to the next, and no history of how any one of them has
+        argued over time is kept.
       </RuledBlock>
       {failed ? (
         // A failure is never an empty panel: it is surfaced, with a retry.
@@ -120,6 +120,8 @@ export interface PanelSectionProps {
   onRefresh?: () => void
   /** The dashboard visit's shared-walk epoch, so this section and The last answer read one subject. */
   subjectEpoch?: number
+  /** The first read settled (success or failure) — the page may now scroll to an anchor. */
+  onSettled?: () => void
 }
 
 /**
@@ -132,6 +134,7 @@ export default function PanelSection({
   refreshKey = 0,
   onRefresh,
   subjectEpoch,
+  onSettled,
 }: PanelSectionProps = {}) {
   const [experts, setExperts] = useState<AgentProfile[]>([])
   const [pendingRunId, setPendingRunId] = useState<string | null>(null)
@@ -168,12 +171,14 @@ export default function PanelSection({
         setPendingRunId(null)
       })
       .finally(() => {
-        if (!cancelled) setLoading(false)
+        if (cancelled) return
+        setLoading(false)
+        onSettled?.()
       })
     return () => {
       cancelled = true
     }
-  }, [attempt, refreshKey, subjectEpoch])
+  }, [attempt, refreshKey, subjectEpoch, onSettled])
 
   const retry = () => {
     setLoading(true)

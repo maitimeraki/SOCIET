@@ -39,8 +39,10 @@ const render = (props: Partial<PanelViewProps> = {}) =>
 describe('PanelSection — Your panel', () => {
   it('states what it can show and what it cannot yet show', () => {
     const html = render()
-    // What it can: the panel of the most recent decision, from the reader's own documents.
-    expect(html).toContain('most recent decision')
+    // What it can: the panel of the decision that filed the answer on this page, from the reader's
+    // own documents. Never "most recent" — the newest decision may still be running.
+    expect(html).toContain('decision that filed the answer on this page')
+    expect(html).not.toContain('most recent decision')
     expect(html).toContain('your own documents')
     // What it cannot: a panel that persists, or any history across decisions.
     expect(html).toContain('cannot yet show')

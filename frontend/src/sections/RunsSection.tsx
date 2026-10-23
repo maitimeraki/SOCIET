@@ -7,6 +7,7 @@ import EmptyState from '../components/ui/EmptyState'
 import ErrorState from '../components/ui/ErrorState'
 import { toast } from '../components/ui/Toast'
 import { DASHBOARD_COPY } from '../pages/dashboardCopy'
+import { PAGE_SIZE } from '../pages/dashboardSubject'
 import RunTable from '../components/common/RunTable'
 
 type StatusFilter = 'all' | 'complete' | 'running' | 'failed' | 'interrupted'
@@ -28,9 +29,6 @@ export function filterRuns(runs: RunSummary[], status: StatusFilter, text: strin
     return statusOk && textOk
   })
 }
-
-/** The v1 page size: the first keyset page of 25, then Load more walks `next_cursor`. */
-const PAGE_SIZE = 25
 
 export interface RunsViewProps {
   runs: RunSummary[]
@@ -101,6 +99,8 @@ export interface RunsSectionProps {
   refreshKey?: number
   /** The page's refresh; when absent the section retries on its own. */
   onRefresh?: () => void
+  /** The first read settled (success or failure) — the page may now scroll to an anchor. */
+  onSettled?: () => void
 }
 
 /**
@@ -108,7 +108,7 @@ export interface RunsSectionProps {
  * A retry either bumps the page's refresh key (one refresh for the whole surface) or, standalone,
  * this section's own attempt.
  */
-export default function RunsSection({ refreshKey = 0, onRefresh }: RunsSectionProps = {}) {
+export default function RunsSection({ refreshKey = 0, onRefresh, onSettled }: RunsSectionProps = {}) {
   const [runs, setRuns] = useState<RunSummary[]>([])
   const [cursor, setCursor] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
@@ -135,12 +135,14 @@ export default function RunsSection({ refreshKey = 0, onRefresh }: RunsSectionPr
         setCursor(null)
       })
       .finally(() => {
-        if (!cancelled) setLoading(false)
+        if (cancelled) return
+        setLoading(false)
+        onSettled?.()
       })
     return () => {
       cancelled = true
     }
-  }, [attempt, refreshKey])
+  }, [attempt, refreshKey, onSettled])
 
   const loadMore = async () => {
     if (!cursor) return

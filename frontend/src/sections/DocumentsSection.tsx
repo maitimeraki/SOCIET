@@ -79,6 +79,8 @@ export interface DocumentsSectionProps {
   refreshKey?: number
   /** The page's refresh; when absent the section retries on its own. */
   onRefresh?: () => void
+  /** The first read settled (success or failure) — the page may now scroll to an anchor. */
+  onSettled?: () => void
 }
 
 /**
@@ -86,7 +88,11 @@ export interface DocumentsSectionProps {
  * either bumps the page's refresh key (one refresh for the whole surface) or, standalone, this
  * section's own attempt.
  */
-export default function DocumentsSection({ refreshKey = 0, onRefresh }: DocumentsSectionProps = {}) {
+export default function DocumentsSection({
+  refreshKey = 0,
+  onRefresh,
+  onSettled,
+}: DocumentsSectionProps = {}) {
   const [documents, setDocuments] = useState<UploadRow[]>([])
   const [loading, setLoading] = useState(true)
   const [failed, setFailed] = useState(false)
@@ -109,12 +115,14 @@ export default function DocumentsSection({ refreshKey = 0, onRefresh }: Document
         setDocuments([])
       })
       .finally(() => {
-        if (!cancelled) setLoading(false)
+        if (cancelled) return
+        setLoading(false)
+        onSettled?.()
       })
     return () => {
       cancelled = true
     }
-  }, [attempt, refreshKey])
+  }, [attempt, refreshKey, onSettled])
 
   const retry = () => {
     setLoading(true)

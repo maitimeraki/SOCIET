@@ -23,6 +23,13 @@ describe('Meter', () => {
     expect(renderToStaticMarkup(<Meter value={-1} label="share" display="0" />)).toContain('width:0%')
   })
 
+  it('draws an empty track for an unrecorded share — never a zero-width fill', () => {
+    const html = renderToStaticMarkup(<Meter value={null} label="share" display="—" />)
+    expect(html).toContain('—')
+    expect(html).not.toContain('style="width:')
+    expect(html).toContain('bg-ink-4') // the track is still drawn
+  })
+
   it('takes the accent fill or the quiet ink fill', () => {
     expect(renderToStaticMarkup(<Meter value={1} label="s" display="1" />)).toContain('bg-accent')
     expect(renderToStaticMarkup(<Meter value={1} label="s" display="1" tone="ink" />)).toContain('bg-ink')

@@ -7,35 +7,78 @@ import PanelSection from '../sections/PanelSection'
 import ResultsSection from '../sections/ResultsSection'
 import RunsSection from '../sections/RunsSection'
 import DashboardView from './dashboardView'
-import { beginDecisionSubject, sharedDecisionSubject } from './dashboardSubject'
+import { DASHBOARD_ANCHORS, anchorIdFromHash } from './dashboardAnchors'
+import { beginDecisionSubject, PAGE_SIZE, sharedDecisionSubject } from './dashboardSubject'
 
-/** The v1 page size: one keyset page of 25, the same page every section's first read uses. */
-const PAGE_SIZE = 25
+/** The keys that scroll the document. Any of them means the customer has taken over. */
+const SCROLL_KEYS = new Set(['ArrowDown', 'ArrowUp', 'PageDown', 'PageUp', 'Home', 'End', ' ', 'Spacebar'])
+
+/** The four sections that must have settled before a deep-linked anchor is scrolled to. */
+const SECTION_IDS = [
+  DASHBOARD_ANCHORS.material,
+  DASHBOARD_ANCHORS.decisions,
+  DASHBOARD_ANCHORS.lastAnswer,
+  DASHBOARD_ANCHORS.panel,
+]
 
 /**
  * Keep a deep-linked section in view while its content settles (§14.3). The four sections fetch
  * independently, so a section above the target can grow after the first scroll; the browser's own
  * hash jump alone lands at the top, which is not the contract. The scroll is `auto` under
- * `prefers-reduced-motion: reduce` and `smooth` otherwise. The observer stays just long enough for
- * the page to stop moving and then lets go.
+ * `prefers-reduced-motion: reduce` and `smooth` otherwise.
+ *
+ * The observer is a correction, not the scroll. It skips its spec-guaranteed first callback, it
+ * stays silent until the initial scroll has had time to finish (a correction mid-animation would
+ * cancel the animation in one frame), and it stops for good the moment the customer takes over —
+ * a wheel, a touch, or a scroll key. Only content that grows afterwards, while the anchor is still
+ * the intent, is re-aligned.
  */
 function useAnchorScroll(hash: string, ready: boolean) {
   useEffect(() => {
     if (!ready) return
-    const id = decodeURIComponent(hash.replace(/^#/, ''))
+    const id = anchorIdFromHash(hash)
     if (!id) return
     const target = document.getElementById(id)
     if (!target) return
     const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches
     target.scrollIntoView({ behavior: reduce ? 'auto' : 'smooth', block: 'start' })
+
+    let firstObservation = true
+    let correctionsArmed = false
+    let userMoved = false
+    const stopCorrecting = () => {
+      userMoved = true
+    }
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (SCROLL_KEYS.has(event.key)) userMoved = true
+    }
+    // A plain `scroll` listener cannot tell our own scrollIntoView from the customer's, so the
+    // intent is read from the inputs that move a document.
+    window.addEventListener('wheel', stopCorrecting, { passive: true, once: true })
+    window.addEventListener('touchmove', stopCorrecting, { passive: true, once: true })
+    window.addEventListener('keydown', onKeyDown)
+
     const observer = new ResizeObserver(() => {
+      if (firstObservation) {
+        firstObservation = false
+        return
+      }
+      if (!correctionsArmed || userMoved) return
       target.scrollIntoView({ behavior: 'auto', block: 'start' })
     })
     observer.observe(document.body)
+    // The smooth animation outlasts the fetch-driven resize burst; arm corrections once it is done.
+    const arm = window.setTimeout(() => {
+      correctionsArmed = true
+    }, reduce ? 120 : 700)
     const timer = window.setTimeout(() => observer.disconnect(), 1500)
     return () => {
       observer.disconnect()
+      window.clearTimeout(arm)
       window.clearTimeout(timer)
+      window.removeEventListener('wheel', stopCorrecting)
+      window.removeEventListener('touchmove', stopCorrecting)
+      window.removeEventListener('keydown', onKeyDown)
     }
   }, [hash, ready])
 }
@@ -54,6 +97,16 @@ export default function DashboardPage() {
   const [accountEmpty, setAccountEmpty] = useState(false)
   const [settled, setSettled] = useState(false)
   const [refreshKey, setRefreshKey] = useState(0)
+  // The anchor scroll waits for the sections' own first reads, not just the page probe: a section
+  // above the target must have its final height before the target is scrolled to.
+  const [readySections, setReadySections] = useState<ReadonlySet<string>>(() => new Set())
+  const markReady = useCallback((id: string) => {
+    setReadySections((previous) => (previous.has(id) ? previous : new Set(previous).add(id)))
+  }, [])
+  const materialSettled = useCallback(() => markReady(DASHBOARD_ANCHORS.material), [markReady])
+  const decisionsSettled = useCallback(() => markReady(DASHBOARD_ANCHORS.decisions), [markReady])
+  const lastAnswerSettled = useCallback(() => markReady(DASHBOARD_ANCHORS.lastAnswer), [markReady])
+  const panelSettled = useCallback(() => markReady(DASHBOARD_ANCHORS.panel), [markReady])
 
   useEffect(() => {
     let cancelled = false
@@ -87,7 +140,8 @@ export default function DashboardPage() {
     }
   }, [refreshKey, subjectEpoch])
 
-  useAnchorScroll(hash, settled)
+  const ready = settled && (accountEmpty || SECTION_IDS.every((id) => readySections.has(id)))
+  useAnchorScroll(hash, ready)
 
   // One retry refreshes the whole surface (§14.3's ERROR row): every section re-reads, and the
   // subject walk starts over because the failed read cleared its cache.
@@ -97,12 +151,28 @@ export default function DashboardPage() {
     <DashboardView
       accountEmpty={accountEmpty}
       live={live ? { runId: live.run_id, question: live.query } : null}
-      material={<DocumentsSection refreshKey={refreshKey} onRefresh={refresh} />}
-      decisions={<RunsSection refreshKey={refreshKey} onRefresh={refresh} />}
-      lastAnswer={
-        <ResultsSection refreshKey={refreshKey} onRefresh={refresh} subjectEpoch={subjectEpoch} />
+      material={
+        <DocumentsSection refreshKey={refreshKey} onRefresh={refresh} onSettled={materialSettled} />
       }
-      panel={<PanelSection refreshKey={refreshKey} onRefresh={refresh} subjectEpoch={subjectEpoch} />}
+      decisions={
+        <RunsSection refreshKey={refreshKey} onRefresh={refresh} onSettled={decisionsSettled} />
+      }
+      lastAnswer={
+        <ResultsSection
+          refreshKey={refreshKey}
+          onRefresh={refresh}
+          subjectEpoch={subjectEpoch}
+          onSettled={lastAnswerSettled}
+        />
+      }
+      panel={
+        <PanelSection
+          refreshKey={refreshKey}
+          onRefresh={refresh}
+          subjectEpoch={subjectEpoch}
+          onSettled={panelSettled}
+        />
+      }
     />
   )
 }

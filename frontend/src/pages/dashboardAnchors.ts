@@ -15,6 +15,20 @@ export type DashboardAnchor = (typeof DASHBOARD_ANCHORS)[keyof typeof DASHBOARD_
 /** The href a legacy route redirects to: the dashboard, with its section's anchor. */
 export const dashboardHref = (anchor: DashboardAnchor): string => `/dashboard#${anchor}`
 
+/**
+ * The anchor id a location hash names. A malformed escape (`#%`) is "no anchor", never a throw —
+ * a URL the customer was handed must not take the page down (I3).
+ */
+export function anchorIdFromHash(hash: string): string | null {
+  const raw = hash.replace(/^#/, '')
+  if (raw.length === 0) return null
+  try {
+    return decodeURIComponent(raw)
+  } catch {
+    return null
+  }
+}
+
 /** The four retired routes and where each now lands. `/runs/:runId` stays a deep view. */
 export const LEGACY_SECTION_REDIRECTS: { path: string; anchor: DashboardAnchor }[] = [
   { path: '/documents', anchor: DASHBOARD_ANCHORS.material },

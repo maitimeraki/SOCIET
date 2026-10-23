@@ -64,11 +64,12 @@ describe('ResultsSection — The last answer', () => {
     expect(html).toContain('shadow-raised')
   })
 
-  it('reads the document prose in the reading face, below the sheet', () => {
+  it('is the sheet alone — no second copy of the document beneath it', () => {
     const html = render({ runId: 'r1', question: 'Q', view: view(), sources: [] })
-    expect(html).toContain('font-record')
-    expect(html).toContain('text-body-lg')
-    expect(html).toContain('Weighted confidence')
+    // The full reading view (and its export) belongs to the run page; the band carries the sheet.
+    expect(html).not.toContain('Weighted confidence')
+    expect(html).not.toContain('Export this verdict')
+    expect(html).not.toContain('text-body-lg') // the reading view's prose face
   })
 
   it('says plainly that the newest decision has not filed an answer yet, and links it', () => {
