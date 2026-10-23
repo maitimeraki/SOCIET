@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest'
 // markup in Node instead.
 import { renderToStaticMarkup } from 'react-dom/server'
 import { BANNED_WORD, renderedText } from '../../test/copyLaw'
-import SectionNav from './SectionNav'
+import SectionNav, { rovingIndex } from './SectionNav'
 
 const ITEMS = [
   // The active item is FIRST on purpose: the assertion below reads the active element's own
@@ -15,6 +15,10 @@ const ITEMS = [
 /** The opening tag of the active destination's own element. */
 const activeTag = (markup: string) =>
   markup.match(/<button\b[^>]*aria-selected="true"[^>]*>/)?.[0] ?? ''
+
+/** The opening tag of the first resting destination's own element. */
+const restingTag = (markup: string) =>
+  markup.match(/<button\b[^>]*aria-selected="false"[^>]*>/)?.[0] ?? ''
 
 describe('SectionNav', () => {
   it('is a tablist of buttons, and marks the active destination', () => {
@@ -64,5 +68,54 @@ describe('SectionNav', () => {
   it('renders no banned word — the copy law holds over the kit', () => {
     const html = renderToStaticMarkup(<SectionNav items={ITEMS} active="floor" onSelect={() => {}} />)
     expect(renderedText(html)).not.toMatch(BANNED_WORD)
+  })
+})
+
+describe('SectionNav is a real tablist (§14.4)', () => {
+  it('ties each tab to its panel through ids derived from the prefix', () => {
+    const html = renderToStaticMarkup(<SectionNav idPrefix="run" items={ITEMS} active="floor" onSelect={() => {}} />)
+    expect(activeTag(html)).toContain('id="run-tab-floor"')
+    expect(activeTag(html)).toContain('aria-controls="run-panel-floor"')
+    expect(restingTag(html)).toContain('id="run-tab-roster"')
+    expect(restingTag(html)).toContain('aria-controls="run-panel-roster"')
+  })
+
+  it('puts only the active tab in the tab order', () => {
+    const html = renderToStaticMarkup(<SectionNav items={ITEMS} active="floor" onSelect={() => {}} />)
+    expect(activeTag(html)).toContain('tabindex="0"')
+    expect(restingTag(html)).toContain('tabindex="-1"')
+  })
+
+  it('declares its orientation on the tablist', () => {
+    const horizontal = renderToStaticMarkup(<SectionNav items={ITEMS} active="floor" onSelect={() => {}} />)
+    const vertical = renderToStaticMarkup(
+      <SectionNav items={ITEMS} active="floor" onSelect={() => {}} orientation="vertical" />,
+    )
+    expect(horizontal).toContain('aria-orientation="horizontal"')
+    expect(vertical).toContain('aria-orientation="vertical"')
+  })
+
+  it('moves roving focus with the arrows, wrapping at both ends', () => {
+    expect(rovingIndex('ArrowRight', 0, 3, false)).toBe(1)
+    expect(rovingIndex('ArrowRight', 2, 3, false)).toBe(0)
+    expect(rovingIndex('ArrowLeft', 0, 3, false)).toBe(2)
+    expect(rovingIndex('ArrowLeft', 2, 3, false)).toBe(1)
+  })
+
+  it('jumps to the ends with Home and End', () => {
+    expect(rovingIndex('Home', 2, 5, false)).toBe(0)
+    expect(rovingIndex('End', 1, 5, false)).toBe(4)
+  })
+
+  it('uses the vertical arrows when the strip is turned, and ignores the wrong axis', () => {
+    expect(rovingIndex('ArrowDown', 0, 3, true)).toBe(1)
+    expect(rovingIndex('ArrowUp', 0, 3, true)).toBe(2)
+    expect(rovingIndex('ArrowRight', 0, 3, true)).toBeNull()
+    expect(rovingIndex('ArrowDown', 0, 3, false)).toBeNull()
+  })
+
+  it('leaves other keys to the platform', () => {
+    expect(rovingIndex('Tab', 0, 3, false)).toBeNull()
+    expect(rovingIndex('Enter', 0, 3, false)).toBeNull()
   })
 })

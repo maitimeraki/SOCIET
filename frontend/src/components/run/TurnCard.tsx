@@ -4,6 +4,7 @@ import { fmtScore } from '../../utils/format'
 import PositionMark from '../ui/PositionMark'
 import Emphasis from '../common/Emphasis'
 import Chip from '../ui/Chip'
+import { ruleClasses } from '../ui/Rule'
 
 export default function TurnCard({ turn, round }: { turn: TurnInfo; round: number }) {
   const references = turn.references ?? []
@@ -14,7 +15,7 @@ export default function TurnCard({ turn, round }: { turn: TurnInfo; round: numbe
   return (
     <article
       aria-label={`Pass ${round} — ${turn.agent_name}, ${turn.stance}`}
-      className="border-t border-ink-4 pt-3"
+      className={`${ruleClasses('top')} pt-3`}
     >
       <header className="flex items-center gap-2">
         <span className="text-body text-ink">{turn.agent_name}</span>

@@ -2,11 +2,12 @@ import { SealCheck } from '@phosphor-icons/react'
 import type { AgentProfile } from '../../run/events'
 import PositionMark from '../ui/PositionMark'
 import Chip from '../ui/Chip'
+import { ruleClasses } from '../ui/Rule'
 
 export default function ProfileCard({ profile }: { profile: AgentProfile }) {
   const sources = profile.summary_provenance ?? []
   return (
-    <article className="border-t border-ink-4 pt-4">
+    <article className={`${ruleClasses('top')} pt-4`}>
       <header className="flex items-center justify-between gap-2">
         <span className="text-body text-ink">
           {profile.identity.name} · {profile.identity.archetype.toLowerCase()}

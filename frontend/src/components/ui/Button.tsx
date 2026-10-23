@@ -34,7 +34,9 @@ const REGISTRATION =
 export function buttonClasses(variant: ButtonVariant = 'secondary', size: ButtonSize = 40, extra = ''): string {
   const h = size === 40 ? 'h-10 px-4 text-body' : 'h-8 px-3 text-micro'
   const mark = variant === 'ghost' || variant === 'primary' ? '' : REGISTRATION
-  return `inline-flex select-none items-center justify-center gap-2 ${mark} rounded-md font-medium transition-[color,background-color,border-color,box-shadow,transform] duration-state disabled:cursor-not-allowed disabled:opacity-50 ${VARIANT[variant]} ${h} ${extra}`
+  // §14.5 — below 640px every actionable control is at least a 44×44 target; the desktop heights
+  // (32 / 40) are unchanged. `min-*` wins over the height it exceeds.
+  return `inline-flex select-none items-center justify-center gap-2 ${mark} rounded-md font-medium transition-[color,background-color,border-color,box-shadow,transform] duration-state disabled:cursor-not-allowed disabled:opacity-50 ${VARIANT[variant]} ${h} max-sm:min-h-11 max-sm:min-w-11 ${extra}`
 }
 
 export default function Button({

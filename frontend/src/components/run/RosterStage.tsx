@@ -7,6 +7,7 @@ import IntentCard from './IntentCard'
 import SelectionTable from './SelectionTable'
 import ProfileCard from './ProfileCard'
 import Button from '../ui/Button'
+import { ruleClasses } from '../ui/Rule'
 
 function Beat({
   number,
@@ -98,7 +99,7 @@ export default function RosterStage({
         state={progress.phase === 'seated' ? 'done' : selection.length > 0 ? 'running' : 'pending'}
       >
         {progress.phase === 'empty' ? (
-          <div className="border-t border-ink-4 pt-5">
+          <div className={`${ruleClasses('top')} pt-5`}>
             <p className="max-w-[60ch] text-body text-ink-2">
               Nothing to convene. "{question}" didn't connect to enough of the corpus. Try a broader question, or add
               documents to this corpus.

@@ -7,6 +7,7 @@ import Seat from './Seat'
 import type { SeatSpec } from './Seat'
 import PairArc from './PairArc'
 import PositionMark from '../ui/PositionMark'
+import { ruleClasses } from '../ui/Rule'
 
 const SLOTS_PER_SECTOR = 12
 
@@ -82,7 +83,7 @@ export default function ChamberFloor({ roster, rounds, activeRound, livePairs, o
 
   return (
     <div
-      className="relative"
+      className="relative rounded-md"
       onKeyDown={(event) => {
         if (event.key === 'Escape' && selected) closePopover()
       }}
@@ -141,7 +142,7 @@ export default function ChamberFloor({ roster, rounds, activeRound, livePairs, o
       </svg>
 
       {seated && (
-        <div className="absolute right-3 top-3 w-[240px] border-t border-ink-4 bg-canvas pt-3">
+        <div className={`${ruleClasses('top')} absolute right-3 top-3 w-[240px] bg-canvas pt-3`}>
           <div className="flex items-start justify-between gap-2">
             <p className="text-body text-ink">{seated.profile.identity.name}</p>
             <button type="button" aria-label="Close popover" onClick={closePopover} className="text-ink-3 hover:text-ink">

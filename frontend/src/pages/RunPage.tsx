@@ -1,11 +1,13 @@
 import { useEffect, useState } from 'react'
 import type { ReactNode } from 'react'
-import { Link, NavLink, Navigate, useLocation, useNavigate, useParams } from 'react-router-dom'
+import { Link, Navigate, useLocation, useNavigate, useParams } from 'react-router-dom'
 import { CaretLeft, CaretRight } from '@phosphor-icons/react'
 import { useRunStore } from '../run/runStore'
-import { convergenceSeries, isLive, railState, rosterProgress, streamItems, verdictView } from '../run/selectors'
+import { convergenceSeries, isLive, rosterProgress, streamItems, verdictView } from '../run/selectors'
 import Button from '../components/ui/Button'
-import StageRail from '../components/common/StageRail'
+import Card from '../components/ui/Card'
+import { ruleClasses } from '../components/ui/Rule'
+import SectionNav, { sectionPanelId, sectionTabId } from '../components/ui/SectionNav'
 import RunHeader from '../components/run/RunHeader'
 import RosterStage from '../components/run/RosterStage'
 import EventStream from '../components/run/EventStream'
@@ -40,33 +42,22 @@ const TAB_LABELS: Record<RunTab, string> = {
   artifacts: 'Artifacts',
 }
 
-const RAIL_TARGETS: Record<string, RunTab> = {
-  ingest: 'artifacts',
-  graph: 'artifacts',
-  question: 'artifacts',
-  roster: 'roster',
-  debate: 'floor',
-  verdict: 'verdict',
-}
+const NAV_PREFIX = 'run'
+const NAV_ITEMS = TABS.map((key) => ({ key, label: TAB_LABELS[key] }))
 
-/** §9 The run's own sections, as one strip of real links above the workspace. */
-function RunTabs({ runId }: { runId: string }) {
+/**
+ * §14.4 The run's one nav strip — a real tablist. The strip scrolls inside its own row at 390px
+ * (§14.5), so the page never scrolls sideways.
+ */
+function RunNav({ runId, tab, onNavigate }: { runId: string; tab: RunTab; onNavigate: (path: string) => void }) {
   return (
-    <nav className="flex items-center gap-1 border-b border-ink-4">
-      {TABS.map((name) => (
-        <NavLink
-          key={name}
-          to={`/runs/${runId}/${name}`}
-          className={({ isActive }) =>
-            `px-3 py-2 text-body capitalize transition-colors ${
-              isActive ? 'text-ink shadow-accent-inset' : 'text-ink-2 hover:text-ink'
-            }`
-          }
-        >
-          {TAB_LABELS[name]}
-        </NavLink>
-      ))}
-    </nav>
+    <SectionNav
+      idPrefix={NAV_PREFIX}
+      items={NAV_ITEMS}
+      active={tab}
+      onSelect={(key) => onNavigate(`/runs/${runId}/${key}`)}
+      className="overflow-x-auto"
+    />
   )
 }
 
@@ -97,71 +88,74 @@ function RunWork({ run, events, tab, runId, scrubbed, latestRound, corpusMissing
   const series = convergenceSeries(run)
   const activeRound = scrubbed ?? latestRound
 
-  return (
-    <>
-      {tab === 'roster' && (
-        <RosterStage
-          question={run.query}
-          intent={run.intent}
-          selection={run.selection}
-          profiles={run.roster}
-          progress={progress}
-          onSkip={() => onNavigate(`/runs/${runId}/floor`)}
-          floorSlot={<ChamberFloor roster={run.roster} rounds={[]} activeRound={null} livePairs={{}} />}
-        />
-      )}
-      {tab === 'floor' && (
-        <div className="grid gap-6 min-[900px]:grid-cols-[3fr_2fr]">
-          <div className="space-y-4">
-            <div className={`rounded-md bg-canvas p-4 shadow-raised ${run.status === 'failed' ? 'opacity-40' : ''}`}>
-              <ChamberFloor
-                roster={run.roster}
-                rounds={run.rounds}
-                activeRound={activeRound}
-                livePairs={run.livePairs}
-                onOpenProfile={() => onNavigate(`/runs/${runId}/agents`)}
-              />
-              <div className="mt-3 flex items-center justify-center gap-3 text-micro text-ink-3">
-                <button type="button" aria-label="Previous pass" disabled={activeRound === null || activeRound <= 1} onClick={() => onScrub(Math.max(1, (activeRound ?? 1) - 1))} className="inline-flex min-h-6 min-w-6 items-center justify-center rounded-[4px] px-2 py-0.5 hover:bg-ground-2 disabled:opacity-40"><CaretLeft size={14} aria-hidden="true" /></button>
-                <span className="tnum font-measurement">{activeRound === null ? 'live' : `pass ${activeRound}`}</span>
-                <button type="button" aria-label="Next pass" disabled={scrubbed === null} onClick={() => onScrub(scrubbed === null ? null : scrubbed >= (latestRound ?? 1) ? null : scrubbed + 1)} className="inline-flex min-h-6 min-w-6 items-center justify-center rounded-[4px] px-2 py-0.5 hover:bg-ground-2 disabled:opacity-40"><CaretRight size={14} aria-hidden="true" /></button>
-                <button type="button" onClick={() => onScrub(null)} className="rounded-[4px] px-2 py-0.5 text-accent hover:bg-ground-2">End — back to live</button>
-              </div>
-            </div>
-            <ConvergenceTape ticks={series} threshold={run.config?.convergence_threshold ?? 0.8} activeRound={activeRound} />
-            {run.verdict && (
-              <div className="flex items-center justify-between border-t border-ink-4 pt-3">
-                <p className="text-body text-ink">
-                  {run.verdict.converged ? 'Converged — the verdict is ready.' : 'Verdict ready — a plurality, not a consensus.'}
-                </p>
-                <Link to={`/runs/${runId}/verdict`} className="text-body text-accent hover:text-accent">
-                  Open verdict →
-                </Link>
-              </div>
-            )}
-          </div>
-          <div className="space-y-3">
-            {run.status === 'failed' && (
-              <div className="border-t border-border-strong/40 pt-3">
-                <p className="text-body text-ink">The debate stopped: {run.error ?? 'unknown error'}.</p>
-                <div className="mt-2 flex items-center gap-4">
-                  <a href="#run-stream" className="text-body text-accent hover:text-accent">
-                    See what happened ↓
-                  </a>
-                  <Link to="/new/society" className="text-body text-ink-2 hover:text-ink">
-                    Start a new decision
+  const renderTab = (key: RunTab): ReactNode => {
+    switch (key) {
+      case 'roster':
+        return (
+          <RosterStage
+            question={run.query}
+            intent={run.intent}
+            selection={run.selection}
+            profiles={run.roster}
+            progress={progress}
+            onSkip={() => onNavigate(`/runs/${runId}/floor`)}
+            floorSlot={<ChamberFloor roster={run.roster} rounds={[]} activeRound={null} livePairs={{}} />}
+          />
+        )
+      case 'floor':
+        return (
+          <div className="grid gap-6 min-[900px]:grid-cols-[3fr_2fr]">
+            <div className="space-y-4">
+              {/* The floor is the one card; every record inside it is ruled, never boxed. */}
+              <Card className={run.status === 'failed' ? 'opacity-40' : ''}>
+                <ChamberFloor
+                  roster={run.roster}
+                  rounds={run.rounds}
+                  activeRound={activeRound}
+                  livePairs={run.livePairs}
+                  onOpenProfile={() => onNavigate(`/runs/${runId}/agents`)}
+                />
+                <div className="mt-3 flex flex-wrap items-center justify-center gap-3 text-micro text-ink-3">
+                  <button type="button" aria-label="Previous pass" disabled={activeRound === null || activeRound <= 1} onClick={() => onScrub(Math.max(1, (activeRound ?? 1) - 1))} className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-xs px-2 py-0.5 hover:bg-ground-2 disabled:opacity-40"><CaretLeft size={14} aria-hidden="true" /></button>
+                  <span className="tnum font-measurement">{activeRound === null ? 'live' : `pass ${activeRound}`}</span>
+                  <button type="button" aria-label="Next pass" disabled={scrubbed === null} onClick={() => onScrub(scrubbed === null ? null : scrubbed >= (latestRound ?? 1) ? null : scrubbed + 1)} className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-xs px-2 py-0.5 hover:bg-ground-2 disabled:opacity-40"><CaretRight size={14} aria-hidden="true" /></button>
+                  <button type="button" onClick={() => onScrub(null)} className="inline-flex min-h-11 items-center rounded-xs px-2 py-0.5 text-accent hover:bg-ground-2">End — back to live</button>
+                </div>
+              </Card>
+              <ConvergenceTape ticks={series} threshold={run.config?.convergence_threshold ?? 0.8} activeRound={activeRound} />
+              {run.verdict && (
+                <div className={`${ruleClasses('top')} flex flex-wrap items-center justify-between gap-2 pt-3`}>
+                  <p className="text-body text-ink">
+                    {run.verdict.converged ? 'Converged — the verdict is ready.' : 'Verdict ready — a plurality, not a consensus.'}
+                  </p>
+                  <Link to={`/runs/${runId}/verdict`} className="inline-flex min-h-11 items-center text-body text-accent hover:text-accent">
+                    Open verdict →
                   </Link>
                 </div>
+              )}
+            </div>
+            <div className="space-y-3">
+              {run.status === 'failed' && (
+                <div className={`${ruleClasses('top')} pt-3`}>
+                  <p className="text-body text-ink">The debate stopped: {run.error ?? 'unknown error'}.</p>
+                  <div className="mt-2 flex flex-wrap items-center gap-4">
+                    <a href="#run-stream" className="inline-flex min-h-11 items-center text-body text-accent hover:text-accent">
+                      See what happened ↓
+                    </a>
+                    <Link to="/new/society" className="inline-flex min-h-11 items-center text-body text-ink-2 hover:text-ink">
+                      Start a new decision
+                    </Link>
+                  </div>
+                </div>
+              )}
+              <div id="run-stream">
+                <EventStream items={streamItems(run)} live={isLive(run)} />
               </div>
-            )}
-            <div id="run-stream">
-              <EventStream items={streamItems(run)} live={isLive(run)} />
             </div>
           </div>
-        </div>
-      )}
-      {tab === 'verdict' && (
-        view ? (
+        )
+      case 'verdict':
+        return view ? (
           <div className="space-y-8">
             {/* §8.5 — the answer IS the reading view and the export: one document, derived once. The
                 raw-JSON dump it replaces is retired; the export lives inside the document, so what is
@@ -173,7 +167,7 @@ function RunWork({ run, events, tab, runId, scrubbed, latestRound, corpusMissing
               sources={sourceTitles(run.roster)}
               corpusMissing={corpusMissing ?? false}
             />
-            <div className="flex items-center gap-3 print:hidden">
+            <div className="flex flex-wrap items-center gap-3 print:hidden">
               <Button onClick={onReplay}>Replay this decision</Button>
               <Button variant="ghost" onClick={() => onNavigate('/new/society')}>
                 Start a new decision
@@ -183,9 +177,55 @@ function RunWork({ run, events, tab, runId, scrubbed, latestRound, corpusMissing
         ) : (
           <p className="text-body text-ink-3">The verdict appears when the debate completes.</p>
         )
-      )}
-      {tab === 'agents' && <AgentsTab run={run} />}
-      {tab === 'artifacts' && <ArtifactsTab run={run} events={events} />}
+      case 'agents':
+        return <AgentsTab run={run} />
+      case 'artifacts':
+        return <ArtifactsTab run={run} events={events} />
+    }
+  }
+
+  return (
+    <>
+      <div
+        role="tabpanel"
+        id={sectionPanelId(NAV_PREFIX, 'roster')}
+        aria-labelledby={sectionTabId(NAV_PREFIX, 'roster')}
+        hidden={tab !== 'roster'}
+      >
+        {tab === 'roster' ? renderTab('roster') : null}
+      </div>
+      <div
+        role="tabpanel"
+        id={sectionPanelId(NAV_PREFIX, 'floor')}
+        aria-labelledby={sectionTabId(NAV_PREFIX, 'floor')}
+        hidden={tab !== 'floor'}
+      >
+        {tab === 'floor' ? renderTab('floor') : null}
+      </div>
+      <div
+        role="tabpanel"
+        id={sectionPanelId(NAV_PREFIX, 'verdict')}
+        aria-labelledby={sectionTabId(NAV_PREFIX, 'verdict')}
+        hidden={tab !== 'verdict'}
+      >
+        {tab === 'verdict' ? renderTab('verdict') : null}
+      </div>
+      <div
+        role="tabpanel"
+        id={sectionPanelId(NAV_PREFIX, 'agents')}
+        aria-labelledby={sectionTabId(NAV_PREFIX, 'agents')}
+        hidden={tab !== 'agents'}
+      >
+        {tab === 'agents' ? renderTab('agents') : null}
+      </div>
+      <div
+        role="tabpanel"
+        id={sectionPanelId(NAV_PREFIX, 'artifacts')}
+        aria-labelledby={sectionTabId(NAV_PREFIX, 'artifacts')}
+        hidden={tab !== 'artifacts'}
+      >
+        {tab === 'artifacts' ? renderTab('artifacts') : null}
+      </div>
     </>
   )
 }
@@ -207,7 +247,7 @@ export interface RunPageViewProps extends RunWorkProps {
 export function RunPageView({ state, onStateChange, map, summary, ...run }: RunPageViewProps) {
   return (
     <>
-      <RunTabs runId={run.runId} />
+      <RunNav runId={run.runId} tab={run.tab} onNavigate={run.onNavigate} />
       <WorkspaceView
         mapId={run.runId}
         state={state}
@@ -285,13 +325,8 @@ export default function RunPage() {
   return (
     <div className="space-y-5">
       <RunHeader run={run} connection={connection} maxRounds={maxRounds} />
-      <StageRail
-        stages={railState(run)}
-        activeKey={tab}
-        onSelect={(key) => navigate(`/runs/${runId}/${RAIL_TARGETS[key] ?? 'roster'}`)}
-      />
 
-      <RunTabs runId={runId} />
+      <RunNav runId={runId} tab={tab} onNavigate={navigate} />
 
       {/* §9/D14 — the one map, paired with the section's work by the workspace. The map is the pane's
           `map` and the section is its `work`; both are rendered in every state, so changing section or

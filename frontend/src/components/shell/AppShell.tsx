@@ -31,6 +31,10 @@ export function RouteFallback() {
  */
 export default function AppShell() {
   const { pathname } = useLocation()
+  // The boundary is keyed on the SECTION, not the full path: a stale error is cleared when the
+  // customer leaves the section, while a tab or step change inside it keeps the page mounted — the
+  // run's map must never remount when its own tab changes (§14.4 row 12).
+  const section = pathname.split('/')[1] ?? ''
   return (
     <div className="flex min-h-screen bg-ground text-ink">
       <a
@@ -41,7 +45,7 @@ export default function AppShell() {
       </a>
       <Rail />
       <main id="content" className="min-w-0 flex-1 px-6 pb-24 pt-8">
-        <AppErrorBoundary key={pathname}>
+        <AppErrorBoundary key={section}>
           <Suspense fallback={<RouteFallback />}>
             <Outlet />
           </Suspense>

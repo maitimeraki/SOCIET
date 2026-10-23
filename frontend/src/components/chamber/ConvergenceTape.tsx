@@ -2,6 +2,7 @@ import { STANCE_ORDER } from '../../run/selectors'
 import type { TapeTick } from '../../run/selectors'
 import type { Stance } from '../../run/events'
 import PositionMark from '../ui/PositionMark'
+import { ruleClasses } from '../ui/Rule'
 import { fmtPct } from '../../utils/format'
 
 const SEGMENT_FILL: Record<Stance, string> = {
@@ -23,7 +24,7 @@ export default function ConvergenceTape({
   const active = ticks.find((tick) => tick.round === (activeRound ?? ticks[ticks.length - 1]?.round))
 
   return (
-    <div className="border-t border-ink-4 pt-4">
+    <div className={`${ruleClasses('top')} pt-4`}>
       <div className="mb-3 flex items-center justify-between">
         <h3 className="text-label uppercase text-ink-3">The Tape</h3>
         <span className="text-micro text-ink-3">weighted share per pass vs {threshold.toFixed(2)}</span>

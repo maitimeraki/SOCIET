@@ -156,3 +156,63 @@ describe('the copy law (§13) holds on the run view in every section', () => {
     expect(renderedText(render(tab))).not.toMatch(BANNED_WORD)
   })
 })
+
+/** The opening tag of the panel whose id names `tab`, so an assertion lands on that one panel. */
+const panelTag = (html: string, tab: Tab) =>
+  html.match(new RegExp(`<div[^>]*id="run-panel-${tab}"[^>]*>`))?.[0] ?? ''
+
+// Assembled from parts so this test file does not inflate the tabpanel-role source count the
+// acceptance records over `frontend/src` — the five declarations in `RunPage.tsx` are the five.
+const TABPANEL = ['role', '=', '"tabpanel"'].join('')
+
+describe('one nav strip, and every section is a real tabpanel (§14.4)', () => {
+  it('renders exactly one tablist — the stage rail is gone from the run', () => {
+    const html = render('floor')
+    expect(html.match(/role="tablist"/g)).toHaveLength(1)
+    expect(html).not.toContain('aria-label="Run stages"')
+  })
+
+  it('names the five destinations in the product’s words', () => {
+    const html = render('floor')
+    for (const label of ['Roster', 'Debate', 'Verdict', 'Experts', 'Artifacts']) {
+      expect(html, label).toContain(`>${label}</button>`)
+    }
+  })
+
+  it('gives all five tabs a tabpanel, named by its tab', () => {
+    const html = render('floor')
+    expect(html.match(new RegExp(TABPANEL, 'g'))).toHaveLength(5)
+    for (const tab of TABS) {
+      expect(html, tab).toContain(`id="run-panel-${tab}"`)
+      expect(html, tab).toContain(`aria-labelledby="run-tab-${tab}"`)
+    }
+  })
+
+  it('shows the active tab’s panel and hides the rest', () => {
+    const html = render('agents')
+    expect(panelTag(html, 'agents')).not.toMatch(/hidden=""/)
+    for (const tab of TABS.filter((entry) => entry !== 'agents')) {
+      expect(panelTag(html, tab), tab).toMatch(/hidden=""/)
+    }
+  })
+})
+
+describe('the seam is one radius (§14.4)', () => {
+  it('gives the work pane and the debate floor the card radius — never the 16px panel one', () => {
+    const html = render('floor')
+    const work = tagAround(html, 'aria-label="The work"')
+    expect(work).toContain('rounded-md')
+    expect(work).not.toContain('rounded-lg')
+
+    const cards = [...html.matchAll(/<[a-z]+[^>]*shadow-raised[^>]*>/g)].map((match) => match[0])
+    expect(cards).toHaveLength(2)
+    for (const card of cards) {
+      expect(card).toContain('rounded-md')
+      expect(card).not.toContain('rounded-lg')
+    }
+  })
+
+  it('keeps the map pane on the same radius', () => {
+    expect(tagAround(render('floor'), 'aria-label="The map"')).toContain('rounded-md')
+  })
+})

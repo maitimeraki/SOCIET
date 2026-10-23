@@ -2,13 +2,14 @@ import type { AgentProfile } from '../../run/events'
 import PositionMark from '../ui/PositionMark'
 import Chip from '../ui/Chip'
 import Meter from '../ui/Meter'
+import { ruleClasses } from '../ui/Rule'
 
 export default function AgentCard({ profile, onOpen }: { profile: AgentProfile; onOpen: () => void }) {
   return (
     <button
       type="button"
       onClick={onOpen}
-      className="w-full border-t border-ink-4 pt-4 text-left transition-colors duration-state hover:bg-ground-2"
+      className={`${ruleClasses('top')} w-full pt-4 text-left transition-colors duration-state hover:bg-ground-2`}
     >
       <span className="flex items-center justify-between gap-2">
         <span className="text-body text-ink">
