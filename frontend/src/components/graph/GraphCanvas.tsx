@@ -622,10 +622,10 @@ function MapDynamics({ graph }: { graph: Graph }) {
       labelDynamics.level = level
       return entryOverride(data, dimmed.current.get(node), level, blooms.current.get(node), now)
     }
+    // Install-only: `@react-sigma`'s SigmaContainer cleanup has already killed the instance when this
+    // effect's cleanup would run, and a `setSetting` on the killed instance schedules a render whose
+    // node programs are gone — it throws. The reducer dies with the instance, so it needs no reset.
     sigma.setSetting('nodeReducer', reducer)
-    return () => {
-      sigma.setSetting('nodeReducer', null)
-    }
   }, [levelAt, sigma])
 
   useEffect(() => {
