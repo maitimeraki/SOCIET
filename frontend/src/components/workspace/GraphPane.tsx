@@ -106,6 +106,8 @@ export interface GraphPaneViewProps extends GraphPaneProps {
   /** The map's relations, as text (`Source —REL→ Target`) — the half of the text alternative that
    *  lives outside the canvas host so it survives every pane state. */
   relations?: string[]
+  /** Relations past the line cap, said in words rather than silently dropped. */
+  omitted?: number
 }
 
 /**
@@ -125,6 +127,7 @@ export function GraphPaneView({
   layers,
   onToggleLayer,
   relations = [],
+  omitted = 0,
   children,
 }: GraphPaneViewProps) {
   const minimised = state === 'minimised'
@@ -180,6 +183,7 @@ export function GraphPaneView({
             {relations.map((line, index) => (
               <li key={index}>{line}</li>
             ))}
+            {omitted > 0 && <li>and {omitted} more</li>}
           </ul>
         )}
 
@@ -225,8 +229,8 @@ export default function GraphPane(props: GraphPaneProps) {
   const nodes = useGraphStore((s) => s.nodes)
   const edges = useGraphStore((s) => s.edges)
   const version = useGraphStore((s) => s.version)
-  const relations = useMemo(
-    () => graphTextFallback(Object.values(nodes), Object.values(edges), TEXT_FALLBACK_LIMIT).lines,
+  const fallback = useMemo(
+    () => graphTextFallback(Object.values(nodes), Object.values(edges), TEXT_FALLBACK_LIMIT),
     // eslint-disable-next-line react-hooks/exhaustive-deps -- version is the invalidation key for nodes/edges
     [version],
   )
@@ -240,5 +244,13 @@ export default function GraphPane(props: GraphPaneProps) {
       return next
     })
 
-  return <GraphPaneView {...props} layers={layers} onToggleLayer={toggleLayer} relations={relations} />
+  return (
+    <GraphPaneView
+      {...props}
+      layers={layers}
+      onToggleLayer={toggleLayer}
+      relations={fallback.lines}
+      omitted={fallback.omitted}
+    />
+  )
 }

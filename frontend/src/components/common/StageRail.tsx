@@ -1,3 +1,4 @@
+import { useEffect, useRef } from 'react'
 import { CheckCircle, XCircle } from '@phosphor-icons/react'
 
 export type RailStageState = 'pending' | 'running' | 'done' | 'failed'
@@ -18,9 +19,23 @@ export default function StageRail({
   activeKey?: string
   onSelect?: (key: string) => void
 }) {
+  const rail = useRef<HTMLElement>(null)
+
+  // The rail scrolls inside its own row at 390; the current step must be visible without the customer
+  // discovering the scroll. The step change is the motion, so the scroll is instant — not smooth.
+  useEffect(() => {
+    rail.current
+      ?.querySelector('[aria-current="step"]')
+      ?.scrollIntoView({ block: 'nearest', inline: 'center', behavior: 'auto' })
+  }, [activeKey])
+
   return (
     <nav
+      ref={rail}
       aria-label="Run stages"
+      // A scroll container that only a pointer can reveal is not reachable by keyboard; focusing the
+      // rail lets the arrow keys scroll it.
+      tabIndex={0}
       className="flex flex-nowrap items-center gap-x-3 overflow-x-auto border-b border-ink-4 pb-3"
     >
       {stages.map((stage, index) => {

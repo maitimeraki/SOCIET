@@ -311,14 +311,30 @@ const RAMP_HEIGHT = 1
 /** Where the deep stop sits along the ray (`… 72%`); past it the ramp paints the deep floor. */
 const RAMP_STOP = 0.72
 
-const parseHex = (hex: string): [number, number, number] | null => {
-  const match = /^#([0-9a-f]{6})$/i.exec(hex.trim())
-  if (!match) return null
-  const value = parseInt(match[1], 16)
-  return [(value >> 16) & 255, (value >> 8) & 255, value & 255]
+/** A `#rrggbb` or `rgb(r, g, b)` colour's channels — Sigma hands colours back in either notation. */
+const parseColor = (color: string): [number, number, number] | null => {
+  const hex = /^#([0-9a-f]{6})$/i.exec(color.trim())
+  if (hex) {
+    const value = parseInt(hex[1], 16)
+    return [(value >> 16) & 255, (value >> 8) & 255, value & 255]
+  }
+  const rgbMatch = /^rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)/i.exec(color.trim())
+  return rgbMatch ? [Number(rgbMatch[1]), Number(rgbMatch[2]), Number(rgbMatch[3])] : null
 }
 
 const rgb = (channels: number[]): string => `rgb(${channels.map((channel) => Math.round(channel)).join(', ')})`
+
+/**
+ * `from` blended toward `to` by `level` (0–1), channel-wise in sRGB — the interpolation a CSS
+ * transition paints. Pure, and the one blend used by the entry dim, the label dim and the ramp.
+ */
+export function blendColor(from: string, to: string, level: number): string {
+  const a = parseColor(from)
+  const b = parseColor(to)
+  if (!a || !b) return from
+  const t = Math.min(1, Math.max(0, level))
+  return rgb(a.map((channel, index) => channel + (b[index] - channel) * t))
+}
 
 /**
  * The colour the map's CSS ramp paints at `(x, y)` on a box of `width × height`.
@@ -338,8 +354,8 @@ export function rampColorAt(
   lit: string,
   deep: string,
 ): string {
-  const from = parseHex(lit)
-  const to = parseHex(deep)
+  const from = parseColor(lit)
+  const to = parseColor(deep)
   if (!from || !to) return deep
   const floor = rgb(to)
   // No box yet (the minimised pane mounts a 1×1 host): the far stop is the honest reading.
@@ -400,6 +416,8 @@ function RampFrameWatch() {
 export const DIM_SIZE_RATIO = 0.6
 /** The bloom's duration — the grammar's bloom (§13.10 rule 12). */
 export const BLOOM_MS = 560
+/** The hover dim's duration — the grammar's state curve (§13.10 rule 12). */
+export const HOVER_MS = 120
 
 /** One entry's read-only override: the dimmed colour and size, computed once per hover. */
 export interface EntryOverride {
@@ -408,16 +426,78 @@ export interface EntryOverride {
 }
 
 /**
+ * The hover dim's level at `elapsed` ms, eased on the project's state curve —
+ * `cubic-bezier(0.2, 0, 0, 1)` (`--ease-standard`). Endpoints are exact (0 at 0ms, 1 at 120ms);
+ * under `prefers-reduced-motion: reduce` the level is the endpoint immediately, with no tween.
+ * Pure, so the curve is unit-testable.
+ */
+export function hoverLevel(elapsed: number, reduced = false): number {
+  if (reduced || elapsed >= HOVER_MS) return 1
+  if (!Number.isFinite(elapsed) || elapsed <= 0) return 0
+  return bezierY(elapsed / HOVER_MS)
+}
+
+const BEZIER_X1 = 0.2
+const BEZIER_X2 = 0
+const BEZIER_Y1 = 0
+const BEZIER_Y2 = 1
+
+const bezier = (t: number, p1: number, p2: number): number => {
+  const u = 1 - t
+  return 3 * u * u * t * p1 + 3 * u * t * t * p2 + t * t * t
+}
+
+const bezierSlope = (t: number, p1: number, p2: number): number =>
+  3 * (1 - t) * (1 - t) * p1 + 6 * (1 - t) * t * (p2 - p1) + 3 * t * t * (1 - p2)
+
+/** The y of `cubic-bezier(0.2, 0, 0, 1)` at x: solve x(t) = x by Newton, then read y(t). */
+function bezierY(x: number): number {
+  let t = x
+  for (let i = 0; i < 8; i += 1) {
+    const delta = bezier(t, BEZIER_X1, BEZIER_X2) - x
+    if (Math.abs(delta) < 1e-5) return bezier(t, BEZIER_Y1, BEZIER_Y2)
+    const slope = bezierSlope(t, BEZIER_X1, BEZIER_X2)
+    if (Math.abs(slope) < 1e-6) break
+    t -= delta / slope
+  }
+  let low = 0
+  let high = 1
+  t = x
+  for (let i = 0; i < 24; i += 1) {
+    const value = bezier(t, BEZIER_X1, BEZIER_X2)
+    if (Math.abs(value - x) < 1e-5) break
+    if (value < x) low = t
+    else high = t
+    t = (low + high) / 2
+  }
+  return bezier(t, BEZIER_Y1, BEZIER_Y2)
+}
+
+/**
+ * Whether an entry still needs its one bloom. The set is per graph instance: a layer filter that
+ * drops and re-adds an entry does not bloom it again, while a new dataset (a new graph instance)
+ * starts empty, so genuinely new material still blooms.
+ */
+export function shouldBloom(bloomed: ReadonlySet<string>, id: string): boolean {
+  return !bloomed.has(id)
+}
+
+/**
+ * The per-node state the label renderer reads. The dim map is the same object the node reducer
+ * reads (computed once per hover change); the level is the same 0→1 tween the marks follow, so a
+ * dimmed entry's label moves with its mark instead of staying at full white. One map on screen
+ * (D14), so one module-level state is enough.
+ */
+const labelDynamics: { dimmed: Map<string, EntryOverride>; level: number } = { dimmed: new Map(), level: 0 }
+
+/**
  * An entry's colour at rest in a hovered map: its own kind blended halfway toward the map's quiet
  * ink. The kind is still readable, and every entry colour clears 3:1 against the lit end of the ramp
  * in this state (the darkest, the material blue, measures 5.07:1), so a dimmed entry never vanishes
  * — the map is a record, not a game.
  */
 export function dimEntryColor(color: string, floor: string): string {
-  const from = parseHex(color)
-  const to = parseHex(floor)
-  if (!from || !to) return color
-  return rgb(from.map((channel, index) => channel + (to[index] - channel) * 0.5))
+  return blendColor(color, floor, 0.5)
 }
 
 /**
@@ -437,8 +517,9 @@ export function hoverDimmedEntries(graph: Graph, hovered: string, floor: string)
 }
 
 /**
- * The bloom's scale at `elapsed` ms — the CSS keyframe `plot-bloom` (0 → 1.28 → 1) over 560ms, with
- * no opacity anywhere in it: the entry **rises** into place, it never fades (§13.10 rule 11). Under
+ * The bloom's scale at `elapsed` ms — the scale half of the CSS keyframe `plot-bloom`
+ * (0 → 1.28 → 1 over 560ms). The CSS keyframe also fades opacity 0 → 1; this canvas path carries
+ * **no opacity at all**, so the entry rises into place and never fades (§13.10 rule 11). Under
  * `prefers-reduced-motion: reduce` the entry is simply there.
  */
 export function bloomScale(elapsed: number, reduced = false): number {
@@ -451,18 +532,23 @@ export function bloomScale(elapsed: number, reduced = false): number {
 /**
  * One node as the reducer hands it back to Sigma. Sigma does **not** merge a reducer's result onto
  * the node's attributes — it replaces them — so the returned object is the whole node: this entry's
- * own position, colour, label and type, with the hover dim and the bloom's scale applied on top.
+ * own position, colour, label and type, with the hover dim (blended by `level`) and the bloom's
+ * scale applied on top. The dim map is computed once per hover change; only the level moves.
  */
 export function entryOverride(
   data: Attributes,
   dim: EntryOverride | undefined,
+  level: number,
   started: number | undefined,
   now: number,
   reduced = false,
 ): Attributes {
   const scale = started === undefined ? 1 : bloomScale(now - started, reduced)
   if (!dim && scale === 1) return data
-  return { ...data, ...dim, size: (dim?.size ?? (data.size as number) ?? NODE_SIZE) * scale }
+  const baseSize = (data.size as number) ?? NODE_SIZE
+  const size = dim ? baseSize + (dim.size - baseSize) * Math.min(1, Math.max(0, level)) : baseSize
+  const color = dim ? blendColor(String(data.color ?? ''), dim.color, level) : String(data.color ?? '')
+  return { ...data, color, size: size * scale }
 }
 
 const prefersReducedMotion = (): boolean =>
@@ -486,51 +572,102 @@ export const drawHoverRing: NodeHoverDrawingFunction = (context, data) => {
  *
  * - **the bloom**: a node the graph gains blooms once over 560ms and settles. The graph's own
  *   `nodeAdded` event starts the clock, a rAF loop drives Sigma until the last bloom expires, and
- *   the node reducer reads the remaining time. Nothing else moves with it, and a given entry never
- *   blooms twice.
- * - **the hover reducer**: entering a node computes the dimmed set once; leaving restores it.
+ *   the node reducer reads the remaining time. Nothing else moves with it; a persistent set means
+ *   an entry a layer filter drops and re-adds never blooms twice.
+ * - **the hover reducer**: entering a node computes the dimmed set **once**; the level then moves
+ *   0→1 over the 120ms state curve, and leaving runs the same curve back to 0 before the dim map is
+ *   cleared — it never snaps.
  */
 function MapDynamics({ graph }: { graph: Graph }) {
   const sigma = useSigma()
   const dimmed = useRef<Map<string, EntryOverride>>(new Map())
   const blooms = useRef<Map<string, number>>(new Map())
+  const bloomed = useRef<Set<string>>(new Set())
+  const tween = useRef<{ startedAt: number; from: number; to: number } | null>(null)
   const frame = useRef<number | undefined>(undefined)
 
-  useEffect(() => {
-    const reducer = (node: string, data: Attributes) =>
-      entryOverride(data, dimmed.current.get(node), blooms.current.get(node), performance.now())
-    sigma.setSetting('nodeReducer', reducer)
-    return () => {
-      sigma.setSetting('nodeReducer', null)
-    }
-  }, [sigma])
+  /** The current 0→1 dim level; 0 when no hover has happened. */
+  const levelAt = useCallback((now: number) => {
+    const current = tween.current
+    if (!current) return 0
+    return current.from + (current.to - current.from) * hoverLevel(now - current.startedAt, prefersReducedMotion())
+  }, [])
 
-  useEffect(() => {
+  /** One rAF loop for both behaviours; it runs only while a bloom or a hover tween is live. */
+  const startLoop = useCallback(() => {
+    if (frame.current !== undefined) return
     const tick = () => {
       frame.current = undefined
       const now = performance.now()
       for (const [node, started] of blooms.current) if (now - started >= BLOOM_MS) blooms.current.delete(node)
+      const current = tween.current
+      if (current && !prefersReducedMotion() && now - current.startedAt >= HOVER_MS && current.to === 0) {
+        dimmed.current = new Map()
+        labelDynamics.dimmed = dimmed.current
+        labelDynamics.level = 0
+        tween.current = null
+      }
       sigma.scheduleRefresh()
-      if (blooms.current.size > 0) frame.current = requestAnimationFrame(tick)
+      const hoverActive =
+        tween.current !== null && !prefersReducedMotion() && now - tween.current.startedAt < HOVER_MS
+      if (blooms.current.size > 0 || hoverActive) frame.current = requestAnimationFrame(tick)
     }
+    frame.current = requestAnimationFrame(tick)
+  }, [sigma])
+
+  useEffect(() => {
+    const reducer = (node: string, data: Attributes) => {
+      const now = performance.now()
+      const level = levelAt(now)
+      labelDynamics.level = level
+      return entryOverride(data, dimmed.current.get(node), level, blooms.current.get(node), now)
+    }
+    sigma.setSetting('nodeReducer', reducer)
+    return () => {
+      sigma.setSetting('nodeReducer', null)
+    }
+  }, [levelAt, sigma])
+
+  useEffect(() => {
+    // A new graph instance starts with no history: the bloom set is per dataset.
+    bloomed.current = new Set()
     const onAdd = ({ key }: { key: string }) => {
-      if (!prefersReducedMotion()) blooms.current.set(key, performance.now())
-      if (blooms.current.size > 0 && frame.current === undefined) frame.current = requestAnimationFrame(tick)
+      if (!shouldBloom(bloomed.current, key) || prefersReducedMotion()) return
+      bloomed.current.add(key)
+      blooms.current.set(key, performance.now())
+      startLoop()
     }
     graph.on('nodeAdded', onAdd)
     return () => {
       graph.off('nodeAdded', onAdd)
+      blooms.current = new Map()
       if (frame.current !== undefined) cancelAnimationFrame(frame.current)
+      frame.current = undefined
     }
-  }, [graph, sigma])
+  }, [graph, startLoop])
 
   useEffect(() => {
     const enter = ({ node }: { node: string }) => {
+      const now = performance.now()
+      const from = levelAt(now)
       dimmed.current = hoverDimmedEntries(graph, node, DIM_INK)
+      labelDynamics.dimmed = dimmed.current
+      tween.current = { startedAt: now, from, to: 1 }
+      if (!prefersReducedMotion()) startLoop()
       sigma.scheduleRefresh()
     }
     const leave = () => {
-      dimmed.current = new Map()
+      const now = performance.now()
+      const from = levelAt(now)
+      tween.current = { startedAt: now, from, to: 0 }
+      if (prefersReducedMotion()) {
+        dimmed.current = new Map()
+        labelDynamics.dimmed = dimmed.current
+        labelDynamics.level = 0
+        tween.current = null
+      } else {
+        startLoop()
+      }
       sigma.scheduleRefresh()
     }
     sigma.on('enterNode', enter)
@@ -538,8 +675,12 @@ function MapDynamics({ graph }: { graph: Graph }) {
     return () => {
       sigma.off('enterNode', enter)
       sigma.off('leaveNode', leave)
+      dimmed.current = new Map()
+      labelDynamics.dimmed = dimmed.current
+      labelDynamics.level = 0
+      tween.current = null
     }
-  }, [graph, sigma])
+  }, [graph, levelAt, sigma, startLoop])
 
   return null
 }
@@ -553,12 +694,18 @@ export const drawNodeLabel: NodeLabelDrawingFunction = (context, data, settings)
   if (!data.label) return
   const { labelSize, labelFont, labelWeight } = settings
   context.font = `${labelWeight} ${labelSize}px ${labelFont}`
-  const color =
+  const base =
     typeof settings.labelColor.attribute === 'string'
       ? ((data as unknown as Record<string, unknown>)[settings.labelColor.attribute] as string | undefined) ??
         settings.labelColor.color ??
         LABEL_INK
       : settings.labelColor.color ?? LABEL_INK
+  // An entry is its mark AND its label: a dimmed entry's label moves with its mark on the same
+  // 0→1 level, toward the map's quiet ink (≥ 6.16:1 on the lit end of the ramp). The hovered entry
+  // and its neighbours are not in the dim map, so their labels stay at the full label ink.
+  const key = (data as { key?: string }).key
+  const dim = key === undefined ? undefined : labelDynamics.dimmed.get(key)
+  const ink = dim ? blendColor(base, DIM_INK, labelDynamics.level) : base
   const x = data.x + data.size + 3
   const y = data.y + labelSize / 3
   // Sigma's label canvas is scaled by the device pixel ratio while the label's x/y are CSS pixels.
@@ -573,7 +720,7 @@ export const drawNodeLabel: NodeLabelDrawingFunction = (context, data, settings)
     ? rampColorAt(x + frame.offsetX, y + frame.offsetY, frame.width, frame.height, RAMP_LIT, RAMP_DEEP)
     : rampColorAt(x, y, canvasWidth, canvasHeight, RAMP_LIT, RAMP_DEEP)
   context.strokeText(data.label, x, y)
-  context.fillStyle = color
+  context.fillStyle = ink
   context.fillText(data.label, x, y)
 }
 

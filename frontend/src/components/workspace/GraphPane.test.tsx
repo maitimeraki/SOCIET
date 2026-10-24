@@ -46,6 +46,7 @@ const render = (
   layers: ReadonlySet<LayerName> = ALL_LAYERS,
   state: PaneState = 'split',
   relations: string[] = [],
+  omitted = 0,
 ) =>
   renderToStaticMarkup(
     <GraphPaneView
@@ -56,10 +57,31 @@ const render = (
       layers={layers}
       onToggleLayer={() => {}}
       relations={relations}
+      omitted={omitted}
     >
       <div data-map-canvas />
     </GraphPaneView>,
   )
+
+/**
+ * The map host's markup slice, found by tag depth from its id. The "outside the host" assertion has
+ * to be structural: the strip and the host both contain the same counts text, so a mere string
+ * presence check would pass even if the relation list lived inside the hidden subtree.
+ */
+function hostBlock(html: string): { start: number; end: number } {
+  const idAt = html.indexOf(`id="${HOST_ID}"`)
+  const start = html.lastIndexOf('<div', idAt)
+  const tag = /<(\/?)([a-z]+)[^>]*>/g
+  tag.lastIndex = start
+  let depth = 0
+  let match: RegExpExecArray | null
+  while ((match = tag.exec(html))) {
+    if (match[0].endsWith('/>')) continue
+    depth += match[1] === '/' ? -1 : 1
+    if (depth === 0) return { start, end: tag.lastIndex }
+  }
+  return { start, end: html.length }
+}
 
 /** The opening tag of the toggle button whose text is `label`, so an assertion lands on one button. */
 function toggleTag(html: string, label: string): string {
@@ -231,6 +253,19 @@ describe('the map’s text alternative is present in every pane state (§14.4 ro
     expect(strip).toContain(RELATIONS[0])
   })
 
+  it('puts the relation list outside the map host the minimised state hides', () => {
+    const html = render(summaryOf(corpusNodes(2)), ALL_LAYERS, 'minimised', RELATIONS)
+    const host = hostBlock(html)
+    const inside = html.slice(host.start, host.end)
+    const outside = html.slice(0, host.start) + html.slice(host.end)
+    expect(inside).not.toContain(RELATIONS[0])
+    expect(outside).toContain(RELATIONS[0])
+  })
+
+  it('says how many relations the cap left out', () => {
+    const html = render(summaryOf(corpusNodes(2)), ALL_LAYERS, 'split', RELATIONS, 7)
+    expect(html).toContain('and 7 more')
+  })
 })
 
 describe('the copy law (§13) governs the pane’s own strings, toggles included', () => {

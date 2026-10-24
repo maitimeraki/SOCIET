@@ -9,6 +9,7 @@ import {
   BLOOM_MS,
   DIM_SIZE_RATIO,
   GraphLegend,
+  HOVER_MS,
   MAX_ANIMATED_NODES,
   MAX_LABELLED_NODES,
   SIGMA_SETTINGS,
@@ -20,11 +21,13 @@ import {
   graphStatusMessage,
   graphStreamPhase,
   hoverDimmedEntries,
+  hoverLevel,
   rampColorAt,
   seedPosition,
+  shouldAnimateLayout,
+  shouldBloom,
   showEdgeLabels,
   showNodeLabels,
-  shouldAnimateLayout,
   simplifiedViewNotice,
   syncGraph,
 } from './GraphCanvas'
@@ -35,6 +38,24 @@ import { BANNED_WORD } from '../../test/copyLaw'
 // No jsdom / no testing-library in this repo: the canvas is exercised through its
 // pure sync function. React/Sigma never mount, so mock the one DOM-bound import.
 vi.mock('@react-sigma/core', () => ({ SigmaContainer: () => null, useSigma: () => null }))
+
+// The renderer's module-level colours are read off the document root, so the one wiring test that
+// must see a real token (the label's sampled strokeStyle) gets the shipped values from a two-member
+// plain object — not jsdom. `surveyColor` only reads `document.documentElement` and
+// `getComputedStyle`; hoisted so it runs before GraphCanvas is imported.
+vi.hoisted(() => {
+  const tokens: Record<string, string> = {
+    '--color-map-ground-2': '#16223D',
+    '--color-map-ground': '#070C16',
+    '--color-map-ink': '#E2E8F0',
+    '--color-map-ink-2': '#94A3B8',
+    '--color-map-accent': '#D9A8E2',
+  }
+  ;(globalThis as unknown as { document: unknown }).document = { documentElement: {} }
+  ;(globalThis as unknown as { getComputedStyle: unknown }).getComputedStyle = () => ({
+    getPropertyValue: (token: string) => tokens[token] ?? '',
+  })
+})
 
 const byId = (...nodes: GraphNode[]): Record<string, GraphNode> =>
   Object.fromEntries(nodes.map((node) => [node.id, node]))
@@ -365,6 +386,10 @@ describe('the hover reducer — the neighbourhood keeps its strength (§12.4 Wav
 })
 
 describe('the bloom — once, in the grammar, and never a fade (§14.4 LIVE)', () => {
+  it('is the grammar’s 560ms', () => {
+    expect(BLOOM_MS).toBe(560)
+  })
+
   it('rises to 1.28 and settles at 1 over 560ms', () => {
     expect(bloomScale(0)).toBe(0)
     expect(bloomScale(0.3 * BLOOM_MS)).toBeCloseTo(0.64)
@@ -384,26 +409,74 @@ describe('entryOverride — the reducer hands Sigma the whole node', () => {
   // Sigma replaces a node's attributes with the reducer's result rather than merging; anything left
   // out (x, y, type) makes the renderer throw. Pin the total-object contract.
   const data = { x: 12, y: 34, size: 7, color: '#3B82F6', label: 'Mill Street lease', type: 'circle' }
+  const dim = { color: 'rgb(104, 147, 215)', size: 7 * DIM_SIZE_RATIO }
 
   it('returns the node untouched when nothing is dimmed or blooming', () => {
-    expect(entryOverride(data, undefined, undefined, 0)).toBe(data)
+    expect(entryOverride(data, undefined, 0, undefined, 0)).toBe(data)
   })
 
   it('scales the size for a bloom without losing a single attribute', () => {
-    const out = entryOverride(data, undefined, 0, 0.3 * BLOOM_MS)
+    const out = entryOverride(data, undefined, 0, 0, 0.3 * BLOOM_MS)
     expect(out.size).toBeCloseTo(7 * 0.64)
     expect(out).toMatchObject({ x: 12, y: 34, color: '#3B82F6', label: 'Mill Street lease', type: 'circle' })
   })
 
-  it('applies the dimmed colour and size, with the bloom on top', () => {
-    const dim = { color: 'rgb(104, 147, 215)', size: 7 * DIM_SIZE_RATIO }
-    const out = entryOverride(data, dim, 0, 0.6 * BLOOM_MS)
+  it('blends colour and size by the hover level — the mid-transition value is strictly between', () => {
+    const out = entryOverride(data, dim, 0.5, undefined, 0)
+    expect(out.color).toBe('rgb(82, 139, 231)') // between #3B82F6 and rgb(104, 147, 215)
+    expect(out.size).toBeCloseTo(7 + (7 * DIM_SIZE_RATIO - 7) * 0.5)
+  })
+
+  it('applies the dimmed colour and size at rest, with the bloom on top', () => {
+    const out = entryOverride(data, dim, 1, 0, 0.6 * BLOOM_MS)
     expect(out.color).toBe('rgb(104, 147, 215)')
     expect(out.size).toBeCloseTo(7 * DIM_SIZE_RATIO * 1.28)
   })
 
   it('is simply full size under reduced motion', () => {
-    expect(entryOverride(data, undefined, 0, 0, true).size).toBe(7)
+    expect(entryOverride(data, undefined, 0, 0, 0, true).size).toBe(7)
+  })
+})
+
+describe('hoverLevel — the 120ms state curve (I1)', () => {
+  it('runs from 0 to 1 over 120ms and holds at the endpoint', () => {
+    expect(HOVER_MS).toBe(120)
+    expect(hoverLevel(0)).toBe(0)
+    expect(hoverLevel(HOVER_MS)).toBe(1)
+    expect(hoverLevel(HOVER_MS * 4)).toBe(1)
+    expect(hoverLevel(HOVER_MS / 2)).toBeGreaterThan(0)
+    expect(hoverLevel(HOVER_MS / 2)).toBeLessThan(1)
+  })
+
+  it('is monotonic across the curve', () => {
+    const samples = Array.from({ length: 13 }, (_, index) => hoverLevel((index / 12) * HOVER_MS))
+    for (let index = 1; index < samples.length; index += 1) {
+      expect(samples[index], `sample ${index}`).toBeGreaterThanOrEqual(samples[index - 1])
+    }
+    expect(samples[6]).toBeGreaterThan(samples[0])
+    expect(samples[6]).toBeLessThan(samples[12])
+  })
+
+  it('jumps to the endpoint under prefers-reduced-motion: reduce', () => {
+    expect(hoverLevel(0, true)).toBe(1)
+    expect(hoverLevel(1, true)).toBe(1)
+    expect(hoverLevel(HOVER_MS, true)).toBe(1)
+  })
+})
+
+describe('shouldBloom — once per entry per graph instance (M3)', () => {
+  it('blooms an id once and never again on the same graph', () => {
+    const bloomed = new Set<string>()
+    expect(shouldBloom(bloomed, 'entry-a')).toBe(true)
+    bloomed.add('entry-a')
+    expect(shouldBloom(bloomed, 'entry-a')).toBe(false)
+  })
+
+  it('blooms the same id again on a fresh graph instance', () => {
+    const previousGraph = new Set<string>(['entry-a'])
+    const freshGraph = new Set<string>()
+    expect(shouldBloom(previousGraph, 'entry-a')).toBe(false)
+    expect(shouldBloom(freshGraph, 'entry-a')).toBe(true)
   })
 })
 
@@ -427,6 +500,26 @@ describe('drawNodeLabel', () => {
 
     expect(calls).toEqual(['stroke', 'fill'])
     expect(context.fillStyle).toBe('#111111')
+  })
+
+  it('strikes the halo in the ramp colour at the label’s position, not a flat tone', () => {
+    const context = {
+      font: '',
+      lineJoin: '',
+      lineWidth: 0,
+      strokeStyle: '',
+      fillStyle: '',
+      // Sigma's label canvas is scaled by the device pixel ratio; here one CSS px is one device px.
+      canvas: { width: 200, height: 100 },
+      getTransform: () => ({ a: 1 }),
+      strokeText: () => {},
+      fillText: () => {},
+    }
+    const settings = { labelSize: 12, labelFont: 'X', labelWeight: '500', labelColor: { color: '#111111' } }
+    // The label's point: x + size + 3 = 20, y + labelSize / 3 = 24.
+    drawNodeLabel(context as unknown as CanvasRenderingContext2D, data as never, settings as never)
+
+    expect(context.strokeStyle).toBe(rampColorAt(20, 24, 200, 100, '#16223D', '#070C16'))
   })
 
   it('draws nothing for a node without a label', () => {
