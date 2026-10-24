@@ -2,6 +2,7 @@ import { Check, X } from '@phosphor-icons/react'
 import type { RunEvent } from '../../run/events'
 import type { RunState } from '../../run/reducer'
 import { fmtScore } from '../../utils/format'
+import DefinitionList from '../ui/DefinitionList'
 import SelectionTable from './SelectionTable'
 import EventLog from './EventLog'
 import WarningList from '../common/WarningList'
@@ -12,20 +13,22 @@ export default function ArtifactsTab({ run, events }: { run: RunState; events: R
       <section>
         <h2 className="mb-3 text-heading text-ink">Intent (S3)</h2>
         {run.intent ? (
-          <dl className="grid grid-cols-[140px_1fr] gap-y-2 text-body">
-            <dt className="text-ink-3">core</dt>
-            <dd className="text-ink-2">{run.intent.core_question}</dd>
-            <dt className="text-ink-3">keywords</dt>
-            <dd className="text-ink-2">{run.intent.direct_keywords.join(', ')}</dd>
-            <dt className="text-ink-3">sectors</dt>
-            <dd className="text-ink-2">{run.intent.latent_sectors.join(', ')}</dd>
-            <dt className="text-ink-3">perspectives</dt>
-            <dd className="text-ink-2">{run.intent.search_perspectives.join(', ')}</dd>
-            <dt className="text-ink-3">confidence</dt>
-            <dd className="tnum font-measurement text-ink-2">
-              {fmtScore(run.intent.extraction_confidence)} · {run.intent.llm_model || '—'} · {run.intent.llm_provider || '—'}
-            </dd>
-          </dl>
+          <DefinitionList
+            items={[
+              { term: 'core', value: run.intent.core_question },
+              { term: 'keywords', value: run.intent.direct_keywords.join(', ') },
+              { term: 'sectors', value: run.intent.latent_sectors.join(', ') },
+              { term: 'perspectives', value: run.intent.search_perspectives.join(', ') },
+              {
+                term: 'confidence',
+                value: (
+                  <span className="tnum font-measurement">
+                    {fmtScore(run.intent.extraction_confidence)} · {run.intent.llm_model || '—'} · {run.intent.llm_provider || '—'}
+                  </span>
+                ),
+              },
+            ]}
+          />
         ) : (
           <p className="text-body text-ink-3">No intent event recorded.</p>
         )}

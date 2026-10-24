@@ -8,6 +8,7 @@ import { useDraftStore } from '../wizard/draftStore'
 import QueryComposer from '../components/society/QueryComposer'
 import ConfigPanel from '../components/society/ConfigPanel'
 import Button from '../components/ui/Button'
+import Label from '../components/ui/Label'
 import { toast } from '../components/ui/Toast'
 import { fmtInt } from '../utils/format'
 
@@ -79,9 +80,9 @@ export default function SocietyPage() {
       </div>
 
       <div>
-        <label htmlFor="society-question" className="mb-2 block text-label uppercase text-ink-3">
-          What should your panel deliberate?
-        </label>
+        <Label as="label" htmlFor="society-question" className="mb-2 block">
+          Your question
+        </Label>
         <QueryComposer id="society-question" value={query} onChange={setQuery} onSubmit={convene} />
         <p className="mt-2 max-w-[60ch] text-micro text-ink-3">
           The question picks which parts of the map speak. Broader questions convene more of your panel.

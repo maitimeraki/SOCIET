@@ -2,6 +2,7 @@ import { Link, NavLink } from 'react-router-dom'
 import { SquaresFour } from '@phosphor-icons/react'
 import { useAuthStore } from '../../auth/authStore'
 import HealthDot from './HealthDot'
+import { ruleClasses } from '../ui/Rule'
 
 /**
  * §7 The rail — the persistent left column: brand at its head, the account's one item in the
@@ -20,7 +21,7 @@ const ITEMS = [{ to: '/dashboard', label: 'Your work', Icon: SquaresFour }]
 //
 // The active item's ICON takes the accent too: the accent-soft fill alone measures 1.035:1 against
 // the rail, which the eye cannot find. The accent is on the mark, and the word stays ink.
-const ITEM = 'relative flex min-h-11 items-center gap-3 px-3 py-2 font-titling text-body transition-colors'
+const ITEM = 'relative flex min-h-11 items-center gap-3 px-3 py-2 font-titling text-body transition-colors duration-state'
 const itemClass = ({ isActive }: { isActive: boolean }) =>
   isActive
     ? `${ITEM} bg-accent-soft font-medium text-ink before:absolute before:inset-y-0 before:left-0 before:w-[3px] before:bg-accent`
@@ -36,7 +37,7 @@ export default function Rail() {
   return (
     // The column. The `<nav>` holds only the sections; the account foot is its sibling, not its
     // child — a landmark jump to "Sections" must not land on account or health chrome.
-    <div className="flex w-16 shrink-0 flex-col border-r border-border bg-ground-2 lg:w-60">
+    <div className={`flex w-16 shrink-0 flex-col ${ruleClasses('right')} bg-ground-2 lg:w-60`}>
       <nav aria-label="Sections" className="flex flex-1 flex-col">
         <div className="flex h-14 shrink-0 items-center gap-2 px-2 lg:px-4">
           <Link
@@ -71,7 +72,7 @@ export default function Rail() {
         </ul>
       </nav>
 
-      <div className="border-t border-border pt-2">
+      <div className={`${ruleClasses('top')} pt-2`}>
         {/* 240px only: the reading's label text does not fit the 64px rail. */}
         <div className="hidden px-4 pb-2 lg:block">
           <HealthDot />

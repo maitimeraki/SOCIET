@@ -162,6 +162,9 @@
   --duration-enter: 180ms;  /* enter — content appearing */
   --duration-layout: 240ms; /* layout — panel and pane resize */
   --duration-bloom: 560ms;  /* the bloom — a new map entry */
+  /* `duration-*` reads `--transition-duration-*`, not `--duration-*`; the alias is what makes the
+     tree's `duration-state` classes compile to the state token instead of emitting nothing. */
+  --transition-duration-state: var(--duration-state);
 }
 
 @layer base {

@@ -1,6 +1,7 @@
 import { STANCE_ORDER } from '../../run/selectors'
 import type { TapeTick } from '../../run/selectors'
 import type { Stance } from '../../run/events'
+import Label from '../ui/Label'
 import PositionMark from '../ui/PositionMark'
 import { ruleClasses } from '../ui/Rule'
 import { fmtPct } from '../../utils/format'
@@ -26,7 +27,7 @@ export default function ConvergenceTape({
   return (
     <div className={`${ruleClasses('top')} pt-4`}>
       <div className="mb-3 flex items-center justify-between">
-        <h3 className="text-label uppercase text-ink-3">The Tape</h3>
+        <Label as="h3">The Tape</Label>
         <span className="text-micro text-ink-3">weighted share per pass vs {threshold.toFixed(2)}</span>
       </div>
 
@@ -34,7 +35,7 @@ export default function ConvergenceTape({
         {/* warn threshold line across all tracks — only meaningful once a tick exists */}
         {ticks.length > 0 && (
           <div aria-hidden="true" className="pointer-events-none absolute inset-y-0 z-10 w-px border-l-2 border-dashed border-warn" style={{ left: `calc(2.25rem + ${threshold} * (100% - 2.25rem))` }}>
-            <span className="absolute -top-1 left-1.5 rounded-[4px] bg-ground-2 px-1 font-measurement text-micro text-ink-2">{threshold.toFixed(2)}</span>
+            <span className="absolute -top-1 left-1.5 rounded-xs bg-ground-2 px-1 font-measurement text-micro text-ink-2">{threshold.toFixed(2)}</span>
           </div>
         )}
 
@@ -46,7 +47,7 @@ export default function ConvergenceTape({
               <div key={tick.round}>
                 <div className="flex items-center gap-3">
                   <span className="tnum w-6 font-measurement text-micro text-ink-3">P{tick.round}</span>
-                  <div className="flex h-3 flex-1 overflow-hidden rounded-[4px]" aria-hidden="true">
+                  <div className="flex h-3 flex-1 overflow-hidden rounded-xs" aria-hidden="true">
                     {STANCE_ORDER.map((stance, index) => {
                       const share = tick.weights[stance] ?? 0
                       if (share <= 0) return null
@@ -54,8 +55,8 @@ export default function ConvergenceTape({
                         <div
                           key={stance}
                           className={`h-full ${SEGMENT_FILL[stance]} ${
-                            index === 0 ? 'rounded-l-[4px]' : ''
-                          } ${index === STANCE_ORDER.length - 1 ? 'rounded-r-[4px]' : ''} ${index > 0 ? 'ml-[2px]' : ''}`}
+                            index === 0 ? 'rounded-l-xs' : ''
+                          } ${index === STANCE_ORDER.length - 1 ? 'rounded-r-xs' : ''} ${index > 0 ? 'ml-[2px]' : ''}`}
                           style={{ width: `calc(${share * 100}% - 2px)` }}
                         />
                       )

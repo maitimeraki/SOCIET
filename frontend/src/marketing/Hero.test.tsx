@@ -136,10 +136,11 @@ describe('the kit — the vocabulary the page is built from', () => {
     expect(count(html, 'border-t border-ink-4')).toBe(0)
   })
 
-  it('leaves the shared Disclosure the only ink-4 hairline', () => {
-    // The Disclosure draws its own bottom rule; the page drops it in CSS (`.hero-faq > div`) and
-    // draws the page’s own rule between the items instead. Nothing else may carry one.
-    expect(count(html, 'border-ink-4')).toBe(10)
+  it('draws every FAQ separator with the kit’s own rule', () => {
+    // The Disclosure draws its bottom rule from the kit; the page drops it in CSS
+    // (`.hero-faq > div`) and draws the page’s own rule between the items instead.
+    expect(count(html, 'rule-b')).toBe(10)
+    expect(count(html, 'border-ink-4')).toBe(0)
   })
 })
 

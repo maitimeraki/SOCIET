@@ -84,7 +84,6 @@
 /* ── The floating nav card. The reference floats its nav as a rounded, bordered white card over
       the ground; it is the cheapest way to make a page look composed rather than stacked. */
 .hero-nav {
-  border: 1px solid var(--color-ground-2);
   border-radius: var(--radius-lg);
   background: var(--color-canvas);
   box-shadow: var(--shadow-raised);

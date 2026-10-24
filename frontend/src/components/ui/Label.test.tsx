@@ -27,4 +27,16 @@ describe('Label', () => {
     const html = renderToStaticMarkup(<Label>Documents</Label>)
     expect(renderedText(html)).not.toMatch(BANNED_WORD)
   })
+
+  it('keeps the element a site already had, so the sweep changes no structure', () => {
+    const heading = renderToStaticMarkup(<Label as="h3">Provenance</Label>)
+    expect(heading.startsWith('<h3')).toBe(true)
+    expect(heading).toContain('Provenance')
+    const para = renderToStaticMarkup(<Label as="p">For</Label>)
+    expect(para.startsWith('<p')).toBe(true)
+  })
+
+  it('carries a form control’s id when it is the label itself', () => {
+    expect(renderToStaticMarkup(<Label as="label" htmlFor="society-question">Your question</Label>)).toContain('for="society-question"')
+  })
 })

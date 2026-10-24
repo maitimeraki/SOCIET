@@ -1,11 +1,12 @@
 import { useState } from 'react'
 import type { ReactNode } from 'react'
 import { CaretDown } from '@phosphor-icons/react'
+import { ruleClasses } from './Rule'
 
 export default function Disclosure({ summary, children, defaultOpen = false }: { summary: ReactNode; children: ReactNode; defaultOpen?: boolean }) {
   const [open, setOpen] = useState(defaultOpen)
   return (
-    <div className="border-b border-ink-4">
+    <div className={ruleClasses('bottom')}>
       <button
         type="button"
         aria-expanded={open}

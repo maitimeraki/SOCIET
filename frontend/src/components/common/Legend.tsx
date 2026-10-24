@@ -1,4 +1,6 @@
 import type { ReactNode } from 'react'
+import Label from '../ui/Label'
+import { ruleClasses } from '../ui/Rule'
 
 export interface LegendEntry {
   /** Optional key matching a `RuledBlock`'s legend key, so a block and its legend entry are linkable. */
@@ -32,8 +34,8 @@ export default function Legend({
 }) {
   if (entries.length === 0) return null
   return (
-    <section className={`border-y border-ink-4 py-2 ${className}`} aria-label={typeof title === 'string' ? title : undefined}>
-      {title && <h3 className="mb-1.5 text-label uppercase text-ink-3">{title}</h3>}
+    <section className={`${ruleClasses('both')} py-2 ${className}`} aria-label={typeof title === 'string' ? title : undefined}>
+      {title && <Label as="h3" className="mb-1.5">{title}</Label>}
       <ul className="flex flex-wrap items-baseline gap-x-4 gap-y-1.5">
         {entries.map((entry) => (
           <li key={entry.key ?? entry.label} className="inline-flex items-baseline gap-1.5 text-micro text-ink-2">

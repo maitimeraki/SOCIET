@@ -7,6 +7,7 @@ import IntentCard from './IntentCard'
 import SelectionTable from './SelectionTable'
 import ProfileCard from './ProfileCard'
 import Button from '../ui/Button'
+import Label from '../ui/Label'
 import { ruleClasses } from '../ui/Rule'
 
 function Beat({
@@ -67,7 +68,7 @@ export default function RosterStage({
 
   return (
     <div className="space-y-8">
-      <p className="text-label uppercase text-ink-3">Building your panel</p>
+      <Label as="p">Building your panel</Label>
 
       <Beat number="①" title="Reading the question" meta="S3 · intent" state={intent ? 'done' : 'running'}>
         {intent ? (

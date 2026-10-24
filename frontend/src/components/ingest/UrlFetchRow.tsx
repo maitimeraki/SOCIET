@@ -2,6 +2,7 @@ import { useState } from 'react'
 import type { FormEvent } from 'react'
 import { LinkSimple } from '@phosphor-icons/react'
 import Button from '../ui/Button'
+import { ruleClasses } from '../ui/Rule'
 
 export default function UrlFetchRow({ onFetch, busy = false }: { onFetch: (url: string) => void; busy?: boolean }) {
   const [url, setUrl] = useState('')
@@ -15,7 +16,7 @@ export default function UrlFetchRow({ onFetch, busy = false }: { onFetch: (url: 
   }
 
   return (
-    <form onSubmit={submit} className="flex items-center gap-2 border-t border-ink-4 pt-2">
+    <form onSubmit={submit} className={`flex items-center gap-2 ${ruleClasses('top')} pt-2`}>
       <LinkSimple size={16} className="shrink-0 text-ink-3" aria-hidden="true" />
       <input
         type="url"

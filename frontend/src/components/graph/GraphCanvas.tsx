@@ -898,7 +898,7 @@ export default function GraphCanvas({ datasetId, jobId }: GraphCanvasProps) {
         {notice && (
           <p
             role="status"
-            className="pointer-events-none absolute right-2 top-2 flex items-center gap-1.5 rounded-[4px] border border-warn/40 bg-map-ground-2 px-2 py-1 text-micro text-ink-2"
+            className="pointer-events-none absolute right-2 top-2 flex items-center gap-1.5 rounded-xs border border-warn/40 bg-map-ground-2 px-2 py-1 text-micro text-ink-2"
           >
             <Warning size={13} className="text-warn" aria-hidden="true" />
             {notice}

@@ -1,5 +1,6 @@
 import { Component, createRef, type ErrorInfo, type ReactNode, type Ref } from 'react'
 import { buttonClasses } from './ui/Button'
+import { ruleClasses } from './ui/Rule'
 
 /** Short, stack-free digest: the error name plus the first line of its message. */
 // eslint-disable-next-line react-refresh/only-export-components -- errorDigest is the tested surface of this file
@@ -25,7 +26,7 @@ export function AppErrorFallback({
       ref={containerRef}
       role="alert"
       tabIndex={-1}
-      className="mx-auto max-w-[720px] border-t border-ink-4 pt-8 outline-none"
+      className={`mx-auto max-w-[720px] ${ruleClasses('top')} pt-8 outline-none`}
     >
       <p className="text-heading text-ink">Something went wrong</p>
       <p className="mt-2 max-w-[60ch] text-body text-ink-2">

@@ -12,6 +12,7 @@ import RelationTable from '../components/graph/RelationTable'
 import StatRow from '../components/graph/StatRow'
 import JobError from '../components/graph/JobError'
 import Button from '../components/ui/Button'
+import { ruleClasses } from '../components/ui/Rule'
 import { fmtInt } from '../utils/format'
 
 type Phase = 'ontology' | 'build' | 'done' | 'failed'
@@ -124,13 +125,13 @@ export default function GraphPage({ onFailureChange }: { onFailureChange?: (fail
       </div>
 
       {reconnecting && (
-        <p className="rounded-[4px] border border-warn/40 px-3 py-2 text-micro text-ink">
+        <p className="rounded-xs border border-warn/40 px-3 py-2 text-micro text-ink">
           Can't reach the server. The work continues on the server — we'll reconnect.
         </p>
       )}
 
       {phase !== 'done' && phase !== 'failed' && (
-        <div className="space-y-4 border-t border-ink-4 pt-5">
+        <div className={`space-y-4 ${ruleClasses('top')} pt-5`}>
           <StageLine
             label="Discovering the kinds of things in your material"
             state={phase === 'ontology' ? 'active' : 'done'}

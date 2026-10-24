@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react'
 import { CheckCircle, XCircle } from '@phosphor-icons/react'
+import { ruleClasses } from '../ui/Rule'
 
 export type RailStageState = 'pending' | 'running' | 'done' | 'failed'
 
@@ -36,7 +37,7 @@ export default function StageRail({
       // A scroll container that only a pointer can reveal is not reachable by keyboard; focusing the
       // rail lets the arrow keys scroll it.
       tabIndex={0}
-      className="flex flex-nowrap items-center gap-x-3 overflow-x-auto border-b border-ink-4 pb-3"
+      className={`flex flex-nowrap items-center gap-x-3 overflow-x-auto ${ruleClasses('bottom')} pb-3`}
     >
       {stages.map((stage, index) => {
         const glyph =
@@ -67,7 +68,7 @@ export default function StageRail({
                 type="button"
                 aria-current={current ? 'step' : undefined}
                 onClick={() => onSelect(stage.key)}
-                className="rounded-[4px] px-1 py-0.5 transition-colors hover:bg-ground-2"
+                className="rounded-xs px-1 py-0.5 transition-colors duration-state hover:bg-ground-2"
               >
                 {inner}
               </button>

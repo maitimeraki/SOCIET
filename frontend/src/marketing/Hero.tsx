@@ -708,15 +708,15 @@ function FiledAnswer() {
       <div ref={ref} className="shell reveal">
         <div className="grid gap-12 lg:grid-cols-[1fr_440px] lg:items-center lg:gap-20">
           <div>
-            <h2 id="demo-filed-heading" className="font-record text-[40px] font-semibold leading-[1.1] tracking-[-0.02em] text-[#e2e8f0]">
+            <h2 id="demo-filed-heading" className="font-record text-[40px] font-semibold leading-[1.1] tracking-[-0.02em] text-map-ink">
               The answer is a document you can open again.
             </h2>
-            <p className="mt-4 max-w-[46ch] font-titling text-[15px] leading-[24px] text-[#94a3b8]">
+            <p className="mt-4 max-w-[46ch] font-titling text-[15px] leading-[24px] text-map-ink-2">
               Not a summary, and not a message that disappears. The question as it was asked, the
               answer, the confidence, the case against, the position each expert took and the
               sources each argued from — and every turn, in order.
             </p>
-            <p className="mt-6 font-measurement text-mono uppercase tracking-[0.14em] text-[#94a3b8]">
+            <p className="mt-6 font-measurement text-mono uppercase tracking-[0.14em] text-map-ink-2">
               Reopen it and it renders exactly as it ended
             </p>
           </div>
@@ -731,7 +731,7 @@ function FiledAnswer() {
               width={CAPTURES.answer.width}
               height={CAPTURES.answer.height}
             />
-            <figcaption className="mt-3 text-[12px] leading-[18px] text-[#94a3b8]">
+            <figcaption className="mt-3 text-[12px] leading-[18px] text-map-ink-2">
               A filed decision: the question, the answer, and the reasoning behind it.
             </figcaption>
           </figure>
