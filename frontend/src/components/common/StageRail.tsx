@@ -19,7 +19,10 @@ export default function StageRail({
   onSelect?: (key: string) => void
 }) {
   return (
-    <nav aria-label="Run stages" className="flex flex-wrap items-center gap-x-3 gap-y-2 border-b border-ink-4 pb-3">
+    <nav
+      aria-label="Run stages"
+      className="flex flex-nowrap items-center gap-x-3 overflow-x-auto border-b border-ink-4 pb-3"
+    >
       {stages.map((stage, index) => {
         const glyph =
           stage.state === 'done' ? (
@@ -35,14 +38,14 @@ export default function StageRail({
           )
         const current = stage.key === activeKey
         const inner = (
-          <span className={`inline-flex items-center gap-2 ${current ? 'text-ink' : 'text-ink-2'}`}>
+          <span className={`inline-flex items-center gap-2 whitespace-nowrap ${current ? 'text-ink' : 'text-ink-2'}`}>
             {glyph}
             <span className="text-label uppercase">{stage.label}</span>
             {stage.note && <span className="tnum font-measurement text-micro text-ink-3">{stage.note}</span>}
           </span>
         )
         return (
-          <div key={stage.key} className="flex items-center gap-3">
+          <div key={stage.key} className="flex shrink-0 items-center gap-3">
             {index > 0 && <span aria-hidden="true" className="h-px w-4 bg-ink-4" />}
             {onSelect ? (
               <button

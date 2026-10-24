@@ -41,7 +41,12 @@ const summaryOf = (nodes: Record<string, GraphNode>, edges: Record<string, Graph
   step: 'The map',
 })
 
-const render = (summary: MapSummary, layers: ReadonlySet<LayerName> = ALL_LAYERS, state: PaneState = 'split') =>
+const render = (
+  summary: MapSummary,
+  layers: ReadonlySet<LayerName> = ALL_LAYERS,
+  state: PaneState = 'split',
+  relations: string[] = [],
+) =>
   renderToStaticMarkup(
     <GraphPaneView
       mapId={MAP_ID}
@@ -50,6 +55,7 @@ const render = (summary: MapSummary, layers: ReadonlySet<LayerName> = ALL_LAYERS
       summary={summary}
       layers={layers}
       onToggleLayer={() => {}}
+      relations={relations}
     >
       <div data-map-canvas />
     </GraphPaneView>,
@@ -209,6 +215,22 @@ describe('the text alternative stays truthful as the map grows (§9.4, §12)', (
     expect(render(summaryOf(corpusNodes(MAX_LABELLED_NODES + 1)))).toContain(`${MAX_LABELLED_NODES + 1} entries`)
     expect(render(summaryOf(corpusNodes(MAX_ANIMATED_NODES + 1)))).toContain(`${MAX_ANIMATED_NODES + 1} entries`)
   })
+})
+
+describe('the map’s text alternative is present in every pane state (§14.4 row 10)', () => {
+  const RELATIONS = ['Mill Street lease —REFERENCES→ Ridgeline Coffee', 'Mill Street demand (Topic)']
+
+  it.each(['split', 'expanded', 'minimised'] as const)('%s renders the relation list outside the map host', (state) => {
+    const html = render(summaryOf(corpusNodes(2)), ALL_LAYERS, state, RELATIONS)
+    for (const line of RELATIONS) expect(html, state).toContain(line)
+  })
+
+  it('renders the relation list in the counts strip, which stays visible when the map is minimised', () => {
+    const html = render(summaryOf(corpusNodes(2)), ALL_LAYERS, 'minimised', RELATIONS)
+    const strip = html.slice(html.indexOf('aria-label="What the map holds"'))
+    expect(strip).toContain(RELATIONS[0])
+  })
+
 })
 
 describe('the copy law (§13) governs the pane’s own strings, toggles included', () => {

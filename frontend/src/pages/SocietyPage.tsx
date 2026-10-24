@@ -92,8 +92,8 @@ export default function SocietyPage() {
 
       {error && <p className="border-t border-danger/40 pt-3 text-body text-ink-2">{error}</p>}
 
-      <div className="flex items-center gap-4">
-        <Button variant="primary" loading={submitting} disabled={!query.trim()} onClick={convene}>
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+        <Button variant="primary" className="w-full sm:w-auto" loading={submitting} disabled={!query.trim()} onClick={convene}>
           Convene the debate
         </Button>
         <span className="text-micro text-ink-3">Decisions take a few minutes — you can watch every pass live.</span>

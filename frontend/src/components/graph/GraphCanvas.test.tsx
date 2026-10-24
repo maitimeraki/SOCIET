@@ -4,17 +4,23 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import { useGraphStore } from '../../graph/graphStore'
 import type { GraphEdge, GraphNode } from '../../graph/graphStore'
 import { CORPUS_COLOR, EXPERT_COLOR, OPINION_TYPE, POSITION_COLORS, UNPOSITIONED_COLOR } from '../../graph/layers'
+import { TEXT_FALLBACK_LIMIT, graphTextFallback } from '../../graph/graphText'
 import {
+  BLOOM_MS,
+  DIM_SIZE_RATIO,
   GraphLegend,
   MAX_ANIMATED_NODES,
   MAX_LABELLED_NODES,
   SIGMA_SETTINGS,
-  TEXT_FALLBACK_LIMIT,
+  bloomScale,
+  dimEntryColor,
   drawNodeLabel,
+  entryOverride,
   graphAriaLabel,
   graphStatusMessage,
   graphStreamPhase,
-  graphTextFallback,
+  hoverDimmedEntries,
+  rampColorAt,
   seedPosition,
   showEdgeLabels,
   showNodeLabels,
@@ -218,6 +224,186 @@ describe('large-graph guard', () => {
     syncGraph(graph, nodes, edges)
 
     expect(graph.getEdgeAttribute('a|b|POWERS', 'label')).toBeUndefined()
+  })
+})
+
+/* ── The ramp sampler and the hover/bloom dynamics (§12.4 Wave 2, §14.4 LIVE) ─────────────────── */
+
+const RAMP_LIT = '#16223D'
+const RAMP_DEEP = '#070C16'
+const MAP_INK_TOK = '#E2E8F0'
+const MAP_INK_2_TOK = '#94A3B8'
+/** The dim blend's floor — `--color-map-ink-2`, read off the document root in the renderer. */
+const DIM_FLOOR = '#94A3B8'
+/** The lit end of the map ramp — the worst ground a dimmed entry can sit on. */
+const LIT_GROUND = '#16223D'
+
+/** The channels of a `#rrggbb` or `rgb(r, g, b)` colour. */
+const channels = (color: string): [number, number, number] => {
+  const asRgb = color.match(/^rgb\((\d+), (\d+), (\d+)\)$/)
+  if (asRgb) return [Number(asRgb[1]), Number(asRgb[2]), Number(asRgb[3])]
+  const asHex = color.match(/^#([0-9a-f]{6})$/i)
+  if (!asHex) throw new Error(`not a colour: ${color}`)
+  const value = parseInt(asHex[1], 16)
+  return [(value >> 16) & 255, (value >> 8) & 255, value & 255]
+}
+
+/** WCAG 2.2 relative luminance. */
+const luminance = (color: string): number => {
+  const [r, g, b] = channels(color)
+  const channel = (value: number) => {
+    const s = value / 255
+    return s <= 0.03928 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4
+  }
+  return 0.2126 * channel(r) + 0.7152 * channel(g) + 0.0722 * channel(b)
+}
+
+const contrast = (a: string, b: string): number => {
+  const la = luminance(a)
+  const lb = luminance(b)
+  return (Math.max(la, lb) + 0.05) / (Math.min(la, lb) + 0.05)
+}
+
+/** CIE lightness: L* = 116·Y^(1/3) − 16 above the knee, 903.3·Y below it. */
+const lightness = (color: string): number => {
+  const y = luminance(color)
+  return y > 0.008856 ? 116 * Math.cbrt(y) - 16 : 903.3 * y
+}
+
+describe('rampColorAt — the halo is the paint (§12.4 Wave 2)', () => {
+  const W = 1000
+  const H = 500
+
+  it('samples the lit centre, the midpoint of the ray and the deep floor', () => {
+    expect(rampColorAt(W / 2, 0, W, H, RAMP_LIT, RAMP_DEEP)).toBe('rgb(22, 34, 61)')
+    expect(rampColorAt(W / 2, 0.36 * H, W, H, RAMP_LIT, RAMP_DEEP)).toBe('rgb(15, 23, 42)')
+    expect(rampColorAt(W / 2, 0.72 * H, W, H, RAMP_LIT, RAMP_DEEP)).toBe('rgb(7, 12, 22)')
+  })
+
+  it('holds the deep floor past the 72% stop, at every corner', () => {
+    expect(rampColorAt(0, H, W, H, RAMP_LIT, RAMP_DEEP)).toBe('rgb(7, 12, 22)')
+    expect(rampColorAt(W, H, W, H, RAMP_LIT, RAMP_DEEP)).toBe('rgb(7, 12, 22)')
+    expect(rampColorAt(W / 2, H * 4, W, H, RAMP_LIT, RAMP_DEEP)).toBe('rgb(7, 12, 22)')
+  })
+
+  it('reads the far stop in a box that has no size yet (the minimised host)', () => {
+    expect(rampColorAt(10, 10, 0, 0, RAMP_LIT, RAMP_DEEP)).toBe('rgb(7, 12, 22)')
+  })
+
+  it('meets the three contrast checks at every sample', () => {
+    const samples = [
+      { point: [W / 2, 0] as const, paint: '#16223d' },
+      { point: [W / 2, 0.36 * H] as const, paint: '#0f172a' },
+      { point: [W / 2, 0.72 * H] as const, paint: '#070c16' },
+      { point: [0, H] as const, paint: '#070c16' },
+    ]
+    for (const { point, paint } of samples) {
+      const halo = rampColorAt(point[0], point[1], W, H, RAMP_LIT, RAMP_DEEP)
+      // The halo IS the paint — never a plate (≤ 1.20:1).
+      expect(contrast(halo, paint), `halo vs paint at ${point}`).toBeLessThanOrEqual(1.2)
+      // The label and the edge stay legible over it.
+      expect(contrast(MAP_INK_TOK, halo), `label ink vs halo at ${point}`).toBeGreaterThanOrEqual(4.5)
+      expect(contrast(MAP_INK_2_TOK, halo), `edge ink vs halo at ${point}`).toBeGreaterThanOrEqual(3)
+    }
+  })
+
+  it('tracks the ramp range: the two extremes are at least 8 L* apart', () => {
+    const lit = rampColorAt(W / 2, 0, W, H, RAMP_LIT, RAMP_DEEP)
+    const deep = rampColorAt(W / 2, 0.72 * H, W, H, RAMP_LIT, RAMP_DEEP)
+    expect(Math.abs(lightness(deep) - lightness(lit))).toBeGreaterThanOrEqual(8)
+  })
+})
+
+describe('the hover reducer — the neighbourhood keeps its strength (§12.4 Wave 2)', () => {
+  const build = () => {
+    const graph = new Graph({ multi: true })
+    graph.addNode('hub', { color: CORPUS_COLOR, size: 7, x: 0, y: 0 })
+    graph.addNode('near-a', { color: POSITION_COLORS.POSITIVE, size: 7 })
+    graph.addNode('near-b', { color: POSITION_COLORS.NEGATIVE, size: 7 })
+    graph.addNode('far-corpus', { color: CORPUS_COLOR, size: 7 })
+    graph.addNode('far-expert', { color: EXPERT_COLOR, size: 7 })
+    graph.addNode('far-pos', { color: POSITION_COLORS.POSITIVE, size: 7 })
+    graph.addNode('far-neu', { color: POSITION_COLORS.NEUTRAL, size: 7 })
+    graph.addNode('far-amb', { color: POSITION_COLORS.AMBIVALENT, size: 7 })
+    graph.addNode('far-neg', { color: POSITION_COLORS.NEGATIVE, size: 7 })
+    graph.addNode('far-unpositioned', { color: UNPOSITIONED_COLOR, size: 7 })
+    graph.addEdge('hub', 'near-a')
+    graph.addEdge('hub', 'near-b')
+    return graph
+  }
+
+  it('dims every entry outside the hovered entry’s neighbourhood, and nothing else', () => {
+    const dimmed = hoverDimmedEntries(build(), 'hub', DIM_FLOOR)
+    expect([...dimmed.keys()].sort()).toEqual(
+      ['far-amb', 'far-corpus', 'far-expert', 'far-neg', 'far-neu', 'far-pos', 'far-unpositioned'].sort(),
+    )
+    expect(dimmed.has('hub')).toBe(false)
+    expect(dimmed.has('near-a')).toBe(false)
+    expect(dimmed.has('near-b')).toBe(false)
+  })
+
+  it('shrinks a dimmed entry — the shape carries the reduction beside the muted colour', () => {
+    const dimmed = hoverDimmedEntries(build(), 'hub', DIM_FLOOR)
+    expect(dimmed.get('far-expert')?.size).toBeCloseTo(7 * DIM_SIZE_RATIO)
+  })
+
+  it('never lets a dimmed entry fall under 3:1 against the lit end of the ramp', () => {
+    const dimmed = hoverDimmedEntries(build(), 'hub', DIM_FLOOR)
+    expect(dimmed.size).toBeGreaterThan(0)
+    for (const [entry, override] of dimmed) {
+      expect(contrast(override.color, LIT_GROUND), entry).toBeGreaterThanOrEqual(3)
+    }
+  })
+
+  it('returns no override for an entry the graph does not hold', () => {
+    expect(hoverDimmedEntries(build(), 'ghost', DIM_FLOOR).size).toBe(0)
+  })
+
+  it('blends a dimmed colour halfway toward the quiet ink', () => {
+    expect(dimEntryColor(CORPUS_COLOR, DIM_FLOOR)).toBe('rgb(104, 147, 215)')
+  })
+})
+
+describe('the bloom — once, in the grammar, and never a fade (§14.4 LIVE)', () => {
+  it('rises to 1.28 and settles at 1 over 560ms', () => {
+    expect(bloomScale(0)).toBe(0)
+    expect(bloomScale(0.3 * BLOOM_MS)).toBeCloseTo(0.64)
+    expect(bloomScale(0.6 * BLOOM_MS)).toBeCloseTo(1.28)
+    expect(bloomScale(0.8 * BLOOM_MS)).toBeCloseTo(1.14)
+    expect(bloomScale(BLOOM_MS)).toBe(1)
+    expect(bloomScale(BLOOM_MS * 10)).toBe(1)
+  })
+
+  it('is simply there under prefers-reduced-motion: reduce', () => {
+    expect(bloomScale(0, true)).toBe(1)
+    expect(bloomScale(0.1 * BLOOM_MS, true)).toBe(1)
+  })
+})
+
+describe('entryOverride — the reducer hands Sigma the whole node', () => {
+  // Sigma replaces a node's attributes with the reducer's result rather than merging; anything left
+  // out (x, y, type) makes the renderer throw. Pin the total-object contract.
+  const data = { x: 12, y: 34, size: 7, color: '#3B82F6', label: 'Mill Street lease', type: 'circle' }
+
+  it('returns the node untouched when nothing is dimmed or blooming', () => {
+    expect(entryOverride(data, undefined, undefined, 0)).toBe(data)
+  })
+
+  it('scales the size for a bloom without losing a single attribute', () => {
+    const out = entryOverride(data, undefined, 0, 0.3 * BLOOM_MS)
+    expect(out.size).toBeCloseTo(7 * 0.64)
+    expect(out).toMatchObject({ x: 12, y: 34, color: '#3B82F6', label: 'Mill Street lease', type: 'circle' })
+  })
+
+  it('applies the dimmed colour and size, with the bloom on top', () => {
+    const dim = { color: 'rgb(104, 147, 215)', size: 7 * DIM_SIZE_RATIO }
+    const out = entryOverride(data, dim, 0, 0.6 * BLOOM_MS)
+    expect(out.color).toBe('rgb(104, 147, 215)')
+    expect(out.size).toBeCloseTo(7 * DIM_SIZE_RATIO * 1.28)
+  })
+
+  it('is simply full size under reduced motion', () => {
+    expect(entryOverride(data, undefined, 0, 0, true).size).toBe(7)
   })
 })
 

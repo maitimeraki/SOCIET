@@ -171,7 +171,7 @@ export default function GraphPage({ onFailureChange }: { onFailureChange?: (fail
               ]}
             />
           </div>
-          <Button variant="primary" onClick={() => navigate('/new/society')}>
+          <Button variant="primary" className="w-full sm:w-auto" onClick={() => navigate('/new/society')}>
             Set the question
             <ArrowRight size={16} aria-hidden="true" />
           </Button>

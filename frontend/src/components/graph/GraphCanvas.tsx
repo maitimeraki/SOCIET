@@ -2,13 +2,15 @@
 import { useCallback, useEffect, useMemo, useRef } from 'react'
 import type { CSSProperties, ReactNode } from 'react'
 import Graph from 'graphology'
+import type { Attributes } from 'graphology-types'
 import forceAtlas2 from 'graphology-layout-forceatlas2'
 import { SigmaContainer, useSigma } from '@react-sigma/core'
-import type { NodeLabelDrawingFunction } from 'sigma/rendering'
+import type { NodeHoverDrawingFunction, NodeLabelDrawingFunction } from 'sigma/rendering'
 import { CheckCircle, CircleDashed, CircleNotch, CirclesThreePlus, UsersThree, Warning, XCircle } from '@phosphor-icons/react'
 import type { StreamStatus } from '../../api/ws'
 import { useGraphStore } from '../../graph/graphStore'
 import type { GraphEdge, GraphNode } from '../../graph/graphStore'
+import Legend from '../common/Legend'
 import {
   CORPUS_COLOR,
   EXPERT_COLOR,
@@ -46,14 +48,21 @@ const surveyColor = (token: string): string =>
   typeof document === 'undefined' ? '' : getComputedStyle(document.documentElement).getPropertyValue(token).trim()
 
 /**
- * The ground the graph is plotted on — the container's own fill (§3.2, the dark plotting table).
- * Node marks are contrast-validated against it, and the label halo is struck in it, so an edge
- * cannot cut through the label text.
+ * The ramp's two stops, read off the document root (§2.3). The plot ground is not one colour: the
+ * `.plot-ground` pane paints a radial ramp from the lit centre (`map-ground-2`) at 50% 0% out to
+ * the deep floor (`map-ground`) at 72%, and the canvas is a window onto that ramp. The halo is
+ * sampled from the same box at the label's position (offset by the canvas's place in the pane), so
+ * it is the paint under the text, not a flat tone that matches neither end.
  */
-const PLOT_SURFACE = surveyColor('--color-map-ground')
+const RAMP_LIT = surveyColor('--color-map-ground-2')
+const RAMP_DEEP = surveyColor('--color-map-ground')
 /** Node labels read luminous on the plot; edges take the muted plot ink so labels stay dominant. */
 const LABEL_INK = surveyColor('--color-map-ink')
 const EDGE_INK = surveyColor('--color-map-ink-2')
+/** The hover ring's ink — the accent rebound for the dark ground (§2.3). */
+const RING_INK = surveyColor('--color-map-accent')
+/** The quiet ink a dimmed entry blends toward — still 4.6:1 or better on the lit end of the ramp. */
+const DIM_INK = surveyColor('--color-map-ink-2')
 /** How often the layout is allowed to run, ms — coalesces a burst of deltas into one settle. */
 const LAYOUT_THROTTLE_MS = 180
 const LAYOUT_ITERATIONS = 5
@@ -89,9 +98,6 @@ export function simplifiedViewNotice(nodeCount: number): string | null {
     : `showing simplified view (${nodeCount} entries)`
 }
 
-/** How many text-fallback lines are rendered — a graph can hold thousands of relations. */
-export const TEXT_FALLBACK_LIMIT = 120
-
 /** `1 entry` / `2 entries` — a count with its noun, pluralised (the plural is explicit for `entry`). */
 function plural(count: number, singular: string, plural = `${singular}s`): string {
   return `${count} ${count === 1 ? singular : plural}`
@@ -126,35 +132,6 @@ export function graphStatusMessage(nodeCount: number, status: StreamStatus, done
     case 'streaming':
       return null
   }
-}
-
-/**
- * The graph's content as text: one line per relation (`Source —REL→ Target`), then the entities no
- * relation mentions. Capped at `limit` lines (a graph can hold thousands); `omitted` counts the rest.
- */
-export function graphTextFallback(
-  nodes: GraphNode[],
-  edges: GraphEdge[],
-  limit: number,
-): { lines: string[]; omitted: number } {
-  const labelById = new Map(nodes.map((node) => [node.id, node.label]))
-  const connected = new Set<string>()
-  const lines: string[] = []
-  let omitted = 0
-  const collect = (line: string) => {
-    if (lines.length < limit) lines.push(line)
-    else omitted++
-  }
-  for (const edge of edges) {
-    const source = labelById.get(edge.source)
-    const target = labelById.get(edge.target)
-    if (source === undefined || target === undefined) continue // an endpoint not yet in the store
-    connected.add(edge.source)
-    connected.add(edge.target)
-    collect(`${source} —${edge.label}→ ${target}`)
-  }
-  for (const node of nodes) if (!connected.has(node.id)) collect(`${node.label} (${node.type})`)
-  return { lines, omitted }
 }
 
 /** Golden angle — successive radii spread seeds around the origin instead of stacking at (0, 0). */
@@ -326,9 +303,251 @@ function ContainerResizeWatch() {
   return null
 }
 
+/* ── The ramp (§12.4 Wave 2) ──────────────────────────────────────────────────────────────────── */
+
+/** The ramp's geometry, verbatim from `--gradient-map`: `radial-gradient(120% 100% at 50% 0%, …)`. */
+const RAMP_WIDTH = 1.2
+const RAMP_HEIGHT = 1
+/** Where the deep stop sits along the ray (`… 72%`); past it the ramp paints the deep floor. */
+const RAMP_STOP = 0.72
+
+const parseHex = (hex: string): [number, number, number] | null => {
+  const match = /^#([0-9a-f]{6})$/i.exec(hex.trim())
+  if (!match) return null
+  const value = parseInt(match[1], 16)
+  return [(value >> 16) & 255, (value >> 8) & 255, value & 255]
+}
+
+const rgb = (channels: number[]): string => `rgb(${channels.map((channel) => Math.round(channel)).join(', ')})`
+
 /**
- * Draw a node label with a halo struck in the stage colour first, so an edge cannot cut the text.
- * The geometry mirrors Sigma's default (`x + size + 3`, `y + labelSize / 3`); only the halo is added.
+ * The colour the map's CSS ramp paints at `(x, y)` on a box of `width × height`.
+ *
+ * It is the gradient's own geometry: an ellipse centred at (50%, 0%), 120% wide and 100% tall,
+ * whose colour runs from `lit` at the centre to `deep` at 72% of the ray and stays `deep` past it.
+ * The interpolation is sRGB, channel-wise — what an opaque CSS gradient paints — and the result is
+ * a literal `rgb(...)`, because a canvas reads none of the document's `var()`s.
+ *
+ * Pure: no DOM, no canvas, so the halo's contrast contract is unit-testable.
+ */
+export function rampColorAt(
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+  lit: string,
+  deep: string,
+): string {
+  const from = parseHex(lit)
+  const to = parseHex(deep)
+  if (!from || !to) return deep
+  const floor = rgb(to)
+  // No box yet (the minimised pane mounts a 1×1 host): the far stop is the honest reading.
+  if (!(width > 0) || !(height > 0) || !Number.isFinite(x) || !Number.isFinite(y)) return floor
+
+  const dx = (x - width * 0.5) / (width * RAMP_WIDTH)
+  const dy = y / (height * RAMP_HEIGHT)
+  const along = Math.min(1, Math.max(0, Math.hypot(dx, dy) / RAMP_STOP))
+  return rgb(from.map((channel, index) => channel + (to[index] - channel) * along))
+}
+
+/**
+ * Where the label canvas sits inside the pane that paints the ramp. The gradient's box is the
+ * `.plot-ground` pane, not the canvas — the pane wraps the legend, the toggles and the counts strip
+ * around the plot — so the sampler needs the pane's size and the canvas's offset within it.
+ * Measured on mount and on either box resizing; in a renderer-less test it stays null, and the
+ * pure sampler is driven directly. One map is on screen at a time (D14), so one frame is enough.
+ */
+interface RampFrame {
+  width: number
+  height: number
+  offsetX: number
+  offsetY: number
+}
+let rampFrame: RampFrame | null = null
+
+function RampFrameWatch() {
+  const sigma = useSigma()
+  useEffect(() => {
+    const canvas = sigma.getContainer()
+    const pane = canvas.closest('.plot-ground')
+    if (!pane) return
+    const measure = () => {
+      const canvasBox = canvas.getBoundingClientRect()
+      const paneBox = pane.getBoundingClientRect()
+      rampFrame = {
+        width: paneBox.width,
+        height: paneBox.height,
+        offsetX: canvasBox.left - paneBox.left,
+        offsetY: canvasBox.top - paneBox.top,
+      }
+    }
+    measure()
+    const observer = new ResizeObserver(measure)
+    observer.observe(canvas)
+    observer.observe(pane)
+    return () => {
+      observer.disconnect()
+      rampFrame = null
+    }
+  }, [sigma])
+  return null
+}
+
+/* ── The hover reducer and the bloom (§12.4 Wave 2, §14.4 LIVE) ─────────────────────────────── */
+
+/** How far a dimmed entry shrinks — the shape carries the reduction beside the muted colour. */
+export const DIM_SIZE_RATIO = 0.6
+/** The bloom's duration — the grammar's bloom (§13.10 rule 12). */
+export const BLOOM_MS = 560
+
+/** One entry's read-only override: the dimmed colour and size, computed once per hover. */
+export interface EntryOverride {
+  color: string
+  size: number
+}
+
+/**
+ * An entry's colour at rest in a hovered map: its own kind blended halfway toward the map's quiet
+ * ink. The kind is still readable, and every entry colour clears 3:1 against the lit end of the ramp
+ * in this state (the darkest, the material blue, measures 5.07:1), so a dimmed entry never vanishes
+ * — the map is a record, not a game.
+ */
+export function dimEntryColor(color: string, floor: string): string {
+  const from = parseHex(color)
+  const to = parseHex(floor)
+  if (!from || !to) return color
+  return rgb(from.map((channel, index) => channel + (to[index] - channel) * 0.5))
+}
+
+/**
+ * The entries a hover reduces: everything that is neither the hovered entry nor one of its
+ * neighbours. This is the whole computation — it runs once per hover change, and the node reducer
+ * only looks each entry up, so no frame walks the graph.
+ */
+export function hoverDimmedEntries(graph: Graph, hovered: string, floor: string): Map<string, EntryOverride> {
+  const dimmed = new Map<string, EntryOverride>()
+  if (!graph.hasNode(hovered)) return dimmed
+  const keep = new Set<string>([hovered, ...graph.neighbors(hovered)])
+  graph.forEachNode((id, attributes) => {
+    if (keep.has(id)) return
+    dimmed.set(id, { color: dimEntryColor(String(attributes.color), floor), size: NODE_SIZE * DIM_SIZE_RATIO })
+  })
+  return dimmed
+}
+
+/**
+ * The bloom's scale at `elapsed` ms — the CSS keyframe `plot-bloom` (0 → 1.28 → 1) over 560ms, with
+ * no opacity anywhere in it: the entry **rises** into place, it never fades (§13.10 rule 11). Under
+ * `prefers-reduced-motion: reduce` the entry is simply there.
+ */
+export function bloomScale(elapsed: number, reduced = false): number {
+  if (reduced || elapsed >= BLOOM_MS) return 1
+  if (!Number.isFinite(elapsed) || elapsed <= 0) return 0
+  const t = elapsed / BLOOM_MS
+  return t < 0.6 ? (t / 0.6) * 1.28 : 1.28 - ((t - 0.6) / 0.4) * 0.28
+}
+
+/**
+ * One node as the reducer hands it back to Sigma. Sigma does **not** merge a reducer's result onto
+ * the node's attributes — it replaces them — so the returned object is the whole node: this entry's
+ * own position, colour, label and type, with the hover dim and the bloom's scale applied on top.
+ */
+export function entryOverride(
+  data: Attributes,
+  dim: EntryOverride | undefined,
+  started: number | undefined,
+  now: number,
+  reduced = false,
+): Attributes {
+  const scale = started === undefined ? 1 : bloomScale(now - started, reduced)
+  if (!dim && scale === 1) return data
+  return { ...data, ...dim, size: (dim?.size ?? (data.size as number) ?? NODE_SIZE) * scale }
+}
+
+const prefersReducedMotion = (): boolean =>
+  typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches
+
+/**
+ * The hover ring: a 2px stroke in the map accent around the hovered entry. Sigma's default hover is
+ * a white label plate — a second surface over the plot, which §13.10 rule 3 forbids on the map. The
+ * ring marks the entry without covering what is around it.
+ */
+export const drawHoverRing: NodeHoverDrawingFunction = (context, data) => {
+  context.beginPath()
+  context.arc(data.x, data.y, data.size + 4, 0, Math.PI * 2)
+  context.lineWidth = 2
+  context.strokeStyle = RING_INK
+  context.stroke()
+}
+
+/**
+ * The map's two live behaviours, kept off the React tree so neither repaints it:
+ *
+ * - **the bloom**: a node the graph gains blooms once over 560ms and settles. The graph's own
+ *   `nodeAdded` event starts the clock, a rAF loop drives Sigma until the last bloom expires, and
+ *   the node reducer reads the remaining time. Nothing else moves with it, and a given entry never
+ *   blooms twice.
+ * - **the hover reducer**: entering a node computes the dimmed set once; leaving restores it.
+ */
+function MapDynamics({ graph }: { graph: Graph }) {
+  const sigma = useSigma()
+  const dimmed = useRef<Map<string, EntryOverride>>(new Map())
+  const blooms = useRef<Map<string, number>>(new Map())
+  const frame = useRef<number | undefined>(undefined)
+
+  useEffect(() => {
+    const reducer = (node: string, data: Attributes) =>
+      entryOverride(data, dimmed.current.get(node), blooms.current.get(node), performance.now())
+    sigma.setSetting('nodeReducer', reducer)
+    return () => {
+      sigma.setSetting('nodeReducer', null)
+    }
+  }, [sigma])
+
+  useEffect(() => {
+    const tick = () => {
+      frame.current = undefined
+      const now = performance.now()
+      for (const [node, started] of blooms.current) if (now - started >= BLOOM_MS) blooms.current.delete(node)
+      sigma.scheduleRefresh()
+      if (blooms.current.size > 0) frame.current = requestAnimationFrame(tick)
+    }
+    const onAdd = ({ key }: { key: string }) => {
+      if (!prefersReducedMotion()) blooms.current.set(key, performance.now())
+      if (blooms.current.size > 0 && frame.current === undefined) frame.current = requestAnimationFrame(tick)
+    }
+    graph.on('nodeAdded', onAdd)
+    return () => {
+      graph.off('nodeAdded', onAdd)
+      if (frame.current !== undefined) cancelAnimationFrame(frame.current)
+    }
+  }, [graph, sigma])
+
+  useEffect(() => {
+    const enter = ({ node }: { node: string }) => {
+      dimmed.current = hoverDimmedEntries(graph, node, DIM_INK)
+      sigma.scheduleRefresh()
+    }
+    const leave = () => {
+      dimmed.current = new Map()
+      sigma.scheduleRefresh()
+    }
+    sigma.on('enterNode', enter)
+    sigma.on('leaveNode', leave)
+    return () => {
+      sigma.off('enterNode', enter)
+      sigma.off('leaveNode', leave)
+    }
+  }, [graph, sigma])
+
+  return null
+}
+
+/**
+ * Draw a node label with a halo struck in the ramp colour under the label first, so an edge cannot
+ * cut the text and the halo never reads as a plate: it is the paint itself, sampled at the label's
+ * position. The geometry mirrors Sigma's default (`x + size + 3`, `y + labelSize / 3`).
  */
 export const drawNodeLabel: NodeLabelDrawingFunction = (context, data, settings) => {
   if (!data.label) return
@@ -342,9 +561,17 @@ export const drawNodeLabel: NodeLabelDrawingFunction = (context, data, settings)
       : settings.labelColor.color ?? LABEL_INK
   const x = data.x + data.size + 3
   const y = data.y + labelSize / 3
+  // Sigma's label canvas is scaled by the device pixel ratio while the label's x/y are CSS pixels.
+  // The ramp is painted on the pane, so the point moves into the pane's box when that frame is known.
+  const scale = typeof context.getTransform === 'function' ? context.getTransform().a || 1 : 1
+  const canvasWidth = context.canvas ? context.canvas.width / scale : 0
+  const canvasHeight = context.canvas ? context.canvas.height / scale : 0
+  const frame = rampFrame
   context.lineJoin = 'round'
   context.lineWidth = LABEL_HALO_WIDTH
-  context.strokeStyle = PLOT_SURFACE
+  context.strokeStyle = frame
+    ? rampColorAt(x + frame.offsetX, y + frame.offsetY, frame.width, frame.height, RAMP_LIT, RAMP_DEEP)
+    : rampColorAt(x, y, canvasWidth, canvasHeight, RAMP_LIT, RAMP_DEEP)
   context.strokeText(data.label, x, y)
   context.fillStyle = color
   context.fillText(data.label, x, y)
@@ -368,6 +595,8 @@ export const SIGMA_SETTINGS = {
   labelDensity: 1,
   renderEdgeLabels: false,
   defaultDrawNodeLabel: drawNodeLabel,
+  // The hovered entry takes the map's accent ring, not Sigma's white label plate (§12.4 Wave 2).
+  defaultDrawNodeHover: drawHoverRing,
 }
 const CANVAS_STYLE = { '--sigma-background-color': 'transparent' } as CSSProperties
 
@@ -396,22 +625,32 @@ export const LEGEND_ROWS: readonly LegendRow[] = [
   { mark: <CircleDashed size={12} aria-hidden="true" />, color: UNPOSITIONED_COLOR, word: 'No position' },
 ]
 
-/** The map's key, ruled above the plot while the map holds anything, so it never covers an entry.
- *  `hasEntries` is false only when nothing is drawn. */
+/**
+ * The map's key, ruled above the plot while the map holds anything, so it never covers an entry.
+ * `hasEntries` is false only when nothing is drawn.
+ *
+ * The kit's `Legend` is the one legend block (§6): symbol + colour + word, never a hue alone. It is
+ * keyed to the map's ink because it is rendered inside `plot-ground`, which rebinds `--color-ink-*`
+ * to the map's tokens — so the same component reads on the dark surface without a per-instance
+ * override. The swatch rides beside the symbol so the row carries shape, colour and word.
+ */
 export function GraphLegend({ hasEntries }: { hasEntries: boolean }) {
   if (!hasEntries) return null
   return (
-    <ul className="pointer-events-none flex shrink-0 flex-wrap gap-x-3 gap-y-1 border-b border-map-rule px-2.5 py-1.5">
-      {LEGEND_ROWS.map((row) => (
-        <li key={row.word} className="flex items-center gap-1.5 text-micro text-ink-3">
-          <span aria-hidden="true" className="inline-flex items-center" style={{ color: row.color }}>
+    // The map's height is a measured floor (568×475 at 1440, 209 at 390 — Task 6), so the kit's
+    // default legend padding is tightened at the call site to fit the strip the old legend occupied.
+    <Legend
+      className="shrink-0 border-t-0! px-2.5 py-1! [&>ul]:gap-y-1!"
+      entries={LEGEND_ROWS.map((row) => ({
+        symbol: (
+          <span className="inline-flex items-center gap-1" style={{ color: row.color }}>
             {row.mark}
+            <span aria-hidden="true" className="inline-block size-2.5 rounded-[2px]" style={{ backgroundColor: row.color }} />
           </span>
-          <span aria-hidden="true" className="inline-block size-2.5 rounded-[2px]" style={{ backgroundColor: row.color }} />
-          {row.word}
-        </li>
-      ))}
-    </ul>
+        ),
+        label: row.word,
+      }))}
+    />
   )
 }
 
@@ -467,7 +706,6 @@ export default function GraphCanvas({ datasetId, jobId }: GraphCanvasProps) {
   const nodes = useGraphStore((s) => s.nodes)
   const edges = useGraphStore((s) => s.edges)
   const labels = useGraphStore((s) => s.labels)
-  const version = useGraphStore((s) => s.version)
   const nodeCount = Object.keys(nodes).length
   const notice = simplifiedViewNotice(nodeCount)
   // A new dataset is a new graph — a fresh instance so no stale nodes survive the switch.
@@ -483,15 +721,6 @@ export default function GraphCanvas({ datasetId, jobId }: GraphCanvasProps) {
   // "waiting for the first chunk" skeleton nor the ended/failed notice belongs over it.
   const phase = jobId === undefined ? 'streaming' : graphStreamPhase(nodeCount, status, done)
   const statusMessage = jobId === undefined ? null : graphStatusMessage(nodeCount, status, done)
-  // Keyed on the store's monotonic version, not the maps themselves: the derivation is O(edges), and
-  // a re-render from any other slice (labels, selection, a whole-store re-sync) must not re-run it.
-  // `version` bumps in the same `set` that swaps `nodes`/`edges`, so the closure is never stale.
-  const fallback = useMemo(
-    () => graphTextFallback(Object.values(nodes), Object.values(edges), TEXT_FALLBACK_LIMIT),
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- version is the invalidation key for nodes/edges
-    [version],
-  )
-
   return (
     // The canvas fills its host: the pane owns the height, and the plot fills the box rather than
     // sitting in the top third of a fixed 360px with dead dark ground under it (§9.2).
@@ -511,8 +740,11 @@ export default function GraphCanvas({ datasetId, jobId }: GraphCanvasProps) {
           className="h-full w-full"
           style={{ width: '100%', height: '100%' }}
         >
+          {/* Dynamics attaches before the sync effect below, so the first entries' bloom is caught. */}
+          <MapDynamics graph={graph} />
           <LiveGraph graph={graph} />
           <FitCamera nodeCount={nodeCount} />
+          <RampFrameWatch />
           <ContainerResizeWatch />
           <SelectionWatch onPick={pick} />
         </SigmaContainer>
@@ -527,19 +759,12 @@ export default function GraphCanvas({ datasetId, jobId }: GraphCanvasProps) {
         )}
         <GraphOverlay phase={phase} message={statusMessage} />
       </div>
-      {/* The counts grow on every delta; role="img" alone is read on demand, so mirror the label into a live region. */}
+      {/* The counts grow on every delta; role="img" alone is read on demand, so mirror the label into a live region.
+          The relation list lives in the pane's counts strip, outside this host, so it survives the map being
+          minimised (§14.4 row 10) instead of sitting in a hidden subtree. */}
       <div aria-live="polite" className="sr-only">
         {canvasLabel}
       </div>
-      {/* The canvas is pixels — a non-visual user reads the graph from this list instead. */}
-      {fallback.lines.length > 0 && (
-        <ul className="sr-only">
-          {fallback.lines.map((line, index) => (
-            <li key={index}>{line}</li>
-          ))}
-          {fallback.omitted > 0 && <li>and {fallback.omitted} more</li>}
-        </ul>
-      )}
     </div>
   )
 }

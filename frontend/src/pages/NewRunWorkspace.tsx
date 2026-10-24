@@ -6,7 +6,7 @@ import GraphCanvas from '../components/graph/GraphCanvas'
 import NodeDetailsDrawer from '../components/run/NodeDetailsDrawer'
 import StageRail from '../components/common/StageRail'
 import Workspace, { WorkspaceView } from '../components/workspace/Workspace'
-import { mapCounts } from '../components/workspace/GraphPane'
+import { busiestEntries, mapCounts } from '../components/workspace/GraphPane'
 import type { MapSummary, PaneState } from '../components/workspace/Workspace'
 import { useDraftStore } from '../wizard/draftStore'
 import { useGraphStore } from '../graph/graphStore'
@@ -158,7 +158,13 @@ export default function NewRunWorkspace() {
   const nodes = useGraphStore((s) => s.nodes)
   const edges = useGraphStore((s) => s.edges)
   // The text alternative reads the one store by kind, so all three layers count as they grow (§9.4).
-  const summary: MapSummary = { counts: mapCounts(nodes, edges), busiest: [], step: STEP_LABELS[step] }
+  // The busiest entries are the same derivation the run page uses, so the workspace's strip is a
+  // live reading and never a placeholder.
+  const summary: MapSummary = {
+    counts: mapCounts(nodes, edges),
+    busiest: busiestEntries(nodes, edges),
+    step: STEP_LABELS[step],
+  }
 
   const map = datasetId && graphJobId ? <GraphCanvas datasetId={datasetId} jobId={graphJobId} /> : null
 

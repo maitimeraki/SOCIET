@@ -1,12 +1,14 @@
 /* eslint-disable react-refresh/only-export-components -- this module deliberately exports its pure helpers (the counts by kind and the state-free view) so the no-DOM suite can drive every toggle state and every map size without a renderer. */
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import type { ReactNode } from 'react'
 import { ArrowsInSimple, ArrowsOutSimple, CaretUp, Minus } from '@phosphor-icons/react'
 import IconButton from '../ui/IconButton'
 import { LayerIcon } from '../../graph/layerIcons'
 import { ALL_LAYERS, LAYER_NAMES, LayerVisibilityContext, nodeLayer } from '../../graph/layers'
 import type { LayerName } from '../../graph/layers'
+import { useGraphStore } from '../../graph/graphStore'
 import type { GraphEdge, GraphNode } from '../../graph/graphStore'
+import { TEXT_FALLBACK_LIMIT, graphTextFallback } from '../../graph/graphText'
 import type { MapCounts, MapSummary, PaneState } from './Workspace'
 
 export interface GraphPaneProps {
@@ -101,6 +103,9 @@ export interface GraphPaneViewProps extends GraphPaneProps {
   /** The layers the canvas may draw. */
   layers: ReadonlySet<LayerName>
   onToggleLayer: (key: LayerToggle) => void
+  /** The map's relations, as text (`Source —REL→ Target`) — the half of the text alternative that
+   *  lives outside the canvas host so it survives every pane state. */
+  relations?: string[]
 }
 
 /**
@@ -119,6 +124,7 @@ export function GraphPaneView({
   summary,
   layers,
   onToggleLayer,
+  relations = [],
   children,
 }: GraphPaneViewProps) {
   const minimised = state === 'minimised'
@@ -167,6 +173,15 @@ export function GraphPaneView({
           {counts.connections} connections
         </p>
         {busiest.length > 0 && <p>Busiest: {busiest.join(', ')}</p>}
+        {/* The relation list is part of the map's text alternative, and it lives here — outside the
+            canvas host — so it is readable in split, expanded and minimised alike (§14.4 row 10). */}
+        {relations.length > 0 && (
+          <ul className="sr-only">
+            {relations.map((line, index) => (
+              <li key={index}>{line}</li>
+            ))}
+          </ul>
+        )}
 
         <div className="ml-auto flex items-center gap-1">
           <IconButton
@@ -204,6 +219,17 @@ const NO_LAYERS: ReadonlySet<LayerName> = new Set()
  */
 export default function GraphPane(props: GraphPaneProps) {
   const [layers, setLayers] = useState<ReadonlySet<LayerName>>(ALL_LAYERS)
+  // The counts strip is a live reading of the same store the canvas draws. `version` is the store's
+  // invalidation key: the derivation is O(edges), so it must not re-run when an unrelated slice
+  // (labels, selection) re-renders the pane.
+  const nodes = useGraphStore((s) => s.nodes)
+  const edges = useGraphStore((s) => s.edges)
+  const version = useGraphStore((s) => s.version)
+  const relations = useMemo(
+    () => graphTextFallback(Object.values(nodes), Object.values(edges), TEXT_FALLBACK_LIMIT).lines,
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- version is the invalidation key for nodes/edges
+    [version],
+  )
 
   const toggleLayer = (key: LayerToggle) =>
     setLayers((current) => {
@@ -214,5 +240,5 @@ export default function GraphPane(props: GraphPaneProps) {
       return next
     })
 
-  return <GraphPaneView {...props} layers={layers} onToggleLayer={toggleLayer} />
+  return <GraphPaneView {...props} layers={layers} onToggleLayer={toggleLayer} relations={relations} />
 }
