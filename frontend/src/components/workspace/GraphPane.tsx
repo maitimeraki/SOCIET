@@ -87,7 +87,7 @@ function LayerButton({ label, layer, on, onClick }: { label: string; layer?: Lay
       type="button"
       aria-pressed={on}
       onClick={onClick}
-      className={`inline-flex items-center gap-1 rounded-[4px] border border-ink-3 px-2 py-1 text-micro transition-colors hover:bg-map-ground-2 ${
+      className={`inline-flex items-center gap-1 rounded-[4px] border border-ink-3 px-2 py-1 text-micro transition-colors hover:bg-map-ground-2 max-sm:min-h-11 max-sm:min-w-11 ${
         on ? 'bg-map-ground-2 text-ink-2' : 'text-ink-3 line-through'
       }`}
     >

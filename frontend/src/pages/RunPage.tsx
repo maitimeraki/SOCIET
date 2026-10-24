@@ -336,7 +336,9 @@ export default function RunPage() {
         mapId={runId}
         summary={mapSummary}
         map={
-          <div className="relative">
+          // The wrapper is a growing flex child of the map host, not a plain block: `GraphCanvas`'s
+          // `flex-1` needs the wrapper to have a definite height, or the plot collapses to 1px.
+          <div className="relative flex min-h-0 flex-1 flex-col">
             <GraphCanvas datasetId={run.datasetId ?? ''} />
             {/* The material read found nothing — said in words IN the map's own region, over a map that
                 is not blank (the run's experts and opinions still stand), and never a silent empty map. */}

@@ -79,7 +79,7 @@ export default function EventStream({ items, live }: { items: StreamItem[]; live
             setPaused(false)
             container.current?.scrollTo({ top: container.current.scrollHeight })
           }}
-          className="sticky bottom-2 left-1/2 mt-2 -translate-x-1/2 rounded-[4px] border border-ink-4 bg-ground-2 px-3 py-1.5 text-micro text-ink"
+          className="sticky bottom-2 left-1/2 mt-2 -translate-x-1/2 rounded-[4px] border border-ink-4 bg-ground-2 px-3 py-1.5 text-micro text-ink max-sm:inline-flex max-sm:min-h-11 max-sm:min-w-11 max-sm:items-center"
         >
           Jump to live ↓
         </button>
