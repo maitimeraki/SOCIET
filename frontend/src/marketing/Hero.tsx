@@ -104,7 +104,7 @@ function BrandMark() {
 function Nav() {
   return (
     <div className="shell pt-5">
-      <header className="hero-nav flex items-center justify-between gap-6 px-4 py-2.5">
+      <header className="hero-nav flex items-center justify-between gap-6 px-[17px] py-[11px]">
         <Link to="/" className="flex items-center gap-2.5 text-ink" aria-label={WORDMARK}>
           <BrandMark />
           <span className="font-titling text-[18px] font-semibold tracking-[-0.01em]">{WORDMARK}</span>

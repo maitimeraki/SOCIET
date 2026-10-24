@@ -152,7 +152,7 @@ export default function GraphPage({ onFailureChange }: { onFailureChange?: (fail
 
       {result && (result.entity_types.length > 0 || result.relation_types.length > 0) && (
         <div className="grid grid-cols-2 gap-4">
-          <SchemaCard title="The kinds of things it found" names={result.entity_types} />
+          <SchemaCard title="Kinds found" names={result.entity_types} />
           <RelationTable names={result.relation_types} />
         </div>
       )}

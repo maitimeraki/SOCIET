@@ -62,7 +62,7 @@ export default function StageRail({
         )
         return (
           <div key={stage.key} className="flex shrink-0 items-center gap-3">
-            {index > 0 && <span aria-hidden="true" className="h-px w-4 bg-ink-4" />}
+            {index > 0 && <span aria-hidden="true" className="h-px w-4 bg-rule" />}
             {onSelect ? (
               <button
                 type="button"
