@@ -285,3 +285,28 @@ describe('runStore reopened-run map (replay = live)', () => {
     expect(Object.keys(useGraphStore.getState().nodes)).not.toContain('EU')
   })
 })
+
+describe('runStore live handoff keeps the extraction map (keepMap)', () => {
+  const originalSeedMap = useRunStore.getState().seedMap
+
+  afterEach(() => {
+    useRunStore.setState({ seedMap: originalSeedMap })
+  })
+
+  const load = async (options?: { keepMap?: boolean }) => {
+    const seedMap = vi.fn()
+    useRunStore.setState({ seedMap })
+    getRun.mockResolvedValue(doc({ status: 'complete' }))
+    getRunGraph.mockResolvedValue({ dataset_id: 'ds-1', nodes: [], edges: [], labels: [], chunk_count: 0 })
+    await useRunStore.getState().loadAndConnect('run-1', options)
+    return seedMap
+  }
+
+  it('seeds the run’s own map by default', async () => {
+    expect(await load()).toHaveBeenCalledTimes(1)
+  })
+
+  it('does not seed when the live handoff asks to keep the extraction map', async () => {
+    expect(await load({ keepMap: true })).not.toHaveBeenCalled()
+  })
+})

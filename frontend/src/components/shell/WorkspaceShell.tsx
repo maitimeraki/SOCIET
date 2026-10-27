@@ -1,4 +1,4 @@
-import { useEffect, Suspense } from 'react'
+import { useEffect, useRef, Suspense } from 'react'
 import { Outlet, useLocation, useMatch, useSearchParams } from 'react-router-dom'
 import AppErrorBoundary from '../AppErrorBoundary'
 import GraphCanvas from '../graph/GraphCanvas'
@@ -11,9 +11,6 @@ import { useRunStore } from '../../run/runStore'
 import { STEP_LABELS, stepFromParam } from '../../pages/workspaceSteps'
 import { RouteFallback } from './AppShell'
 import WorkspaceTopBar from './WorkspaceTopBar'
-
-/** The map's caption on a run — the run view has no build step to name, so it names the map itself. */
-const MAP_STEP = 'The map'
 
 /**
  * §9 The full-screen workspace shell. One layout route for the new-decision lifecycle AND every run,
@@ -40,11 +37,29 @@ export default function WorkspaceShell() {
   const nodes = useGraphStore((state) => state.nodes)
   const edges = useGraphStore((state) => state.edges)
 
-  const handoff = Boolean((location.state as { handoff?: boolean } | null)?.handoff)
+  // The handoff is consumed ONCE per run, at the moment the run id changes. It must not re-run when a
+  // later navigation drops `location.state` (every tab click, the roster→floor replace): that would
+  // reload the run and `seedMap()` over the extraction map the handoff exists to preserve.
+  const handoffForRun = useRef<{ runId: string; keepMap: boolean } | null>(null)
 
   useEffect(() => {
-    if (runId) void loadAndConnect(runId, { keepMap: handoff })
-  }, [runId, handoff, loadAndConnect])
+    if (!runId) {
+      // Left the run for the new-decision workspace — the old `RunPage` unmount lifetime, restored.
+      useRunStore.getState().disconnect()
+      handoffForRun.current = null
+      return
+    }
+    if (handoffForRun.current?.runId !== runId) {
+      handoffForRun.current = {
+        runId,
+        keepMap: Boolean((location.state as { handoff?: boolean } | null)?.handoff),
+      }
+    }
+    void loadAndConnect(runId, { keepMap: handoffForRun.current.keepMap })
+    // `location` is read only when the run changes; depending on it would re-run on every navigation
+    // and defeat the once-per-run handoff.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [runId, loadAndConnect])
 
   useEffect(() => () => useRunStore.getState().disconnect(), [])
 
@@ -72,7 +87,7 @@ export default function WorkspaceShell() {
   const summary = {
     counts: mapCounts(nodes, edges),
     busiest: busiestEntries(nodes, edges),
-    step: runId ? MAP_STEP : STEP_LABELS[step],
+    step: runId ? STEP_LABELS.graph : STEP_LABELS[step],
   }
   const title = runId ? run.query || 'This decision' : STEP_LABELS[step]
 
