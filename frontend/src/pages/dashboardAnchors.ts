@@ -29,10 +29,11 @@ export function anchorIdFromHash(hash: string): string | null {
   }
 }
 
-/** The four retired routes and where each now lands. `/runs/:runId` stays a deep view. */
+/**
+ * The remaining retired route and where it lands. Documents, Runs and Verdicts are real pages again
+ * (the three sections of the dashboard plan); only the panel is still folded into the dashboard.
+ * `/runs/:runId` stays a deep view.
+ */
 export const LEGACY_SECTION_REDIRECTS: { path: string; anchor: DashboardAnchor }[] = [
-  { path: '/documents', anchor: DASHBOARD_ANCHORS.material },
-  { path: '/runs', anchor: DASHBOARD_ANCHORS.decisions },
-  { path: '/results', anchor: DASHBOARD_ANCHORS.lastAnswer },
   { path: '/panel', anchor: DASHBOARD_ANCHORS.panel },
 ]

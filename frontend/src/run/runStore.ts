@@ -21,7 +21,7 @@ interface RunStoreState {
   corpusMissing: boolean
   /** The run `version` the map was last built from — the key `seedMap` rebuilds against (§11.2). */
   mapVersion: number
-  loadAndConnect: (runId: string) => Promise<void>
+  loadAndConnect: (runId: string, options?: { keepMap?: boolean }) => Promise<void>
   /** Rebuild the one map from the run's own folded state — the reopened run's producer (§11.2, F36). */
   seedMap: () => void
   dispatch: (event: RunEvent) => void
@@ -152,7 +152,7 @@ export const useRunStore = create<RunStoreState>((set, get) => {
       set({ socket: null, connection: 'idle', corpus: null, corpusMissing: false, mapVersion: -1 })
     },
 
-    loadAndConnect: async (runId: string) => {
+    loadAndConnect: async (runId: string, options?: { keepMap?: boolean }) => {
       get().disconnect()
       const generation = ++loadGeneration
       set({ run: { ...initialState, runId }, events: [], connection: 'connecting' })
@@ -172,7 +172,8 @@ export const useRunStore = create<RunStoreState>((set, get) => {
         set({ run: reopened, events: doc.events, corpus: corpus.snapshot, corpusMissing: corpus.missing })
         // Seed the map from the run's own state. A reopened run builds its map here; a live run seeds
         // the same layers and the WS replay below re-adds them idempotently, so the seam is invisible.
-        get().seedMap()
+        // A live handoff keeps the extraction map already in the store: seeding would replace it.
+        if (!options?.keepMap) get().seedMap()
         if (doc.status === 'complete' || doc.status === 'failed') {
           set({ connection: 'closed' })
           return

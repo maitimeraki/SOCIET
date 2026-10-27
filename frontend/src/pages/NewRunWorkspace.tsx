@@ -1,38 +1,17 @@
 /* eslint-disable react-refresh/only-export-components -- this module deliberately exports its pure helpers (the step resolver, the exported pure view) so the no-DOM suite can drive each step without a renderer. */
 import { useEffect, useState } from 'react'
-import type { ReactNode } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
-import GraphCanvas from '../components/graph/GraphCanvas'
-import NodeDetailsDrawer from '../components/run/NodeDetailsDrawer'
 import StageRail from '../components/common/StageRail'
-import Workspace, { WorkspaceView } from '../components/workspace/Workspace'
-import { busiestEntries, mapCounts } from '../components/workspace/GraphPane'
-import type { MapSummary, PaneState } from '../components/workspace/Workspace'
 import { useDraftStore } from '../wizard/draftStore'
-import { useGraphStore } from '../graph/graphStore'
 import IngestPage from './IngestPage'
 import GraphPage from './GraphPage'
 import SocietyPage from './SocietyPage'
+import { STEP_LABELS, STEPS, stepFromParam } from './workspaceSteps'
+import type { WorkspaceStep } from './workspaceSteps'
 
-/**
- * §9 The three lifecycle steps, in one workspace. The step is an internal identifier — its query
- * values (`ingest`/`graph`/`society`) are the ones the old step paths used and are exempt from §13;
- * only `STEP_LABELS` ever renders.
- */
-export type WorkspaceStep = 'ingest' | 'graph' | 'society'
-
-const STEPS: WorkspaceStep[] = ['ingest', 'graph', 'society']
-
-const STEP_LABELS: Record<WorkspaceStep, string> = {
-  ingest: 'Your material',
-  graph: 'The map',
-  society: 'Your question',
-}
-
-/** The step a `?step=` value names; anything else (absent, unknown) is the first step. */
-export function stepFromParam(value: string | null): WorkspaceStep {
-  return value === 'graph' || value === 'society' ? value : 'ingest'
-}
+// Re-exported so existing imports (`./NewRunWorkspace`) keep working after the move.
+export { stepFromParam }
+export type { WorkspaceStep }
 
 /** The rail the current step drives (§9.4): earlier steps settle, the current runs, later wait — and
  *  a failed current step carries the danger marker, not a pulse that would contradict the body. */
@@ -84,52 +63,24 @@ function StepWork({
 
 export interface NewRunWorkspaceViewProps {
   step: WorkspaceStep
-  mapId: string
-  state: PaneState
-  onStateChange: (next: PaneState) => void
-  map: ReactNode
-  summary: MapSummary
   /** True when the current step has failed — its rail stage carries the danger marker, not a pulse. */
   failed?: boolean
 }
 
 /**
- * The pure view — the step AND the pane state are props, so the no-DOM suite renders each step to
- * static markup (Rulings F17/F23). The `map` node is handed to the pane's always-rendered host and
- * is never conditionally rendered, so no step change can unmount or remount it (Ruling F22).
+ * The pure view — the step is a prop, so the no-DOM suite renders each step to static markup
+ * (Rulings F17/F23). The map and the pane geometry belong to `WorkspaceShell`; the page renders only
+ * its step content.
  */
-export function NewRunWorkspaceView({
-  step,
-  mapId,
-  state,
-  onStateChange,
-  map,
-  summary,
-  failed = false,
-}: NewRunWorkspaceViewProps) {
-  return (
-    <WorkspaceView
-      mapId={mapId}
-      state={state}
-      onStateChange={onStateChange}
-      map={map}
-      summary={{ ...summary, step: STEP_LABELS[step] }}
-      work={<StepWork step={step} failed={failed} />}
-    />
-  )
+export function NewRunWorkspaceView({ step, failed = false }: NewRunWorkspaceViewProps) {
+  return <StepWork step={step} failed={failed} />
 }
 
-/** The workspace's map id for a new decision — stable across every step, so the map host never
- *  changes identity as the lifecycle advances. */
-const SESSION_MAP_ID = 'new'
 const EXPIRED_NOTE = "Your session's documents expired — add them again."
 
 /**
- * §9 The new-decision host. It owns nothing but the step (from `?step=`, F22), the map node and the
- * map's text alternative — the pane geometry lives in `Workspace`. One route element renders every
- * step, so React reconciles the same component type at the same position: the map never remounts on
- * a step change, and the graph store is rendered across the whole lifecycle rather than surviving
- * navigation unshown.
+ * §9 The new-decision host. It owns the step (from `?step=`, F22) and reports a step failure to the
+ * rail; the map host and the load/socket lifetime live in `WorkspaceShell`.
  */
 export default function NewRunWorkspace() {
   const [params] = useSearchParams()
@@ -141,7 +92,6 @@ export default function NewRunWorkspace() {
   const [failed, setFailed] = useState(false)
 
   const datasetId = useDraftStore((s) => s.datasetId)
-  const graphJobId = useDraftStore((s) => s.graphJobId)
   const docs = useDraftStore((s) => s.docs)
   const readyCount = docs.filter((doc) => doc.status === 'ready').length
 
@@ -155,31 +105,11 @@ export default function NewRunWorkspace() {
     if (stale) navigate('/new?step=ingest', { replace: true, state: { note: EXPIRED_NOTE } })
   }, [step, datasetId, readyCount, navigate])
 
-  const nodes = useGraphStore((s) => s.nodes)
-  const edges = useGraphStore((s) => s.edges)
-  // The text alternative reads the one store by kind, so all three layers count as they grow (§9.4).
-  // The busiest entries are the same derivation the run page uses, so the workspace's strip is a
-  // live reading and never a placeholder.
-  const summary: MapSummary = {
-    counts: mapCounts(nodes, edges),
-    busiest: busiestEntries(nodes, edges),
-    step: STEP_LABELS[step],
-  }
-
-  const map = datasetId && graphJobId ? <GraphCanvas datasetId={datasetId} jobId={graphJobId} /> : null
-
   return (
-    <>
-      <Workspace
-        mapId={SESSION_MAP_ID}
-        map={map}
-        work={<StepWork step={step} failed={step === 'graph' && failed} onFailureChange={setFailed} />}
-        summary={summary}
-      />
-      {/* §9.5 The open entry's details. A sibling of the panes, never a child of the map host: the
-          host is hidden when the map is minimised, and a dialog inside a hidden, aria-hidden subtree
-          is not reachable. It draws nothing until an entry is opened. */}
-      <NodeDetailsDrawer />
-    </>
+    <StepWork
+      step={step}
+      failed={step === 'graph' && failed}
+      onFailureChange={setFailed}
+    />
   )
 }

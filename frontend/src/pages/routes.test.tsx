@@ -16,6 +16,9 @@ import { resolveGuard, signInTarget } from '../auth/guard'
 import { GuardView } from '../auth/RequireAuth'
 import AppShell from '../components/shell/AppShell'
 import DashboardPage from './DashboardPage'
+import DocumentsPage from './DocumentsPage'
+import RunsPage from './RunsPage'
+import ResultsPage from './ResultsPage'
 import { dashboardHref, DASHBOARD_ANCHORS, LEGACY_SECTION_REDIRECTS } from './dashboardAnchors'
 // §13 — the one copy-law guard (list + stem-tolerant matcher + tag-stripping reader), shared with
 // every rendered-string test.
@@ -82,25 +85,29 @@ describe('the dashboard inside the guard', () => {
   })
 })
 
-describe('the four retired routes redirect to the dashboard at their anchor (D1)', () => {
-  it('maps all four paths, and each lands on its own section', () => {
-    expect(LEGACY_SECTION_REDIRECTS.map((entry) => entry.path)).toEqual([
-      '/documents',
-      '/runs',
-      '/results',
-      '/panel',
-    ])
-    expect(LEGACY_SECTION_REDIRECTS.map((entry) => dashboardHref(entry.anchor))).toEqual([
-      '/dashboard#material',
-      '/dashboard#decisions',
-      '/dashboard#last-answer',
-      '/dashboard#panel',
-    ])
+describe('the remaining retired route redirects to the dashboard at its anchor (D1)', () => {
+  it('maps only /panel now — Documents, Runs and Verdicts are real pages again', () => {
+    expect(LEGACY_SECTION_REDIRECTS.map((entry) => entry.path)).toEqual(['/panel'])
+    expect(LEGACY_SECTION_REDIRECTS.map((entry) => dashboardHref(entry.anchor))).toEqual(['/dashboard#panel'])
   })
 
   it('uses the anchors the dashboard actually carries', () => {
     expect(new Set(Object.values(DASHBOARD_ANCHORS)).size).toBe(4)
     expect(dashboardHref(DASHBOARD_ANCHORS.lastAnswer)).toBe('/dashboard#last-answer')
+  })
+})
+
+describe('the three sections are real pages, not redirects', () => {
+  it('renders Documents at /documents', () => {
+    expect(renderGuarded('authed', '/documents', DocumentsPage)).toContain('>Documents</h1>')
+  })
+
+  it('renders Runs at /runs', () => {
+    expect(renderGuarded('authed', '/runs', RunsPage)).toContain('>Runs</h1>')
+  })
+
+  it('renders Verdicts at /results', () => {
+    expect(renderGuarded('authed', '/results', ResultsPage)).toContain('>Verdicts</h1>')
   })
 })
 

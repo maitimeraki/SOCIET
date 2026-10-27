@@ -16,17 +16,8 @@ import AgentsTab from '../components/run/AgentsTab'
 import AnswerDocument, { sourceTitles } from '../components/run/AnswerDocument'
 import ChamberFloor from '../components/chamber/ChamberFloor'
 import ConvergenceTape from '../components/chamber/ConvergenceTape'
-import GraphCanvas from '../components/graph/GraphCanvas'
-import { busiestEntries, mapCounts } from '../components/workspace/GraphPane'
-import Workspace, { WorkspaceView } from '../components/workspace/Workspace'
-import NodeDetailsDrawer from '../components/run/NodeDetailsDrawer'
-import type { MapSummary, PaneState } from '../components/workspace/Workspace'
-import { useGraphStore } from '../graph/graphStore'
 import type { RunEvent } from '../run/events'
 import type { RunState } from '../run/reducer'
-
-/** §9.4 The pane's caption — the run view has no build step to name, so it names the map itself. */
-const MAP_STEP = 'The map'
 
 const TABS = ['roster', 'floor', 'verdict', 'agents', 'artifacts'] as const
 export type RunTab = (typeof TABS)[number]
@@ -230,32 +221,17 @@ function RunWork({ run, events, tab, runId, scrubbed, latestRound, corpusMissing
   )
 }
 
-export interface RunPageViewProps extends RunWorkProps {
-  state: PaneState
-  onStateChange: (next: PaneState) => void
-  /** The map surface — the canvas, rendered into the pane's host in every state. */
-  map: ReactNode
-  summary: MapSummary
-}
-
 /**
- * The pure view — the pane state AND the run are plain props, so the debate step renders to static
- * markup (Rulings F17/F23). The floor lives inside the activity pane and the map inside the map pane,
- * as siblings laid out by class, never conditionally rendered: no change of section can unmount the
- * map (D14). The live host renders the same `RunWork` through `Workspace`, which owns the pane state.
+ * The pure view — the run and the tab are plain props, so the page renders to static markup
+ * (Rulings F17/F23). The map pane and its host belong to `WorkspaceShell`; this is the run's work
+ * region: the nav strip and the active section.
  */
-export function RunPageView({ state, onStateChange, map, summary, ...run }: RunPageViewProps) {
+export function RunPageView(runWorkProps: RunWorkProps) {
+  const { runId, tab, onNavigate } = runWorkProps
   return (
     <>
-      <RunNav runId={run.runId} tab={run.tab} onNavigate={run.onNavigate} />
-      <WorkspaceView
-        mapId={run.runId}
-        state={state}
-        onStateChange={onStateChange}
-        map={map}
-        summary={summary}
-        work={<RunWork {...run} />}
-      />
+      <RunNav runId={runId} tab={tab} onNavigate={onNavigate} />
+      <RunWork {...runWorkProps} />
     </>
   )
 }
@@ -266,21 +242,8 @@ export default function RunPage() {
   const run = useRunStore((s) => s.run)
   const events = useRunStore((s) => s.events)
   const connection = useRunStore((s) => s.connection)
-  const loadAndConnect = useRunStore((s) => s.loadAndConnect)
   const corpusMissing = useRunStore((s) => s.corpusMissing)
   const maxRounds = run.config?.max_rounds ?? null
-
-  // §9/D14 — the one map's text alternative. The counts and the busiest entries are read from the one
-  // store, so the map stays readable without sight while the floor argues beside it (Task 4.5).
-  const nodes = useGraphStore((s) => s.nodes)
-  const edges = useGraphStore((s) => s.edges)
-  const mapSummary: MapSummary = { counts: mapCounts(nodes, edges), busiest: busiestEntries(nodes, edges), step: MAP_STEP }
-
-  useEffect(() => {
-    if (runId) void loadAndConnect(runId)
-  }, [runId, loadAndConnect])
-
-  useEffect(() => () => useRunStore.getState().disconnect(), [])
 
   const location = useLocation()
   const replayFrom = (location.state as { replayFrom?: number } | null)?.replayFrom
@@ -325,51 +288,20 @@ export default function RunPage() {
   return (
     <div className="space-y-5">
       <RunHeader run={run} connection={connection} maxRounds={maxRounds} />
-
-      <RunNav runId={runId} tab={tab} onNavigate={navigate} />
-
-      {/* §9/D14 — the one map, paired with the section's work by the workspace. The map is the pane's
-          `map` and the section is its `work`; both are rendered in every state, so changing section or
-          swinging the floor into the activity pane never unmounts the canvas. `Workspace` owns the pane
-          state (persisted per run); the map node is handed over, never rebuilt. */}
-      <Workspace
-        mapId={runId}
-        summary={mapSummary}
-        map={
-          // The wrapper is a growing flex child of the map host, not a plain block: `GraphCanvas`'s
-          // `flex-1` needs the wrapper to have a definite height, or the plot collapses to 1px.
-          <div className="relative flex min-h-0 flex-1 flex-col">
-            <GraphCanvas datasetId={run.datasetId ?? ''} />
-            {/* The material read found nothing — said in words IN the map's own region, over a map that
-                is not blank (the run's experts and opinions still stand), and never a silent empty map. */}
-            {corpusMissing && (
-              <div className="absolute inset-0 flex items-center justify-center bg-map-ground/90 p-6">
-                <p role="status" className="max-w-sm text-center text-body text-ink-2">
-                  The material behind this decision is no longer available.
-                </p>
-              </div>
-            )}
-          </div>
-        }
-        work={
-          <RunWork
-            run={run}
-            events={events}
-            tab={tab}
-            runId={runId}
-            scrubbed={scrubbed}
-            latestRound={latestRound}
-            corpusMissing={corpusMissing}
-            onScrub={setScrubbed}
-            onNavigate={navigate}
-            onReplay={() => navigate(`/runs/${runId}/floor`, { state: { replayFrom: 1 } })}
-          />
-        }
+      {/* §9 The map host and the socket lifetime live in `WorkspaceShell`; the page renders the run's
+          work region only, so a section change never remounts the canvas (D14). */}
+      <RunPageView
+        run={run}
+        events={events}
+        tab={tab}
+        runId={runId}
+        scrubbed={scrubbed}
+        latestRound={latestRound}
+        corpusMissing={corpusMissing}
+        onScrub={setScrubbed}
+        onNavigate={navigate}
+        onReplay={() => navigate(`/runs/${runId}/floor`, { state: { replayFrom: 1 } })}
       />
-
-      {/* §9.5 The open entry's details — a sibling of the panes, never a child of the map host (the host
-          is hidden when the pane is minimised, and a dialog inside a hidden subtree is unreachable). */}
-      <NodeDetailsDrawer />
     </div>
   )
 }

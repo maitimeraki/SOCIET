@@ -17,8 +17,12 @@ const Hero = lazy(() => import('./marketing/Hero'))
 const HomeDemo = lazy(() => import('./marketing/HomeDemo'))
 const NewRunWorkspace = lazy(() => import('./pages/NewRunWorkspace'))
 const RunPage = lazy(() => import('./pages/RunPage'))
+const WorkspaceShell = lazy(() => import('./components/shell/WorkspaceShell'))
 const AgentsPage = lazy(() => import('./pages/AgentsPage'))
 const DashboardPage = lazy(() => import('./pages/DashboardPage'))
+const DocumentsPage = lazy(() => import('./pages/DocumentsPage'))
+const RunsPage = lazy(() => import('./pages/RunsPage'))
+const ResultsPage = lazy(() => import('./pages/ResultsPage'))
 const SignInPage = lazy(() => import('./pages/SignInPage'))
 const SignUpPage = lazy(() => import('./pages/SignUpPage'))
 
@@ -50,22 +54,28 @@ export default function App() {
           </Route>
 
           <Route element={<RequireAuth />}>
-            <Route element={<AppShell />}>
-              <Route path="/dashboard" element={<DashboardPage />} />
-              {/* D1: the four old rail pages are sections of the dashboard now, so their routes
-                  redirect to it with the section's anchor. A decision is still its own deep view. */}
-              {LEGACY_SECTION_REDIRECTS.map(({ path, anchor }) => (
-                <Route key={path} path={path} element={<Navigate to={dashboardHref(anchor)} replace />} />
-              ))}
-              <Route path="/runs/:runId" element={<RunPage />} />
-              <Route path="/runs/:runId/:tab" element={<RunPage />} />
-              {/* §9 one workspace, three steps (Ruling F22). `/new` renders the workspace; the old
-                  per-step paths stay valid routes as redirects into it, carrying the step as `?step=`
-                  — eight existing call sites navigate to them, and nothing may 404. */}
+            {/* §9 The full-screen workspace: the new-decision lifecycle and every run share one shell,
+                so the one map host is mounted above the pages and never remounted by a page change.
+                The old per-step paths stay valid routes as redirects into `/new`, carrying the step
+                as `?step=` — eight existing call sites depend on them, and nothing may 404. */}
+            <Route element={<WorkspaceShell />}>
               <Route path="/new" element={<NewRunWorkspace />} />
               <Route path="/new/ingest" element={<Navigate to="/new?step=ingest" replace />} />
               <Route path="/new/graph" element={<Navigate to="/new?step=graph" replace />} />
               <Route path="/new/society" element={<Navigate to="/new?step=society" replace />} />
+              <Route path="/runs/:runId" element={<RunPage />} />
+              <Route path="/runs/:runId/:tab" element={<RunPage />} />
+            </Route>
+            <Route element={<AppShell />}>
+              <Route path="/dashboard" element={<DashboardPage />} />
+              <Route path="/documents" element={<DocumentsPage />} />
+              <Route path="/runs" element={<RunsPage />} />
+              <Route path="/results" element={<ResultsPage />} />
+              {/* D1: the remaining old rail route is a section of the dashboard, so it redirects to
+                  it with the section's anchor. A decision is still its own deep view. */}
+              {LEGACY_SECTION_REDIRECTS.map(({ path, anchor }) => (
+                <Route key={path} path={path} element={<Navigate to={dashboardHref(anchor)} replace />} />
+              ))}
               <Route path="/agents" element={<AgentsPage />} />
               <Route path="*" element={<NotFoundPage />} />
             </Route>
