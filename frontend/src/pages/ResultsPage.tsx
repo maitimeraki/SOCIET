@@ -97,7 +97,9 @@ export function VerdictsPageView({ latest, earlier, loading, failed, failDetail,
   )
 }
 
-async function loadVerdicts() {
+type LoadedVerdict = { entry: RunSummary; view: VerdictView; sources: string[] }
+
+export async function loadVerdicts() {
   const answered: RunSummary[] = []
   let cursor: string | null = null
   do {
@@ -107,15 +109,24 @@ async function loadVerdicts() {
   } while (cursor && answered.length < 50)
 
   // One document read per answered run: the same folded roster answers both the verdict and its sources.
-  const rows = await Promise.all(
-    answered.map(async (entry) => {
+  // Settled, not all: one unreadable run (deleted, 404, transient 5xx) must not blank the whole archive.
+  const results = await Promise.allSettled(
+    answered.slice(0, 50).map(async (entry) => {
       const doc = await getRun(entry.run_id)
       const state = fold(doc.events)
       const view = verdictView(state)
       return view ? { entry, view, sources: sourceTitles(state.roster) } : null
     }),
   )
-  const loaded = rows.filter((row): row is { entry: RunSummary; view: VerdictView; sources: string[] } => row !== null)
+  const loaded: LoadedVerdict[] = []
+  for (const result of results) {
+    if (result.status === 'fulfilled') {
+      if (result.value) loaded.push(result.value)
+    } else {
+      // Diagnosable without leaking the server's text into the page.
+      console.error('ResultsPage: could not read one verdict.', result.reason)
+    }
+  }
   const [first, ...rest] = loaded
   return {
     latest: first
@@ -154,9 +165,10 @@ export default function ResultsPage() {
         setData(loaded)
         setFailed(false)
       })
-      .catch(() => {
+      .catch((error: unknown) => {
         if (cancelled) return
         // The server's raw text is not customer copy — the view's curated fallback renders instead.
+        console.error('ResultsPage: could not load verdicts.', error)
         setFailed(true)
         setData({ latest: null, earlier: [] })
       })
