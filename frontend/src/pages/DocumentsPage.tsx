@@ -79,6 +79,7 @@ export function DocumentsPageView({
               {['Document', 'Corpus', 'Added', 'State'].map((heading) => (
                 <th
                   key={heading}
+                  scope="col"
                   className="border-b border-rule px-0 pb-2 text-left font-measurement text-[8px] uppercase tracking-[0.12em] text-ink-3"
                 >
                   {heading}
@@ -90,14 +91,21 @@ export function DocumentsPageView({
             {documents.map((document) => (
               <tr
                 key={document.id}
-                tabIndex={0}
                 onClick={() => onSelect(document)}
-                onKeyDown={(event) => {
-                  if (event.key === 'Enter' || event.key === ' ') onSelect(document)
-                }}
                 className="cursor-pointer border-b border-rule/40 hover:bg-ground-2"
               >
-                <td className="py-3 pr-3 text-body text-ink">{document.name}</td>
+                <td className="py-3 pr-3 text-body text-ink">
+                  <button
+                    type="button"
+                    onClick={(event) => {
+                      event.stopPropagation()
+                      onSelect(document)
+                    }}
+                    className="min-h-11 text-left text-body text-ink"
+                  >
+                    {document.name}
+                  </button>
+                </td>
                 <td className="py-3 pr-3 text-body text-ink-2">{document.dataset_name ?? 'Not in a corpus yet'}</td>
                 <td className="py-3 pr-3 font-measurement text-mono text-ink-3">{fmtDate(document.created_at)}</td>
                 <td className="py-3 font-measurement text-micro text-ink-2">
@@ -150,10 +158,11 @@ export default function DocumentsPage() {
         setFailed(false)
         setFailDetail(undefined)
       })
-      .catch((error: unknown) => {
+      .catch(() => {
         if (cancelled) return
         setFailed(true)
-        setFailDetail(error instanceof Error ? error.message : undefined)
+        // The server's raw text is not customer copy — the view's curated fallback renders instead.
+        setFailDetail(undefined)
         setDocuments([])
       })
       .finally(() => {
