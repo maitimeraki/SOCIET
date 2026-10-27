@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { getIngestDocuments, listUploads } from '../api/rest'
 import type { UploadRow } from '../api/types'
@@ -142,6 +142,9 @@ export default function DocumentsPage() {
   const [failDetail, setFailDetail] = useState<string>()
   const [attempt, setAttempt] = useState(0)
   const [selected, setSelected] = useState<DocumentsPageViewProps['selected']>(null)
+  // Every selection or close bumps the token; a late resolution from an older request is ignored
+  // so it can neither revert the reader to the previous document nor re-open a closed one.
+  const requestRef = useRef(0)
 
   useEffect(() => {
     let cancelled = false
@@ -182,17 +185,23 @@ export default function DocumentsPage() {
       failDetail={failDetail}
       selected={selected}
       onSelect={(document) => {
+        const request = ++requestRef.current
         setSelected({ document, text: '', loading: true, failed: false })
         void getIngestDocuments([document.id])
           .then(({ documents: payload }) => {
+            if (requestRef.current !== request) return
             const text = payload[0]?.text ?? ''
             setSelected({ document, text, loading: false, failed: false })
           })
           .catch(() => {
+            if (requestRef.current !== request) return
             setSelected({ document, text: '', loading: false, failed: true })
           })
       }}
-      onClose={() => setSelected(null)}
+      onClose={() => {
+        requestRef.current += 1
+        setSelected(null)
+      }}
       onRetry={reload}
     />
   )

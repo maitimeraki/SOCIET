@@ -36,5 +36,8 @@ describe('DocumentReaderView', () => {
         renderToStaticMarkup(<DocumentReaderView title="x" meta="y" text="The record." onClose={() => {}} />),
       ),
     ).not.toMatch(BANNED_WORD)
+    expect(
+      renderedText(renderToStaticMarkup(<DocumentReaderView title="x" meta="y" text="" failed onClose={() => {}} />)),
+    ).not.toMatch(BANNED_WORD)
   })
 })
