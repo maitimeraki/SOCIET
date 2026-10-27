@@ -5,7 +5,6 @@ import RequireAuth from './auth/RequireAuth'
 import AppShell, { RouteFallback } from './components/shell/AppShell'
 import MarketingLayout from './components/shell/MarketingLayout'
 import NotFoundPage from './pages/NotFoundPage'
-import { dashboardHref, LEGACY_SECTION_REDIRECTS } from './pages/dashboardAnchors'
 
 // Each page is its own chunk, so the initial bundle carries only the layouts, the router and the 404 —
 // Sigma/graphology/framer-motion leave the entry chunk entirely. Specifiers stay static literals: a
@@ -19,7 +18,6 @@ const NewRunWorkspace = lazy(() => import('./pages/NewRunWorkspace'))
 const RunPage = lazy(() => import('./pages/RunPage'))
 const WorkspaceShell = lazy(() => import('./components/shell/WorkspaceShell'))
 const AgentsPage = lazy(() => import('./pages/AgentsPage'))
-const DashboardPage = lazy(() => import('./pages/DashboardPage'))
 const DocumentsPage = lazy(() => import('./pages/DocumentsPage'))
 const RunsPage = lazy(() => import('./pages/RunsPage'))
 const ResultsPage = lazy(() => import('./pages/ResultsPage'))
@@ -71,15 +69,13 @@ export default function App() {
               <Route path="/runs/:runId/:tab" element={<RunPage />} />
             </Route>
             <Route element={<AppShell />}>
-              <Route path="/dashboard" element={<DashboardPage />} />
               <Route path="/documents" element={<DocumentsPage />} />
               <Route path="/runs" element={<RunsPage />} />
               <Route path="/results" element={<ResultsPage />} />
-              {/* D1: the remaining old rail route is a section of the dashboard, so it redirects to
-                  it with the section's anchor. A decision is still its own deep view. */}
-              {LEGACY_SECTION_REDIRECTS.map(({ path, anchor }) => (
-                <Route key={path} path={path} element={<Navigate to={dashboardHref(anchor)} replace />} />
-              ))}
+              {/* The one-page dashboard is retired: old links land on the runs list, which is the
+                  closest thing it had to a home. A decision is still its own deep view. */}
+              <Route path="/dashboard" element={<Navigate to="/runs" replace />} />
+              <Route path="/panel" element={<Navigate to="/runs" replace />} />
               <Route path="/agents" element={<AgentsPage />} />
               <Route path="*" element={<NotFoundPage />} />
             </Route>

@@ -99,6 +99,7 @@ export function VerdictsPageView({ latest, earlier, loading, failed, failDetail,
 
 type LoadedVerdict = { entry: RunSummary; view: VerdictView; sources: string[] }
 
+// eslint-disable-next-line react-refresh/only-export-components -- loadVerdicts is the tested loader
 export async function loadVerdicts() {
   const answered: RunSummary[] = []
   let cursor: string | null = null

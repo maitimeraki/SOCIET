@@ -25,10 +25,11 @@ describe('AppErrorFallback', () => {
     expect(html).toContain('role="alert"')
   })
 
-  it('offers reload and back-to-dashboard actions', () => {
+  it('offers reload and back-to-runs actions', () => {
     const html = render(new Error('render exploded'))
     expect(html).toContain('Reload')
-    expect(html).toContain('Back to dashboard')
+    expect(html).toContain('Back to runs')
+    expect(html).toContain('head back to your runs.')
     expect(html.match(/<button/g)).toHaveLength(2)
   })
 

@@ -11,6 +11,7 @@ import { PAGE_SIZE } from './pageSize'
  * material but no filed answer goes to Runs (the work is in flight, or waiting to be started);
  * any answered run means Verdict is the thing worth reading.
  */
+// eslint-disable-next-line react-refresh/only-export-components -- landingTarget is the tested routing rule
 export function landingTarget(uploads: number, runs: RunSummary[]): '/documents' | '/runs' | '/results' {
   if (uploads === 0 && runs.length === 0) return '/documents'
   if (!runs.some((entry) => entry.verdict_stance)) return '/runs'

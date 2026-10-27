@@ -7,7 +7,7 @@ import Input from './Input'
 import NumberField from './NumberField'
 
 describe('the field notebook', () => {
-  // Regression guard for the two live failures: a bare control (sections/RunsSection.tsx) must carry the
+  // Regression guard for the two live failures: a bare control must carry the
   // focus affordance itself, and a shrink-wrapped one (society/ConfigPanel.tsx, a w-24 NumberField)
   // must register the mark on the control rather than on the grid cell.
   it('paints the registration tick on the control itself, bare or wrapped', () => {

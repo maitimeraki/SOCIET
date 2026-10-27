@@ -30,7 +30,7 @@ export function AppErrorFallback({
     >
       <p className="text-heading text-ink">Something went wrong</p>
       <p className="mt-2 max-w-[60ch] text-body text-ink-2">
-        This view failed to render. Reload to pick your work back up, or head back to the dashboard.
+        This view failed to render. Reload to pick your work back up, or head back to your runs.
       </p>
       <p className="mt-4 font-measurement text-mono text-ink-3">{errorDigest(error)}</p>
       <div className="mt-6 flex flex-wrap items-center gap-3">
@@ -38,7 +38,7 @@ export function AppErrorFallback({
           Reload
         </button>
         <button type="button" className={buttonClasses('secondary')} onClick={onBack}>
-          Back to dashboard
+          Back to runs
         </button>
       </div>
     </div>
@@ -64,7 +64,7 @@ export class AppErrorBoundary extends Component<{ children: ReactNode }, { error
 
   // Hard navigation on purpose: after a render crash a full reload is the reliable reset, and it
   // works whether or not this boundary sits inside the router.
-  private back = () => window.location.assign('/')
+  private back = () => window.location.assign('/runs')
 
   render() {
     if (this.state.error !== null) {

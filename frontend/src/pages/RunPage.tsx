@@ -167,6 +167,7 @@ function RunWork({ run, events, tab, runId, scrubbed, latestRound, corpusMissing
 }
 
 /** The verdict opens once per run, and never over itself. */
+// eslint-disable-next-line react-refresh/only-export-components -- shouldAutoOpenVerdict is the tested open-once rule
 export function shouldAutoOpenVerdict(hasVerdict: boolean, seen: boolean, tab: string): boolean {
   return hasVerdict && !seen && tab !== 'verdict'
 }

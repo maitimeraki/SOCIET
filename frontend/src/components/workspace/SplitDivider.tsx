@@ -1,3 +1,4 @@
+/* eslint-disable react-refresh/only-export-components -- the ratio helpers are this file's tested surface */
 import { useRef } from 'react'
 import type { PointerEvent } from 'react'
 
