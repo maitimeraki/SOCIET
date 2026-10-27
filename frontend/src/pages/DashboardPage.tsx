@@ -121,7 +121,7 @@ export default function DashboardPage() {
       ([uploads, runs]) => {
         if (cancelled) return
         if (uploads.status === 'fulfilled' && runs.status === 'fulfilled') {
-          setAccountEmpty(uploads.value.items.length === 0 && runs.value.items.length === 0)
+          setAccountEmpty((uploads.value.items ?? []).length === 0 && runs.value.items.length === 0)
         }
         if (runs.status === 'fulfilled') {
           setLive(runs.value.items.find((run) => run.status === 'running') ?? null)

@@ -5,6 +5,7 @@ Debate API: Async debate simulation with streaming support.
 import asyncio
 import logging
 import time
+import uuid
 from dataclasses import asdict
 from datetime import datetime, timezone
 from typing import Any, Callable, Dict, List, Literal, Optional
@@ -31,7 +32,7 @@ from src.auth.cookies import verify_csrf
 from src.auth.deps import current_user, require_owner, websocket_user
 from src.config.settings import get_settings
 from src.db.engine import get_db
-from src.db.models import User
+from src.db.models import Dataset, User
 from src.simulation.debate_config import DebateConfig
 
 logger = logging.getLogger(__name__)
@@ -453,6 +454,23 @@ async def create_debate(
     """
     if not body.query or not body.query.strip():
         raise HTTPException(status_code=400, detail="query is required")
+
+    # A corpus id in the request becomes a foreign key on the run, so it has to
+    # name a corpus this caller owns. A missing or foreign one is the same 404 —
+    # existence is never leaked — and the run insert cannot fail on the
+    # constraint afterwards. Ids that are not uuids are the legacy default and
+    # leave the column null (the same rule `run_doc` applies).
+    try:
+        corpus_id = uuid.UUID(body.graph_id)
+    except (AttributeError, TypeError, ValueError):
+        corpus_id = None
+    if corpus_id is not None:
+        corpus = await db.get(Dataset, corpus_id)
+        if corpus is None or corpus.user_id != user.id:
+            raise HTTPException(
+                status_code=404,
+                detail={"code": "not_found", "message": "Corpus not found."},
+            )
 
     config = DebateConfig(
         max_agents=body.config.max_agents,

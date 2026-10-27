@@ -9,9 +9,19 @@
 # to strong, unique values and the dev defaults below must NOT ship to prod.
 # Put a real domain in SITE_ADDRESS so Caddy requests a Let's Encrypt cert.
 
+# Single source of truth for the app's database URL. Shared by the one-shot
+# `migrate` service and the long-running app services so the two cannot drift.
+x-database-url: &database-url
+  DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-societas}:${POSTGRES_PASSWORD:-societas_dev}@postgres:5432/${POSTGRES_DB:-societas}
+
 x-app-service: &app-service
   restart: unless-stopped
   depends_on:
+    # The schema must exist before the app touches it: api/worker wait for the
+    # one-shot migration to exit 0. Without this, a fresh pg_data volume serves
+    # requests against an empty schema — `relation "jobs" does not exist`.
+    migrate:
+      condition: service_completed_successfully
     postgres:
       condition: service_healthy
     redis:
@@ -26,9 +36,9 @@ x-app-service: &app-service
     - path: .env
       required: false
   environment:
-    DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-societas}:${POSTGRES_PASSWORD:-societas_dev}@postgres:5432/${POSTGRES_DB:-societas}
+    <<: *database-url
     REDIS_URL: redis://redis:6379/0
-    NEO4J_URI: bolt://neo4j:7687
+    NEO4J_URI: neo4j://neo4j:7687
     NEO4J_USERNAME: neo4j
     NEO4J_PASSWORD: ${NEO4J_PASSWORD:-societas_dev}
     NEO4J_DATABASE: neo4j
@@ -88,19 +98,25 @@ services:
     restart: unless-stopped
     environment:
       NEO4J_AUTH: "neo4j/${NEO4J_PASSWORD:-societas_dev}"
+      # The graph-build path needs APOC: llama-index's Neo4jPropertyGraphStore
+      # schema refresh calls apoc.meta.data/apoc.meta.subGraph/apoc.schema.nodes,
+      # normalization.py calls apoc.coll.toSet + apoc.refactor.mergeNodes. A
+      # vanilla neo4j:5 raises ProcedureNotFound for all of them. The image
+      # downloads the plugin on first boot (needs network).
+      NEO4J_PLUGINS: '["apoc"]'
       # Exposed only so the healthcheck below can authenticate.
-      NEO4J_PASSWORD: ${NEO4J_PASSWORD:-societas_dev}
+      HEALTHCHECK_PASSWORD: ${NEO4J_PASSWORD:-societas_dev}
     volumes:
       - neo4j_data:/data
     healthcheck:
-      test: ["CMD-SHELL", "cypher-shell -u neo4j -p \"$$NEO4J_PASSWORD\" 'RETURN 1'"]
+      test: ["CMD-SHELL", "cypher-shell -u neo4j -p \"$$HEALTHCHECK_PASSWORD\" 'RETURN 1'"]
       interval: 10s
       timeout: 10s
       retries: 12
       start_period: 40s
 
   minio:
-    image: minio/minio
+    image: cgr.dev/chainguard/minio:latest
     restart: unless-stopped
     command: server /data --console-address ":9001"
     environment:
@@ -120,16 +136,34 @@ services:
   # One-shot: create the uploads bucket, then exit. Idempotent via
   # --ignore-existing, so restarts are safe.
   minio-init:
-    image: minio/mc
+    image: cgr.dev/chainguard/minio-client:latest
     depends_on:
       minio:
         condition: service_healthy
-    entrypoint: >
-      /bin/sh -c "
-      mc alias set local http://minio:9000
-      ${MINIO_ROOT_USER:-minioadmin} ${MINIO_ROOT_PASSWORD:-minioadmin};
-      mc mb --ignore-existing local/${S3_BUCKET:-societas-uploads};
-      "
+    # Distroless image — it has no /bin/sh, so no shell entrypoint. The image's
+    # ENTRYPOINT is already `mc`, and `mc` reads its alias from MC_HOST_<alias>,
+    # so a single exec-form command replaces the two chained shell ones.
+    environment:
+      MC_HOST_local: http://${MINIO_ROOT_USER:-minioadmin}:${MINIO_ROOT_PASSWORD:-minioadmin}@minio:9000
+    command: ["mb", "--ignore-existing", "local/${S3_BUCKET:-societas-uploads}"]
+
+  # One-shot: apply Alembic migrations, then exit. api/worker gate on it
+  # (service_completed_successfully), so a fresh pg_data volume always has the
+  # schema before the app serves a request. Idempotent (`upgrade head`).
+  migrate:
+    build:
+      context: .
+      target: api
+    restart: "no"
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      <<: *database-url
+    depends_on:
+      postgres:
+        condition: service_healthy
+    command: ["alembic", "upgrade", "head"]
 
   api:
     <<: *app-service

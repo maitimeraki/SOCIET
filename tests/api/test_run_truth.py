@@ -16,7 +16,7 @@ import pytest
 import pytest_asyncio
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
-from sqlalchemy import delete, select
+from sqlalchemy import delete, func, select
 
 import src.api.api_server as api_server
 import src.api.debate_api as debate_api
@@ -24,7 +24,8 @@ import src.api.run_doc as run_doc
 from src.api.debate_api import router as debate_router
 from src.auth.deps import current_user
 from src.db.engine import get_session_factory
-from src.db.models import Run, User
+from src.jobs import queue as jobs_queue
+from src.db.models import Dataset, Run, User
 
 if sys.platform == "win32":
     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
@@ -213,3 +214,62 @@ async def test_create_debate_persists_a_queued_row_at_accept(
     assert head is not None
     assert (head["status"], head["user_id"]) == ("queued", owner.id)
     debate_api._DEBATE_JOBS.pop(run_id, None)
+
+
+async def test_debate_over_an_owned_corpus_persists_its_corpus(
+    client, accounts, monkeypatch
+):
+    """`runs.dataset_id` is a foreign key: the queued row may only point at a row
+    the caller owns. This is the golden path's 500 — a corpus built fresh had no
+    `datasets` row, so the insert violated the constraint after the 202 path."""
+    owner, _ = accounts
+    monkeypatch.setattr(debate_api, "_run_debate_async", AsyncMock())
+    # The rows are the subject; nothing may actually run (no worker, no LLM).
+    monkeypatch.setattr(jobs_queue, "_dispatch", lambda *args: None)
+    corpus = uuid.uuid4()
+    async with get_session_factory()() as session:
+        session.add(
+            Dataset(id=corpus, user_id=uuid.UUID(owner.id), name="Mill Street")
+        )
+        await session.commit()
+
+    response = await client.post(
+        "/simulate/debate",
+        json={
+            "query": "Should we open a second location?",
+            "graph_id": str(corpus),
+            "corpus_label": "Mill Street",
+        },
+    )
+
+    assert response.status_code == 202, response.text
+    run_id = response.json()["job_id"]
+    async with get_session_factory()() as session:
+        row = await session.get(Run, uuid.UUID(run_id))
+    assert row is not None
+    assert row.dataset_id == corpus
+    assert row.corpus_label == "Mill Street"
+    debate_api._DEBATE_JOBS.pop(run_id, None)
+
+
+async def test_a_corpus_owned_by_someone_else_is_the_uniform_404(
+    client, accounts, monkeypatch
+):
+    _, other = accounts
+    monkeypatch.setattr(debate_api, "_run_debate_async", AsyncMock())
+    corpus = uuid.uuid4()
+    async with get_session_factory()() as session:
+        session.add(Dataset(id=corpus, user_id=uuid.UUID(other.id), name="Theirs"))
+        await session.commit()
+
+    response = await client.post(
+        "/simulate/debate",
+        json={"query": "Should we expand?", "graph_id": str(corpus)},
+    )
+
+    assert response.status_code == 404
+    async with get_session_factory()() as session:
+        count = await session.scalar(
+            select(func.count()).select_from(Run).where(Run.dataset_id == corpus)
+        )
+    assert count == 0

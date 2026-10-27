@@ -23,7 +23,7 @@ plan.*
 docs/
 *.txt
 runtime/
-.claude/
 .serena/
 .superpowers/
 .gstack/
+.impeccable/

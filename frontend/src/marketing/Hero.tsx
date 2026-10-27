@@ -3,6 +3,7 @@ import { useEffect, useRef } from 'react'
 import type { ReactNode } from 'react'
 import Band from '../components/ui/Band'
 import { buttonClasses } from '../components/ui/Button'
+import Card from '../components/ui/Card'
 import Disclosure from '../components/ui/Disclosure'
 import FiledSheet from '../components/ui/FiledSheet'
 import PositionMark from '../components/ui/PositionMark'
@@ -105,7 +106,7 @@ function Nav() {
   return (
     <div className="shell pt-5">
       <header className="hero-nav flex items-center justify-between gap-6 px-[17px] py-[11px]">
-        <Link to="/" className="flex items-center gap-2.5 text-ink" aria-label={WORDMARK}>
+        <Link to="/" className="inline-flex min-h-11 -my-0.5 items-center gap-2.5 text-ink" aria-label={WORDMARK}>
           <BrandMark />
           <span className="font-titling text-[18px] font-semibold tracking-[-0.01em]">{WORDMARK}</span>
         </Link>
@@ -197,7 +198,7 @@ function NoisePanel() {
 
       {TURNS.map((turn) => (
         <div key={turn.who} className={`hero-noise__row ${ruleClasses('top', 'dark')}`}>
-          <p className="flex items-center gap-2 font-measurement text-[10px] uppercase tracking-[0.14em]">
+          <p className="flex items-center gap-2 font-measurement text-micro uppercase tracking-[0.14em]">
             <PositionMark position={turn.position} size="sm" ground="map" />
             <span className="text-map-ink-2">{turn.who}</span>
           </p>
@@ -243,7 +244,7 @@ function NoisePanel() {
  */
 function HeroSection() {
   return (
-    <Band tone="page" className="pt-16" aria-labelledby="demo-hero-headline">
+    <Band tone="page" aria-labelledby="demo-hero-headline">
       <div className="shell">
         <div className="grid gap-14 xl:grid-cols-[560px_minmax(0,1fr)] xl:items-start xl:gap-16">
           <div>
@@ -277,7 +278,7 @@ function HeroSection() {
               </Link>
               <a
                 href="#answer"
-                className="font-titling text-body text-ink-2 underline decoration-ink-3 underline-offset-4 transition-colors duration-state hover:text-ink hover:decoration-accent"
+                className="inline-flex min-h-11 items-center font-titling text-body text-ink-2 underline decoration-ink-3 underline-offset-4 transition-colors duration-state hover:text-ink hover:decoration-accent"
               >
                 See what it files
               </a>
@@ -461,9 +462,16 @@ function TheAnswer() {
 
         <ul className="mt-10 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
           {items.map((item) => (
-            <li
+            <Card
               key={item.label}
-              className={`rounded-lg bg-canvas p-6 shadow-raised ${item.caution ? 'border-l-[3px] border-caution' : ''}`}
+              as="li"
+              pad={24}
+              radius="lg"
+              className={
+                item.caution
+                  ? "relative overflow-hidden pl-[27px] before:absolute before:inset-y-0 before:left-0 before:w-[3px] before:bg-caution before:content-['']"
+                  : undefined
+              }
             >
               <p
                 className={`font-measurement text-mono uppercase tracking-[0.14em] ${
@@ -473,7 +481,7 @@ function TheAnswer() {
                 {item.label}
               </p>
               <p className="mt-3 font-titling text-[14px] leading-[22px] text-ink-2">{item.body}</p>
-            </li>
+            </Card>
           ))}
         </ul>
 
@@ -630,11 +638,11 @@ function UseCases() {
 
           <ul className="grid gap-4 sm:grid-cols-2">
             {cases.map((item) => (
-              <li key={item.question} className="rounded-lg bg-canvas p-6 shadow-raised">
+              <Card key={item.question} as="li" pad={24} radius="lg">
                 <h3 className="font-titling text-heading text-ink">{item.question}</h3>
                 <p className="mt-2 font-titling text-[14px] leading-[22px] text-ink-2">{item.body}</p>
                 <p className="mt-4 font-measurement text-mono uppercase tracking-[0.14em] text-ink-3">{item.replaces}</p>
-              </li>
+              </Card>
             ))}
           </ul>
         </div>

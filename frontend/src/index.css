@@ -165,6 +165,7 @@
   /* `duration-*` reads `--transition-duration-*`, not `--duration-*`; the alias is what makes the
      tree's `duration-state` classes compile to the state token instead of emitting nothing. */
   --transition-duration-state: var(--duration-state);
+  --transition-duration-layout: var(--duration-layout);
 }
 
 @layer base {

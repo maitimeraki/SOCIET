@@ -104,7 +104,7 @@ export default function DocumentsSection({
     listUploads()
       .then((page) => {
         if (cancelled) return
-        setDocuments(page.items)
+        setDocuments(page.items ?? [])
         setFailed(false)
         setFailDetail(undefined)
       })
