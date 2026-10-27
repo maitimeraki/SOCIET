@@ -6,9 +6,9 @@ import { describe, expect, it } from 'vitest'
 //
 // App.tsx's own nesting — which element sits under which route — is confirmed by reading App.tsx, not
 // by rendering it (no test renders `App`; it would suspend on its `lazy()` chunks and emit only the
-// fallback). The two retired routes are redirects now: `<Navigate>` does not navigate under SSR, so
-// the redirect routes are pinned from App.tsx's source here and the browser capture proves where each
-// one lands.
+// fallback). The two retired routes are redirects now: `<Navigate>` is inert under SSR, so the
+// redirect routes are pinned by reading App.tsx's source here; no browser pass was run to observe
+// where they land.
 import { readFileSync } from 'node:fs'
 import type { ComponentType } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
