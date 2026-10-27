@@ -14,7 +14,7 @@ describe('nextSuffix — the other door’s carried destination', () => {
   })
 
   it('carries only the sanitised path when next points off-site', () => {
-    expect(nextSuffix(new URLSearchParams('next=https://evil.example/steal'))).toBe('?next=%2Fdashboard')
-    expect(nextSuffix(new URLSearchParams('next=//evil.example'))).toBe('?next=%2Fdashboard')
+    expect(nextSuffix(new URLSearchParams('next=https://evil.example/steal'))).toBe('?next=%2Flanding')
+    expect(nextSuffix(new URLSearchParams('next=//evil.example'))).toBe('?next=%2Flanding')
   })
 })
