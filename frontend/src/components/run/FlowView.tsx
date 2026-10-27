@@ -3,6 +3,8 @@ import { CaretLeft, CaretRight } from '@phosphor-icons/react'
 import { convergenceSeries, isLive, streamItems } from '../../run/selectors'
 import Card from '../ui/Card'
 import { ruleClasses } from '../ui/Rule'
+import StageRail from '../common/StageRail'
+import type { RailStage } from '../common/StageRail'
 import ChamberFloor from '../chamber/ChamberFloor'
 import ConvergenceTape from '../chamber/ConvergenceTape'
 import EventStream from './EventStream'
@@ -17,10 +19,32 @@ export interface FlowViewProps {
 }
 
 /** §9.4 — the Debate section: the floor, the pass scrubber, the tape, and the live record. */
+/** §15.5 — the flow's four stages, in order. The labels are the customer's words (copy law). */
+const STAGE_KEYS = ['documents', 'experts', 'argument', 'verdict'] as const
+type StageKey = (typeof STAGE_KEYS)[number]
+
 export default function FlowView({ run, activeRound, latestRound, onScrub, onNavigate }: FlowViewProps) {
   const series = convergenceSeries(run)
+  const stageKey: StageKey = run.verdict
+    ? 'verdict'
+    : run.rounds.length
+      ? 'argument'
+      : run.roster.length
+        ? 'experts'
+        : 'documents'
+  const activeIndex = STAGE_KEYS.indexOf(stageKey)
+  const stateAt = (key: StageKey, index: number): RailStage['state'] =>
+    index < activeIndex ? 'done' : index === activeIndex ? (key === 'verdict' ? 'done' : 'running') : 'pending'
+  const stages: RailStage[] = [
+    { key: 'documents', label: 'Documents', state: stateAt('documents', 0) },
+    { key: 'experts', label: 'Experts', state: stateAt('experts', 1) },
+    { key: 'argument', label: 'Argument', state: stateAt('argument', 2) },
+    { key: 'verdict', label: 'Verdict', state: stateAt('verdict', 3) },
+  ]
   return (
-    <div className="grid gap-6 min-[900px]:grid-cols-[3fr_2fr]">
+    <div className="space-y-4">
+      <StageRail stages={stages} activeKey={stageKey} />
+      <div className="grid gap-6 min-[900px]:grid-cols-[3fr_2fr]">
       <div className="space-y-4">
         {/* The floor is the one card; every record inside it is ruled, never boxed. */}
         <Card className={run.status === 'failed' ? 'opacity-40' : ''}>
@@ -67,6 +91,7 @@ export default function FlowView({ run, activeRound, latestRound, onScrub, onNav
         <div id="run-stream">
           <EventStream items={streamItems(run)} live={isLive(run)} />
         </div>
+      </div>
       </div>
     </div>
   )

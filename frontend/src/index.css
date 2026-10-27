@@ -91,6 +91,11 @@
     var(--color-map-ground) 72%
   );
 
+  /* §15.1.3 use 4 — the ground lift under the page header. On the main region only, never the rail. */
+  --gradient-ground: linear-gradient(180deg, #F4F6FA 0%, #ECEFF4 320px);
+  /* §15.1.3 use 5 — the Verdict page's latest-answer band: the outcome is the one warm surface. */
+  --gradient-answer: linear-gradient(180deg, #ECDFF2 0%, #E5D4EC 100%);
+
   /* ── §3 Elevation — shadow is not gradient. Each shadow is a pair: a tight contact shadow that
         seats the surface on the plane, and a soft ambient shadow that lifts it off. A surface
         declares itself once — a card carries a shadow and no border; a record carries a rule and

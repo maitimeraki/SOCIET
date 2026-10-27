@@ -19,15 +19,22 @@ describe('DocumentReaderView', () => {
     expect(html).toContain('Close')
   })
 
-  it('renders a loading skeleton and a failed message', () => {
+  it('renders a loading skeleton and a failed message with a retry', () => {
     const loading = renderToStaticMarkup(
       <DocumentReaderView title="x" meta="y" text="" loading onClose={() => {}} />,
     )
     expect(loading).toContain('animate-pulse')
     const failed = renderToStaticMarkup(
-      <DocumentReaderView title="x" meta="y" text="" failed onClose={() => {}} />,
+      <DocumentReaderView title="x" meta="y" text="" failed onClose={() => {}} onRetry={() => {}} />,
     )
     expect(failed).toContain('could not be read')
+    expect(failed).toContain('Try again')
+  })
+
+  it('is a focusable panel that closes on Escape', () => {
+    const html = renderToStaticMarkup(<DocumentReaderView title="x" meta="y" text="" onClose={() => {}} />)
+    expect(html).toContain('aria-label="Document"')
+    expect(html).toContain('tabindex="-1"')
   })
 
   it('carries no banned word', () => {

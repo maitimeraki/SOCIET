@@ -35,7 +35,7 @@ export interface VerdictsPageViewProps {
 export function VerdictsPageView({ latest, earlier, loading, failed, failDetail, onRetry }: VerdictsPageViewProps) {
   return (
     <div>
-      <header className="flex flex-wrap items-end justify-between gap-4 pb-6">
+      <header className="flex flex-wrap items-end justify-between gap-4 border-b border-rule pb-6">
         <div>
           <h1 className="font-titling text-display text-ink">Verdicts</h1>
           <p className="mt-2 max-w-[60ch] text-body text-ink-2">
@@ -57,13 +57,16 @@ export function VerdictsPageView({ latest, earlier, loading, failed, failDetail,
       ) : latest ? (
         <div className="grid gap-6 lg:grid-cols-12">
           <div className="lg:col-span-8">
-            <AnswerDocument
-              runId={latest.runId}
-              question={latest.question}
-              view={latest.view}
-              sources={latest.sources}
-              corpusMissing={latest.corpusMissing}
-            />
+            {/* §15.3 — the answer sits on the warm band; the sheet itself stays flat white. */}
+            <div className="rounded-lg bg-[image:var(--gradient-answer)] p-6">
+              <AnswerDocument
+                runId={latest.runId}
+                question={latest.question}
+                view={latest.view}
+                sources={latest.sources}
+                corpusMissing={latest.corpusMissing}
+              />
+            </div>
           </div>
           <aside className="lg:col-span-4">
             <h2 className="mb-2 font-measurement text-micro text-ink-3">EARLIER VERDICTS</h2>

@@ -18,4 +18,14 @@ describe('FlowView keeps the round pair graph', () => {
     expect(html).toContain('pass 1')
     expect(html).toContain('Tariff alignment favours early expansion.')
   })
+
+  it('carries the four-stage strip with the current stage marked', () => {
+    const html = renderToStaticMarkup(
+      <MemoryRouter>
+        <FlowView run={run} activeRound={1} latestRound={2} onScrub={() => {}} onNavigate={() => {}} />
+      </MemoryRouter>,
+    )
+    for (const label of ['Documents', 'Experts', 'Argument', 'Verdict']) expect(html).toContain(label)
+    expect(html).toContain('aria-current="step"')
+  })
 })

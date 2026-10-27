@@ -60,7 +60,7 @@ export default function Rail() {
           </Link>
         </div>
 
-        <Link to="/new" className={buttonClasses('primary', 40, 'mx-3 mb-4 min-h-11 justify-center')}>
+        <Link to="/new" className={buttonClasses('primary', 40, 'mx-3 mb-4 min-h-11 min-w-11 justify-center')}>
           <Plus size={16} aria-hidden="true" />
           <span className={LABEL}>New decision</span>
         </Link>

@@ -53,7 +53,7 @@ export default function AppShell() {
         Skip to content
       </a>
       <Rail />
-      <main id="content" className="min-w-0 flex-1 px-6 pb-24 pt-8">
+      <main id="content" className="min-w-0 flex-1 bg-[image:var(--gradient-ground)] px-6 pb-24 pt-8">
         <AppErrorBoundary key={key}>
           <Suspense fallback={<RouteFallback />}>
             <Outlet />

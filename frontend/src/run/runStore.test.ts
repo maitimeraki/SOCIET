@@ -321,6 +321,7 @@ describe('runStore live handoff keeps the extraction map (keepMap)', () => {
 
   afterEach(() => {
     useRunStore.setState({ seedMap: originalSeedMap })
+    useGraphStore.setState({ nodes: {}, edges: {}, labels: [], version: 0 })
   })
 
   const load = async (options?: { keepMap?: boolean }) => {
@@ -338,5 +339,29 @@ describe('runStore live handoff keeps the extraction map (keepMap)', () => {
 
   it('does not seed when the live handoff asks to keep the extraction map', async () => {
     expect(await load({ keepMap: true })).not.toHaveBeenCalled()
+  })
+
+  it('leaves an extraction entry on the map through a keepMap load (the real seed, not a spy)', async () => {
+    useGraphStore.setState({ nodes: {}, edges: {}, labels: [], version: 0 })
+    useGraphStore.getState().mergeDelta({ nodes: [{ id: 'EU', label: 'EU', type: 'Region' }], edges: [] })
+    const before = Object.keys(useGraphStore.getState().nodes)
+
+    getRun.mockResolvedValue(doc({ status: 'complete' }))
+    getRunGraph.mockResolvedValue({ dataset_id: 'ds-1', nodes: [], edges: [], labels: [], chunk_count: 0 })
+    await useRunStore.getState().loadAndConnect('run-1', { keepMap: true })
+
+    expect(before).toContain('EU')
+    expect(Object.keys(useGraphStore.getState().nodes)).toEqual(before)
+  })
+
+  it('replaces the extraction map by default (no keepMap)', async () => {
+    useGraphStore.setState({ nodes: {}, edges: {}, labels: [], version: 0 })
+    useGraphStore.getState().mergeDelta({ nodes: [{ id: 'EU', label: 'EU', type: 'Region' }], edges: [] })
+
+    getRun.mockResolvedValue(doc({ status: 'complete' }))
+    getRunGraph.mockResolvedValue({ dataset_id: 'ds-1', nodes: [], edges: [], labels: [], chunk_count: 0 })
+    await useRunStore.getState().loadAndConnect('run-1')
+
+    expect(Object.keys(useGraphStore.getState().nodes)).toEqual([])
   })
 })

@@ -114,10 +114,10 @@ const panelTag = (html: string, tab: Tab) =>
 const TABPANEL = ['role', '=', '"tabpanel"'].join('')
 
 describe('one nav strip, and every section is a real tabpanel (§14.4)', () => {
-  it('renders exactly one tablist — the stage rail is gone from the run', () => {
+  it('renders exactly one tablist — the §15.5 stage strip is a nav, not a second tablist', () => {
     const html = render('floor')
     expect(html.match(/role="tablist"/g)).toHaveLength(1)
-    expect(html).not.toContain('aria-label="Run stages"')
+    expect(html).toContain('aria-label="Run stages"')
   })
 
   it('names the five destinations in the product’s words', () => {

@@ -34,7 +34,7 @@ export function RunsPageView({
 }: RunsPageViewProps) {
   return (
     <div>
-      <header className="flex flex-wrap items-end justify-between gap-4 pb-6">
+      <header className="flex flex-wrap items-end justify-between gap-4 border-b border-rule pb-6">
         <div>
           <h1 className="font-titling text-display text-ink">Runs</h1>
           <p className="mt-2 max-w-[60ch] text-body text-ink-2">
@@ -44,7 +44,7 @@ export function RunsPageView({
         <span className="font-measurement text-micro text-ink-3">{runs.length} TOTAL</span>
       </header>
 
-      {failed ? (
+      {failed && runs.length === 0 ? (
         <ErrorState
           title="Couldn't reach the server"
           detail={failDetail || 'Your decisions load when the server is back.'}
@@ -99,7 +99,16 @@ export function RunsPageView({
         </ul>
       )}
 
-      {hasMore && (
+      {failed && runs.length > 0 && (
+        <div className="mt-4 flex flex-wrap items-center justify-center gap-3">
+          <span className="text-body text-ink-2">Couldn't load more.</span>
+          <button type="button" onClick={onLoadMore} className={buttonClasses('secondary', 40, 'min-h-11')}>
+            Try again
+          </button>
+        </div>
+      )}
+
+      {hasMore && !failed && (
         <div className="mt-4 flex justify-center">
           <button
             type="button"
@@ -166,6 +175,7 @@ export default function RunsPage() {
           const page = await listRunsPage({ limit: PAGE_SIZE, cursor })
           setRuns((previous) => [...previous, ...page.items])
           setCursor(page.next_cursor)
+          setFailed(false)
         } catch {
           // A failed second page is the same recoverable failure as a failed first one.
           setFailed(true)

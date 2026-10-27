@@ -57,6 +57,20 @@ describe('RunsPageView', () => {
     expect(failed).toContain('Try again')
   })
 
+  it('keeps the archive when a later page fails, offering only a compact retry', () => {
+    const html = render({ runs: [run()], failed: true, hasMore: true })
+    expect(html).toContain('Should we renew the lease?')
+    expect(html).toContain('Couldn&#x27;t load more.')
+    expect(html).not.toContain('reach the server')
+    expect(html).not.toContain('Load more')
+  })
+
+  it('still shows the full failure state when nothing loaded', () => {
+    const html = render({ runs: [], failed: true, hasMore: true })
+    expect(html).toContain('reach the server')
+    expect(html).not.toContain('Couldn&#x27;t load more.')
+  })
+
   it('carries no banned word', () => {
     expect(renderedText(render({ runs: [run()] }))).not.toMatch(BANNED_WORD)
   })

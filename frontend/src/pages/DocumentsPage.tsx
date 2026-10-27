@@ -38,7 +38,7 @@ export function DocumentsPageView({
 
   return (
     <div>
-      <header className="flex flex-wrap items-end justify-between gap-4 pb-6">
+      <header className="flex flex-wrap items-end justify-between gap-4 border-b border-rule pb-6">
         <div>
           <h1 className="font-titling text-display text-ink">Documents</h1>
           <p className="mt-2 max-w-[60ch] text-body text-ink-2">
@@ -101,6 +101,7 @@ export function DocumentsPageView({
                 <td className="py-3 pr-3 text-body text-ink">
                   <button
                     type="button"
+                    data-document-id={document.id}
                     onClick={(event) => {
                       event.stopPropagation()
                       onSelect(document)
@@ -129,6 +130,7 @@ export function DocumentsPageView({
           loading={selected.loading}
           failed={selected.failed}
           onClose={onClose}
+          onRetry={() => onSelect(selected.document)}
         />
       )}
     </div>
@@ -177,6 +179,23 @@ export default function DocumentsPage() {
     setAttempt((value) => value + 1)
   }
 
+  // One read path for selection and for the reader's retry, so a retry cannot show a different
+  // document or race a newer open.
+  const open = (document: UploadRow) => {
+    const request = ++requestRef.current
+    setSelected({ document, text: '', loading: true, failed: false })
+    void getIngestDocuments([document.id])
+      .then(({ documents: payload }) => {
+        if (requestRef.current !== request) return
+        const text = payload[0]?.text ?? ''
+        setSelected({ document, text, loading: false, failed: false })
+      })
+      .catch(() => {
+        if (requestRef.current !== request) return
+        setSelected({ document, text: '', loading: false, failed: true })
+      })
+  }
+
   return (
     <DocumentsPageView
       documents={documents}
@@ -184,23 +203,16 @@ export default function DocumentsPage() {
       failed={failed}
       failDetail={failDetail}
       selected={selected}
-      onSelect={(document) => {
-        const request = ++requestRef.current
-        setSelected({ document, text: '', loading: true, failed: false })
-        void getIngestDocuments([document.id])
-          .then(({ documents: payload }) => {
-            if (requestRef.current !== request) return
-            const text = payload[0]?.text ?? ''
-            setSelected({ document, text, loading: false, failed: false })
-          })
-          .catch(() => {
-            if (requestRef.current !== request) return
-            setSelected({ document, text: '', loading: false, failed: true })
-          })
-      }}
+      onSelect={open}
       onClose={() => {
+        const id = selected?.document.id
         requestRef.current += 1
         setSelected(null)
+        // §15.2 — the row is the trigger, so focus goes back to it once the reader has closed.
+        if (!id || typeof document === 'undefined' || typeof requestAnimationFrame !== 'function') return
+        requestAnimationFrame(() => {
+          document.querySelector<HTMLElement>(`[data-document-id="${id}"]`)?.focus()
+        })
       }}
       onRetry={reload}
     />
