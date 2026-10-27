@@ -174,6 +174,32 @@ describe('composeRunGraph', () => {
     expect(round1.order).toBeLessThan(all.order)
     expect(round1.nodes()).toContain('ds-1:qh:1:D. Weber')
     expect(round1.nodes()).not.toContain('ds-1:qh:2:D. Weber')
+    // The pass-2 connection goes with its pass — the filter drops edges as well as entries.
+    expect(all.hasEdge('ds-1:D. Weber', 'ds-1:qh:2:D. Weber')).toBe(true)
+    expect(round1.hasEdge('ds-1:D. Weber', 'ds-1:qh:2:D. Weber')).toBe(false)
+  })
+
+  it('leaves the corpus layer intact when replaying a pass', () => {
+    const state = fold(
+      [
+        agent('D. Weber'),
+        {
+          type: 'commit',
+          round: 2,
+          opinions: 1,
+          edges: 1,
+          written_nodes: [{ key: 'ds-1:qh:2:D. Weber', label: 'Opinion', name: 'D. Weber · pass 2' }],
+          written_links: [{ from: 'ds-1:D. Weber', to: 'ds-1:qh:2:D. Weber', kind: 'STATED' }],
+        },
+      ],
+      NOW,
+    )
+    const round1 = composeRunGraph(state, CORPUS, 1)
+
+    expect(countsByType(round1)).toEqual({ Region: 1, Topic: 1, Company: 1, [EXPERT_TYPE]: 1 })
+    expect(round1.hasNode('EuroSteel')).toBe(true)
+    expect(round1.hasEdge('EuroSteel', 'EU')).toBe(true)
+    expect(round1.nodes()).not.toContain('ds-1:qh:2:D. Weber')
   })
 
   it('keeps an entry of an unknown kind rather than dropping it', () => {

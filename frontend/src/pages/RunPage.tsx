@@ -274,12 +274,15 @@ export default function RunPage() {
 
   // The map replays the pass the scrubber names once the run is settled. The map host and the socket
   // lifetime belong to `WorkspaceShell`, so the page only asks the store to re-seed — the guard in
-  // `seedMap` makes a repeated pass a no-op (D14, §11.2).
+  // `seedMap` makes a repeated pass a no-op (D14, §11.2). The store must already hold THIS run: on a
+  // fresh handoff this page mounts before the shell's `loadAndConnect`, and seeding there would
+  // rebuild the previous, completed run over the extraction map the handoff exists to preserve.
   useEffect(() => {
+    if (run.runId !== runId) return
     if (run.status === 'complete' || run.status === 'failed') {
       useRunStore.getState().seedMap(scrubbed)
     }
-  }, [scrubbed, run.status])
+  }, [runId, scrubbed, run.status, run.runId])
 
   // Handoff: auto-switch to the floor only while the user is on the roster tab (§7.5).
   useEffect(() => {
