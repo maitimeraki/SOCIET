@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { renderToStaticMarkup } from 'react-dom/server'
-import SplitDivider, { MAX_RATIO, MIN_RATIO, clampRatio, ratioFromKey } from './SplitDivider'
+import SplitDivider, { MAX_RATIO, MIN_RATIO, clampRatio, ratioFromKey, ratioFromPointer } from './SplitDivider'
 
 describe('clampRatio', () => {
   it('keeps the ratio inside 25–75%', () => {
@@ -27,10 +27,30 @@ describe('ratioFromKey', () => {
   })
 })
 
+describe('ratioFromPointer', () => {
+  it('measures from the handle’s centre, not its left edge', () => {
+    // 1000px grid; the cursor at the handle's centre (4px) is the 0% edge, centred is exactly half.
+    expect(ratioFromPointer(4, 0, 1000)).toBe(0.25)
+    expect(ratioFromPointer(504, 0, 1000)).toBe(0.5)
+    expect(ratioFromPointer(754, 0, 1000)).toBe(0.75)
+  })
+
+  it('honours an explicit handle width and the grid’s left offset', () => {
+    expect(ratioFromPointer(104, 100, 1000, 8)).toBe(0.25)
+    expect(ratioFromPointer(604, 100, 1000, 8)).toBe(0.5)
+  })
+
+  it('clamps past either edge', () => {
+    expect(ratioFromPointer(-500, 0, 1000)).toBe(0.25)
+    expect(ratioFromPointer(5000, 0, 1000)).toBe(0.75)
+  })
+})
+
 describe('SplitDivider', () => {
   it('renders a keyboard separator with its value', () => {
     const html = renderToStaticMarkup(<SplitDivider ratio={0.4} onChange={() => {}} />)
     expect(html).toContain('role="separator"')
+    expect(html).toContain('aria-label="Resize the map and the work"')
     expect(html).toContain('aria-orientation="vertical"')
     expect(html).toContain('aria-valuenow="40"')
     expect(html).toContain('aria-valuemin="25"')

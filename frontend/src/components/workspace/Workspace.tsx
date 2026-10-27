@@ -99,21 +99,22 @@ export function WorkspaceView({
   onRatioChange = () => {},
 }: WorkspaceViewProps) {
   // Stacked below `lg` (flex column), the brief's three-column split from `lg` up (grid). The inline
-  // template is inert while the container is a flex column, so the stacked order is class-only.
+  // template is inert while the container is a flex column, so the stacked order is class-only. In
+  // split the horizontal gap is dropped from `lg` up: the 8px handle column is the whole seam (§9).
+  const split = state === 'split'
   return (
     <div
-      className={`flex flex-col gap-4 ${state === 'split' ? 'lg:grid' : ''}`}
-      style={
-        state === 'split' ? { gridTemplateColumns: `minmax(320px, ${ratio * 100}%) 8px minmax(0, 1fr)` } : undefined
-      }
+      className={`flex flex-col gap-4 ${split ? 'lg:grid lg:gap-x-0' : ''}`}
+      style={split ? { gridTemplateColumns: `minmax(320px, ${ratio * 100}%) 8px minmax(0, 1fr)` } : undefined}
     >
-      {/* The work sits above the map when the panes stack (§9 responsive); the map is left on wide.
-          Each pane rides in its own order wrapper so the outer layout owns the order, not the panes. */}
-      <div className="order-1 lg:order-3">
+      {/* The work sits above the map whenever the panes stack (§9 responsive); only the wide split
+          reorders it to the right. Each pane rides in its own order wrapper so the outer layout owns
+          the order, not the panes. */}
+      <div className={split ? 'order-1 lg:order-3' : 'order-1'}>
         <ActivityPane hidden={state === 'expanded'}>{work}</ActivityPane>
       </div>
-      {state === 'split' && <SplitDivider ratio={ratio} onChange={onRatioChange} />}
-      <div className="order-2 lg:order-1">
+      {split && <SplitDivider ratio={ratio} onChange={onRatioChange} />}
+      <div className={split ? 'order-2 lg:order-1' : 'order-2'}>
         <GraphPane mapId={mapId} state={state} onStateChange={onStateChange} summary={summary}>
           {map}
         </GraphPane>

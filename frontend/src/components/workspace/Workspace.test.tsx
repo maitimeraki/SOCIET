@@ -40,6 +40,14 @@ function tagAround(html: string, marker: string): string {
 
 const hostTag = (html: string) => tagAround(html, `id="${HOST_ID}"`)
 
+/** The opening tag of the order wrapper that holds the pane carrying `marker`. */
+function wrapperTagBefore(html: string, marker: string): string {
+  const at = html.indexOf(marker)
+  if (at < 0) return ''
+  const start = html.lastIndexOf('<div', at)
+  return html.slice(start, html.indexOf('>', start) + 1)
+}
+
 describe('paneStateFrom — the default and the phone default', () => {
   it('split is the default with nothing stored', () => {
     expect(paneStateFrom(null)).toBe('split')
@@ -165,6 +173,20 @@ describe('the split is resizable — the divider lives only in split (§9)', () 
     expect(render('split')).toContain('role="separator"')
     expect(render('expanded')).not.toContain('role="separator"')
     expect(render('minimised')).not.toContain('role="separator"')
+  })
+
+  it('makes the 8px handle column the whole seam — no horizontal gap at lg', () => {
+    expect(render('split')).toContain('lg:gap-x-0')
+    expect(render('minimised')).not.toContain('lg:gap-x-0')
+  })
+
+  it('orders map left / work right only in split; stacked states keep work above map', () => {
+    const workWrapper = (html: string) => wrapperTagBefore(html, 'aria-label="The work"')
+    const mapWrapper = (html: string) => wrapperTagBefore(html, 'aria-label="The map"')
+    expect(workWrapper(render('split'))).toContain('lg:order-3')
+    expect(mapWrapper(render('split'))).toContain('lg:order-1')
+    expect(workWrapper(render('minimised'))).not.toContain('lg:order-3')
+    expect(mapWrapper(render('minimised'))).not.toContain('lg:order-1')
   })
 
   it('draws the divider from the view’s ratio', () => {
