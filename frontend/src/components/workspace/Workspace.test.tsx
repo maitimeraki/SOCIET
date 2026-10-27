@@ -160,6 +160,29 @@ describe('the activity pane is the work; the map fills the region when expanded'
   })
 })
 
+describe('the split is resizable — the divider lives only in split (§9)', () => {
+  it('renders the splitter only in split', () => {
+    expect(render('split')).toContain('role="separator"')
+    expect(render('expanded')).not.toContain('role="separator"')
+    expect(render('minimised')).not.toContain('role="separator"')
+  })
+
+  it('draws the divider from the view’s ratio', () => {
+    const html = renderToStaticMarkup(
+      <WorkspaceView
+        mapId={MAP_ID}
+        state="split"
+        onStateChange={() => {}}
+        map={<div data-map-canvas />}
+        work={<p>the work region</p>}
+        summary={SUMMARY}
+        ratio={0.3}
+      />,
+    )
+    expect(html).toContain('aria-valuenow="30"')
+  })
+})
+
 describe('the copy law (§13) governs every rendered string', () => {
   it('renders no banned word in any of the three states', () => {
     for (const state of ['split', 'expanded', 'minimised'] as const) {
