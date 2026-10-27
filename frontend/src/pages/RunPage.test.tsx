@@ -5,7 +5,7 @@ import { describe, expect, it, vi } from 'vitest'
 // the page's own work region: the one nav strip and the section it shows.
 import { renderToStaticMarkup } from 'react-dom/server'
 import { MemoryRouter } from 'react-router-dom'
-import { RunPageView } from './RunPage'
+import { RunPageView, shouldAutoOpenVerdict } from './RunPage'
 import { busiestEntries } from '../components/workspace/GraphPane'
 import type { AgentProfile } from '../run/events'
 import { initialState, type RunState } from '../run/reducer'
@@ -142,6 +142,20 @@ describe('one nav strip, and every section is a real tabpanel (§14.4)', () => {
     for (const tab of TABS.filter((entry) => entry !== 'agents')) {
       expect(panelTag(html, tab), tab).toMatch(/hidden=""/)
     }
+  })
+})
+
+describe('the verdict opens itself once, and only with a verdict', () => {
+  it('opens when a verdict lands and it has not been seen', () => {
+    expect(shouldAutoOpenVerdict(true, false, 'floor')).toBe(true)
+  })
+
+  it('does not reopen a verdict already seen', () => {
+    expect(shouldAutoOpenVerdict(true, true, 'floor')).toBe(false)
+  })
+
+  it('does not open without a verdict', () => {
+    expect(shouldAutoOpenVerdict(false, false, 'floor')).toBe(false)
   })
 })
 

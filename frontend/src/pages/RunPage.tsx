@@ -1,21 +1,17 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
-import { Link, Navigate, useLocation, useNavigate, useParams } from 'react-router-dom'
-import { CaretLeft, CaretRight } from '@phosphor-icons/react'
+import { Navigate, useLocation, useNavigate, useParams } from 'react-router-dom'
 import { useRunStore } from '../run/runStore'
-import { convergenceSeries, isLive, rosterProgress, streamItems, verdictView } from '../run/selectors'
+import { rosterProgress, verdictView } from '../run/selectors'
 import Button from '../components/ui/Button'
-import Card from '../components/ui/Card'
-import { ruleClasses } from '../components/ui/Rule'
 import SectionNav, { sectionPanelId, sectionTabId } from '../components/ui/SectionNav'
 import RunHeader from '../components/run/RunHeader'
 import RosterStage from '../components/run/RosterStage'
-import EventStream from '../components/run/EventStream'
+import FlowView from '../components/run/FlowView'
 import ArtifactsTab from '../components/run/ArtifactsTab'
 import AgentsTab from '../components/run/AgentsTab'
 import AnswerDocument, { sourceTitles } from '../components/run/AnswerDocument'
 import ChamberFloor from '../components/chamber/ChamberFloor'
-import ConvergenceTape from '../components/chamber/ConvergenceTape'
 import type { RunEvent } from '../run/events'
 import type { RunState } from '../run/reducer'
 
@@ -76,7 +72,6 @@ export interface RunWorkProps {
 function RunWork({ run, events, tab, runId, scrubbed, latestRound, corpusMissing, onScrub, onNavigate, onReplay }: RunWorkProps) {
   const progress = rosterProgress(run)
   const view = verdictView(run)
-  const series = convergenceSeries(run)
   const activeRound = scrubbed ?? latestRound
 
   const renderTab = (key: RunTab): ReactNode => {
@@ -94,57 +89,7 @@ function RunWork({ run, events, tab, runId, scrubbed, latestRound, corpusMissing
           />
         )
       case 'floor':
-        return (
-          <div className="grid gap-6 min-[900px]:grid-cols-[3fr_2fr]">
-            <div className="space-y-4">
-              {/* The floor is the one card; every record inside it is ruled, never boxed. */}
-              <Card className={run.status === 'failed' ? 'opacity-40' : ''}>
-                <ChamberFloor
-                  roster={run.roster}
-                  rounds={run.rounds}
-                  activeRound={activeRound}
-                  livePairs={run.livePairs}
-                  onOpenProfile={() => onNavigate(`/runs/${runId}/agents`)}
-                />
-                <div className="mt-3 flex flex-wrap items-center justify-center gap-3 text-micro text-ink-3">
-                  <button type="button" aria-label="Previous pass" disabled={activeRound === null || activeRound <= 1} onClick={() => onScrub(Math.max(1, (activeRound ?? 1) - 1))} className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-xs px-2 py-0.5 hover:bg-ground-2 disabled:opacity-40"><CaretLeft size={14} aria-hidden="true" /></button>
-                  <span className="tnum font-measurement">{activeRound === null ? 'live' : `pass ${activeRound}`}</span>
-                  <button type="button" aria-label="Next pass" disabled={scrubbed === null} onClick={() => onScrub(scrubbed === null ? null : scrubbed >= (latestRound ?? 1) ? null : scrubbed + 1)} className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-xs px-2 py-0.5 hover:bg-ground-2 disabled:opacity-40"><CaretRight size={14} aria-hidden="true" /></button>
-                  <button type="button" onClick={() => onScrub(null)} className="inline-flex min-h-11 items-center rounded-xs px-2 py-0.5 text-accent hover:bg-ground-2">End — back to live</button>
-                </div>
-              </Card>
-              <ConvergenceTape ticks={series} threshold={run.config?.convergence_threshold ?? 0.8} activeRound={activeRound} />
-              {run.verdict && (
-                <div className={`${ruleClasses('top')} flex flex-wrap items-center justify-between gap-2 pt-3`}>
-                  <p className="text-body text-ink">
-                    {run.verdict.converged ? 'Converged — the verdict is ready.' : 'Verdict ready — a plurality, not a consensus.'}
-                  </p>
-                  <Link to={`/runs/${runId}/verdict`} className="inline-flex min-h-11 items-center text-body text-accent hover:text-accent">
-                    Open verdict →
-                  </Link>
-                </div>
-              )}
-            </div>
-            <div className="space-y-3">
-              {run.status === 'failed' && (
-                <div className={`${ruleClasses('top')} pt-3`}>
-                  <p className="text-body text-ink">The debate stopped: {run.error ?? 'unknown error'}.</p>
-                  <div className="mt-2 flex flex-wrap items-center gap-4">
-                    <a href="#run-stream" className="inline-flex min-h-11 items-center text-body text-accent hover:text-accent">
-                      See what happened ↓
-                    </a>
-                    <Link to="/new/society" className="inline-flex min-h-11 items-center text-body text-ink-2 hover:text-ink">
-                      Start a new decision
-                    </Link>
-                  </div>
-                </div>
-              )}
-              <div id="run-stream">
-                <EventStream items={streamItems(run)} live={isLive(run)} />
-              </div>
-            </div>
-          </div>
-        )
+        return <FlowView run={run} activeRound={activeRound} latestRound={latestRound} onScrub={onScrub} onNavigate={onNavigate} />
       case 'verdict':
         return view ? (
           <div className="space-y-8">
@@ -221,6 +166,11 @@ function RunWork({ run, events, tab, runId, scrubbed, latestRound, corpusMissing
   )
 }
 
+/** The verdict opens once per run, and never over itself. */
+export function shouldAutoOpenVerdict(hasVerdict: boolean, seen: boolean, tab: string): boolean {
+  return hasVerdict && !seen && tab !== 'verdict'
+}
+
 /**
  * The pure view — the run and the tab are plain props, so the page renders to static markup
  * (Rulings F17/F23). The map pane and its host belong to `WorkspaceShell`; this is the run's work
@@ -290,6 +240,21 @@ export default function RunPage() {
       navigate(`/runs/${runId}/floor`, { replace: true })
     }
   }, [runId, tab, progress.phase, run.status, navigate])
+
+  // Auto-open the verdict once per run. The store can still hold the previous run on mount (the
+  // shell loads after child effects), so a stale verdict must not navigate this run to /verdict.
+  const verdictSeen = useRef(false)
+  const verdictRunId = useRef(runId)
+  useEffect(() => {
+    if (verdictRunId.current !== runId) {
+      verdictRunId.current = runId
+      verdictSeen.current = false
+    }
+    if (run.runId !== runId) return
+    if (!shouldAutoOpenVerdict(Boolean(run.verdict), verdictSeen.current, tab ?? '')) return
+    verdictSeen.current = true
+    navigate(`/runs/${runId}/verdict`, { replace: true })
+  }, [run.verdict, run.runId, tab, runId, navigate])
 
   if (!runId) return null
   if (!isRunTab(tab)) {
