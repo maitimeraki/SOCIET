@@ -66,4 +66,13 @@ describe('DocumentsPageView', () => {
     expect(renderedText(render({ documents: [] }))).not.toMatch(BANNED_WORD)
     expect(renderedText(render({ documents: [], failed: true }))).not.toMatch(BANNED_WORD)
   })
+
+  it('renders the reader when a document is selected', () => {
+    const html = render({
+      documents: [doc()],
+      selected: { document: doc(), text: 'The lease renews for a further five years.', loading: false, failed: false },
+    })
+    expect(html).toContain('The lease renews for a further five years.')
+    expect(html).toContain('Close document')
+  })
 })

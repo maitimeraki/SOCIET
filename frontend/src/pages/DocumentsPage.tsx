@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { listUploads } from '../api/rest'
+import { getIngestDocuments, listUploads } from '../api/rest'
 import type { UploadRow } from '../api/types'
+import { DocumentReaderView } from '../components/documents/DocumentReader'
 import { buttonClasses } from '../components/ui/Button'
 import EmptyState from '../components/ui/EmptyState'
 import ErrorState from '../components/ui/ErrorState'
@@ -18,6 +19,9 @@ export interface DocumentsPageViewProps {
   onClose: () => void
   onRetry: () => void
 }
+
+const readerMeta = (document: UploadRow) =>
+  `Added ${fmtDate(document.created_at)} · ${fmtInt(document.bytes)} bytes · ${document.dataset_name ?? 'Not in a corpus yet'}`
 
 export function DocumentsPageView({
   documents,
@@ -118,24 +122,14 @@ export function DocumentsPageView({
       )}
 
       {selected && (
-        <aside className="mt-6 border-t border-rule pt-4">
-          <div className="flex items-start justify-between gap-3">
-            <div>
-              <p className="font-measurement text-micro text-ink-3">DOCUMENT</p>
-              <p className="text-body text-ink">{selected.document.name}</p>
-            </div>
-            <button type="button" onClick={onClose} className="text-body text-ink-3 hover:text-ink">
-              Close
-            </button>
-          </div>
-          {selected.loading ? (
-            <Skeleton className="mt-3 h-32 w-full" />
-          ) : selected.failed ? (
-            <p className="mt-3 text-body text-ink-2">This document could not be read. Try again.</p>
-          ) : (
-            <p className="mt-3 max-w-[68ch] whitespace-pre-line font-record text-body-lg text-ink-2">{selected.text}</p>
-          )}
-        </aside>
+        <DocumentReaderView
+          title={selected.document.name}
+          meta={readerMeta(selected.document)}
+          text={selected.text}
+          loading={selected.loading}
+          failed={selected.failed}
+          onClose={onClose}
+        />
       )}
     </div>
   )
@@ -189,7 +183,14 @@ export default function DocumentsPage() {
       selected={selected}
       onSelect={(document) => {
         setSelected({ document, text: '', loading: true, failed: false })
-        // The reader task (Task 3) replaces this with getIngestDocuments.
+        void getIngestDocuments([document.id])
+          .then(({ documents: payload }) => {
+            const text = payload[0]?.text ?? ''
+            setSelected({ document, text, loading: false, failed: false })
+          })
+          .catch(() => {
+            setSelected({ document, text: '', loading: false, failed: true })
+          })
       }}
       onClose={() => setSelected(null)}
       onRetry={reload}
