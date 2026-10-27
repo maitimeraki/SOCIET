@@ -23,6 +23,7 @@ const DashboardPage = lazy(() => import('./pages/DashboardPage'))
 const DocumentsPage = lazy(() => import('./pages/DocumentsPage'))
 const RunsPage = lazy(() => import('./pages/RunsPage'))
 const ResultsPage = lazy(() => import('./pages/ResultsPage'))
+const LandingPage = lazy(() => import('./pages/LandingPage'))
 const SignInPage = lazy(() => import('./pages/SignInPage'))
 const SignUpPage = lazy(() => import('./pages/SignUpPage'))
 
@@ -54,6 +55,9 @@ export default function App() {
           </Route>
 
           <Route element={<RequireAuth />}>
+            {/* The bare post-auth address (`DEFAULT_NEXT`): a sibling of the shells, so no rail or
+                workspace chrome flashes before the account state picks a destination. */}
+            <Route path="/landing" element={<LandingPage />} />
             {/* §9 The full-screen workspace: the new-decision lifecycle and every run share one shell,
                 so the one map host is mounted above the pages and never remounted by a page change.
                 The old per-step paths stay valid routes as redirects into `/new`, carrying the step

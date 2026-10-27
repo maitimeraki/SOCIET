@@ -11,7 +11,7 @@ import { ApiError, ConfigError, NetworkError } from '../api/rest'
  *  machine. 640 ms lets the mark complete (560 ms) and settle for a beat before the page moves on. */
 export const STAMP_MS = 640
 
-const DEFAULT_NEXT = '/dashboard'
+const DEFAULT_NEXT = '/landing'
 
 /**
  * Tab, newline, CR and the rest of the C0/C1 controls. The WHATWG URL parser *strips* these anywhere
@@ -33,7 +33,7 @@ function hasControlChars(value: string): boolean {
  * `next` is a security boundary. Only a same-origin, relative path is honoured: an absolute URL
  * (`https://evil`), a protocol-relative host (`//evil`), a bare relative (`runs`), a backslash trick
  * (`/\evil`, which some engines normalise to `//`) or a value carrying a stripped control character
- * (`/\n/evil.example`) all fall back to the dashboard — a crafted `?next=` can never walk a
+ * (`/\n/evil.example`) all fall back to the landing route — a crafted `?next=` can never walk a
  * freshly-authenticated user off-site.
  *
  * Two layers: the syntactic guards above reject the known shapes, then the value is resolved against

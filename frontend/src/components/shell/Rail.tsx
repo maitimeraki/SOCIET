@@ -1,19 +1,24 @@
 import { Link, NavLink } from 'react-router-dom'
-import { SquaresFour } from '@phosphor-icons/react'
+import { CheckCircle, Plus, SquaresFour } from '@phosphor-icons/react'
 import { useAuthStore } from '../../auth/authStore'
 import HealthDot from './HealthDot'
+import { buttonClasses } from '../ui/Button'
 import { ruleClasses } from '../ui/Rule'
 
 /**
- * §7 The rail — the persistent left column: brand at its head, the account's one item in the
- * middle, the account reading at its foot. 240px on wide screens, 64px and icon-only below `lg`.
+ * §7 The rail — the persistent left column: brand at its head, the new-decision action and the
+ * three destinations in the middle, the account reading at its foot. 240px on wide screens, 64px
+ * and icon-only below `lg`.
  *
- * D1: the dashboard absorbs the four former rail pages, so the rail carries **one** item — "Your
- * work" — and the four section names live on the page, where their order is the lifecycle's.
- * `NavLink` sets `aria-current` for us, so the active item is correct without a pathname
- * comparison here.
+ * The three destinations are the lifecycle's stages: Documents (what the account holds), Verdict
+ * (the last answer) and Runs (the work behind it). `NavLink` sets `aria-current` for us, so the
+ * active item is correct without a pathname comparison here.
  */
-const ITEMS = [{ to: '/dashboard', label: 'Your work', Icon: SquaresFour }]
+const ITEMS = [
+  { to: '/documents', label: 'Documents', Icon: SquaresFour },
+  { to: '/results', label: 'Verdict', Icon: CheckCircle },
+  { to: '/runs', label: 'Runs', Icon: SquaresFour },
+]
 
 // §7 Rail item states — resting ink-2; hover a ground fill; active an accent-soft fill with a 3px
 // accent left rule and ink at weight 500. The rule is a `::before` flush to the rail's own edge, so
@@ -35,8 +40,9 @@ export default function Rail() {
   const initials = email.split('@')[0].slice(0, 2).toUpperCase()
 
   return (
-    // The column. The `<nav>` holds only the sections; the account foot is its sibling, not its
-    // child — a landmark jump to "Sections" must not land on account or health chrome.
+    // The column. The `<nav>` holds the brand, the new-decision action and the sections; the
+    // account foot is its sibling, not its child — a landmark jump to "Sections" must not land on
+    // account or health chrome.
     <div className={`flex w-16 shrink-0 flex-col ${ruleClasses('right')} bg-ground-2 lg:w-60`}>
       <nav aria-label="Sections" className="flex flex-1 flex-col">
         <div className="flex h-14 shrink-0 items-center gap-2 px-2 lg:px-4">
@@ -53,6 +59,11 @@ export default function Rail() {
             </span>
           </Link>
         </div>
+
+        <Link to="/new" className={buttonClasses('primary', 40, 'mx-3 mb-4 min-h-11 justify-center')}>
+          <Plus size={16} aria-hidden="true" />
+          <span className={LABEL}>New decision</span>
+        </Link>
 
         <ul className="flex flex-1 flex-col gap-1">
           {ITEMS.map((item) => (

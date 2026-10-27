@@ -124,18 +124,26 @@ describe('the guard preserves the path a signed-out visitor was reaching for', (
   )
 })
 
-describe('the rail is one item — "Your work"', () => {
-  it('marks the dashboard current on /dashboard', () => {
-    expect(currentHref(renderShell('/dashboard'))).toBe('/dashboard')
+describe('the rail carries the three destinations', () => {
+  it.each(['/documents', '/runs', '/results'])('marks %s current at its own path', (path) => {
+    expect(currentHref(renderShell(path))).toBe(path)
   })
 
-  it('renders exactly one item inside the sections nav', () => {
-    const html = renderShell('/dashboard')
+  it('renders exactly three items inside the sections nav', () => {
+    const html = renderShell('/documents')
     const nav = html.match(/<nav[^>]*aria-label="Sections"[^>]*>[\s\S]*?<\/nav>/)?.[0] ?? ''
-    expect(nav.match(/<li>/g) ?? []).toHaveLength(1)
-    expect(nav).toContain('Your work')
-    expect(nav).not.toContain('Documents')
-    expect(nav).not.toContain('Verdicts')
+    expect(nav.match(/<li>/g) ?? []).toHaveLength(3)
+    expect(nav).toContain('Documents')
+    expect(nav).toContain('Verdict')
+    expect(nav).toContain('Runs')
+  })
+
+  it('offers the new-decision action inside the sections nav, after the brand', () => {
+    const html = renderShell('/documents')
+    const nav = html.match(/<nav[^>]*aria-label="Sections"[^>]*>[\s\S]*?<\/nav>/)?.[0] ?? ''
+    expect(nav).toContain('href="/new"')
+    expect(nav).toContain('New decision')
+    expect(nav.indexOf('New decision')).toBeGreaterThan(nav.indexOf('Societas'))
   })
 })
 

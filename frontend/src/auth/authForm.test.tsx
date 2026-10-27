@@ -54,33 +54,33 @@ describe('authForm — the error states', () => {
 })
 
 describe('authForm — `next` is a same-origin boundary', () => {
-  it('honours a relative path and defaults everything else to the dashboard', () => {
+  it('honours a relative path and defaults everything else to the landing route', () => {
     expect(safeNext('/runs/abc')).toBe('/runs/abc')
     expect(safeNext('/runs/abc?tab=verdict')).toBe('/runs/abc?tab=verdict')
-    expect(safeNext(null)).toBe('/dashboard')
-    expect(safeNext(undefined)).toBe('/dashboard')
-    expect(safeNext('')).toBe('/dashboard')
+    expect(safeNext(null)).toBe('/landing')
+    expect(safeNext(undefined)).toBe('/landing')
+    expect(safeNext('')).toBe('/landing')
   })
 
   it('rejects absolute, protocol-relative, backslash and bare-relative values', () => {
-    expect(safeNext('https://evil.example/steal')).toBe('/dashboard')
-    expect(safeNext('//evil.example/steal')).toBe('/dashboard')
-    expect(safeNext('/\\evil.example')).toBe('/dashboard')
-    expect(safeNext('runs/abc')).toBe('/dashboard')
+    expect(safeNext('https://evil.example/steal')).toBe('/landing')
+    expect(safeNext('//evil.example/steal')).toBe('/landing')
+    expect(safeNext('/\\evil.example')).toBe('/landing')
+    expect(safeNext('runs/abc')).toBe('/landing')
   })
 
   it('rejects control characters the URL parser would strip into an off-site host (F1)', () => {
     // The WHATWG URL parser strips tab/newline/CR anywhere, so `/\n/evil.example` normalises to
     // `//evil.example` → an off-site origin. Layer 1 (control chars) rejects it; layer 2 (origin
     // equality) would catch it again as defence in depth.
-    expect(safeNext('/\n/evil.example')).toBe('/dashboard')
-    expect(safeNext('/\t/evil.example')).toBe('/dashboard')
+    expect(safeNext('/\n/evil.example')).toBe('/landing')
+    expect(safeNext('/\t/evil.example')).toBe('/landing')
     // A trailing CR is stripped to a same-origin path, so only layer 1 catches this one.
-    expect(safeNext('/runs/abc\r')).toBe('/dashboard')
+    expect(safeNext('/runs/abc\r')).toBe('/landing')
     // A `?next=` percent-encoded for a protocol-relative path is decoded before it reaches here:
     // `%2F%2Fevil.example` → `//evil.example`, and `/%2F%2Fevil.example` → `///evil.example`.
-    expect(safeNext('//evil.example')).toBe('/dashboard')
-    expect(safeNext('///evil.example')).toBe('/dashboard')
+    expect(safeNext('//evil.example')).toBe('/landing')
+    expect(safeNext('///evil.example')).toBe('/landing')
   })
 })
 
