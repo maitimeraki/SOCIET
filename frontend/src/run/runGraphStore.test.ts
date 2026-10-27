@@ -157,6 +157,25 @@ describe('composeRunGraph', () => {
     expect(composeRunGraph(state, null).getNodeAttribute('ds-1:qh:1:D. Weber', 'stance')).toBeUndefined()
   })
 
+  it('includes only commits up to the selected pass', () => {
+    const commit = (round: number): RunEvent => ({
+      type: 'commit',
+      round,
+      opinions: 1,
+      edges: 1,
+      written_nodes: [{ key: `ds-1:qh:${round}:D. Weber`, label: 'Opinion', name: `D. Weber · pass ${round}` }],
+      written_links: [{ from: 'ds-1:D. Weber', to: `ds-1:qh:${round}:D. Weber`, kind: 'STATED' }],
+    })
+    const state = fold([agent('D. Weber'), commit(1), commit(2)], NOW)
+
+    const all = composeRunGraph(state, null)
+    const round1 = composeRunGraph(state, null, 1)
+
+    expect(round1.order).toBeLessThan(all.order)
+    expect(round1.nodes()).toContain('ds-1:qh:1:D. Weber')
+    expect(round1.nodes()).not.toContain('ds-1:qh:2:D. Weber')
+  })
+
   it('keeps an entry of an unknown kind rather than dropping it', () => {
     const state = fold(
       [

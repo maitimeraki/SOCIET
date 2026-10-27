@@ -272,6 +272,15 @@ export default function RunPage() {
     setScrubbed(Math.min(replayFrom, latestRound))
   }
 
+  // The map replays the pass the scrubber names once the run is settled. The map host and the socket
+  // lifetime belong to `WorkspaceShell`, so the page only asks the store to re-seed — the guard in
+  // `seedMap` makes a repeated pass a no-op (D14, §11.2).
+  useEffect(() => {
+    if (run.status === 'complete' || run.status === 'failed') {
+      useRunStore.getState().seedMap(scrubbed)
+    }
+  }, [scrubbed, run.status])
+
   // Handoff: auto-switch to the floor only while the user is on the roster tab (§7.5).
   useEffect(() => {
     if (runId && tab === 'roster' && progress.phase === 'seated' && run.status !== 'complete') {

@@ -21,9 +21,11 @@ interface RunStoreState {
   corpusMissing: boolean
   /** The run `version` the map was last built from — the key `seedMap` rebuilds against (§11.2). */
   mapVersion: number
+  /** The pass the map was last replayed to, alongside `mapVersion`; null = every pass. */
+  mapRound: number | null
   loadAndConnect: (runId: string, options?: { keepMap?: boolean }) => Promise<void>
-  /** Rebuild the one map from the run's own folded state — the reopened run's producer (§11.2, F36). */
-  seedMap: () => void
+  /** Rebuild the one map from the run's own folded state, up to a pass — the reopened run's producer (§11.2, F36). */
+  seedMap: (maxRound?: number | null) => void
   dispatch: (event: RunEvent) => void
   reset: () => void
   disconnect: () => void
@@ -114,6 +116,7 @@ export const useRunStore = create<RunStoreState>((set, get) => {
     corpus: null,
     corpusMissing: false,
     mapVersion: -1,
+    mapRound: null,
 
     // Config rides the run doc only — the replayed event buffer carries none, so a
     // reset on (re)connect must keep it or the header/tape lose the run's settings.
@@ -125,16 +128,17 @@ export const useRunStore = create<RunStoreState>((set, get) => {
     },
 
     /**
-     * Rebuild the one map from the run's own state (D14, F36). Keyed on `run.version`, so a frame that
-     * folds a burst of events rebuilds once, not once per event (§11.2) — and a run already mirrored
-     * is not rebuilt twice. The compose is pure; the store it lands in is the same one the live path
+     * Rebuild the one map from the run's own state (D14, F36). Keyed on `run.version` and the pass
+     * being replayed, so a frame that folds a burst of events rebuilds once, not once per event
+     * (§11.2), a run already mirrored is not rebuilt twice, and the scrubber only re-seeds when the
+     * pass it names changes. The compose is pure; the store it lands in is the same one the live path
      * folds into, so the reopened map IS the live map (the equality the suite pins).
      */
-    seedMap: () => {
-      const { run, corpus, mapVersion } = get()
-      if (run.version === mapVersion) return
-      set({ mapVersion: run.version })
-      useGraphStore.getState().seedFromGraph(composeRunGraph(run, corpus), corpus?.labels ?? [])
+    seedMap: (maxRound = null) => {
+      const { run, corpus, mapVersion, mapRound } = get()
+      if (run.version === mapVersion && mapRound === maxRound) return
+      set({ mapVersion: run.version, mapRound: maxRound })
+      useGraphStore.getState().seedFromGraph(composeRunGraph(run, corpus, maxRound), corpus?.labels ?? [])
     },
 
     dispatch: (event) => {
@@ -149,7 +153,7 @@ export const useRunStore = create<RunStoreState>((set, get) => {
       pending = [] // a run switch discards the previous run's unfolded events; its doc refolds them
       get().socket?.close()
       // The next load re-reads and re-seeds from scratch, so nothing of this run is left to leak into it.
-      set({ socket: null, connection: 'idle', corpus: null, corpusMissing: false, mapVersion: -1 })
+      set({ socket: null, connection: 'idle', corpus: null, corpusMissing: false, mapVersion: -1, mapRound: null })
     },
 
     loadAndConnect: async (runId: string, options?: { keepMap?: boolean }) => {

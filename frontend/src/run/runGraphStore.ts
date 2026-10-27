@@ -76,8 +76,9 @@ function opinionEntry(written: { key: string; label: string; name: string }, sta
  * graph stays self-consistent.
  *
  * @param corpus the Task 1.3 corpus read, or null when no snapshot is available — the caller owns the fetch.
+ * @param maxRound the pass to replay up to — commits after it are left out; null mirrors every pass.
  */
-export function composeRunGraph(run: RunState, corpus: GraphSnapshot | null): Graph {
+export function composeRunGraph(run: RunState, corpus: GraphSnapshot | null, maxRound: number | null = null): Graph {
   // Last write wins per key, exactly as the store's `upsertNodes`/`upsertEdges` fold — so the map holds
   // one entry per identity however many passes write it.
   const nodes: Record<string, GraphNode> = {}
@@ -98,6 +99,7 @@ export function composeRunGraph(run: RunState, corpus: GraphSnapshot | null): Gr
   // Opinion layer — the entries and connections the commits report they wrote, taken verbatim (D7),
   // each entry carrying the position the pass recorded for its holder so the map can colour it (§9.2).
   for (const commit of run.commits) {
+    if (maxRound !== null && commit.round > maxRound) continue
     const stances = opinionStances(run, commit.round, commit.writtenLinks)
     for (const written of commit.writtenNodes) nodes[written.key] = opinionEntry(written, stances)
     for (const link of commit.writtenLinks) edges[edgeKey(link.from, link.to, link.kind)] = { source: link.from, target: link.to, label: link.kind }

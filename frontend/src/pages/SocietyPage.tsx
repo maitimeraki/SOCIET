@@ -58,7 +58,9 @@ export default function SocietyPage() {
       const { job_id } = await startDebate(body)
       clear() // documents are done with; datasetId survives for the run views
       toast('success', 'Decision convened')
-      navigate(`/runs/${job_id}/roster`)
+      // The handoff tells the shell to keep the extraction map already on screen (Task 6): the run
+      // grows that map in place rather than replacing it (D14).
+      navigate(`/runs/${job_id}/roster`, { state: { handoff: true } })
     } catch (err) {
       setError(
         err instanceof ApiError && err.status < 500

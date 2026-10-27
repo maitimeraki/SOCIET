@@ -272,6 +272,36 @@ describe('runStore reopened-run map (replay = live)', () => {
     expect(reopened).toEqual(live)
   })
 
+  it('replays only the passes up to the scrubber, and refolds every pass when it returns to live', () => {
+    useRunStore.getState().disconnect() // a clean map key for the replay
+    const commit = (round: number): RunEvent => ({
+      type: 'commit',
+      round,
+      opinions: 1,
+      edges: 1,
+      written_nodes: [{ key: `${DATASET}:qh:${round}:D. Weber`, label: 'Opinion', name: `D. Weber · pass ${round}` }],
+      written_links: [{ from: `${DATASET}:D. Weber`, to: `${DATASET}:qh:${round}:D. Weber`, kind: 'STATED' }],
+    })
+    useRunStore.setState({ run: fold([seat('D. Weber'), commit(1), commit(2)], () => NOW) })
+
+    useRunStore.getState().seedMap(1)
+    expect(useRunStore.getState().mapRound).toBe(1)
+    expect(Object.keys(useGraphStore.getState().nodes).sort()).toEqual([`${DATASET}:D. Weber`, `${DATASET}:qh:1:D. Weber`])
+
+    // The same pass again is not rebuilt — the key is (version, pass), not the call.
+    const seeded = useGraphStore.getState().version
+    useRunStore.getState().seedMap(1)
+    expect(useGraphStore.getState().version).toBe(seeded)
+
+    useRunStore.getState().seedMap(null)
+    expect(useRunStore.getState().mapRound).toBeNull()
+    expect(Object.keys(useGraphStore.getState().nodes).sort()).toEqual([
+      `${DATASET}:D. Weber`,
+      `${DATASET}:qh:1:D. Weber`,
+      `${DATASET}:qh:2:D. Weber`,
+    ])
+  })
+
   it('a run whose material is gone reports it and keeps no previous run’s map', async () => {
     useGraphStore.getState().applySnapshot(CORPUS) // a previously opened run's map is already held
     getRun.mockResolvedValue(doc({ dataset_id: DATASET, status: 'complete', events: EVENTS }))
