@@ -136,6 +136,8 @@ export interface RunSummary {
   rounds_executed: number
   converged: boolean | null
   verdict_stance: Stance | null
+  /** The filed share — the dominant stance's weighted share. Null when no answer was filed. */
+  verdict_confidence: number | null
 }
 
 /** `GET /api/v1/simulate/debates` — keyset page (plan §6): `next_cursor` null at the end. */

@@ -60,42 +60,47 @@ afterEach(() => {
 })
 
 describe('loadVerdicts', () => {
-  it('keeps the readable verdicts when one run cannot be read', async () => {
-    const run = (patch: Partial<RunSummary>): RunSummary => ({
-      run_id: 'r',
-      created_at: '2026-10-09T10:00:00Z',
-      query: 'Should we expand?',
-      corpus_label: null,
-      dataset_id: 'd1',
-      status: 'complete',
-      rounds_executed: 2,
-      converged: true,
-      verdict_stance: 'POSITIVE',
-      ...patch,
-    })
-    const good: RunDoc = {
-      run_id: 'r-good',
-      created_at: '2026-10-09T10:00:00Z',
-      query: 'Should we expand?',
-      dataset_id: 'd1',
-      config: DEBATE_CONFIG_DEFAULTS,
-      status: 'complete',
-      events: RUN_SAMPLE,
-    }
-    const reply = (body: unknown, ok = true, status = 200) => ({
-      ok,
-      status,
-      statusText: ok ? 'OK' : 'Not Found',
-      headers: { get: () => null },
-      json: async () => body,
-    })
+  const run = (patch: Partial<RunSummary>): RunSummary => ({
+    run_id: 'r',
+    created_at: '2026-10-09T10:00:00Z',
+    query: 'Should we expand?',
+    corpus_label: null,
+    dataset_id: 'd1',
+    status: 'complete',
+    rounds_executed: 2,
+    converged: true,
+    verdict_stance: 'POSITIVE',
+    verdict_confidence: null,
+    ...patch,
+  })
+  const good: RunDoc = {
+    run_id: 'r-good',
+    created_at: '2026-10-09T10:00:00Z',
+    query: 'Should we expand?',
+    dataset_id: 'd1',
+    config: DEBATE_CONFIG_DEFAULTS,
+    status: 'complete',
+    events: RUN_SAMPLE,
+  }
+  const reply = (body: unknown, ok = true, status = 200) => ({
+    ok,
+    status,
+    statusText: ok ? 'OK' : 'Not Found',
+    headers: { get: () => null },
+    json: async () => body,
+  })
+
+  it('opens the first readable answer and builds the rest of the archive from the list', async () => {
     vi.stubGlobal(
       'fetch',
       vi.fn(async (url: string) => {
         if (url.includes('/r-bad')) return reply({ detail: 'not found' }, false, 404)
         if (url.includes('/r-good')) return reply(good)
         return reply({
-          items: [run({ run_id: 'r-bad', query: 'A run whose record is gone' }), run({ run_id: 'r-good' })],
+          items: [
+            run({ run_id: 'r-bad', query: 'A run whose record is gone', verdict_confidence: 0.61 }),
+            run({ run_id: 'r-good', verdict_confidence: 0.82 }),
+          ],
           next_cursor: null,
         })
       }),
@@ -106,7 +111,40 @@ describe('loadVerdicts', () => {
 
     expect(loaded.latest?.runId).toBe('r-good')
     expect(loaded.latest?.sources).toEqual(['eu-market-2027.pdf'])
-    expect(loaded.earlier).toEqual([])
+    expect(loaded.earlier).toEqual([
+      {
+        runId: 'r-bad',
+        question: 'A run whose record is gone',
+        stance: 'POSITIVE',
+        share: 0.61,
+        date: '2026-10-09T10:00:00Z',
+      },
+    ])
     expect(errorSpy).toHaveBeenCalled()
+  })
+
+  it('leaves every answered row in the archive when no document can be read', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string) => {
+        if (url.includes('/debates/')) return reply({ detail: 'not found' }, false, 404)
+        return reply({
+          items: [
+            run({ run_id: 'r-bad', verdict_confidence: 0.61 }),
+            run({ run_id: 'r-gone', query: 'Also gone', verdict_confidence: 0.55 }),
+          ],
+          next_cursor: null,
+        })
+      }),
+    )
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+
+    const loaded = await loadVerdicts()
+
+    expect(loaded.latest).toBeNull()
+    expect(loaded.earlier).toEqual([
+      { runId: 'r-bad', question: 'Should we expand?', stance: 'POSITIVE', share: 0.61, date: '2026-10-09T10:00:00Z' },
+      { runId: 'r-gone', question: 'Also gone', stance: 'POSITIVE', share: 0.55, date: '2026-10-09T10:00:00Z' },
+    ])
   })
 })

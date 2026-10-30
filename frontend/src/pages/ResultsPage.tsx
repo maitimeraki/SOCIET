@@ -100,8 +100,6 @@ export function VerdictsPageView({ latest, earlier, loading, failed, failDetail,
   )
 }
 
-type LoadedVerdict = { entry: RunSummary; view: VerdictView; sources: string[] }
-
 // eslint-disable-next-line react-refresh/only-export-components -- loadVerdicts is the tested loader
 export async function loadVerdicts() {
   const answered: RunSummary[] = []
@@ -112,44 +110,43 @@ export async function loadVerdicts() {
     cursor = page.next_cursor
   } while (cursor && answered.length < 50)
 
-  // One document read per answered run: the same folded roster answers both the verdict and its sources.
-  // Settled, not all: one unreadable run (deleted, 404, transient 5xx) must not blank the whole archive.
-  const results = await Promise.allSettled(
-    answered.slice(0, 50).map(async (entry) => {
+  // Read documents only until the first readable one: that run is the answer the page opens.
+  // Every earlier row takes its stance/share/date from the list, so one unreadable run
+  // (deleted, 404, transient 5xx) never blanks the archive — and the archive never fans out
+  // into one document read per run.
+  let latest: VerdictsPageViewProps['latest'] = null
+  for (const entry of answered) {
+    try {
       const doc = await getRun(entry.run_id)
       const state = fold(doc.events)
       const view = verdictView(state)
-      return view ? { entry, view, sources: sourceTitles(state.roster) } : null
-    }),
-  )
-  const loaded: LoadedVerdict[] = []
-  for (const result of results) {
-    if (result.status === 'fulfilled') {
-      if (result.value) loaded.push(result.value)
-    } else {
-      // Diagnosable without leaking the server's text into the page.
-      console.error('ResultsPage: could not read one verdict.', result.reason)
-    }
-  }
-  const [first, ...rest] = loaded
-  return {
-    latest: first
-      ? {
-          runId: first.entry.run_id,
-          question: first.entry.query,
-          view: first.view,
-          sources: first.sources,
+      if (view) {
+        latest = {
+          runId: entry.run_id,
+          question: entry.query,
+          view,
+          sources: sourceTitles(state.roster),
           corpusMissing: false,
         }
-      : null,
-    earlier: rest.map((row) => ({
-      runId: row.entry.run_id,
-      question: row.entry.query,
-      stance: row.view.stance,
-      share: row.view.confidence,
-      date: row.entry.created_at,
-    })),
+        break
+      }
+    } catch (error) {
+      // Diagnosable without leaking the server's text into the page.
+      console.error('ResultsPage: could not read one verdict.', error)
+    }
   }
+
+  const earlier: VerdictRow[] = answered
+    .filter((row) => row.run_id !== latest?.runId)
+    .map((row) => ({
+      runId: row.run_id,
+      question: row.query,
+      stance: row.verdict_stance as Stance,
+      share: row.verdict_confidence,
+      date: row.created_at,
+    }))
+
+  return { latest, earlier }
 }
 
 export default function ResultsPage() {

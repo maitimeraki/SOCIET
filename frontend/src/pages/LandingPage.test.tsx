@@ -4,7 +4,7 @@ import { landingTarget } from './LandingPage'
 
 const run = (patch: Partial<RunSummary> = {}): RunSummary => ({
   run_id: 'r1', created_at: '2026-10-12T10:00:00Z', query: 'q', corpus_label: null,
-  dataset_id: 'd1', status: 'complete', rounds_executed: 3, converged: true, verdict_stance: 'NEGATIVE', ...patch,
+  dataset_id: 'd1', status: 'complete', rounds_executed: 3, converged: true, verdict_stance: 'NEGATIVE', verdict_confidence: null, ...patch,
 })
 
 describe('landingTarget', () => {

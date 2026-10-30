@@ -15,6 +15,7 @@ const run = (patch: Partial<RunSummary> = {}): RunSummary => ({
   rounds_executed: 3,
   converged: true,
   verdict_stance: 'NEGATIVE',
+  verdict_confidence: null,
   ...patch,
 })
 

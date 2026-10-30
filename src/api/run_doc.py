@@ -376,6 +376,10 @@ def _summarize(
         "rounds_executed": result.get("rounds_executed", rounds_from_events),
         "converged": result.get("converged"),
         "verdict_stance": verdict_stance,
+        # The filed share — the dominant stance's weighted share. The list surfaces (the
+        # Overview's recent work, the runs table's outcome column) show it directly, so
+        # they never fan out into one document read per run.
+        "verdict_confidence": result.get("confidence_score"),
     }
 
 

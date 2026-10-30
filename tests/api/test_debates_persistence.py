@@ -194,6 +194,33 @@ async def test_summary_derives_verdict_stance_from_clusters(client, store_user):
     assert run["dataset_id"] == "ds-1"
 
 
+async def test_summary_carries_the_filed_share(client, store_user):
+    """The list must carry the filed share, so a list-driven surface never reads every run."""
+    doc = _doc(
+        store_user.id,
+        "2026-10-01T10:00:00+00:00",
+        result={
+            "rounds_executed": 4,
+            "converged": True,
+            "confidence_score": 0.82,
+            "cluster_details": {
+                "NEGATIVE": {"stance": "NEGATIVE", "total_weight": 5.92},
+                "POSITIVE": {"stance": "POSITIVE", "total_weight": 1.29},
+            },
+        },
+    )
+    await run_doc.write_run_doc(doc)
+    run = (await client.get("/simulate/debates")).json()[0]
+    assert run["verdict_confidence"] == 0.82
+
+
+async def test_summary_share_is_null_when_no_answer_was_filed(client, store_user):
+    doc = _doc(store_user.id, "2026-10-01T10:00:00+00:00", result={"rounds_executed": 1})
+    await run_doc.write_run_doc(doc)
+    run = (await client.get("/simulate/debates")).json()[0]
+    assert run["verdict_confidence"] is None
+
+
 async def test_run_doc_round_trip(client, store_user):
     doc = _doc(
         store_user.id,

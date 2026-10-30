@@ -14,6 +14,7 @@ const RUN: RunSummary = {
   rounds_executed: 3,
   converged: true,
   verdict_stance: 'POSITIVE',
+  verdict_confidence: null,
 }
 
 const render = (runs: RunSummary[], loading = false) =>
