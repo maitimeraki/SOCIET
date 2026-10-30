@@ -34,6 +34,12 @@ describe('AppShell', () => {
     expect(html.indexOf('<main id="content"')).toBeLessThan(html.indexOf('the child region'))
   })
 
+  it('caps and centres the content column at 1320px (§6.2)', () => {
+    const main = render().match(/<main[^>]*id="content"[^>]*>/)?.[0] ?? ''
+    expect(main).toContain('max-w-[1320px]')
+    expect(main).toContain('mx-auto')
+  })
+
   it('offers a skip link to #content', () => {
     expect(render()).toContain('href="#content"')
   })

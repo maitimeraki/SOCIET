@@ -1,5 +1,5 @@
 import { Link, NavLink } from 'react-router-dom'
-import { CheckCircle, House, ListChecks, Plus, SquaresFour } from '@phosphor-icons/react'
+import { CheckCircle, House, ListChecks, Plus, SignOut, SquaresFour } from '@phosphor-icons/react'
 import { useAuthStore } from '../../auth/authStore'
 import { authLogout } from '../../api/rest'
 import HealthDot from './HealthDot'
@@ -93,9 +93,11 @@ export default function Rail() {
                 window.location.href = '/auth/signin'
               })
             }}
-            className={LABEL + ' min-h-11 font-mono text-mono text-accent underline underline-offset-4'}
+            className="flex min-h-11 w-full items-center justify-center gap-2 rounded-sm font-mono text-mono text-accent underline underline-offset-4 lg:justify-start"
           >
-            Sign out
+            {/* §7.3 — visible at 72px too, where the label is for screen readers only. */}
+            <SignOut size={16} aria-hidden="true" />
+            <span className="sr-only lg:not-sr-only">Sign out</span>
           </button>
         </div>
       </div>
