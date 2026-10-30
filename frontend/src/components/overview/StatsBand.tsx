@@ -19,7 +19,6 @@ export default function StatsBand(props: StatsBandProps) {
       <div className="border-t border-hairline bg-[image:var(--gradient-marked)] p-5 sm:border-l-0 sm:border-t-0">
         <p className="font-ui text-label uppercase tracking-[0.09em] text-ink-3">Decisions this month</p>
         <p className="tnum mt-2.5 font-mono text-[32px] leading-none tracking-[-0.04em] text-ink">{props.decisions}</p>
-        <p className="mt-2 font-mono text-micro text-ink-3">one filed overnight</p>
       </div>
       <div className="border-t border-hairline p-5 sm:border-l sm:border-t-0">
         <p className="font-ui text-label uppercase tracking-[0.09em] text-ink-3">Filed</p>

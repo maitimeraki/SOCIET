@@ -25,6 +25,15 @@ export function monthKeyUtc(date: Date): string {
   return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, '0')}`
 }
 
+/** A failed or interrupted run is not still working — its summary says which state it ended in. */
+// eslint-disable-next-line react-refresh/only-export-components -- recentState is the tested status rule
+export function recentState(run: RunSummary): RecentRow['state'] {
+  if (run.verdict_stance) return 'Filed'
+  if (run.status === 'failed') return 'Failed'
+  if (run.status === 'interrupted') return 'Interrupted'
+  return 'Deliberating'
+}
+
 export interface OverviewStats {
   decisions: number
   filed: number
@@ -174,10 +183,10 @@ export default function OverviewPage() {
           monthRuns.slice(0, 4).map((run) => ({
             runId: run.run_id,
             question: run.query,
-            state: run.verdict_stance ? 'Filed' : 'Deliberating',
+            state: recentState(run),
             stance: run.verdict_stance,
             share: run.verdict_confidence,
-            passes: `${run.rounds_executed} of 5`,
+            passes: `${run.rounds_executed}`,
             date: run.created_at.slice(0, 10),
           })),
         )
