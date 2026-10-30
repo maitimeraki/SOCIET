@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { MemoryRouter } from 'react-router-dom'
 import type { UploadRow } from '../api/types'
-import { BANNED_WORD, renderedText } from '../test/copyLaw'
+import { BANNED_TERMS, renderedText } from '../test/copyLaw'
 import { DocumentsPageView, type DocumentsPageViewProps } from './DocumentsPage'
 
 afterEach(() => vi.unstubAllGlobals())
@@ -62,9 +62,9 @@ describe('DocumentsPageView', () => {
   })
 
   it('carries no banned word in loaded, empty or failed state', () => {
-    expect(renderedText(render({ documents: [doc()] }))).not.toMatch(BANNED_WORD)
-    expect(renderedText(render({ documents: [] }))).not.toMatch(BANNED_WORD)
-    expect(renderedText(render({ documents: [], failed: true }))).not.toMatch(BANNED_WORD)
+    expect(renderedText(render({ documents: [doc()] }))).not.toMatch(BANNED_TERMS)
+    expect(renderedText(render({ documents: [] }))).not.toMatch(BANNED_TERMS)
+    expect(renderedText(render({ documents: [], failed: true }))).not.toMatch(BANNED_TERMS)
   })
 
   it('renders the reader when a document is selected', () => {

@@ -5,7 +5,7 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import { MemoryRouter } from 'react-router-dom'
 import { ruleClasses } from '../components/ui/Rule'
 // §13 — the one copy-law guard (list + stem-tolerant matcher), shared with every rendered-string test.
-import { BANNED_WORD, renderedText } from '../test/copyLaw'
+import { BANNED_TERMS, renderedText } from '../test/copyLaw'
 import Hero from './Hero'
 
 const html = renderToStaticMarkup(
@@ -160,7 +160,7 @@ describe('the shipped captures — real frames of the running product', () => {
 
 describe('the copy law (§13)', () => {
   it('holds over every rendered string on the page', () => {
-    expect(renderedText(html)).not.toMatch(BANNED_WORD)
+    expect(renderedText(html)).not.toMatch(BANNED_TERMS)
   })
 
   it('leaves no unresolved value in the rendered text', () => {

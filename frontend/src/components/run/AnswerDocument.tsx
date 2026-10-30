@@ -4,7 +4,7 @@ import { fmtScore } from '../../utils/format'
 import { NARRATIVE_FALLBACK_COPY } from '../verdict/NarrativeFallbackNotice'
 import { splitSections } from '../verdict/narrative'
 import EntityChips from '../verdict/EntityChips'
-import PositionMark from '../ui/PositionMark'
+import PositionMark, { stanceWord } from '../ui/PositionMark'
 import FiledSheet from '../ui/FiledSheet'
 import type { FiledDecision } from '../ui/FiledSheet'
 import Emphasis from '../common/Emphasis'
@@ -140,9 +140,6 @@ function sourceBlocks(sources: string[], corpusMissing: boolean): AnswerBlock[] 
   else if (!corpusMissing) blocks.push({ kind: 'text', text: 'No sources were recorded for this decision.' })
   return blocks
 }
-
-/** The customer reads the word, never the enum (§4.6) — the same word the position mark draws. */
-const stanceWord = (stance: string): string => stance[0] + stance.slice(1).toLowerCase()
 
 const dissentLine = (view: DissentingView): string => `${stanceWord(view.stance)} — ${view.view}`
 const evidenceLine = (item: EvidenceItem): string => `${item.entity} — ${item.claim}`

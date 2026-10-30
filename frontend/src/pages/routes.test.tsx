@@ -22,7 +22,7 @@ import RunsPage from './RunsPage'
 import ResultsPage from './ResultsPage'
 // §13 — the one copy-law guard (list + stem-tolerant matcher + tag-stripping reader), shared with
 // every rendered-string test.
-import { BANNED_WORD, renderedText } from '../test/copyLaw'
+import { BANNED_TERMS, BANNED_WORD, renderedText } from '../test/copyLaw'
 
 const appSource = readFileSync('src/App.tsx', 'utf8')
 
@@ -164,6 +164,6 @@ describe('the copy-law pattern itself catches banned words, whole-word only', ()
 
 describe('the copy law (§13) holds on the shell routes', () => {
   it.each(['/documents', '/runs', '/results'])('renders no banned word in the chrome at %s', (path) => {
-    expect(renderedText(renderShell(path))).not.toMatch(BANNED_WORD)
+    expect(renderedText(renderShell(path))).not.toMatch(BANNED_TERMS)
   })
 })

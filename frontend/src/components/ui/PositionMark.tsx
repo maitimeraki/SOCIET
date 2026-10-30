@@ -23,6 +23,15 @@ const WORD: Record<Position, string> = {
   NEGATIVE: 'Negative',
 }
 
+/**
+ * The word a position is written in. Unrecognised input is returned unchanged — an unknown stance
+ * must never render "undefined", and the customer reads a word, never the enum.
+ */
+// eslint-disable-next-line react-refresh/only-export-components -- the word helper is the pure rule the document export and its consumers share
+export function stanceWord(stance: string): string {
+  return WORD[stance as Position] ?? stance
+}
+
 /** The symbol each position is drawn with. */
 const SYMBOL: Record<Position, string> = {
   POSITIVE: '▲',

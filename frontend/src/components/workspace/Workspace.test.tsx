@@ -8,7 +8,7 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import { WorkspaceView, type MapSummary, type PaneState } from './Workspace'
 import { paneStateFrom, paneStorageKey } from './paneState'
 // §13 — the one copy-law guard, shared with every rendered-string test.
-import { BANNED_WORD, renderedText } from '../../test/copyLaw'
+import { BANNED_TERMS, renderedText } from '../../test/copyLaw'
 
 const MAP_ID = 'run-1'
 const HOST_ID = `workspace-map-${MAP_ID}`
@@ -208,7 +208,7 @@ describe('the split is resizable — the divider lives only in split (§9)', () 
 describe('the copy law (§13) governs every rendered string', () => {
   it('renders no banned word in any of the three states', () => {
     for (const state of ['split', 'expanded', 'minimised'] as const) {
-      expect(renderedText(render(state)), state).not.toMatch(BANNED_WORD)
+      expect(renderedText(render(state)), state).not.toMatch(BANNED_TERMS)
     }
   })
 })

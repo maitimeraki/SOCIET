@@ -33,7 +33,7 @@ import {
 } from './GraphCanvas'
 // §13 — the one copy-law guard. The canvas binds WebGL under Node and cannot be rendered in tests,
 // so its customer-visible copy is checked through the pure string helpers it renders from instead.
-import { BANNED_WORD } from '../../test/copyLaw'
+import { BANNED_TERMS } from '../../test/copyLaw'
 
 // No jsdom / no testing-library in this repo: the canvas is exercised through its
 // pure sync function. React/Sigma never mount, so mock the one DOM-bound import.
@@ -592,7 +592,7 @@ describe('the copy law (§13) governs every string the canvas renders (§8.5 —
       simplifiedViewNotice(1600),
     ].filter((line): line is string => line !== null)
     expect(rendered).not.toHaveLength(0)
-    for (const line of rendered) expect(line).not.toMatch(BANNED_WORD)
+    for (const line of rendered) expect(line).not.toMatch(BANNED_TERMS)
   })
 })
 

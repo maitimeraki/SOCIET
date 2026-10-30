@@ -14,7 +14,7 @@ import AuthLayout from '../auth/AuthLayout'
 import { emailError, fieldProblem, passwordError } from '../auth/authRules'
 import SignInPage from '../pages/SignInPage'
 import SignUpPage from '../pages/SignUpPage'
-import { BANNED_WORD, renderedText } from './copyLaw'
+import { BANNED_TERMS, renderedText } from './copyLaw'
 
 /** The whole surface, frame and form together, as a visitor sees it. */
 const surface = (path: 'signin' | 'signup') =>
@@ -48,8 +48,8 @@ const RETIRED = /survey|office|publishable|deliberation|specialist/i
 
 describe('the auth surface speaks the new world', () => {
   it('renders no banned word, on either form or the frame', () => {
-    expect(renderedText(signIn)).not.toMatch(BANNED_WORD)
-    expect(renderedText(signUp)).not.toMatch(BANNED_WORD)
+    expect(renderedText(signIn)).not.toMatch(BANNED_TERMS)
+    expect(renderedText(signUp)).not.toMatch(BANNED_TERMS)
   })
 
   it('carries no retired-world word, in any file — a comment counts too', () => {

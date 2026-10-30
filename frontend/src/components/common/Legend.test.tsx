@@ -5,7 +5,7 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import { STANCE_ORDER } from '../../run/selectors'
 import { PositionGlyph } from '../ui/PositionMark'
 import Legend from './Legend'
-import { BANNED_WORD, renderedText } from '../../test/copyLaw'
+import { BANNED_TERMS, renderedText } from '../../test/copyLaw'
 
 /** §4.6's symbols — the drawn form beside each word. */
 const SYMBOL: Record<string, string> = {
@@ -40,6 +40,6 @@ describe('Legend', () => {
     const html = renderToStaticMarkup(
       <Legend entries={STANCE_ORDER.map((stance) => ({ symbol: <PositionGlyph position={stance} ground="light" />, label: stance }))} />,
     )
-    expect(renderedText(html)).not.toMatch(BANNED_WORD)
+    expect(renderedText(html)).not.toMatch(BANNED_TERMS)
   })
 })

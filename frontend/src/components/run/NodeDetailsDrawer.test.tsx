@@ -15,7 +15,7 @@ import { fold } from '../../run/reducer'
 import type { AgentProfile, ProvenanceLink, RunEvent, Stance } from '../../run/events'
 import { NodeDetailsView, entryDetails, resolveSelection } from './NodeDetailsDrawer'
 // §13 — the one copy-law guard, shared with every rendered-string test.
-import { BANNED_WORD, renderedText } from '../../test/copyLaw'
+import { BANNED_TERMS, renderedText } from '../../test/copyLaw'
 import type { MapDetails } from './NodeDetailsDrawer'
 
 const OPINION_TYPE = 'Opinion'
@@ -280,11 +280,11 @@ describe('opening an entry from the map', () => {
 describe('the copy law (§13) governs every string the drawer renders', () => {
   it('renders no banned word for any kind of entry', () => {
     for (const node of [MATERIAL, SILENT_MATERIAL, LONELY, EXPERT, OPINION]) {
-      expect(renderedText(drawn(node)), node.label).not.toMatch(BANNED_WORD)
+      expect(renderedText(drawn(node)), node.label).not.toMatch(BANNED_TERMS)
     }
   })
 
   it('renders no banned word for a connection', () => {
-    expect(renderedText(draw(resolveSelection(run, NODES, EDGES, { kind: 'connection', id: Object.keys(EDGES)[0] })!))).not.toMatch(BANNED_WORD)
+    expect(renderedText(draw(resolveSelection(run, NODES, EDGES, { kind: 'connection', id: Object.keys(EDGES)[0] })!))).not.toMatch(BANNED_TERMS)
   })
 })

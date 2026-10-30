@@ -8,7 +8,7 @@ import WorkspaceShell from './WorkspaceShell'
 import { WorkspaceView, type MapSummary, type PaneState } from '../workspace/Workspace'
 import { useRunStore } from '../../run/runStore'
 // §13 — the one copy-law guard, shared with every rendered-string test.
-import { BANNED_WORD, renderedText } from '../../test/copyLaw'
+import { BANNED_TERMS, renderedText } from '../../test/copyLaw'
 
 // No jsdom / no testing-library (see GraphCanvas.test.tsx): the graph stack binds WebGL at import
 // under Node, so mock the one DOM-bound module the shell pulls in through `GraphCanvas`.
@@ -123,6 +123,6 @@ describe('the map host never unmounts across the pane states (§9.3, Ruling F17)
 
 describe('the copy law (§13) holds on the shell', () => {
   it.each(['/new', '/runs/run-1/floor'])('%s renders no banned word', (path) => {
-    expect(renderedText(renderShell(path))).not.toMatch(BANNED_WORD)
+    expect(renderedText(renderShell(path))).not.toMatch(BANNED_TERMS)
   })
 })

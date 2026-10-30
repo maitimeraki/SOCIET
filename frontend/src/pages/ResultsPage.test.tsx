@@ -5,7 +5,7 @@ import { DEBATE_CONFIG_DEFAULTS, type RunDoc, type RunSummary } from '../api/typ
 import { fold } from '../run/reducer'
 import { verdictView } from '../run/selectors'
 import { RUN_SAMPLE } from '../run/__fixtures__/run-sample'
-import { BANNED_WORD, renderedText } from '../test/copyLaw'
+import { BANNED_TERMS, renderedText } from '../test/copyLaw'
 import { VerdictsPageView, loadVerdicts, type VerdictsPageViewProps } from './ResultsPage'
 
 const view = verdictView(fold(RUN_SAMPLE))
@@ -50,7 +50,7 @@ describe('VerdictsPageView', () => {
   })
 
   it('carries no banned word', () => {
-    expect(renderedText(render())).not.toMatch(BANNED_WORD)
+    expect(renderedText(render())).not.toMatch(BANNED_TERMS)
   })
 })
 

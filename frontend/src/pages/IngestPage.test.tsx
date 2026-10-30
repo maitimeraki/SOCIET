@@ -5,7 +5,7 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import { MemoryRouter } from 'react-router-dom'
 import { runFileIngest, runUrlIngest } from '../api/ingestFlow'
 import DocCard from '../components/ingest/DocCard'
-import { BANNED_WORD, renderedText } from '../test/copyLaw'
+import { BANNED_TERMS, renderedText } from '../test/copyLaw'
 import type { DraftDoc } from '../wizard/draftStore'
 import IngestPage from './IngestPage'
 
@@ -169,13 +169,13 @@ describe('the ingest failure speaks the customer’s language (§13)', () => {
 
   it('the stall reason is clean, and clean once DocCard renders it', async () => {
     const reason = await failure({ status: 'failed' })
-    expect(reason).not.toMatch(BANNED_WORD)
-    expect(renderedText(docCardWith(reason))).not.toMatch(BANNED_WORD)
+    expect(reason).not.toMatch(BANNED_TERMS)
+    expect(renderedText(docCardWith(reason))).not.toMatch(BANNED_TERMS)
   })
 
   it('the no-sections reason is clean, and clean once DocCard renders it', async () => {
     const reason = await failure({ status: 'completed', result: {} })
-    expect(reason).not.toMatch(BANNED_WORD)
-    expect(renderedText(docCardWith(reason))).not.toMatch(BANNED_WORD)
+    expect(reason).not.toMatch(BANNED_TERMS)
+    expect(renderedText(docCardWith(reason))).not.toMatch(BANNED_TERMS)
   })
 })

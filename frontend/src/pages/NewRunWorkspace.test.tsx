@@ -7,7 +7,7 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import { MemoryRouter } from 'react-router-dom'
 import { NewRunWorkspaceView, stepFromParam, type WorkspaceStep } from './NewRunWorkspace'
 // §13 — the one copy-law guard, shared with every rendered-string test.
-import { BANNED_WORD, renderedText } from '../test/copyLaw'
+import { BANNED_TERMS, renderedText } from '../test/copyLaw'
 
 const STEPS = ['ingest', 'graph', 'society'] as const
 // §13: the visible step labels — the query value (`ingest`/`graph`/`society`) is an internal
@@ -100,6 +100,6 @@ describe('the copy law (§13) holds on the workspace at every step', () => {
   // The shared, stem-tolerant pattern, matched against the RENDERED TEXT only (tags/attributes
   // stripped), so `bg-bone` can never trip `\bround\b`.
   it.each(STEPS)('%s renders no banned word', (step) => {
-    expect(renderedText(renderStep(step))).not.toMatch(BANNED_WORD)
+    expect(renderedText(renderStep(step))).not.toMatch(BANNED_TERMS)
   })
 })

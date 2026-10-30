@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 // No jsdom / no testing-library in this repo (see AppErrorBoundary.test.tsx): render to static
 // markup in Node instead.
 import { renderToStaticMarkup } from 'react-dom/server'
-import { BANNED_WORD, renderedText } from '../../test/copyLaw'
+import { BANNED_TERMS, renderedText } from '../../test/copyLaw'
 import Label from './Label'
 
 describe('Label', () => {
@@ -25,7 +25,7 @@ describe('Label', () => {
 
   it('renders no banned word — the copy law holds over the kit', () => {
     const html = renderToStaticMarkup(<Label>Documents</Label>)
-    expect(renderedText(html)).not.toMatch(BANNED_WORD)
+    expect(renderedText(html)).not.toMatch(BANNED_TERMS)
   })
 
   it('keeps the element a site already had, so the sweep changes no structure', () => {

@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { MemoryRouter } from 'react-router-dom'
 import type { RunSummary } from '../api/types'
-import { BANNED_WORD, renderedText } from '../test/copyLaw'
+import { BANNED_TERMS, renderedText } from '../test/copyLaw'
 import { RunsPageView, type RunsPageViewProps } from './RunsPage'
 
 const run = (patch: Partial<RunSummary> = {}): RunSummary => ({
@@ -72,6 +72,6 @@ describe('RunsPageView', () => {
   })
 
   it('carries no banned word', () => {
-    expect(renderedText(render({ runs: [run()] }))).not.toMatch(BANNED_WORD)
+    expect(renderedText(render({ runs: [run()] }))).not.toMatch(BANNED_TERMS)
   })
 })

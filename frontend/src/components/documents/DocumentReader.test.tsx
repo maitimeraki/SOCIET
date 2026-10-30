@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { renderToStaticMarkup } from 'react-dom/server'
-import { BANNED_WORD, renderedText } from '../../test/copyLaw'
+import { BANNED_TERMS, renderedText } from '../../test/copyLaw'
 import { DocumentReaderView } from './DocumentReader'
 
 describe('DocumentReaderView', () => {
@@ -42,9 +42,9 @@ describe('DocumentReaderView', () => {
       renderedText(
         renderToStaticMarkup(<DocumentReaderView title="x" meta="y" text="The record." onClose={() => {}} />),
       ),
-    ).not.toMatch(BANNED_WORD)
+    ).not.toMatch(BANNED_TERMS)
     expect(
       renderedText(renderToStaticMarkup(<DocumentReaderView title="x" meta="y" text="" failed onClose={() => {}} />)),
-    ).not.toMatch(BANNED_WORD)
+    ).not.toMatch(BANNED_TERMS)
   })
 })

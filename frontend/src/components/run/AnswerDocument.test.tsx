@@ -5,10 +5,11 @@ import { describe, expect, it } from 'vitest'
 import { renderToStaticMarkup } from 'react-dom/server'
 import type { VerdictView } from '../../run/selectors'
 import { NARRATIVE_FALLBACK_COPY } from '../verdict/NarrativeFallbackNotice'
+import { stanceWord } from '../ui/PositionMark'
 import AnswerDocument, { answerSections, answerText, blockLines, sourceTitles } from './AnswerDocument'
 import type { AnswerBlock, AnswerInput } from './AnswerDocument'
 // §13 — the one copy-law guard, shared with every rendered-string test.
-import { BANNED_WORD, renderedText } from '../../test/copyLaw'
+import { BANNED_TERMS, renderedText } from '../../test/copyLaw'
 
 const SOURCES = ['Market research 2026', 'Finance brief']
 const QUESTION = 'Should we expand into Europe?'
@@ -53,7 +54,7 @@ const blockStrings = (block: AnswerBlock): string[] => {
       return block.items
     case 'stances':
       // The customer-facing word, not the enum — both surfaces must render the same word (§4.6).
-      return block.rows.flatMap((row) => [row.name, row.stance[0] + row.stance.slice(1).toLowerCase()])
+      return block.rows.flatMap((row) => [row.name, stanceWord(row.stance)])
     case 'entities':
       return [...block.supporting, ...block.opposing]
     case 'warnings':
@@ -81,13 +82,13 @@ describe('AnswerDocument — §8.5 the outcome, readable', () => {
   })
 
   it('carries no banned word, authored or exported (§13)', () => {
-    expect(renderedText(render())).not.toMatch(BANNED_WORD)
-    expect(answerText(input())).not.toMatch(BANNED_WORD)
+    expect(renderedText(render())).not.toMatch(BANNED_TERMS)
+    expect(answerText(input())).not.toMatch(BANNED_TERMS)
     // The fallback branch carries its own authored copy (NARRATIVE_FALLBACK_COPY) — scan it too.
     const fallback = input({ view: view({ narrative: '', narrativeStatus: 'fallback' }) })
     expect(answerText(fallback)).toContain(NARRATIVE_FALLBACK_COPY)
-    expect(answerText(fallback)).not.toMatch(BANNED_WORD)
-    expect(renderedText(render({ view: fallback.view }))).not.toMatch(BANNED_WORD)
+    expect(answerText(fallback)).not.toMatch(BANNED_TERMS)
+    expect(renderedText(render({ view: fallback.view }))).not.toMatch(BANNED_TERMS)
   })
 })
 
