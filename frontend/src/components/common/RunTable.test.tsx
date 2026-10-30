@@ -50,14 +50,14 @@ describe('RunTable — the decision list (§8.4)', () => {
   it('renders the outcome as the stance word beside its symbol', () => {
     // StanceChip draws symbol + colour + word together (§6/§9); the word is what proves the stance
     // is not a bare hue.
-    expect(render([RUN])).toContain('POSITIVE')
+    expect(render([RUN])).toContain('Positive')
   })
 
   it('says "still running" when a run is still going and has no verdict yet', () => {
     const html = render([{ ...RUN, status: 'running', verdict_stance: null }])
     expect(html).toContain('still running')
     expect(html).not.toContain('No outcome yet')
-    expect(html).not.toContain('POSITIVE') // no outcome claimed before one exists
+    expect(html).not.toContain('Positive') // no outcome claimed before one exists
   })
 
   it('says "No outcome yet" — never "still running" — for a finished run with no verdict', () => {

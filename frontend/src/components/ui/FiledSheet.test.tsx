@@ -17,7 +17,7 @@ describe('FiledSheet', () => {
   it('states the question, the position, the share, the case against and the sources', () => {
     const html = renderToStaticMarkup(<FiledSheet decision={DECISION} />)
     expect(html).toContain(DECISION.question)
-    expect(html).toContain('NEGATIVE') // the position, as symbol + word
+    expect(html).toContain('Negative') // the position, as symbol + word
     expect(html).toContain('0.82') // the weighted share
     expect(html).toContain(DECISION.caseAgainst)
     expect(html).toContain(DECISION.sources)

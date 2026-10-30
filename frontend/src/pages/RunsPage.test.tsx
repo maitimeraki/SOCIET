@@ -38,7 +38,7 @@ describe('RunsPageView', () => {
   it('renders every run with its outcome and status', () => {
     const html = render({ runs: [run()] })
     expect(html).toContain('Should we renew the lease?')
-    expect(html).toContain('NEGATIVE')
+    expect(html).toContain('Negative')
     expect(html).toContain('Complete')
     expect(html).toContain('/runs/r1')
   })
@@ -47,7 +47,7 @@ describe('RunsPageView', () => {
     const html = render({ runs: [run({ status: 'running', verdict_stance: null, rounds_executed: 2 })] })
     expect(html).toContain('still running')
     expect(html).toContain('2 passes')
-    expect(html).not.toContain('NEGATIVE')
+    expect(html).not.toContain('Negative')
   })
 
   it('renders the empty and failed states', () => {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { BANNED_WORD, renderedText } from './copyLaw'
+import { BANNED_TERMS, BANNED_WORD, renderedText } from './copyLaw'
 
 // The guard sees the text BETWEEN tags AND the four customer-visible attribute values. A prior bug
 // replaced each whole tag, so a banned word in aria-label/title/placeholder/alt was invisible.
@@ -36,5 +36,28 @@ describe('renderedText — the guard reads what the customer reads', () => {
 
   it('reads single-quoted attribute values', () => {
     expect(banned("<button aria-label='remove this agent'>x</button>")).toBe(true)
+  })
+})
+
+describe('the marketing-cliché list', () => {
+  it.each([
+    'AI-powered',
+    'seamless',
+    'elevate',
+    'unlock',
+    'revolutionize',
+    'supercharge',
+    '10x',
+    'next-gen',
+    'game-changing',
+    'trusted by',
+    'industry-leading',
+    'cutting-edge',
+    'empower',
+    'leverage',
+    'synergy',
+    'best-in-class',
+  ])('catches %s', (phrase) => {
+    expect(BANNED_TERMS.test(phrase)).toBe(true)
   })
 })

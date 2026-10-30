@@ -7,6 +7,14 @@ import { PositionGlyph } from '../ui/PositionMark'
 import Legend from './Legend'
 import { BANNED_WORD, renderedText } from '../../test/copyLaw'
 
+/** §4.6's symbols — the drawn form beside each word. */
+const SYMBOL: Record<string, string> = {
+  POSITIVE: '▲',
+  NEUTRAL: '●',
+  AMBIVALENT: '◐',
+  NEGATIVE: '▼',
+}
+
 describe('Legend', () => {
   it('renders a symbol beside every word, so a colour is never the only carrier', () => {
     const html = renderToStaticMarkup(
@@ -18,8 +26,10 @@ describe('Legend', () => {
         }))}
       />,
     )
-    expect((html.match(/<svg/g) ?? []).length).toBe(STANCE_ORDER.length)
-    for (const stance of STANCE_ORDER) expect(html).toContain(stance)
+    for (const stance of STANCE_ORDER) {
+      expect(html).toContain(SYMBOL[stance])
+      expect(html).toContain(stance)
+    }
   })
 
   it('renders nothing when there is nothing to key', () => {

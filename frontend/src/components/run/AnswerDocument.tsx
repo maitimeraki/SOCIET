@@ -141,7 +141,10 @@ function sourceBlocks(sources: string[], corpusMissing: boolean): AnswerBlock[] 
   return blocks
 }
 
-const dissentLine = (view: DissentingView): string => `${view.stance} — ${view.view}`
+/** The customer reads the word, never the enum (§4.6) — the same word the position mark draws. */
+const stanceWord = (stance: string): string => stance[0] + stance.slice(1).toLowerCase()
+
+const dissentLine = (view: DissentingView): string => `${stanceWord(view.stance)} — ${view.view}`
 const evidenceLine = (item: EvidenceItem): string => `${item.entity} — ${item.claim}`
 
 /** The section list, serialized as a self-contained markdown file — the same content, in text. */
@@ -163,7 +166,7 @@ export function blockLines(block: AnswerBlock): string[] {
     case 'listing':
       return block.items.map((item) => `- ${item}`)
     case 'stances':
-      return block.rows.map((row) => `- ${row.name} — ${row.stance}`)
+      return block.rows.map((row) => `- ${row.name} — ${stanceWord(row.stance)}`)
     case 'warnings':
       return block.items.map((item) => `- ${item}`)
     case 'entities': {

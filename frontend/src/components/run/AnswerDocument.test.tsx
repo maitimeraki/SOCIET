@@ -52,7 +52,8 @@ const blockStrings = (block: AnswerBlock): string[] => {
     case 'listing':
       return block.items
     case 'stances':
-      return block.rows.flatMap((row) => [row.name, row.stance])
+      // The customer-facing word, not the enum — both surfaces must render the same word (§4.6).
+      return block.rows.flatMap((row) => [row.name, row.stance[0] + row.stance.slice(1).toLowerCase()])
     case 'entities':
       return [...block.supporting, ...block.opposing]
     case 'warnings':
@@ -74,9 +75,9 @@ describe('AnswerDocument — §8.5 the outcome, readable', () => {
 
   it('renders a stance as symbol and colour and word, never a hue alone (§6/§9)', () => {
     const html = render()
-    expect(html).toContain('<svg') // the stance glyph
+    expect(html).toContain('▲') // the stance symbol
     expect(html).toContain('--color-pos-light') // the symbol's hue, not the word's
-    expect(html).toContain('>POSITIVE<') // the word beside it
+    expect(html).toContain('>Positive<') // the word beside it, never the enum
   })
 
   it('carries no banned word, authored or exported (§13)', () => {
@@ -115,7 +116,7 @@ describe('AnswerDocument — read and export are the same document', () => {
   it('sheet mode renders the filed sheet alone — no reading view, no export', () => {
     const html = renderToStaticMarkup(<AnswerDocument runId="r1" {...input()} variant="sheet" />)
     expect(html).toContain(QUESTION)
-    expect(html).toContain('POSITIVE') // the position, as symbol + word
+    expect(html).toContain('Positive') // the position, as symbol + word
     expect(html).toContain('0.82') // the weighted share
     expect(html).toContain('Cash flow is too tight this year.') // the case against
     expect(html).toContain('Market research 2026') // a source

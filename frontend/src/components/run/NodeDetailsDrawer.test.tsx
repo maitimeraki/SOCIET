@@ -222,7 +222,7 @@ describe('the drawer’s panel (§9.5)', () => {
 
   it('shows the held view with the app’s stance rendering and its confidence figure', () => {
     const argued = sectionOf(drawn(OPINION), 'Argued as')
-    expect(argued).toContain('POSITIVE')
+    expect(argued).toContain('Positive')
     expect(argued).toContain('0.82')
     expect(argued).toContain('Nordic capacity is underused.')
   })
