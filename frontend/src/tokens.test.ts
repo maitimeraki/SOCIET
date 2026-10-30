@@ -186,7 +186,7 @@ describe('the retired world', () => {
       if (basename(file) === GUARD_FILE) continue
       const text = readFileSync(file, 'utf8')
       for (const name of RETIRED) {
-        if (new RegExp(`\\b${name.replace(/[-/\\^$*+?.()|[\]{}]/g, '\\$&')}\\b`).test(text)) {
+        if (new RegExp(`(?<![\\w-])${name.replace(/[-/\\^$*+?.()|[\]{}]/g, '\\$&')}(?![\\w-])`).test(text)) {
           offenders.push(`${file}: ${name}`)
         }
       }

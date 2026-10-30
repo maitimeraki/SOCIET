@@ -10,9 +10,8 @@ import './home-demo.css'
  *
  * A **redesign** of the marketing homepage, built as a preview and not as a migration: `/` and
  * every shipped surface are untouched, and everything this page needs is scoped to `.demo-home`
- * (`home-demo.css`). The five named surfaces it is built from (`--color-page`, `--color-band`,
- * `--color-surface-sky`, `--color-surface-warm`, `--color-surface-plum`) are global tokens, so any
- * other page or component may take the same ones.
+ * (`home-demo.css`). The three grounds it is built from (`--color-bone`, `--color-sand`,
+ * `--color-paper`) are global tokens, so any other page or component may take the same ones.
  *
  * The order of the page is the order a stranger decides in, and every band has one job:
  *

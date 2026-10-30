@@ -17,9 +17,9 @@ import './hero.css'
  *
  * It replaced the retired landing sheet (`LandingPage` and its family), which is the world's
  * old voice. The bands and the rules it is built from are the kit's (`components/ui/Band.tsx`,
- * `components/ui/Rule.tsx`), so any other surface can take the same named surfaces instead of
- * copying this page's CSS. The five named surfaces (`--color-page`, `--color-band`,
- * `--color-surface-sky`, `--color-surface-warm`, `--color-surface-plum`) are global tokens.
+ * `components/ui/Rule.tsx`), so any other surface can take the same grounds instead of copying
+ * this page's CSS. The three grounds (`--color-bone`, `--color-sand`, `--color-paper`) are global
+ * tokens.
  *
  * The order of the page is the order a stranger decides in, and every band has one job:
  *
