@@ -1,14 +1,13 @@
 import type { TextareaHTMLAttributes } from 'react'
 
-// The one field baseline — `Input`'s ruled treatment (`border-b border-ink-3 bg-transparent`): no
-// box, no fill, and no radius to round, because a ruled baseline has no corners. The padding is
-// this control's own: a multi-line area is not the single-line field.
+// §8.2 — as `Input`, with the multi-line body: `resize-none`, 15px/23px copy, and the same
+// paper field on the record rule.
 
 export default function Textarea({ className = '', ...rest }: TextareaHTMLAttributes<HTMLTextAreaElement>) {
   return (
     <textarea
       {...rest}
-      className={`corner-tick w-full resize-none border-b border-ink-3 bg-transparent p-3 text-body text-ink placeholder:text-ink-2 focus:border-accent ${className}`}
+      className={`w-full resize-none rounded-sm border border-rule bg-paper p-4 text-[15px] leading-[23px] text-ink placeholder:text-ink-3 focus:border-accent ${className}`}
     />
   )
 }

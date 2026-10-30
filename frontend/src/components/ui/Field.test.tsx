@@ -7,16 +7,20 @@ import Input from './Input'
 import NumberField from './NumberField'
 
 describe('the field notebook', () => {
-  // Regression guard for the two live failures: a bare control must carry the
-  // focus affordance itself, and a shrink-wrapped one (society/ConfigPanel.tsx, a w-24 NumberField)
-  // must register the mark on the control rather than on the grid cell.
-  it('paints the registration tick on the control itself, bare or wrapped', () => {
-    expect(renderToStaticMarkup(<Input />)).toContain('corner-tick')
-    expect(renderToStaticMarkup(<NumberField value={3} min={1} max={9} onChange={() => {}} />)).toContain('corner-tick')
-    expect(renderToStaticMarkup(<Input prefix="N51°" />)).toContain('corner-tick')
+  // Regression guard: a bare control must carry the Quiet Room box itself, and a shrink-wrapped
+  // one (society/ConfigPanel.tsx, a w-24 NumberField) must keep the box on the control rather
+  // than on the grid cell.
+  it('sets the control on the Quiet Room box — 48px, paper, one record rule, the 8px corner', () => {
+    const input = renderToStaticMarkup(<Input />)
+    expect(input).toContain('h-12')
+    expect(input).toContain('bg-paper')
+    expect(input).toContain('border-rule')
+    expect(input).toContain('rounded-sm')
+    expect(renderToStaticMarkup(<NumberField value={3} min={1} max={9} onChange={() => {}} />)).toContain('h-12')
+    expect(renderToStaticMarkup(<Input prefix="N51°" />)).toContain('h-12')
   })
 
-  it('does not put the tick on the Field row, which stretches past the control', () => {
+  it('keeps the box on the control, not on the Field row, which stretches past it', () => {
     const html = renderToStaticMarkup(
       <Field label="Corpus name">
         <Input />
@@ -25,8 +29,8 @@ describe('the field notebook', () => {
     const rowTag = html.slice(0, html.indexOf('>') + 1) // the row's opening tag (F4: a <div>, the
     // note having moved out of the <label> so it is described, not named)
     expect(rowTag).toContain('<div')
-    expect(rowTag).not.toContain('corner-tick')
-    expect(html).toContain('<input class="corner-tick') // …and the control does carry it
+    expect(rowTag).not.toContain('h-12')
+    expect(html).toContain('<input class="h-12') // …and the control does carry the box
   })
 
   it('reserves the margin unconditionally, so an error never moves the control', () => {
@@ -38,12 +42,11 @@ describe('the field notebook', () => {
     expect(plain).not.toContain('field-invalid')
   })
 
-  it('announces the error and keeps the message in ink, not in the danger hue', () => {
+  it('announces the error and sets the message in the danger hue', () => {
     const html = renderToStaticMarkup(<Field label="Name" error="That name is taken."><Input /></Field>)
     expect(html).toContain('role="alert"')
     expect(html).toContain('That name is taken.')
-    expect(html).toContain('text-ink-2')
-    expect(html).not.toContain('text-danger')
+    expect(html).toContain('text-danger')
   })
 
   it('keeps the note out of the label, so it describes the control rather than naming it (F4)', () => {

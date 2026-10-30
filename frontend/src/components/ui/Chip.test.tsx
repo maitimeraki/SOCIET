@@ -6,20 +6,23 @@ import { BANNED_WORD, renderedText } from '../../test/copyLaw'
 import Chip, { StateChip } from './Chip'
 
 describe('Chip', () => {
-  it('is a small bordered tag on the radius token, never a literal', () => {
+  it('is a 24px mono caps tag on the radius token, never a literal', () => {
     const html = renderToStaticMarkup(<Chip>finance</Chip>)
-    expect(html).toContain('border')
+    expect(html).toContain('h-6')
     expect(html).toContain('rounded-xs')
+    expect(html).toContain('font-mono')
+    expect(html).toContain('uppercase')
     expect(html).not.toContain('rounded-[4px]')
   })
 
   it('takes its tone from the variant, not from the call site', () => {
     const neutral = renderToStaticMarkup(<Chip>finance</Chip>)
-    const status = renderToStaticMarkup(<Chip tone="status">Complete</Chip>)
-    const accent = renderToStaticMarkup(<Chip tone="accent">Live</Chip>)
-    expect(neutral).not.toBe(status)
-    expect(status).not.toBe(accent)
-    expect(accent).toContain('text-accent')
+    const verified = renderToStaticMarkup(<Chip tone="verified">Complete</Chip>)
+    const danger = renderToStaticMarkup(<Chip tone="danger">Failed</Chip>)
+    expect(neutral).not.toBe(verified)
+    expect(verified).not.toBe(danger)
+    expect(verified).toContain('text-ok')
+    expect(danger).toContain('border-rule')
   })
 
   it('carries an icon beside the word when it is given one', () => {
@@ -42,13 +45,15 @@ describe('StateChip', () => {
     }
   })
 
-  it('takes the accent while the run is live, and the status ink when it is not', () => {
-    expect(renderToStaticMarkup(<StateChip state="running" />)).toContain('text-accent')
-    expect(renderToStaticMarkup(<StateChip state="complete" />)).not.toContain('text-accent')
+  it('turns the live mark and settles it when the run is no longer live', () => {
+    expect(renderToStaticMarkup(<StateChip state="running" />)).toContain('animate-spin')
+    expect(renderToStaticMarkup(<StateChip state="running" />)).toContain('text-warn')
+    expect(renderToStaticMarkup(<StateChip state="complete" />)).not.toContain('animate-spin')
+    expect(renderToStaticMarkup(<StateChip state="complete" />)).toContain('text-ok')
   })
 
   it('renders no banned word — the copy law holds over the kit', () => {
-    const html = renderToStaticMarkup(<Chip tone="status">Complete</Chip>)
+    const html = renderToStaticMarkup(<Chip tone="verified">Complete</Chip>)
     expect(renderedText(html)).not.toMatch(BANNED_WORD)
   })
 })

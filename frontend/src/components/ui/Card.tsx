@@ -1,12 +1,12 @@
 import type { HTMLAttributes } from 'react'
 
 /**
- * §14.1 — a card is **an object the customer picks up**: the canvas, one soft shadow, and no
- * border at all. House style rule 5: a card carries a shadow and no rule, a record carries a
- * rule and no shadow. Never both, never neither — so this primitive has no border, ever.
+ * §8.3 / §6.4 — a card is **an object the customer picks up**: paper, a 16px corner, 24px of
+ * space inside, and one soft shadow. It carries no border: a card carries a shadow and no rule,
+ * a record carries a rule and no shadow. Never both — so this primitive has no border, ever.
  *
- * `pad` is the space inside the card, `radius` the corner, and `hover` lifts the object one
- * step when the pointer arrives. Everything else is a class the caller may add.
+ * The defaults are the Quiet Room card. `pad` and `radius` remain as overrides, and `hover`
+ * lifts the object one step when the pointer arrives.
  */
 export type CardElement = 'div' | 'article' | 'li' | 'section'
 
@@ -21,8 +21,8 @@ export type CardProps = {
 
 export default function Card({
   as = 'div',
-  pad = 16,
-  radius = 'md',
+  pad = 24,
+  radius = 'lg',
   hover = false,
   className = '',
   children,

@@ -115,9 +115,9 @@ describe('the map host never unmounts across the pane states (§9.3, Ruling F17)
 
   it('keeps the work and the map on one seam radius (§14.4)', () => {
     const html = renderPanes('split')
-    expect(tagAround(html, 'aria-label="The work"')).toContain('rounded-md')
-    expect(tagAround(html, 'aria-label="The map"')).toContain('rounded-md')
-    expect(tagAround(html, 'aria-label="The map"')).not.toContain('rounded-lg')
+    expect(tagAround(html, 'aria-label="The work"')).toContain('rounded-lg')
+    expect(tagAround(html, 'aria-label="The map"')).toContain('rounded-lg')
+    expect(tagAround(html, 'aria-label="The map"')).not.toContain('rounded-md')
   })
 })
 

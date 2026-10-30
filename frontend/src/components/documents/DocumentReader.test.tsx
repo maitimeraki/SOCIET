@@ -23,7 +23,7 @@ describe('DocumentReaderView', () => {
     const loading = renderToStaticMarkup(
       <DocumentReaderView title="x" meta="y" text="" loading onClose={() => {}} />,
     )
-    expect(loading).toContain('animate-pulse')
+    expect(loading).toContain('skeleton-shimmer')
     const failed = renderToStaticMarkup(
       <DocumentReaderView title="x" meta="y" text="" failed onClose={() => {}} onRetry={() => {}} />,
     )

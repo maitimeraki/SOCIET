@@ -24,16 +24,15 @@ export default function Field({
       })
     : children
   return (
-    // The left margin is reserved unconditionally, so the invalid hatch (§7.2) marks the entry
-    // without moving it. The corner registration tick (§6) belongs to the control, not to this
-    // row — a stretched row would register the mark against the grid cell, not the field.
+    // The left margin is reserved unconditionally, so the 3px danger hatch (§8.2) marks the entry
+    // without moving it. The hatch belongs to this row; the control owns its own box.
     <div className={`relative block pl-2.5 ${error ? 'field-invalid' : ''}`}>
       <label className="block">
         <Label className="mb-1 block">{label}</Label>
         {control}
       </label>
       {error ? (
-        <span id={noteId} role="alert" className="mt-1 block text-micro text-ink-2">
+        <span id={noteId} role="alert" className="mt-1 block text-micro text-danger">
           {error}
         </span>
       ) : hint ? (

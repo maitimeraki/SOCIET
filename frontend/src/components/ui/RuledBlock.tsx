@@ -28,7 +28,7 @@ export default function RuledBlock({
   className?: string
 }) {
   return (
-    <section className={`${ruleClasses('both')} py-3 ${className}`}>
+    <section className={`${ruleClasses('both')} py-4 ${className}`}>
       {(legendKey || title) && (
         <header className="mb-2 flex items-baseline gap-2">
           {legendKey && <span className="font-mono text-mono text-ink-3">{legendKey}</span>}

@@ -27,7 +27,7 @@ describe('Meter', () => {
     const html = renderToStaticMarkup(<Meter value={null} label="share" display="—" />)
     expect(html).toContain('—')
     expect(html).not.toContain('style="width:')
-    expect(html).toContain('bg-hairline') // the track is still drawn
+    expect(html).toContain('bg-sand') // the track is still drawn
   })
 
   it('takes the accent fill or the quiet ink fill', () => {
@@ -40,8 +40,10 @@ describe('Meter', () => {
     expect(renderToStaticMarkup(<Meter value={1} label="s" display="1" width="full" />)).toContain('flex-1')
   })
 
-  it('rounds its track on the radius token, never a literal', () => {
-    expect(renderToStaticMarkup(<Meter value={1} label="s" display="1" />)).toContain('rounded-xs')
+  it('draws a 6px track on the radius token, never a literal', () => {
+    const html = renderToStaticMarkup(<Meter value={1} label="s" display="1" />)
+    expect(html).toContain('h-1.5')
+    expect(html).toContain('rounded-xs')
   })
 
   it('renders no banned word — the copy law holds over the kit', () => {

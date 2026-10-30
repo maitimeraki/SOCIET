@@ -159,15 +159,15 @@ describe('the verdict opens itself once, and only with a verdict', () => {
   })
 })
 
-describe('the debate floor keeps the card radius (§14.4)', () => {
+describe('the debate floor takes the Quiet Room card radius (§14.4)', () => {
   // The work pane and the map pane are the shell's (see WorkspaceShell.test.tsx); the floor card is
-  // the page's own raised surface and keeps the same 10px radius, never the 16px panel one.
+  // the page's own raised surface and takes the card's 16px corner.
   it('gives the debate floor the card radius', () => {
     const cards = [...render('floor').matchAll(/<[a-z]+[^>]*shadow-card[^>]*>/g)].map((match) => match[0])
     expect(cards).toHaveLength(1)
     for (const card of cards) {
-      expect(card).toContain('rounded-md')
-      expect(card).not.toContain('rounded-lg')
+      expect(card).toContain('rounded-lg')
+      expect(card).not.toContain('rounded-md')
     }
   })
 })

@@ -118,8 +118,9 @@ describe('the kit — the vocabulary the page is built from', () => {
     // so the page renders fifteen hairlines there, and one fewer would mean a site went
     // hand-rolled. The page's own FiledSheet drew three of those rules; the kit's FiledSheet
     // draws four, and the panel's four turns draw the rule in its dark tone — the same class,
-    // on the map's own hairline. 15 − 3 + 4 + 4 = 20.
-    expect(count(html, 'rule-t')).toBe(20)
+    // on the map's own hairline. The ten FAQ Disclosures now open on the kit's own top rule.
+    // 15 − 3 + 4 + 4 + 10 = 30.
+    expect(count(html, 'rule-t')).toBe(30)
   })
 
   it('takes the panel’s hairlines from the kit in the map’s own rule', () => {
@@ -136,10 +137,10 @@ describe('the kit — the vocabulary the page is built from', () => {
     expect(count(html, 'border-t border-hairline')).toBe(0)
   })
 
-  it('draws every FAQ separator with the kit’s own rule', () => {
-    // The Disclosure draws its bottom rule from the kit; the page drops it in CSS
-    // (`.hero-faq > div`) and draws the page’s own rule between the items instead.
-    expect(count(html, 'rule-b')).toBe(10)
+  it('draws every FAQ separator with the kit’s own top rule', () => {
+    // The Disclosure opens on the kit's top rule; the page draws no hand-rolled separator.
+    expect(count(html, '<details')).toBe(10)
+    expect(count(html, 'rule-b')).toBe(0)
     expect(count(html, 'border-hairline')).toBe(0)
   })
 })

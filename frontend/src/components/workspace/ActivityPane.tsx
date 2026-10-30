@@ -6,8 +6,8 @@ import Card from '../ui/Card'
  *
  * It is hidden with `hidden` when the map is expanded, never unmounted, so returning to split does not
  * remount the work either. On stacked widths it sits above the map (§9 responsive) and takes the right
- * column once the panes sit side by side. The pane is the kit's `Card`, so its 10px radius is the same
- * 10px the map pane sits against — one seam, one radius (§14.4).
+ * column once the panes sit side by side. The pane is the kit's `Card`, so its 16px radius is the same
+ * 16px the map pane sits against — one seam, one radius (§14.4).
  */
 export default function ActivityPane({ hidden, children }: { hidden?: boolean; children: ReactNode }) {
   return (

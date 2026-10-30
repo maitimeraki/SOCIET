@@ -18,8 +18,11 @@
  */
 export type RuleSide = 'top' | 'bottom' | 'both' | 'around' | 'left' | 'right'
 
-/** The rule's ground: the light surfaces, or the map's own dark surface. */
-export type RuleTone = 'light' | 'dark'
+/**
+ * The rule's ground: the light surfaces, the map's own dark surface, or the decorative hairline
+ * used between things that are not records.
+ */
+export type RuleTone = 'light' | 'dark' | 'hair'
 
 const RULE: Record<RuleSide, string> = {
   top: 'rule-t',
@@ -33,10 +36,13 @@ const RULE: Record<RuleSide, string> = {
 /**
  * The rule class for a side and a tone. The caller chooses the side; the hairline itself is the
  * kit's. `dark` adds the map's rule, so the same vocabulary draws the column hairline on the
- * light surface and the row hairline on the dark one.
+ * light surface and the row hairline on the dark one. `hair` swaps in the decorative hairline
+ * for a divider that is not a record boundary.
  */
 export function ruleClasses(side: RuleSide = 'top', tone: RuleTone = 'light'): string {
-  return tone === 'dark' ? `${RULE[side]} rule-dark` : RULE[side]
+  if (tone === 'dark') return `${RULE[side]} rule-dark`
+  if (tone === 'hair') return `${RULE[side]} rule-hair`
+  return RULE[side]
 }
 
 // §14.1's acceptance row 12 asks every kit file for a default export. `Rule` is a vocabulary, not

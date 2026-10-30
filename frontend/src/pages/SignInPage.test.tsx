@@ -21,8 +21,8 @@ const frame = renderToStaticMarkup(
 )
 
 describe('SignInPage — the door back in (§14.2)', () => {
-  it('renders the ruled-baseline fields and the door button', () => {
-    expect(page).toContain('corner-tick') // Input's registration mark, on the control itself
+  it('renders the Quiet Room fields and the door button', () => {
+    expect(page).toContain('border-rule') // Input's record rule, on the control itself
     expect(page).toContain('type="email"')
     expect(page).toContain('type="password"')
     // The door label is the submit control's own text, not a page-wide substring the heading

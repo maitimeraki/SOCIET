@@ -42,7 +42,8 @@
   background: var(--color-paper);
 }
 
+/* Pine is a flat section surface, never the map's ramp: a gradient belongs to the map alone. */
 .band--dark {
-  background: var(--gradient-map);
+  background: var(--color-map-ground);
   color: var(--color-map-ink);
 }

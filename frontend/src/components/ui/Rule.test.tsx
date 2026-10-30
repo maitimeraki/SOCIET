@@ -27,6 +27,11 @@ describe('Rule — the record vocabulary', () => {
     expect(ruleClasses('top', 'light')).not.toContain('rule-dark')
   })
 
+  it('takes the hair tone for a decorative divider', () => {
+    expect(ruleClasses('top', 'hair')).toContain('rule-hair')
+    expect(ruleClasses('top', 'light')).not.toContain('rule-hair')
+  })
+
   it('exports the vocabulary itself as the default, so every kit file has one', () => {
     expect(named).toBe(ruleClasses)
   })

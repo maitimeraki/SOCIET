@@ -2,11 +2,11 @@ import type { ReactNode } from 'react'
 import { ruleClasses } from './Rule'
 
 /**
- * §14.1 — the step from a page title to a section: the title, the optional lead beneath it, and
+ * §8.1 — the step from a page title to a section: the title, the optional lead beneath it, and
  * the rule that closes the block.
  *
- * The title is 24/30 in ink, the lead is one line of body copy, and the rule is the kit's own —
- * a hairline on the heading block itself, never a divider node standing between things.
+ * The title is Fraunces at `text-title` in ink, the lead is one line of body copy, and the rule
+ * is the kit's own — a hairline on the heading block itself, never a divider node between things.
  */
 export type SectionHeadingProps = {
   /** The heading level: a page's section takes 2, a section's own sub-block takes 3. */
@@ -19,7 +19,7 @@ export type SectionHeadingProps = {
   className?: string
 }
 
-const TITLE = 'text-heading text-ink'
+const TITLE = 'font-display text-title text-ink'
 
 export default function SectionHeading({
   level = 2,

@@ -26,8 +26,8 @@ export default function DefinitionList({
   className?: string
 }) {
   const dark = tone === 'dark'
-  const term = dark ? 'text-map-ink-2' : 'text-ink-3'
-  const value = dark ? 'text-map-ink' : 'text-ink-2'
+  const term = dark ? 'text-micro uppercase tracking-[0.08em] text-map-ink-2' : 'text-micro uppercase tracking-[0.08em] text-ink-3'
+  const value = dark ? 'text-body-sm text-map-ink' : 'text-body-sm text-ink'
   return (
     <dl className={`${ruleClasses('around', tone)} ${className}`}>
       {items.map((item, index) => (

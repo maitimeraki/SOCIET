@@ -13,6 +13,12 @@ describe('Card', () => {
     expect(html).not.toMatch(/border(-[trblxy])?-/)
   })
 
+  it('takes the Quiet Room card by default — 24px inside, a 16px corner', () => {
+    const html = renderToStaticMarkup(<Card>body</Card>)
+    expect(html).toContain('p-6')
+    expect(html).toContain('rounded-lg')
+  })
+
   it('pads by the number the caller asks for', () => {
     expect(renderToStaticMarkup(<Card pad={16}>body</Card>)).toContain('p-4')
     expect(renderToStaticMarkup(<Card pad={24}>body</Card>)).toContain('p-6')

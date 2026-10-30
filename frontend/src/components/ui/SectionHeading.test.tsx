@@ -11,8 +11,10 @@ describe('SectionHeading', () => {
     expect(renderToStaticMarkup(<SectionHeading level={3} title="Your decisions" />)).toContain('<h3')
   })
 
-  it('sets the title in the section title face', () => {
-    expect(renderToStaticMarkup(<SectionHeading title="Your decisions" />)).toContain('text-heading')
+  it('sets the title in Fraunces at the title step', () => {
+    const html = renderToStaticMarkup(<SectionHeading title="Your decisions" />)
+    expect(html).toContain('font-display')
+    expect(html).toContain('text-title')
   })
 
   it('carries the lead when there is one, and nothing when there is not', () => {

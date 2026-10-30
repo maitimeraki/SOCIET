@@ -89,24 +89,23 @@ describe('the auth surface speaks the new world', () => {
     expect(signIn).toContain('Worked example')
   })
 
-  it('puts every field on Input’s ruled baseline, and no field in a box', () => {
+  it('puts every field on the Quiet Room box — 48px, paper, one record rule, the 8px corner', () => {
     for (const html of [signIn, signUp]) {
       const inputs = html.match(/<input[^>]*>/g) ?? []
       expect(inputs.length).toBeGreaterThan(0)
       for (const input of inputs) {
         const classes = (input.match(/class="([^"]*)"/)?.[1] ?? '').split(' ')
-        expect(classes).toContain('border-b')
-        expect(classes).toContain('border-ink-3')
-        expect(classes).toContain('bg-transparent')
-        expect(classes).not.toContain('border') // no box around the field
-        expect(classes.some((name) => name.startsWith('rounded'))).toBe(false)
+        expect(classes).toContain('h-12')
+        expect(classes).toContain('border')
+        expect(classes).toContain('border-rule')
+        expect(classes).toContain('bg-paper')
+        expect(classes).toContain('rounded-sm')
       }
     }
   })
 
-  it('gives the focus state its own visual — the accent rule and the corner tick', () => {
+  it('gives the focus state its own visual — the evergreen rule', () => {
     for (const html of [signIn, signUp]) {
-      expect(html).toContain('corner-tick')
       expect(html).toContain('focus:border-accent')
     }
   })
