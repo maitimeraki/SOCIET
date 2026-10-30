@@ -5,8 +5,12 @@ describe('format', () => {
   it('formats integers with thousands separators', () => {
     expect(fmtInt(1080)).toBe('1,080')
   })
-  it('formats a corpus figure as whole MB, then GB', () => {
+  it('formats a material figure in bytes, KB, MB, then GB', () => {
+    expect(fmtBytes(512)).toBe('512 B')
+    expect(fmtBytes(20_480)).toBe('20 KB')
+    expect(fmtBytes(840_000)).toBe('840 KB')
     expect(fmtBytes(620_000_000)).toBe('620 MB')
+    expect(fmtBytes(2_400_000)).toBe('2 MB')
     expect(fmtBytes(2_000_000_000)).toBe('2 GB')
     expect(fmtBytes(2_500_000_000)).toBe('2.5 GB')
     expect(fmtBytes(12_000_000_000)).toBe('12 GB')

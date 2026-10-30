@@ -72,9 +72,15 @@ describe('DocumentsPageView', () => {
   it('renders the reader when a document is selected', () => {
     const html = render({
       documents: [doc()],
-      selected: { document: doc(), text: 'The lease renews for a further five years.', loading: false, failed: false },
+      selected: {
+        document: doc({ bytes: 840_000 }),
+        text: 'The lease renews for a further five years.',
+        loading: false,
+        failed: false,
+      },
     })
     expect(html).toContain('The lease renews for a further five years.')
+    expect(html).toContain('840 KB')
     expect(html).toContain('Close document')
   })
 })
@@ -94,5 +100,11 @@ describe('the documents table', () => {
   it('says the read state in words, never in colour alone', () => {
     const html = render({ documents: [doc({ id: 'u2', read: false })] })
     expect(html).toContain('Reading')
+  })
+
+  it('measures a small file in KB rather than zero megabytes', () => {
+    const html = render({ documents: [doc({ id: 'u3', bytes: 840_000 })] })
+    expect(html).toContain('840 KB')
+    expect(html).not.toContain('0 MB')
   })
 })

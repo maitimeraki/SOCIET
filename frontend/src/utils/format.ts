@@ -7,10 +7,17 @@ const pad = (n: number): string => String(n).padStart(2, '0')
 
 export const fmtInt = (n: number): string => INT.format(Math.round(n))
 
-/** A corpus figure for a customer: whole MB below 1 GB, then GB (one decimal below 10 GB). */
+/**
+ * A material figure for a customer: whole bytes, KB and MB below 1 GB, then GB (one decimal below
+ * 10 GB). No unit is ever skipped, so a small file never reads as `0 MB`.
+ */
 export const fmtBytes = (bytes: number): string => {
+  const KB = 1_000
+  const MB = 1_000_000
   const GB = 1_000_000_000
-  if (bytes < GB) return `${Math.round(bytes / 1_000_000)} MB`
+  if (bytes < KB) return `${Math.round(bytes)} B`
+  if (bytes < MB) return `${Math.round(bytes / KB)} KB`
+  if (bytes < GB) return `${Math.round(bytes / MB)} MB`
   const gb = bytes / GB
   return `${gb < 10 ? Number(gb.toFixed(1)) : Math.round(gb)} GB`
 }
