@@ -7,7 +7,7 @@ import { buttonClasses } from '../components/ui/Button'
 import EmptyState from '../components/ui/EmptyState'
 import ErrorState from '../components/ui/ErrorState'
 import Skeleton from '../components/ui/Skeleton'
-import { fmtDate, fmtInt } from '../utils/format'
+import { fmtBytes, fmtDate, fmtInt } from '../utils/format'
 
 export interface DocumentsPageViewProps {
   documents: UploadRow[]
@@ -21,7 +21,7 @@ export interface DocumentsPageViewProps {
 }
 
 const readerMeta = (document: UploadRow) =>
-  `Added ${fmtDate(document.created_at)} · ${fmtInt(document.bytes)} bytes · ${document.dataset_name ?? 'Not in a corpus yet'}`
+  `Added ${fmtDate(document.created_at)} · ${fmtBytes(document.bytes)} · ${document.dataset_name ?? 'Not in a corpus yet'}`
 
 export function DocumentsPageView({
   documents,
@@ -40,39 +40,39 @@ export function DocumentsPageView({
     <div>
       <header className="flex flex-wrap items-end justify-between gap-4 border-b border-rule pb-6">
         <div>
-          <h1 className="font-ui text-display text-ink">Documents</h1>
-          <p className="mt-2 max-w-[60ch] text-body text-ink-2">
-            Everything you've provided, and what has been read of it.
-          </p>
+          <p className="font-ui text-label uppercase tracking-[0.09em] text-ink-3">Documents</p>
+          <h1 className="font-display text-display font-medium tracking-[-0.03em] text-ink">Your material</h1>
+          <p className="mt-2 max-w-[60ch] font-ui text-body-sm text-ink-2">Everything your panel argues from.</p>
         </div>
-        <Link to="/new?step=ingest" className={buttonClasses('secondary', 40, 'min-h-11')}>
-          Add material
+        <Link to="/new?step=ingest" className={buttonClasses('primary', 48, 'min-h-11')}>
+          Add documents
         </Link>
       </header>
 
-      <p className="mb-2 font-mono text-micro text-ink-3">
-        {fmtInt(documents.length)} DOCUMENTS · {fmtInt(read)} READ · {fmtInt(corpora)} CORPORA
+      <p className="mb-3 font-mono text-micro text-ink-3">
+        {fmtInt(documents.length)} DOCUMENTS &middot; {fmtInt(read)} READ &middot; {fmtInt(corpora)} CORPORA
       </p>
 
       {failed ? (
         <ErrorState
           title="Couldn't reach the server"
-          detail={failDetail || 'Your documents load when the server is back.'}
+          detail={failDetail || 'Nothing was lost.'}
           onRetry={onRetry}
           retryLabel="Try again"
         />
       ) : loading ? (
-        <div className="space-y-2">
-          {[0, 1, 2, 3].map((index) => (
-            <Skeleton key={index} className="h-12 w-full" />
+        <div>
+          {[0, 1, 2, 3, 4].map((index) => (
+            <Skeleton key={index} className="h-[52px] w-full" />
           ))}
         </div>
       ) : documents.length === 0 ? (
         <EmptyState
-          line="Add your first document. Everything your panel argues from comes from here."
+          title="Start with your material"
+          line="Everything else follows from it."
           action={
             <Link to="/new?step=ingest" className={buttonClasses('primary', 40, 'min-h-11')}>
-              Upload documents
+              Add your first document
             </Link>
           }
         />
@@ -80,11 +80,11 @@ export function DocumentsPageView({
         <table className="w-full border-collapse">
           <thead>
             <tr>
-              {['Document', 'Corpus', 'Added', 'State'].map((heading) => (
+              {['Name', 'Added', 'Size', 'Read', 'Corpus'].map((heading) => (
                 <th
                   key={heading}
                   scope="col"
-                  className="border-b border-rule px-0 pb-2 text-left font-mono text-[8px] uppercase tracking-[0.12em] text-ink-3"
+                  className="border-b border-rule px-0 pb-2 text-left font-ui text-label uppercase tracking-[0.08em] text-ink-3"
                 >
                   {heading}
                 </th>
@@ -96,9 +96,9 @@ export function DocumentsPageView({
               <tr
                 key={document.id}
                 onClick={() => onSelect(document)}
-                className="cursor-pointer border-b border-rule/40 hover:bg-sand"
+                className="h-[52px] cursor-pointer border-b border-rule/40 hover:bg-accent-soft"
               >
-                <td className="py-3 pr-3 text-body text-ink">
+                <td className="pr-3 font-ui text-body-sm text-ink">
                   <button
                     type="button"
                     data-document-id={document.id}
@@ -106,16 +106,25 @@ export function DocumentsPageView({
                       event.stopPropagation()
                       onSelect(document)
                     }}
-                    className="min-h-11 text-left text-body text-ink"
+                    className="min-h-11 text-left font-ui text-body-sm font-medium text-ink"
                   >
                     {document.name}
                   </button>
                 </td>
-                <td className="py-3 pr-3 text-body text-ink-2">{document.dataset_name ?? 'Not in a corpus yet'}</td>
-                <td className="py-3 pr-3 font-mono text-mono text-ink-3">{fmtDate(document.created_at)}</td>
-                <td className="py-3 font-mono text-micro text-ink-2">
-                  {document.read ? '● Read' : '○ Not read yet'}
+                <td className="pr-3 font-mono text-mono text-ink-3">{fmtDate(document.created_at)}</td>
+                <td className="pr-3 font-mono text-mono text-ink-3">{fmtBytes(document.bytes)}</td>
+                <td>
+                  {document.read ? (
+                    <span className="inline-flex min-h-6 items-center gap-1.5 rounded-xs bg-accent-soft px-2 font-mono text-micro uppercase tracking-[0.04em] text-ok">
+                      <i className="h-1.5 w-1.5 rounded-full bg-ok" aria-hidden="true" />Read
+                    </span>
+                  ) : (
+                    <span className="inline-flex min-h-6 items-center gap-1.5 rounded-xs bg-sand px-2 font-mono text-micro uppercase tracking-[0.04em] text-ink-2">
+                      <i className="h-1.5 w-1.5 rounded-full bg-ink-3" aria-hidden="true" />Reading
+                    </span>
+                  )}
                 </td>
+                <td className="font-ui text-body-sm text-ink-2">{document.dataset_name ?? 'Not in a corpus yet'}</td>
               </tr>
             ))}
           </tbody>

@@ -85,25 +85,25 @@ describe('the retired routes redirect into the overview', () => {
 
 describe('a section page inside the guard', () => {
   it('renders the page when the visitor is authed', () => {
-    expect(renderGuarded('authed', '/documents', DocumentsPage)).toContain('>Documents</h1>')
+    expect(renderGuarded('authed', '/documents', DocumentsPage)).toContain('>Your material</h1>')
   })
 
   it('renders neither the page nor a sign-in page while the session is unknown', () => {
     const html = renderGuarded('unknown', '/documents', DocumentsPage)
-    expect(html).not.toContain('>Documents</h1>')
+    expect(html).not.toContain('>Your material</h1>')
     expect(html).toContain('Checking your session')
   })
 
   it('renders no page for an anon visitor — the guard redirects (a Navigate, inert under SSR)', () => {
     const html = renderGuarded('anon', '/documents', DocumentsPage)
-    expect(html).not.toContain('>Documents</h1>')
+    expect(html).not.toContain('>Your material</h1>')
     expect(html).not.toContain('Checking your session')
   })
 })
 
 describe('the three sections are real pages, not redirects', () => {
   it('renders Documents at /documents', () => {
-    expect(renderGuarded('authed', '/documents', DocumentsPage)).toContain('>Documents</h1>')
+    expect(renderGuarded('authed', '/documents', DocumentsPage)).toContain('>Your material</h1>')
   })
 
   it('renders Runs at /runs', () => {
