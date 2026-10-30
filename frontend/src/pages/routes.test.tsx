@@ -26,9 +26,9 @@ import { BANNED_TERMS, BANNED_WORD, renderedText } from '../test/copyLaw'
 
 const appSource = readFileSync('src/App.tsx', 'utf8')
 
-/** A `<Route path="…" element={<Navigate to="/runs" replace />} />`, whitespace tolerated. */
-const redirectsToRuns = (path: string) =>
-  new RegExp(`<Route\\s+path="${path}"\\s+element=\\{<Navigate\\s+to="/runs"\\s+replace\\s*/>\\}\\s*/>`).test(appSource)
+/** A `<Route path="…" element={<Navigate to="/overview" replace />} />`, whitespace tolerated. */
+const redirectsToOverview = (path: string) =>
+  new RegExp(`<Route\\s+path="${path}"\\s+element=\\{<Navigate\\s+to="/overview"\\s+replace\\s*/>\\}\\s*/>`).test(appSource)
 
 /** The section rendered through the real guard, its data supplied as a prop (zustand v5's SSR
  *  snapshot is the initial `unknown` state, so a store-driven render could only be asserted as a
@@ -68,9 +68,9 @@ function currentHref(html: string): string | undefined {
   return marked?.match(/href="([^"]*)"/)?.[1]
 }
 
-describe('the retired routes redirect into the runs list', () => {
-  it.each(['/dashboard', '/panel'])('%s redirects to /runs', (path) => {
-    expect(redirectsToRuns(path)).toBe(true)
+describe('the retired routes redirect into the overview', () => {
+  it.each(['/dashboard', '/panel'])('%s redirects to /overview', (path) => {
+    expect(redirectsToOverview(path)).toBe(true)
   })
 
   it('no longer imports or renders the one-page dashboard', () => {

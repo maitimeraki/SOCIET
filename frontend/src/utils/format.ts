@@ -7,6 +7,14 @@ const pad = (n: number): string => String(n).padStart(2, '0')
 
 export const fmtInt = (n: number): string => INT.format(Math.round(n))
 
+/** A corpus figure for a customer: whole MB below 1 GB, then GB (one decimal below 10 GB). */
+export const fmtBytes = (bytes: number): string => {
+  const GB = 1_000_000_000
+  if (bytes < GB) return `${Math.round(bytes / 1_000_000)} MB`
+  const gb = bytes / GB
+  return `${gb < 10 ? Number(gb.toFixed(1)) : Math.round(gb)} GB`
+}
+
 export const fmtPct = (n: number, digits = 0): string => `${(n * 100).toFixed(digits)}%`
 
 export const fmtScore = (n: number, digits = 2): string => n.toFixed(digits)

@@ -1,9 +1,15 @@
 import { describe, expect, it } from 'vitest'
-import { fmtDate, fmtElapsed, fmtInt, fmtPct, fmtScore, truncateId } from './format'
+import { fmtBytes, fmtDate, fmtElapsed, fmtInt, fmtPct, fmtScore, truncateId } from './format'
 
 describe('format', () => {
   it('formats integers with thousands separators', () => {
     expect(fmtInt(1080)).toBe('1,080')
+  })
+  it('formats a corpus figure as whole MB, then GB', () => {
+    expect(fmtBytes(620_000_000)).toBe('620 MB')
+    expect(fmtBytes(2_000_000_000)).toBe('2 GB')
+    expect(fmtBytes(2_500_000_000)).toBe('2.5 GB')
+    expect(fmtBytes(12_000_000_000)).toBe('12 GB')
   })
   it('formats shares as percent', () => {
     expect(fmtPct(0.83)).toBe('83%')
