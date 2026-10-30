@@ -17,6 +17,11 @@ describe('the Quiet Room buttons', () => {
     expect(buttonClasses('secondary')).not.toContain('after:border-r')
   })
 
+  it('rules the ghost underline in the record rule, never the decorative hairline', () => {
+    expect(buttonClasses('ghost')).toContain('decoration-rule')
+    expect(buttonClasses('ghost')).not.toContain('decoration-hairline')
+  })
+
   it('keeps the 44px touch target below 640px', () => {
     expect(buttonClasses('primary')).toContain('max-sm:min-h-11')
   })

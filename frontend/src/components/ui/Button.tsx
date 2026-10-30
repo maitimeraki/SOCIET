@@ -14,9 +14,11 @@ const VARIANT: Record<ButtonVariant, string> = {
   primary: 'action-fill rounded-md shadow-card hover:shadow-sheet',
   // secondary — paper, one record rule, an ink label.
   secondary: 'border border-rule bg-paper text-ink hover:bg-sand',
-  // ghost — the underlined measurement link: mono, ruled beneath, no box.
+  // ghost — the underlined measurement link: mono, ruled beneath, no box. The underline is the
+  // variant's only affordance, so it takes the record rule (§4.7: meaningful UI boundaries ≥3:1);
+  // the decorative hairline is never a control's sole boundary.
   ghost:
-    'font-mono text-mono text-ink-2 underline underline-offset-4 decoration-hairline hover:text-ink hover:decoration-accent',
+    'font-mono text-mono text-ink-2 underline underline-offset-4 decoration-rule hover:text-ink hover:decoration-accent',
   // danger — paper, one danger rule, a danger label.
   danger: 'border border-rule bg-paper text-danger hover:bg-danger/10',
 }
