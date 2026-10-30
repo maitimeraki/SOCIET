@@ -8,7 +8,7 @@ import Figure from './Figure'
 describe('Figure', () => {
   it('is mono and tabular — a figure never competes with prose', () => {
     const html = renderToStaticMarkup(<Figure value="0.82" />)
-    expect(html).toContain('font-measurement')
+    expect(html).toContain('font-mono')
     expect(html).toContain('tnum')
   })
 

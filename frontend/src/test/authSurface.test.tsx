@@ -144,7 +144,7 @@ describe('the invalid mark is a hatch, and it is measured', () => {
     // sheet, and the contrast is taken on that composite.
     const coverage = Number(gradient![1]) / Number(gradient![2])
     const stripe = token('--color-danger')
-    const sheet = token('--color-canvas')
+    const sheet = token('--color-paper')
     const paint = stripe.map((c, i) => c * coverage + sheet[i] * (1 - coverage))
     expect(contrast(paint, sheet)).toBeGreaterThanOrEqual(3)
   })

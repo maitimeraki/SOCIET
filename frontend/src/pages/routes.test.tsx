@@ -157,7 +157,7 @@ describe('the copy-law pattern itself catches banned words, whole-word only', ()
   })
 
   it('does not match a banned word inside a longer one', () => {
-    expect(BANNED_WORD.test('bg-ground background ground')).toBe(false)
+    expect(BANNED_WORD.test('bg-bone background ground')).toBe(false)
     expect(BANNED_WORD.test('tookend rundown')).toBe(false)
   })
 })

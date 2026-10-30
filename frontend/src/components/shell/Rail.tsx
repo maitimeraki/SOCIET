@@ -26,11 +26,11 @@ const ITEMS = [
 //
 // The active item's ICON takes the accent too: the accent-soft fill alone measures 1.035:1 against
 // the rail, which the eye cannot find. The accent is on the mark, and the word stays ink.
-const ITEM = 'relative flex min-h-11 items-center gap-3 px-3 py-2 font-titling text-body transition-colors duration-state'
+const ITEM = 'relative flex min-h-11 items-center gap-3 px-3 py-2 font-ui text-body transition-colors duration-state'
 const itemClass = ({ isActive }: { isActive: boolean }) =>
   isActive
     ? `${ITEM} bg-accent-soft font-medium text-ink before:absolute before:inset-y-0 before:left-0 before:w-[3px] before:bg-accent`
-    : `${ITEM} text-ink-2 hover:bg-ground hover:text-ink`
+    : `${ITEM} text-ink-2 hover:bg-bone hover:text-ink`
 
 /** The label is `sr-only` in the collapsed rail, so every item keeps an accessible name at 64px. */
 const LABEL = 'sr-only lg:not-sr-only'
@@ -43,7 +43,7 @@ export default function Rail() {
     // The column. The `<nav>` holds the brand, the new-decision action and the sections; the
     // account foot is its sibling, not its child — a landmark jump to "Sections" must not land on
     // account or health chrome.
-    <div className={`flex w-16 shrink-0 flex-col ${ruleClasses('right')} bg-ground-2 lg:w-60`}>
+    <div className={`flex w-16 shrink-0 flex-col ${ruleClasses('right')} bg-sand lg:w-60`}>
       <nav aria-label="Sections" className="flex flex-1 flex-col">
         <div className="flex h-14 shrink-0 items-center gap-2 px-2 lg:px-4">
           <Link
@@ -51,10 +51,10 @@ export default function Rail() {
             className="flex min-h-11 min-w-11 items-center justify-center gap-2 text-ink lg:justify-start"
           >
             {/* §7 draws a diamond, not a logo — the glyph is the mark, the wordmark names the product. */}
-            <span aria-hidden="true" className="font-titling text-title leading-none">
+            <span aria-hidden="true" className="font-ui text-title leading-none">
               ◆
             </span>
-            <span className="sr-only font-titling text-heading font-semibold lg:not-sr-only">
+            <span className="sr-only font-ui text-heading font-semibold lg:not-sr-only">
               Societas
             </span>
           </Link>
@@ -91,7 +91,7 @@ export default function Rail() {
         <div className="flex items-center gap-2 px-3 py-2">
           <span
             aria-hidden="true"
-            className="grid h-6 w-6 shrink-0 place-items-center rounded-full bg-accent-soft font-titling text-micro font-medium text-accent"
+            className="grid h-6 w-6 shrink-0 place-items-center rounded-full bg-accent-soft font-ui text-micro font-medium text-accent"
           >
             {initials}
           </span>

@@ -31,7 +31,7 @@ export default function RuledBlock({
     <section className={`${ruleClasses('both')} py-3 ${className}`}>
       {(legendKey || title) && (
         <header className="mb-2 flex items-baseline gap-2">
-          {legendKey && <span className="font-measurement text-mono text-ink-3">{legendKey}</span>}
+          {legendKey && <span className="font-mono text-mono text-ink-3">{legendKey}</span>}
           {title && <h3 className="text-heading text-ink">{title}</h3>}
         </header>
       )}

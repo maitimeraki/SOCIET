@@ -31,16 +31,16 @@ export default function SelectionTable({
           <Fragment key={row.name}>
             <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1 sm:contents">
               <span className="w-full text-body text-ink sm:w-auto">{row.name}</span>
-              <span className="tnum font-measurement text-mono text-ink-2">
+              <span className="tnum font-mono text-mono text-ink-2">
                 <span className={`mr-1 ${label}`}>semantic</span>
                 {fmtScore(row.semantic)}
               </span>
-              <span className="tnum font-measurement text-mono text-ink-2">
+              <span className="tnum font-mono text-mono text-ink-2">
                 <span className={`mr-1 ${label}`}>density</span>
                 {fmtScore(row.density)}
               </span>
               <span className="flex items-center gap-2">
-                <span className="relative hidden h-1.5 flex-1 rounded-xs bg-ink-4 sm:block">
+                <span className="relative hidden h-1.5 flex-1 rounded-xs bg-hairline sm:block">
                   <span
                     className="absolute inset-y-0 left-0 rounded-xs bg-accent"
                     style={{ width: `${Math.min(1, row.blended) * 100}%` }}
@@ -52,7 +52,7 @@ export default function SelectionTable({
                   />
                 </span>
                 <span className={label}>blended</span>
-                <span className="tnum w-9 text-right font-measurement text-mono text-ink">{fmtScore(row.blended)}</span>
+                <span className="tnum w-9 text-right font-mono text-mono text-ink">{fmtScore(row.blended)}</span>
               </span>
             </div>
           </Fragment>

@@ -40,7 +40,7 @@ export function ToastHost() {
         // plot-ground panel), so it keeps an opaque filled surface rather than the ruled-block
         // treatment used for in-flow cards.
         return (
-          <div key={t.id} className="flex items-center gap-2 rounded-[6px] border border-ink-3 bg-ground-2 px-4 py-3 text-body text-ink">
+          <div key={t.id} className="flex items-center gap-2 rounded-[6px] border border-ink-3 bg-sand px-4 py-3 text-body text-ink">
             <IconCmp size={16} className="shrink-0" aria-hidden="true" />
             {t.message}
           </div>

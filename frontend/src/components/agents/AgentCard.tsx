@@ -9,7 +9,7 @@ export default function AgentCard({ profile, onOpen }: { profile: AgentProfile; 
     <button
       type="button"
       onClick={onOpen}
-      className={`${ruleClasses('top')} w-full pt-4 text-left transition-colors duration-state hover:bg-ground-2`}
+      className={`${ruleClasses('top')} w-full pt-4 text-left transition-colors duration-state hover:bg-sand`}
     >
       <span className="flex items-center justify-between gap-2">
         <span className="text-body text-ink">

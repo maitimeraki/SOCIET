@@ -79,7 +79,7 @@ describe('AuthLayout — the door frame (§14.2)', () => {
   it('separates the two columns with one hairline, not a band', () => {
     expect(frame).toContain('rule-l')
     expect(frame).toContain('rule-t')
-    expect(frame).not.toContain('border-ink-4')
+    expect(frame).not.toContain('border-hairline')
   })
 
   it('carries no shell chrome — no app navigation', () => {

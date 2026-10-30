@@ -15,7 +15,7 @@ export default function StageLine({
     ) : state === 'active' ? (
       <span aria-hidden="true" className="h-2.5 w-2.5 animate-pulse rounded-full bg-accent" />
     ) : (
-      <span aria-hidden="true" className="h-2.5 w-2.5 rounded-full border border-ink-4" />
+      <span aria-hidden="true" className="h-2.5 w-2.5 rounded-full border border-hairline" />
     )
   return (
     <div className="flex items-center gap-2.5">

@@ -36,12 +36,12 @@ export function RunsPageView({
     <div>
       <header className="flex flex-wrap items-end justify-between gap-4 border-b border-rule pb-6">
         <div>
-          <h1 className="font-titling text-display text-ink">Runs</h1>
+          <h1 className="font-ui text-display text-ink">Runs</h1>
           <p className="mt-2 max-w-[60ch] text-body text-ink-2">
             Every question you've brought, and how each one ended.
           </p>
         </div>
-        <span className="font-measurement text-micro text-ink-3">{runs.length} TOTAL</span>
+        <span className="font-mono text-micro text-ink-3">{runs.length} TOTAL</span>
       </header>
 
       {failed && runs.length === 0 ? (
@@ -74,11 +74,11 @@ export function RunsPageView({
               <li key={entry.run_id}>
                 <Link
                   to={`/runs/${entry.run_id}`}
-                  className="flex items-start justify-between gap-4 border-b border-rule/40 py-3 hover:bg-ground-2"
+                  className="flex items-start justify-between gap-4 border-b border-rule/40 py-3 hover:bg-sand"
                 >
                   <span className="min-w-0">
                     <span className="block text-heading text-ink">{entry.query}</span>
-                    <span className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 font-measurement text-micro text-ink-3">
+                    <span className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 font-mono text-micro text-ink-3">
                       {entry.verdict_stance ? (
                         <PositionMark position={entry.verdict_stance} ground="light" />
                       ) : (

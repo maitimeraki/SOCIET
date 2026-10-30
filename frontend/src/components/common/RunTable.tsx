@@ -56,9 +56,9 @@ export default function RunTable({ runs, loading = false }: { runs: RunSummary[]
               <h3 className="text-heading text-ink">{run.query}</h3>
               <p className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-micro text-ink-3">
                 {outcome(run)}
-                <span className="tnum font-measurement text-mono">{fmtDate(run.created_at)}</span>
-                <span className="tnum font-measurement text-mono">{passes(run.rounds_executed)}</span>
-                <span className="font-measurement text-mono">{corpus(run)}</span>
+                <span className="tnum font-mono text-mono">{fmtDate(run.created_at)}</span>
+                <span className="tnum font-mono text-mono">{passes(run.rounds_executed)}</span>
+                <span className="font-mono text-mono">{corpus(run)}</span>
                 <StateChip state={run.status} />
               </p>
             </Card>

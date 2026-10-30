@@ -163,7 +163,7 @@ describe('the debate floor keeps the card radius (§14.4)', () => {
   // The work pane and the map pane are the shell's (see WorkspaceShell.test.tsx); the floor card is
   // the page's own raised surface and keeps the same 10px radius, never the 16px panel one.
   it('gives the debate floor the card radius', () => {
-    const cards = [...render('floor').matchAll(/<[a-z]+[^>]*shadow-raised[^>]*>/g)].map((match) => match[0])
+    const cards = [...render('floor').matchAll(/<[a-z]+[^>]*shadow-card[^>]*>/g)].map((match) => match[0])
     expect(cards).toHaveLength(1)
     for (const card of cards) {
       expect(card).toContain('rounded-md')

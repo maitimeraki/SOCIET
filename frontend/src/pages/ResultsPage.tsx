@@ -37,12 +37,12 @@ export function VerdictsPageView({ latest, earlier, loading, failed, failDetail,
     <div>
       <header className="flex flex-wrap items-end justify-between gap-4 border-b border-rule pb-6">
         <div>
-          <h1 className="font-titling text-display text-ink">Verdicts</h1>
+          <h1 className="font-ui text-display text-ink">Verdicts</h1>
           <p className="mt-2 max-w-[60ch] text-body text-ink-2">
             The final answer to every question you've brought.
           </p>
         </div>
-        <span className="font-measurement text-micro text-ink-3">{earlier.length + (latest ? 1 : 0)} TOTAL</span>
+        <span className="font-mono text-micro text-ink-3">{earlier.length + (latest ? 1 : 0)} TOTAL</span>
       </header>
 
       {failed ? (
@@ -57,8 +57,8 @@ export function VerdictsPageView({ latest, earlier, loading, failed, failDetail,
       ) : latest ? (
         <div className="grid gap-6 lg:grid-cols-12">
           <div className="lg:col-span-8">
-            {/* §15.3 — the answer sits on the warm band; the sheet itself stays flat white. */}
-            <div className="rounded-lg bg-[image:var(--gradient-answer)] p-6">
+            {/* §4.1 — the answer sits on paper; the sheet is the verdict document and carries no gradient. */}
+            <div className="rounded-lg bg-paper p-6">
               <AnswerDocument
                 runId={latest.runId}
                 question={latest.question}
@@ -69,16 +69,16 @@ export function VerdictsPageView({ latest, earlier, loading, failed, failDetail,
             </div>
           </div>
           <aside className="lg:col-span-4">
-            <h2 className="mb-2 font-measurement text-micro text-ink-3">EARLIER VERDICTS</h2>
+            <h2 className="mb-2 font-mono text-micro text-ink-3">EARLIER VERDICTS</h2>
             <ul>
               {earlier.map((row) => (
                 <li key={row.runId}>
-                  <Link to={`/runs/${row.runId}/verdict`} className="grid grid-cols-[62px_1fr_auto] gap-3 border-b border-rule/30 py-2 hover:bg-ground-2">
-                    <span className="font-measurement text-micro text-ink-3">{fmtDate(row.date)}</span>
+                  <Link to={`/runs/${row.runId}/verdict`} className="grid grid-cols-[62px_1fr_auto] gap-3 border-b border-rule/30 py-2 hover:bg-sand">
+                    <span className="font-mono text-micro text-ink-3">{fmtDate(row.date)}</span>
                     <span className="text-body text-ink-2">{row.question}</span>
                     <span className="flex items-center gap-2">
                       <PositionMark position={row.stance} size="sm" ground="light" />
-                      <span className="font-measurement text-mono text-ink-2">{row.share?.toFixed(2) ?? '—'}</span>
+                      <span className="font-mono text-mono text-ink-2">{row.share?.toFixed(2) ?? '—'}</span>
                     </span>
                   </Link>
                 </li>

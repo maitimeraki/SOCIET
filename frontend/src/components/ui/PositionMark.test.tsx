@@ -38,7 +38,7 @@ describe('PositionMark — the legend law', () => {
   it('is neither a pill nor an outlined box', () => {
     const html = renderToStaticMarkup(<PositionMark position="POSITIVE" ground="light" />)
     expect(html).not.toContain('rounded-full')
-    expect(html).not.toContain('border-ink-4')
+    expect(html).not.toContain('border-hairline')
   })
 
   it('gives each position a different drawn form, not just a different hue', () => {

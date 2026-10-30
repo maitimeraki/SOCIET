@@ -35,7 +35,7 @@ export default function ConvergenceTape({
         {/* warn threshold line across all tracks — only meaningful once a tick exists */}
         {ticks.length > 0 && (
           <div aria-hidden="true" className="pointer-events-none absolute inset-y-0 z-10 w-px border-l-2 border-dashed border-warn" style={{ left: `calc(2.25rem + ${threshold} * (100% - 2.25rem))` }}>
-            <span className="absolute -top-1 left-1.5 rounded-xs bg-ground-2 px-1 font-measurement text-micro text-ink-2">{threshold.toFixed(2)}</span>
+            <span className="absolute -top-1 left-1.5 rounded-xs bg-sand px-1 font-mono text-micro text-ink-2">{threshold.toFixed(2)}</span>
           </div>
         )}
 
@@ -46,7 +46,7 @@ export default function ConvergenceTape({
             return (
               <div key={tick.round}>
                 <div className="flex items-center gap-3">
-                  <span className="tnum w-6 font-measurement text-micro text-ink-3">P{tick.round}</span>
+                  <span className="tnum w-6 font-mono text-micro text-ink-3">P{tick.round}</span>
                   <div className="flex h-3 flex-1 overflow-hidden rounded-xs" aria-hidden="true">
                     {STANCE_ORDER.map((stance, index) => {
                       const share = tick.weights[stance] ?? 0
@@ -68,7 +68,7 @@ export default function ConvergenceTape({
                   {present.map((stance) => (
                     <li key={stance} className="flex items-center gap-1.5">
                       <PositionMark position={stance} size="sm" ground="light" />
-                      <span className="tnum font-measurement text-micro text-ink-3">
+                      <span className="tnum font-mono text-micro text-ink-3">
                         {fmtPct(tick.weights[stance] ?? 0)}
                       </span>
                     </li>
@@ -81,7 +81,7 @@ export default function ConvergenceTape({
       </div>
 
       {active && (
-        <p className="tnum mt-3 font-measurement text-mono text-ink-2">
+        <p className="tnum mt-3 font-mono text-mono text-ink-2">
           pass {active.round}{active.dominant ? ` · ${active.dominant.stance} ${fmtPct(active.dominant.weightShare)} weighted share` : ''}
         </p>
       )}

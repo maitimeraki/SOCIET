@@ -1,7 +1,7 @@
 import type { InputHTMLAttributes } from 'react'
 
 // §6 Inputs — the field notebook. No box and no fill: the field sits on a single ruled baseline.
-// That rule is the control's boundary, so it takes --ink-3 (4.54:1 on the sheet) — --ink-4 is
+// That rule is the control's boundary, so it takes --ink-3 (4.54:1 on the sheet) — --hairline is
 // decorative and never a control boundary (addendum §1). Focus turns the rule accent and raises the
 // corner registration tick, which the control paints itself so it registers on the control's own
 // corner whether or not a `Field` wraps it.
@@ -24,7 +24,7 @@ export default function Input({
   if (!prefix) return field
   return (
     <span className="flex items-baseline gap-2">
-      <span className="font-measurement text-mono text-ink-3">{prefix}</span>
+      <span className="font-mono text-mono text-ink-3">{prefix}</span>
       {field}
     </span>
   )

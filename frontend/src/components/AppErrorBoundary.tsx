@@ -32,7 +32,7 @@ export function AppErrorFallback({
       <p className="mt-2 max-w-[60ch] text-body text-ink-2">
         This view failed to render. Reload to pick your work back up, or head back to your runs.
       </p>
-      <p className="mt-4 font-measurement text-mono text-ink-3">{errorDigest(error)}</p>
+      <p className="mt-4 font-mono text-mono text-ink-3">{errorDigest(error)}</p>
       <div className="mt-6 flex flex-wrap items-center gap-3">
         <button type="button" className={buttonClasses('primary')} onClick={onReload}>
           Reload

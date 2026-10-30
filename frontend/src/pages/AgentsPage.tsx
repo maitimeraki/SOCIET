@@ -68,7 +68,7 @@ export default function AgentsPage() {
 
   return (
     <div className="space-y-6">
-      <h1 className="font-titling text-display text-ink">Experts</h1>
+      <h1 className="font-ui text-display text-ink">Experts</h1>
       {datasets.length > 1 && (
         <Select value={datasetId} onChange={(event) => setDatasetId(event.target.value)} aria-label="Choose corpus">
           {datasets.map((dataset) => (
@@ -78,7 +78,7 @@ export default function AgentsPage() {
           ))}
         </Select>
       )}
-      {note && <p className="tnum font-measurement text-mono text-ink-3">{note}</p>}
+      {note && <p className="tnum font-mono text-mono text-ink-3">{note}</p>}
       {loading ? (
         <div className="grid gap-3 md:grid-cols-2">
           {[0, 1, 2, 3].map((i) => (

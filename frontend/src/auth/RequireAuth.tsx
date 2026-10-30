@@ -17,7 +17,7 @@ import { bootstrapSession, resolveGuard, signInTarget } from './guard'
  */
 export function AuthSplash({ unreachable, onRetry }: { unreachable: boolean; onRetry: () => void }) {
   return (
-    <div className="flex min-h-screen flex-col items-center justify-center gap-5 bg-ground px-6 text-center">
+    <div className="flex min-h-screen flex-col items-center justify-center gap-5 bg-bone px-6 text-center">
       {/* One live region owns BOTH the waiting copy and the failure copy, so the flip to `unreachable`
           — the failure text plus the retry — is what a screen reader announces, not just "Checking…".
           The skeletons carry no announcement (Skeleton is aria-hidden), so they can stay put. */}

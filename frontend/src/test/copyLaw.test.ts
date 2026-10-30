@@ -27,7 +27,7 @@ describe('renderedText — the guard reads what the customer reads', () => {
   })
 
   it('ignores identifiers — className="rounded-md" must not trip the round stem', () => {
-    expect(banned('<div className="rounded-md bg-ground">ok</div>')).toBe(false)
+    expect(banned('<div className="rounded-md bg-bone">ok</div>')).toBe(false)
   })
 
   it('ignores data-* identifiers', () => {

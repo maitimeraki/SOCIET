@@ -16,9 +16,9 @@ export type ChipTone = 'neutral' | 'status' | 'accent'
 
 const TONE: Record<ChipTone, string> = {
   // neutral — the quiet tag: `ui/Tag.tsx`'s metrics, unchanged.
-  neutral: 'border-ink-3 bg-ground-2 text-ink-2 px-1.5 py-0.5 text-micro',
+  neutral: 'border-ink-3 bg-sand text-ink-2 px-1.5 py-0.5 text-micro',
   // status — the state chip: `common/StateChip.tsx`'s metrics, unchanged.
-  status: 'border-ink-3 bg-ground-2 text-ink px-2 py-1 text-label',
+  status: 'border-ink-3 bg-sand text-ink px-2 py-1 text-label',
   // accent — the live state chip: the status chip's metrics on the accent.
   accent: 'border-accent bg-accent-soft text-accent px-2 py-1 text-label',
 }

@@ -32,7 +32,7 @@ export default function Figure({
         className={[
           'tnum',
           label ? 'mt-1' : '',
-          'font-measurement',
+          'font-mono',
           size === 'numeral' ? 'text-numeral' : 'text-mono-lg',
           'text-ink',
         ]

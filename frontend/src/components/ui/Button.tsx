@@ -11,17 +11,17 @@ export type ButtonSize = 32 | 40
 const VARIANT: Record<ButtonVariant, string> = {
   // primary — the action. The accent ramp (7.24:1 under the white label), radius-md, and a soft
   // shadow that seats it on the page. It is the only accent-filled control in the app.
-  primary: 'action-fill rounded-md shadow-raised hover:shadow-floating',
+  primary: 'action-fill rounded-md shadow-card hover:shadow-sheet',
   // secondary — the ink stamp: an ink-3 outline with a 2px border-strong foot and a corner
   // registration tick. --ink-3 measures 4.54:1 on the sheet, clearing SC 1.4.11 (addendum §1).
-  secondary: 'border border-ink-3 text-ink hover:border-ink hover:bg-ground-2',
+  secondary: 'border border-ink-3 text-ink hover:border-ink hover:bg-sand',
   // tertiary — the underlined measurement link: mono, ruled beneath, no box and so no registration
   // mark. The underline is the only cue separating it from body prose, so it is a control affordance
-  // and takes --ink-3 (4.54:1) — --ink-4 is for separators and rules, never a control's affordance.
+  // and takes --ink-3 (4.54:1) — --hairline is decorative and never a control's affordance.
   ghost:
-    'font-measurement text-mono text-ink-2 underline underline-offset-4 decoration-ink-3 hover:text-ink hover:decoration-accent',
+    'font-mono text-mono text-ink-2 underline underline-offset-4 decoration-ink-3 hover:text-ink hover:decoration-accent',
   // danger — the warning stamp: a route rule, ink label.
-  danger: 'border border-border-strong text-ink hover:bg-danger/10',
+  danger: 'border border-rule text-ink hover:bg-danger/10',
 }
 
 // §6 The registration mark: a small hairline corner tick, one corner, present on the stamped

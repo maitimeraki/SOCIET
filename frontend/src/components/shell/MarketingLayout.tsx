@@ -11,7 +11,7 @@ import { Outlet } from 'react-router-dom'
  */
 export default function MarketingLayout() {
   return (
-    <div className="min-h-screen bg-ground text-body text-ink">
+    <div className="min-h-screen bg-bone text-body text-ink">
       <main id="content">
         <Outlet />
       </main>

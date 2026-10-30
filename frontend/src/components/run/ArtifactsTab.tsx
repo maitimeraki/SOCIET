@@ -22,7 +22,7 @@ export default function ArtifactsTab({ run, events }: { run: RunState; events: R
               {
                 term: 'confidence',
                 value: (
-                  <span className="tnum font-measurement">
+                  <span className="tnum font-mono">
                     {fmtScore(run.intent.extraction_confidence)} · {run.intent.llm_model || '—'} · {run.intent.llm_provider || '—'}
                   </span>
                 ),
@@ -67,7 +67,7 @@ export default function ArtifactsTab({ run, events }: { run: RunState; events: R
         <h2 className="mb-3 text-heading text-ink">Commits</h2>
         {run.commits.length === 0 && <p className="text-body text-ink-3">No commits yet.</p>}
         {run.commits.map((commit) => (
-          <p key={commit.round} className="tnum flex items-center gap-1 font-measurement text-mono text-ink-2">
+          <p key={commit.round} className="tnum flex items-center gap-1 font-mono text-mono text-ink-2">
             P{commit.round} · {commit.opinions} opinions · {commit.edges} connections
             {commit.failed ? <X size={12} aria-hidden="true" /> : <Check size={12} aria-hidden="true" />}
             <span className="sr-only">{commit.failed ? 'failed' : 'kept'}</span>

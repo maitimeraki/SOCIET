@@ -6,116 +6,86 @@
 @import "./components/ui/rules.css";
 
 @theme {
-  /* ── §2 Colour. Neutral ground, one accent, colour-as-meaning: a hue with no job does not exist. */
+  /* ── §4.1 Light surfaces — the ground, the canvas, the edges. ───────────── */
+  --color-bone: #f4efe6;     /* the page ground */
+  --color-paper: #fffcf6;    /* sheets, cards, the reader, the verdict document */
+  --color-sand: #eae2d4;     /* quiet bands, table heads */
+  --color-hairline: #d8d0c2; /* decorative dividers only — never the sole boundary */
+  --color-rule: #8a806e;     /* the boundary of a record, a table row, a ruled list */
 
-  /* §2.2 Light surfaces — the ground, the canvas, the edges. The ground and the band ALIAS the
-        named surfaces below, so the app and the marketing page are ONE colour system (D8). */
-  --color-ground: var(--color-page);   /* #ECEFF4 — the page ground */
-  --color-ground-2: var(--color-band); /* #DFE4EC — the rail, table heads, bands */
-  --color-canvas: #ffffff;        /* cards, sheets */
-  --color-border: #e2e8f0;        /* card edges, dividers */
-  --color-border-strong: #cbd5e1; /* inputs, hover */
-  --color-rule: #6b7a8d;          /* a record's edge — ≥ 3:1 on every light surface */
-  --color-ink: #0f172a;           /* headings */
-  --color-ink-2: #334155;         /* body */
-  --color-ink-3: #556070;         /* secondary, captions — ≥ 4.5:1 on every light surface */
-  --color-ink-4: #94a3b8;         /* rules and disabled fills ONLY, never text */
+  /* ── §4.2 Ink. There is no ink-4: no grey text below 4.5:1. ─────────────── */
+  --color-ink: #191814;      /* headings, primary text, the wordmark */
+  --color-ink-2: #443f36;    /* body copy, secondary headings */
+  --color-ink-3: #6b6457;    /* captions, metadata, labels */
+  --color-on-accent: #fffdf8; /* a label on an evergreen fill */
 
-  /* §2.2 The one accent — a plum. It is the one hue that reads against both grounds the product
-        has (a daylight ground and the near-black map) and it collides with none of the four
-        position hues or with the map's corpus blue. Every token hangs off this one accent and
-        one ground, so the palette is one variable wide. */
-  --color-accent: #823a86;        /* action, links, "live" */
-  --color-accent-hover: #75327b;   /* the accent-filled action hovered */
-  --color-accent-press: #612665;   /* the accent-filled action pressed */
-  --color-accent-soft: #f6eefa;   /* selected row, tinted band */
-  --color-accent-ink: #ffffff;    /* on-accent */
+  /* ── §4.3 The one accent. Evergreen — calm, money, institutional. ─────── */
+  --color-accent: #1e4b38;
+  --color-accent-hover: #163a2b;
+  --color-accent-press: #102b20;
+  --color-accent-soft: #e3ebe4; /* a selected row, an active nav item */
 
-  /* §2.2 Status. */
-  --color-ok: #15803d;     /* complete, converged */
-  --color-warn: #b45309;   /* caution, partial */
-  --color-danger: #b91c1c; /* failure, destructive */
+  /* ── §4.4 Semantic status. Functional colours, never decoration. ───────── */
+  --color-ok: #1d6b3c;
+  --color-warn: #7a5a12;
+  --color-danger: #a32a22;
+  --color-caution: #8f3a1c;   /* "the case against" — text and rule only */
 
-  /* ── §2.2 The NAMED SURFACES. These five are shared, and they are the ones a marketing surface
-        is built from: the page is a plane, a band is a step down, and sky / warm / plum each mean
-        one thing (the mechanism, the caution, the answer). Any page or component may take the same
-        named surface, so the product keeps ONE colour system instead of one per screen.
-        The homepage scopes these to its own ground; nothing else is affected by them. */
-  --color-page: #eceff4;         /* the page — a marketing ground, a step below white */
-  --color-band: #dfe4ec;         /* the deeper grey band */
-  --color-surface-sky: #dbe9f7;  /* the mechanism */
-  --color-surface-warm: #f8ecc9; /* the caution */
-  --color-surface-plum: #e5d4ec; /* the answer */
-  --color-caution: #92400e;      /* the case against AS TEXT — the app's --color-warn (#b45309)
-                                    is 3.6:1 on a tinted band and fails AA for a label */
+  /* ── §4.5 The map surface — the one dark instrument in the product. ────── */
+  --color-map-ground: #0b1510;
+  --color-map-ground-2: #13251b;
+  --color-map-ink: #ede7da;
+  --color-map-ink-2: #a9b7aa;
+  --color-map-rule: #2a3d30;
+  --color-map-accent: #8fd3a8;
 
-  /* §2.3 The map surface — the ONE dark surface, because the map must stay in view. */
-  --color-map-ground: #070c16;   /* the map's deep floor */
-  --color-map-ground-2: #16223d; /* the map's lit centre — the near end of the ramp */
-  --color-map-ink: #e2e8f0;
-  --color-map-ink-2: #94a3b8;
-  --color-map-rule: #263450;
-  --color-map-accent: #d9a8e2; /* the accent, rebound for the dark ground (9.49:1) */
+  /* ── §4.6 The four positions, in the frozen order. ─────────────────────── */
+  --color-pos-light: #1d7a48;
+  --color-neu-light: #5e665a;
+  --color-amb-light: #7a5a12;
+  --color-neg-light: #a33a22;
+  --color-pos: #6fcf97;       /* the map ground */
+  --color-neu: #b8c2b6;
+  --color-amb: #d8b05e;
+  --color-neg: #f08a72;
 
-  /* §2.4 Map entry colours — one per entry kind. */
-  --color-corpus: #3b82f6; /* the material — informational, neutral */
-  --color-expert: #e2e8f0; /* an expert — luminous on the dark ground */
+  /* ── §8.7 The map's own layer colours. ─────────────────────────────────── */
+  --color-corpus: #8fd3a8;   /* the material — the map's mint */
+  --color-expert: #ede7da;   /* an expert — the map's paper */
 
-  /* §2.4/§2.5 The four positions — frozen order POSITIVE, NEUTRAL, AMBIVALENT, NEGATIVE.
-        A position renders shape + colour + word at every size; a colour with no visible shape is banned. */
-  --color-pos: #4ade80;       /* dark ground */
-  --color-neu: #94a3b8;
-  --color-amb: #fbbf24;
-  --color-neg: #f87171;
-  --color-pos-light: #16a34a; /* light ground */
-  --color-neu-light: #64748b;
-  --color-amb-light: #d97706;
-  --color-neg-light: #dc2626;
-
-  /* ── §3 The gradient law. Gradients are material, not wallpaper: four permitted uses, no others. */
-  --color-accent-top: #8f3f97;  /* §3 use 1 — the action ramp, top */
-  --color-accent-base: #6e2f74; /* §3 use 1 — the action ramp, base (label contrast unchanged) */
-  /* §3 use 1 — the action, and nothing else (never secondary, ghost, destructive or disabled).
-     One ramp, two heights: the marketing `.action` (44px) and the app's `primary` button (40px). */
-  --gradient-action: linear-gradient(
-    to bottom,
-    var(--color-accent-top),
-    var(--color-accent) 50%,
-    var(--color-accent-base)
-  );
-  /* §3 use 3 — the map, so the luminous plot sits in depth rather than on a flat rectangle. The
-     geometry and the hexes land TOGETHER: the old ramp measured ΔL* 4.98, this one 10.23. */
+  /* ── §4.8 The gradient system. Exactly four, and no others. ────────────── */
+  /* 1 — the map light: the only visible ramp in the product. */
   --gradient-map: radial-gradient(
-    120% 100% at 50% 0%,
+    60% 55% at 50% 38%,
     var(--color-map-ground-2) 0%,
     var(--color-map-ground) 72%
   );
+  /* 2 — the first light: the top 160px of the marketing hero. */
+  --gradient-first-light: linear-gradient(to bottom, rgb(30 75 56 / 0.07), transparent);
+  /* 3 — the morning wash: the dashboard's content column, two offset pools. */
+  --gradient-morning: radial-gradient(880px 380px at 8% -8%, rgb(30 75 56 / 0.13), transparent 68%),
+    radial-gradient(760px 340px at 100% 0%, rgb(143 211 168 / 0.1), transparent 60%);
+  /* 4 — the marked wash: the one recommended plan, and the first stat tile. */
+  --gradient-marked: linear-gradient(165deg, var(--color-accent-soft) 0%, var(--color-paper) 58%);
 
-  /* §15.1.3 use 4 — the ground lift under the page header. On the main region only, never the rail. */
-  --gradient-ground: linear-gradient(180deg, #F4F6FA 0%, #ECEFF4 320px);
-  /* §15.1.3 use 5 — the Verdict page's latest-answer band: the outcome is the one warm surface. */
-  --gradient-answer: linear-gradient(180deg, #ECDFF2 0%, #E5D4EC 100%);
-
-  /* ── §3 Elevation — shadow is not gradient. Each shadow is a pair: a tight contact shadow that
-        seats the surface on the plane, and a soft ambient shadow that lifts it off. A surface
-        declares itself once — a card carries a shadow and no border; a record carries a rule and
-        no shadow. Never coloured. */
-  --shadow-raised: 0 1px 2px rgb(15 23 42 / 0.05), 0 3px 8px rgb(15 23 42 / 0.06);
-  --shadow-floating: 0 2px 4px rgb(15 23 42 / 0.05), 0 10px 24px rgb(15 23 42 / 0.09);
-  --shadow-panel: 0 1px 2px rgb(15 23 42 / 0.07), 0 14px 32px rgb(15 23 42 / 0.12);
-  --shadow-overlay: 0 4px 10px rgb(15 23 42 / 0.07), 0 18px 44px rgb(15 23 42 / 0.17);
+  /* ── §6.4 Elevation. Warm and diffused: paper, not glass. A surface declares
+        itself once — a card carries a shadow and no border; a record carries a
+        rule and no shadow. Never coloured. ──────────────────────────────── */
+  --shadow-card: 0 1px 2px rgb(25 24 20 / 0.05), 0 12px 32px rgb(25 24 20 / 0.07);
+  --shadow-sheet: 0 2px 4px rgb(25 24 20 / 0.05), 0 24px 64px rgb(25 24 20 / 0.12);
+  --shadow-map: 0 24px 80px rgb(11 21 16 / 0.28);
+  --shadow-overlay: 0 4px 10px rgb(25 24 20 / 0.07), 0 18px 44px rgb(25 24 20 / 0.17);
   /* the accent rule the active tab draws — the one shadow that is not an elevation */
   --shadow-accent-inset: inset 0 -2px 0 0 var(--color-accent);
   /* the same accent band, on a nav strip turned on its side */
   --shadow-accent-inset-left: inset -2px 0 0 0 var(--color-accent);
 
-  /* ── §4 Typography — three installed families, each with one job. No new font dependency. */
-  --font-titling: "Archivo Variable", Archivo, system-ui, sans-serif;
-  --font-record: "Spectral", Spectral, Georgia, serif;
-  --font-measurement: "JetBrains Mono Variable", "JetBrains Mono", ui-monospace, monospace;
+  /* ── §4 Typography — the UI and mono faces. Task 2 swaps the families. ───── */
+  --font-ui: "Archivo Variable", Archivo, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono Variable", "JetBrains Mono", ui-monospace, monospace;
 
-  /* Spectral is long-form reading only — never UI chrome. Titling is the default face. */
-  --default-font-family: var(--font-titling);
+  /* The default face is the UI face. */
+  --default-font-family: var(--font-ui);
 
   /* §4 The scale. Any figure that is a measurement is set in the mono, tabular. The hero is set
         large deliberately — a small hero is what reads as an internal tool. */
@@ -154,10 +124,12 @@
 
   /* ── §5 Space, radius, elevation. Spacing is a single 4px-based scale (Tailwind's default
         `--spacing`), so only the radii need naming. */
-  --radius-xs: 4px;  /* chips, ticks — Tailwind's built-in xs is 2px */
-  --radius-sm: 6px;  /* chips, inputs */
-  --radius-md: 10px; /* cards, buttons */
-  --radius-lg: 16px; /* panels, dialogs, auth card */
+  /* ── §6.3 Radius. Nothing is fully rounded except the live status pill. ─── */
+  --radius-xs: 6px;   /* chips, status pills, tiny controls */
+  --radius-sm: 8px;   /* inputs, small buttons */
+  --radius-md: 12px;  /* buttons, nav items, table containers */
+  --radius-lg: 16px;  /* cards, use-case rows, the reader sheet */
+  --radius-xl: 24px;  /* the verdict sheet, large panels, the evidence desk */
 
   /* ── §6 Motion. One grammar, one easing curve for the whole product. */
   --ease-standard: cubic-bezier(0.2, 0, 0, 1);
@@ -178,9 +150,9 @@
     color-scheme: light;
   }
   body {
-    background: var(--color-ground);
+    background: var(--color-bone);
     color: var(--color-ink);
-    font-family: var(--font-titling);
+    font-family: var(--font-ui);
     font-size: 14px;
     line-height: 21px;
     -webkit-font-smoothing: antialiased;
@@ -324,16 +296,15 @@
   --color-ink: var(--color-map-ink);
   --color-ink-2: var(--color-map-ink);
   --color-ink-3: var(--color-map-ink-2);
-  --color-ink-4: var(--color-map-rule);
   /* the record rule on the map is the map's own rule — the same hairline the kit's dark tone draws */
   --rule-color: var(--color-map-rule);
 }
 
-/* The accent-filled action — §3 use 1. One ramp, both surfaces: the marketing `.action` and the
-   app's `primary` button. The label is the on-accent ink; nothing on this surface is grey. */
+/* The accent-filled action. A flat evergreen fill, never a gradient (§4.8 rule 2).
+   The label is the on-accent ink; nothing on this surface is grey. */
 @utility action-fill {
-  background-image: var(--gradient-action);
-  color: var(--color-accent-ink);
+  background-color: var(--color-accent);
+  color: var(--color-on-accent);
 }
 
 /* The focus ring on an accent-filled control is the ink, not the accent: an accent ring on an

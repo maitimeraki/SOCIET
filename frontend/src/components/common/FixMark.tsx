@@ -11,7 +11,7 @@
  *
  * The ring is drawn in `currentColor` rather than a hardcoded ink, so the mark is not married to the
  * light sheet: on the plotting table (`--plot-ground`) `--ink` measures 1.04:1 and disappears — a
- * caller there passes `className="text-ink-4"` (8.46:1). `--brass` (7.14:1) and the vermilion point
+ * caller there passes `className="text-ink-3"` (8.46:1). `--brass` (7.14:1) and the vermilion point
  * (3.38:1) clear the mark floor on either ground, so only the ring switches.
  */
 export default function FixMark({
@@ -43,7 +43,7 @@ export default function FixMark({
           style={{ transformOrigin: '30px 10px' }}
         />
       </svg>
-      <span className="tnum font-measurement text-mono-lg">
+      <span className="tnum font-mono text-mono-lg">
         <span className="sr-only">weighted confidence </span>
         {confidence === null ? '—' : confidence.toFixed(2)}
       </span>

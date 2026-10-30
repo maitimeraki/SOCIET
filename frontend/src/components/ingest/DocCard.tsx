@@ -29,7 +29,7 @@ export default function DocCard({
         <div className="truncate text-body text-ink">{doc.title}</div>
         {doc.status === 'extracting' && <div className="mt-0.5 text-micro text-accent">Extracting…</div>}
         {doc.status === 'ready' && (
-          <div className="tnum mt-0.5 font-measurement text-micro text-ink-3">Ready — {fmtInt(doc.word_count)} words</div>
+          <div className="tnum mt-0.5 font-mono text-micro text-ink-3">Ready — {fmtInt(doc.word_count)} words</div>
         )}
         {doc.status === 'failed' && (
           <div className="mt-0.5 text-micro text-ink-2">

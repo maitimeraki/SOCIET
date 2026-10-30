@@ -42,7 +42,7 @@ export default function Legend({
             <span className="inline-flex shrink-0 translate-y-px" aria-hidden="true">
               {entry.symbol}
             </span>
-            {entry.key && <span className="font-measurement text-mono text-ink-3">{entry.key}</span>}
+            {entry.key && <span className="font-mono text-mono text-ink-3">{entry.key}</span>}
             {entry.label}
           </li>
         ))}

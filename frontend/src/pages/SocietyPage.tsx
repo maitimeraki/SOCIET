@@ -74,8 +74,8 @@ export default function SocietyPage() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="font-titling text-display text-ink">Set the question</h1>
-        <p className="tnum mt-2 font-measurement text-mono text-ink-3">
+        <h1 className="font-ui text-display text-ink">Set the question</h1>
+        <p className="tnum mt-2 font-mono text-mono text-ink-3">
           Corpus: {corpusName}
           {graphSummary ? ` (${fmtInt(graphSummary.chunks)} sections)` : ''}
         </p>

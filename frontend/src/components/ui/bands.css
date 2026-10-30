@@ -23,23 +23,23 @@
 }
 
 .band--page {
-  background: var(--color-page);
+  background: var(--color-bone);
 }
 
 .band--band {
-  background: var(--color-band);
+  background: var(--color-sand);
 }
 
 .band--sky {
-  background: var(--color-surface-sky);
+  background: var(--color-sand);
 }
 
 .band--warm {
-  background: var(--color-surface-warm);
+  background: var(--color-sand);
 }
 
 .band--plum {
-  background: var(--color-surface-plum);
+  background: var(--color-paper);
 }
 
 .band--dark {

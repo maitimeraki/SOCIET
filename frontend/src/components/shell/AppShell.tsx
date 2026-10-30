@@ -45,15 +45,15 @@ export default function AppShell() {
   const { pathname } = useLocation()
   const key = boundaryKey(pathname)
   return (
-    <div className="flex min-h-screen bg-ground text-ink">
+    <div className="flex min-h-screen bg-bone text-ink">
       <a
         href="#content"
-        className="sr-only focus:not-sr-only focus:absolute focus:left-4 focus:top-4 focus:z-[70] focus:inline-flex focus:min-h-11 focus:min-w-11 focus:items-center focus:rounded-sm focus:bg-canvas focus:px-3 focus:py-2 focus:text-body focus:text-ink"
+        className="sr-only focus:not-sr-only focus:absolute focus:left-4 focus:top-4 focus:z-[70] focus:inline-flex focus:min-h-11 focus:min-w-11 focus:items-center focus:rounded-sm focus:bg-paper focus:px-3 focus:py-2 focus:text-body focus:text-ink"
       >
         Skip to content
       </a>
       <Rail />
-      <main id="content" className="min-w-0 flex-1 bg-[image:var(--gradient-ground)] px-6 pb-24 pt-8">
+      <main id="content" className="min-w-0 flex-1 bg-[image:var(--gradient-morning)] px-6 pb-24 pt-8">
         <AppErrorBoundary key={key}>
           <Suspense fallback={<RouteFallback />}>
             <Outlet />

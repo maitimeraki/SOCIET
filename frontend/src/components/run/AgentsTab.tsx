@@ -15,7 +15,7 @@ export default function AgentsTab({ run }: { run: RunState }) {
     <div className="space-y-8">
       <div className="flex items-baseline gap-3">
         <h2 className="text-heading text-ink">The panel of this decision</h2>
-        <span className="tnum font-measurement text-micro text-ink-3">
+        <span className="tnum font-mono text-micro text-ink-3">
           {run.roster.length} seated · {run.activations.reduce((sum, activation) => sum + activation.agents.length, 0)} activated
         </span>
       </div>

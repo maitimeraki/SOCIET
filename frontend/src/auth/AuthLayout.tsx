@@ -24,15 +24,15 @@ import { DESCRIPTOR, THESIS, WORKED_EXAMPLE } from './authCopy'
  */
 export default function AuthLayout() {
   return (
-    <main className="min-h-screen bg-ground">
+    <main className="min-h-screen bg-bone">
       <div className="mx-auto grid min-h-screen w-full max-w-6xl grid-cols-1 lg:grid-cols-2">
         <div className="flex flex-col px-6 py-10 sm:px-10 lg:px-14">
           <Link
             to="/"
             className="inline-flex min-h-11 items-center gap-2.5 self-start lg:min-h-0 lg:items-baseline"
           >
-            <span className="font-titling text-[18px] uppercase leading-none tracking-[0.08em] text-ink">Societas</span>
-            <span className="font-measurement text-mono uppercase tracking-[0.06em] text-ink-3">
+            <span className="font-ui text-[18px] uppercase leading-none tracking-[0.08em] text-ink">Societas</span>
+            <span className="font-mono text-mono uppercase tracking-[0.06em] text-ink-3">
               {DESCRIPTOR}
             </span>
           </Link>
@@ -55,7 +55,7 @@ export default function AuthLayout() {
           className={`${ruleClasses('left')} px-6 py-12 sm:px-10 lg:flex lg:flex-col lg:justify-center lg:px-14 lg:py-16 max-lg:border-l-0`}
         >
           <div className={`${ruleClasses('top')} lg:border-t-0`}>
-            <p className="max-w-[26ch] font-titling text-title text-ink">{THESIS}</p>
+            <p className="max-w-[26ch] font-ui text-title text-ink">{THESIS}</p>
             <div className="mt-10">
               <FiledSheet decision={WORKED_EXAMPLE} sample />
             </div>

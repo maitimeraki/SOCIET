@@ -255,7 +255,7 @@ export function NodeDetailsView({ details, onClose }: { details: MapDetails; onC
               <Reading heading="Argued as">
                 <div className="flex items-baseline gap-3">
                   <PositionMark position={details.held.stance} ground="light" />
-                  <span className="tnum font-measurement text-mono text-ink">{details.held.confidence.toFixed(2)}</span>
+                  <span className="tnum font-mono text-mono text-ink">{details.held.confidence.toFixed(2)}</span>
                 </div>
                 <Emphasis text={details.held.view} className="mt-2 text-body-lg text-ink-2" />
               </Reading>

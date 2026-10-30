@@ -45,7 +45,7 @@ export default function AgentDrawer({
         {profile.graph_snapshot && (
           <section>
             <Label as="h3" className="mb-2">Map snapshot</Label>
-            <p className="tnum font-measurement text-mono text-ink-2">
+            <p className="tnum font-mono text-mono text-ink-2">
               {profile.graph_snapshot.dataset_id} · {profile.graph_snapshot.chunk_count} sections ·{' '}
               {profile.graph_snapshot.version_hash.slice(0, 8)}
             </p>

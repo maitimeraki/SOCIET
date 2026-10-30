@@ -66,9 +66,9 @@ export default function Drawer({ open, onClose, title, children }: { open: boole
             animate={{ x: 0, opacity: 1 }}
             exit={{ x: 32, opacity: 0 }}
             transition={{ duration: 0.18, ease: [0.2, 0, 0, 1] }}
-            className="absolute right-0 top-0 h-full w-full max-w-[560px] overflow-y-auto bg-canvas p-6 shadow-overlay"
+            className="absolute right-0 top-0 h-full w-full max-w-[560px] overflow-y-auto bg-paper p-6 shadow-overlay"
           >
-            <h2 className="mb-4 font-titling text-title text-ink">{title}</h2>
+            <h2 className="mb-4 font-ui text-title text-ink">{title}</h2>
             {children}
           </motion.section>
         </motion.div>

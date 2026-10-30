@@ -113,7 +113,7 @@ export default function IngestPage() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="font-titling text-display text-ink">Build the corpus</h1>
+        <h1 className="font-ui text-display text-ink">Build the corpus</h1>
         <p className="mt-3 max-w-[60ch] text-body text-ink-2">
           Add the documents your experts would have read — PDFs, Word files, Markdown, plain text, or a web page.
         </p>

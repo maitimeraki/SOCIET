@@ -29,14 +29,14 @@ function Beat({
     ) : state === 'running' ? (
       <span aria-hidden="true" className="h-2.5 w-2.5 animate-pulse rounded-full bg-accent" />
     ) : (
-      <span aria-hidden="true" className="h-2.5 w-2.5 rounded-full border border-ink-4" />
+      <span aria-hidden="true" className="h-2.5 w-2.5 rounded-full border border-hairline" />
     )
   return (
     <section>
       <header className="mb-3 flex items-center gap-2.5">
-        <span className="font-titling text-title text-ink">{number}</span>
+        <span className="font-ui text-title text-ink">{number}</span>
         <h2 className="text-label uppercase text-ink">{title}</h2>
-        {meta && <span className="tnum font-measurement text-micro text-ink-3">{meta}</span>}
+        {meta && <span className="tnum font-mono text-micro text-ink-3">{meta}</span>}
         {glyph}
       </header>
       {children}

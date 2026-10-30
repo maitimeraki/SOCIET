@@ -79,7 +79,7 @@ export default function SignUpPage() {
   return (
     <form onSubmit={onSubmit} noValidate aria-busy={submitting} className="space-y-6">
       <header>
-        <h1 className="font-titling text-title text-ink">{SIGN_UP.heading}</h1>
+        <h1 className="font-ui text-title text-ink">{SIGN_UP.heading}</h1>
         <p className="mt-1 text-body text-ink-2">{SIGN_UP.lead}</p>
       </header>
 
@@ -132,13 +132,13 @@ export default function SignUpPage() {
         </Button>
       )}
 
-      <p className="text-pretty font-measurement text-mono text-ink-3">{SIGN_UP.cost}</p>
+      <p className="text-pretty font-mono text-mono text-ink-3">{SIGN_UP.cost}</p>
 
       <p className="text-body text-ink-3">
         {SIGN_UP.crossQuestion}{' '}
         <Link
           to={`/auth/signin${nextSuffix(params)}`}
-          className="inline-flex min-h-11 min-w-11 items-center font-titling text-body text-ink-2 underline decoration-ink-3 underline-offset-4 transition-colors duration-state hover:text-ink hover:decoration-accent lg:min-h-0 lg:min-w-0"
+          className="inline-flex min-h-11 min-w-11 items-center font-ui text-body text-ink-2 underline decoration-ink-3 underline-offset-4 transition-colors duration-state hover:text-ink hover:decoration-accent lg:min-h-0 lg:min-w-0"
         >
           {SIGN_UP.crossAction}
         </Link>

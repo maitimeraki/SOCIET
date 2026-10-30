@@ -56,10 +56,10 @@ export default function FlowView({ run, activeRound, latestRound, onScrub, onNav
             onOpenProfile={() => onNavigate(`/runs/${run.runId}/agents`)}
           />
           <div className="mt-3 flex flex-wrap items-center justify-center gap-3 text-micro text-ink-3">
-            <button type="button" aria-label="Previous pass" disabled={activeRound === null || activeRound <= 1} onClick={() => onScrub(Math.max(1, (activeRound ?? 1) - 1))} className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-xs px-2 py-0.5 hover:bg-ground-2 disabled:opacity-40"><CaretLeft size={14} aria-hidden="true" /></button>
-            <span className="tnum font-measurement">{activeRound === null ? 'live' : `pass ${activeRound}`}</span>
-            <button type="button" aria-label="Next pass" disabled={activeRound === null || activeRound >= (latestRound ?? activeRound)} onClick={() => onScrub(activeRound === null || activeRound >= (latestRound ?? activeRound) ? null : activeRound + 1)} className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-xs px-2 py-0.5 hover:bg-ground-2 disabled:opacity-40"><CaretRight size={14} aria-hidden="true" /></button>
-            <button type="button" onClick={() => onScrub(null)} className="inline-flex min-h-11 items-center rounded-xs px-2 py-0.5 text-accent hover:bg-ground-2">End — back to live</button>
+            <button type="button" aria-label="Previous pass" disabled={activeRound === null || activeRound <= 1} onClick={() => onScrub(Math.max(1, (activeRound ?? 1) - 1))} className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-xs px-2 py-0.5 hover:bg-sand disabled:opacity-40"><CaretLeft size={14} aria-hidden="true" /></button>
+            <span className="tnum font-mono">{activeRound === null ? 'live' : `pass ${activeRound}`}</span>
+            <button type="button" aria-label="Next pass" disabled={activeRound === null || activeRound >= (latestRound ?? activeRound)} onClick={() => onScrub(activeRound === null || activeRound >= (latestRound ?? activeRound) ? null : activeRound + 1)} className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-xs px-2 py-0.5 hover:bg-sand disabled:opacity-40"><CaretRight size={14} aria-hidden="true" /></button>
+            <button type="button" onClick={() => onScrub(null)} className="inline-flex min-h-11 items-center rounded-xs px-2 py-0.5 text-accent hover:bg-sand">End — back to live</button>
           </div>
         </Card>
         <ConvergenceTape ticks={series} threshold={run.config?.convergence_threshold ?? 0.8} activeRound={activeRound} />

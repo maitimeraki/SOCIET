@@ -9,7 +9,7 @@ describe('Meter', () => {
   it('draws the share, and sets the figure beside it in the measurement face', () => {
     const html = renderToStaticMarkup(<Meter value={0.82} label="share" display="0.82" />)
     expect(html).toContain('0.82')
-    expect(html).toContain('font-measurement')
+    expect(html).toContain('font-mono')
     expect(html).toContain('tnum')
   })
 
@@ -27,7 +27,7 @@ describe('Meter', () => {
     const html = renderToStaticMarkup(<Meter value={null} label="share" display="—" />)
     expect(html).toContain('—')
     expect(html).not.toContain('style="width:')
-    expect(html).toContain('bg-ink-4') // the track is still drawn
+    expect(html).toContain('bg-hairline') // the track is still drawn
   })
 
   it('takes the accent fill or the quiet ink fill', () => {

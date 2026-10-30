@@ -104,7 +104,7 @@ export default function ChamberFloor({ roster, rounds, activeRound, livePairs, o
               height={10}
               rx={3}
               fill="none"
-              stroke="var(--color-ink-4)"
+              stroke="var(--color-hairline)"
             />
           )),
         )}
@@ -142,7 +142,7 @@ export default function ChamberFloor({ roster, rounds, activeRound, livePairs, o
       </svg>
 
       {seated && (
-        <div className={`${ruleClasses('top')} absolute right-3 top-3 w-[240px] bg-canvas pt-3`}>
+        <div className={`${ruleClasses('top')} absolute right-3 top-3 w-[240px] bg-paper pt-3`}>
           <div className="flex items-start justify-between gap-2">
             <p className="text-body text-ink">{seated.profile.identity.name}</p>
             <button type="button" aria-label="Close popover" onClick={closePopover} className="text-ink-3 hover:text-ink">
@@ -153,7 +153,7 @@ export default function ChamberFloor({ roster, rounds, activeRound, livePairs, o
           <div className="mt-2">
             <PositionMark position={seated.profile.stance} size="sm" ground="light" />
           </div>
-          <p className="tnum mt-2 font-measurement text-micro text-ink-2">conf {seated.profile.confidence.toFixed(2)}</p>
+          <p className="tnum mt-2 font-mono text-micro text-ink-2">conf {seated.profile.confidence.toFixed(2)}</p>
           {onOpenProfile && (
             <button type="button" onClick={onOpenProfile} className="mt-2 inline-block text-micro text-accent hover:text-accent">
               Open profile →

@@ -14,7 +14,7 @@ describe('FixMark', () => {
 
   it('is always accompanied by the confidence figure, in the measurement face', () => {
     const html = renderToStaticMarkup(<FixMark confidence={0.82} />)
-    expect(html).toContain('font-measurement')
+    expect(html).toContain('font-mono')
     expect(html).toContain('0.82')
   })
 

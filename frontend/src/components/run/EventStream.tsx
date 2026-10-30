@@ -44,7 +44,7 @@ export default function EventStream({ items, live }: { items: StreamItem[]; live
               return (
                 <h3 key={index} className="pt-2 text-heading text-ink">
                   Pass {item.round}{' '}
-                  <span className="tnum font-measurement text-micro text-ink-3">{item.pairs} pairs</span>
+                  <span className="tnum font-mono text-micro text-ink-3">{item.pairs} pairs</span>
                 </h3>
               )
             case 'turn':
@@ -79,7 +79,7 @@ export default function EventStream({ items, live }: { items: StreamItem[]; live
             setPaused(false)
             container.current?.scrollTo({ top: container.current.scrollHeight })
           }}
-          className="sticky bottom-2 left-1/2 mt-2 -translate-x-1/2 rounded-xs border border-ink-4 bg-ground-2 px-3 py-1.5 text-micro text-ink max-sm:inline-flex max-sm:min-h-11 max-sm:min-w-11 max-sm:items-center"
+          className="sticky bottom-2 left-1/2 mt-2 -translate-x-1/2 rounded-xs border border-hairline bg-sand px-3 py-1.5 text-micro text-ink max-sm:inline-flex max-sm:min-h-11 max-sm:min-w-11 max-sm:items-center"
         >
           Jump to live ↓
         </button>

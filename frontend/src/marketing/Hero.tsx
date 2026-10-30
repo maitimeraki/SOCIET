@@ -108,16 +108,16 @@ function Nav() {
       <header className="hero-nav flex items-center justify-between gap-6 px-[17px] py-[11px]">
         <Link to="/" className="inline-flex min-h-11 -my-0.5 items-center gap-2.5 text-ink" aria-label={WORDMARK}>
           <BrandMark />
-          <span className="font-titling text-[18px] font-semibold tracking-[-0.01em]">{WORDMARK}</span>
+          <span className="font-ui text-[18px] font-semibold tracking-[-0.01em]">{WORDMARK}</span>
         </Link>
         <nav aria-label="Sections" className="hidden items-center gap-6 md:flex">
-          <a href="#how-it-works" className="font-titling text-body text-ink-2 transition-colors duration-state hover:text-ink">
+          <a href="#how-it-works" className="font-ui text-body text-ink-2 transition-colors duration-state hover:text-ink">
             How it works
           </a>
-          <a href="#answer" className="font-titling text-body text-ink-2 transition-colors duration-state hover:text-ink">
+          <a href="#answer" className="font-ui text-body text-ink-2 transition-colors duration-state hover:text-ink">
             The answer
           </a>
-          <a href="#questions" className="font-titling text-body text-ink-2 transition-colors duration-state hover:text-ink">
+          <a href="#questions" className="font-ui text-body text-ink-2 transition-colors duration-state hover:text-ink">
             Questions
           </a>
         </nav>
@@ -172,7 +172,7 @@ function NoisePanel() {
   return (
     <figure className="hero-noise">
       <div className="hero-noise__strip">
-        <p className="font-measurement text-[11px] uppercase tracking-[0.16em] text-map-ink">
+        <p className="font-mono text-[11px] uppercase tracking-[0.16em] text-map-ink">
           The map, and the panel over it
         </p>
         <span className="hero-noise__chip">Worked example</span>
@@ -191,44 +191,44 @@ function NoisePanel() {
       </div>
 
       <div className="mt-4 px-5 pb-1">
-        <p className="font-measurement text-[11px] uppercase tracking-[0.16em] text-map-ink-2">
+        <p className="font-mono text-[11px] uppercase tracking-[0.16em] text-map-ink-2">
           The panel, arguing
         </p>
       </div>
 
       {TURNS.map((turn) => (
         <div key={turn.who} className={`hero-noise__row ${ruleClasses('top', 'dark')}`}>
-          <p className="flex items-center gap-2 font-measurement text-micro uppercase tracking-[0.14em]">
+          <p className="flex items-center gap-2 font-mono text-micro uppercase tracking-[0.14em]">
             <PositionMark position={turn.position} size="sm" ground="map" />
             <span className="text-map-ink-2">{turn.who}</span>
           </p>
-          <p className="mt-1 font-titling text-[13px] leading-[20px] text-map-ink">{turn.said}</p>
+          <p className="mt-1 font-ui text-[13px] leading-[20px] text-map-ink">{turn.said}</p>
         </div>
       ))}
 
-      <p className="hero-noise__note px-5 pt-4 font-measurement text-[11px] leading-[17px] text-map-ink-2">
+      <p className="hero-noise__note px-5 pt-4 font-mono text-[11px] leading-[17px] text-map-ink-2">
         The map while the panel argues. Every turn lands on it before the next pass reads it.
       </p>
 
       {/* The filed answer — the only white object inside the dark surface, breaking the frame. */}
       <div className="hero-verdict p-5">
         <div className="flex items-center justify-between gap-3">
-          <p className="font-measurement text-mono uppercase tracking-[0.14em] text-ink-3">Filed</p>
-          <p className="flex items-center gap-2 font-measurement text-[11px] uppercase tracking-[0.14em] text-ink">
+          <p className="font-mono text-mono uppercase tracking-[0.14em] text-ink-3">Filed</p>
+          <p className="flex items-center gap-2 font-mono text-[11px] uppercase tracking-[0.14em] text-ink">
             <PositionMark position="NEGATIVE" size="sm" ground="light" />
           </p>
         </div>
         <p className="mt-2 flex items-baseline gap-2">
-          <span className="font-measurement text-[34px] leading-[38px] tnum text-ink">0.82</span>
-          <span className="font-measurement text-[10px] uppercase tracking-[0.14em] text-ink-3">
+          <span className="font-mono text-[34px] leading-[38px] tnum text-ink">0.82</span>
+          <span className="font-mono text-[10px] uppercase tracking-[0.14em] text-ink-3">
             the weighted share
           </span>
         </p>
         <div className={`${ruleClasses('top')} mt-3 pt-3`}>
-          <p className="font-measurement text-mono uppercase tracking-[0.14em] text-caution">
+          <p className="font-mono text-mono uppercase tracking-[0.14em] text-caution">
             The case against
           </p>
-          <p className="mt-1 font-titling text-[13px] leading-[20px] text-ink-2">
+          <p className="mt-1 font-ui text-[13px] leading-[20px] text-ink-2">
             If the upgrade lands on time, the Mill Street economics hold.
           </p>
         </div>
@@ -248,24 +248,24 @@ function HeroSection() {
       <div className="shell">
         <div className="grid gap-14 xl:grid-cols-[560px_minmax(0,1fr)] xl:items-start xl:gap-16">
           <div>
-            <p className="enter font-measurement text-mono uppercase tracking-[0.18em] text-ink-3" style={{ animationDelay: '0ms' }}>
+            <p className="enter font-mono text-mono uppercase tracking-[0.18em] text-ink-3" style={{ animationDelay: '0ms' }}>
               A panel of experts
             </p>
             <h1
               id="demo-hero-headline"
-              className="enter mt-5 max-w-[16ch] font-record text-[clamp(2.75rem,1.6rem+4.2vw,68px)] font-semibold leading-[1.02] tracking-[-0.02em] text-ink"
+              className="enter mt-5 max-w-[16ch] font-ui text-[clamp(2.75rem,1.6rem+4.2vw,68px)] font-semibold leading-[1.02] tracking-[-0.02em] text-ink"
               style={{ animationDelay: '60ms' }}
             >
               A decision you <em className="font-normal italic">can&rsquo;t</em> look up.
             </h1>
             <p
-              className="enter mt-6 max-w-[42ch] font-titling text-[19px] leading-[28px] text-ink"
+              className="enter mt-6 max-w-[42ch] font-ui text-[19px] leading-[28px] text-ink"
               style={{ animationDelay: '120ms' }}
             >
               The decision turns on documents you already have. The argument is what is missing.
             </p>
             <p
-              className="enter mt-4 max-w-[52ch] font-titling text-[17px] leading-[28px] text-ink-2"
+              className="enter mt-4 max-w-[52ch] font-ui text-[17px] leading-[28px] text-ink-2"
               style={{ animationDelay: '150ms' }}
             >
               Societas reads that material, convenes a panel of experts drawn from it, and makes them
@@ -278,12 +278,12 @@ function HeroSection() {
               </Link>
               <a
                 href="#answer"
-                className="inline-flex min-h-11 items-center font-titling text-body text-ink-2 underline decoration-ink-3 underline-offset-4 transition-colors duration-state hover:text-ink hover:decoration-accent"
+                className="inline-flex min-h-11 items-center font-ui text-body text-ink-2 underline decoration-ink-3 underline-offset-4 transition-colors duration-state hover:text-ink hover:decoration-accent"
               >
                 See what it files
               </a>
             </div>
-            <p className="enter mt-8 font-measurement text-mono text-ink-3" style={{ animationDelay: '240ms' }}>
+            <p className="enter mt-8 font-mono text-mono text-ink-3" style={{ animationDelay: '240ms' }}>
               Runs on the machine you start it on · Free to use · No card, no tier
             </p>
           </div>
@@ -323,8 +323,8 @@ function Facts() {
         <ul className="grid gap-8 md:grid-cols-3 md:gap-10">
           {facts.map((fact) => (
             <li key={fact.label} className={`${ruleClasses('top')} pt-4`}>
-              <p className="font-measurement text-mono uppercase tracking-[0.14em] text-ink-3">{fact.label}</p>
-              <p className="mt-2 max-w-[42ch] font-titling text-[15px] leading-[24px] text-ink-2">{fact.body}</p>
+              <p className="font-mono text-mono uppercase tracking-[0.14em] text-ink-3">{fact.label}</p>
+              <p className="mt-2 max-w-[42ch] font-ui text-[15px] leading-[24px] text-ink-2">{fact.body}</p>
             </li>
           ))}
         </ul>
@@ -350,10 +350,10 @@ function Problem() {
       <div ref={ref} className="shell reveal">
         <div className="grid gap-10 lg:grid-cols-[1fr_1fr] lg:gap-20">
           <div>
-            <h2 id="demo-problem-heading" className="font-record text-[40px] font-semibold leading-[1.1] tracking-[-0.02em] text-ink">
+            <h2 id="demo-problem-heading" className="font-ui text-[40px] font-semibold leading-[1.1] tracking-[-0.02em] text-ink">
               The argument is the thing you&rsquo;re missing.
             </h2>
-            <p className="mt-4 max-w-[48ch] font-titling text-[15px] leading-[24px] text-ink-2">
+            <p className="mt-4 max-w-[48ch] font-ui text-[15px] leading-[24px] text-ink-2">
               Everyone you ask will have an opinion. Almost nobody has read everything you have read,
               argued the sides against each other, and told you the strongest objection. So the
               decision stays yours — made on a hunch you cannot defend.
@@ -362,7 +362,7 @@ function Problem() {
 
           <ul className="self-end">
             {lines.map((line) => (
-              <li key={line} className={`${ruleClasses('top')} py-4 font-titling text-[17px] leading-[26px] text-ink`}>
+              <li key={line} className={`${ruleClasses('top')} py-4 font-ui text-[17px] leading-[26px] text-ink`}>
                 {line}
               </li>
             ))}
@@ -402,10 +402,10 @@ function HowItWorks() {
   return (
     <Band tone="sky" id="how-it-works" aria-labelledby="demo-how-heading">
       <div ref={ref} className="shell reveal">
-        <h2 id="demo-how-heading" className="font-record text-[40px] font-semibold leading-[1.1] tracking-[-0.02em] text-ink">
+        <h2 id="demo-how-heading" className="font-ui text-[40px] font-semibold leading-[1.1] tracking-[-0.02em] text-ink">
           How it works
         </h2>
-        <p className="mt-3 max-w-[56ch] font-titling text-[15px] leading-[24px] text-ink-2">
+        <p className="mt-3 max-w-[56ch] font-ui text-[15px] leading-[24px] text-ink-2">
           Four movements, always in the same order: add your material, ask the question, let the
           panel argue, file the answer.
         </p>
@@ -413,9 +413,9 @@ function HowItWorks() {
         <ol className="mt-10 grid gap-8 md:grid-cols-4 md:gap-10">
           {steps.map((step) => (
             <li key={step.key} className={`${ruleClasses('top')} pt-4`}>
-              <p className="font-measurement text-mono text-ink-3">{step.key}</p>
-              <h3 className="mt-3 font-titling text-title text-ink">{step.title}</h3>
-              <p className="mt-2 max-w-[38ch] font-titling text-[15px] leading-[24px] text-ink-2">{step.body}</p>
+              <p className="font-mono text-mono text-ink-3">{step.key}</p>
+              <h3 className="mt-3 font-ui text-title text-ink">{step.title}</h3>
+              <p className="mt-2 max-w-[38ch] font-ui text-[15px] leading-[24px] text-ink-2">{step.body}</p>
             </li>
           ))}
         </ol>
@@ -453,10 +453,10 @@ function TheAnswer() {
   return (
     <Band tone="plum" id="answer" aria-labelledby="demo-answer-heading">
       <div ref={ref} className="shell reveal">
-        <h2 id="demo-answer-heading" className="font-record text-[40px] font-semibold leading-[1.1] tracking-[-0.02em] text-ink">
+        <h2 id="demo-answer-heading" className="font-ui text-[40px] font-semibold leading-[1.1] tracking-[-0.02em] text-ink">
           What you get back
         </h2>
-        <p className="mt-3 max-w-[56ch] font-titling text-[15px] leading-[24px] text-ink-2">
+        <p className="mt-3 max-w-[56ch] font-ui text-[15px] leading-[24px] text-ink-2">
           Four objects, every time — and none of them is a chat you have to keep asking.
         </p>
 
@@ -474,18 +474,18 @@ function TheAnswer() {
               }
             >
               <p
-                className={`font-measurement text-mono uppercase tracking-[0.14em] ${
+                className={`font-mono text-mono uppercase tracking-[0.14em] ${
                   item.caution ? 'text-caution' : 'text-ink-3'
                 }`}
               >
                 {item.label}
               </p>
-              <p className="mt-3 font-titling text-[14px] leading-[22px] text-ink-2">{item.body}</p>
+              <p className="mt-3 font-ui text-[14px] leading-[22px] text-ink-2">{item.body}</p>
             </Card>
           ))}
         </ul>
 
-        <p className="mt-8 max-w-[60ch] font-titling text-[15px] leading-[24px] text-ink">
+        <p className="mt-8 max-w-[60ch] font-ui text-[15px] leading-[24px] text-ink">
           Not a transcript. A document you can read on screen and take away.
         </p>
       </div>
@@ -506,8 +506,8 @@ function ChatBubble({ from, children }: { from: 'you' | 'them'; children: ReactN
   return (
     <div className={from === 'you' ? 'flex justify-end' : 'flex justify-start'}>
       <p
-        className={`max-w-[40ch] rounded-lg px-4 py-2.5 font-titling text-[13px] leading-[20px] ${
-          from === 'you' ? 'bg-canvas text-ink shadow-raised' : 'bg-band text-ink-2'
+        className={`max-w-[40ch] rounded-lg px-4 py-2.5 font-ui text-[13px] leading-[20px] ${
+          from === 'you' ? 'bg-paper text-ink shadow-card' : 'bg-sand text-ink-2'
         }`}
       >
         {children}
@@ -535,17 +535,17 @@ function Difference() {
   return (
     <Band tone="band" aria-labelledby="demo-difference-heading">
       <div ref={ref} className="shell reveal">
-        <h2 id="demo-difference-heading" className="font-record text-[40px] font-semibold leading-[1.1] tracking-[-0.02em] text-ink">
+        <h2 id="demo-difference-heading" className="font-ui text-[40px] font-semibold leading-[1.1] tracking-[-0.02em] text-ink">
           Not a conversation. A filed decision.
         </h2>
-        <p className="mt-3 max-w-[56ch] font-titling text-[15px] leading-[24px] text-ink-2">
+        <p className="mt-3 max-w-[56ch] font-ui text-[15px] leading-[24px] text-ink-2">
           Two things can end the same session. Only one of them leaves you holding something.
         </p>
 
         <div className="mt-10 grid gap-10 lg:grid-cols-2 lg:gap-16">
           {/* The conversation — it goes on, and it ends with nothing. */}
           <div>
-            <p className="font-measurement text-mono uppercase tracking-[0.14em] text-ink-3">
+            <p className="font-mono text-mono uppercase tracking-[0.14em] text-ink-3">
               A conversation
             </p>
             <div className="mt-4 space-y-2.5">
@@ -560,32 +560,32 @@ function Difference() {
                 you.
               </ChatBubble>
             </div>
-            <p className="mt-5 font-measurement text-mono uppercase tracking-[0.14em] text-ink-3">
+            <p className="mt-5 font-mono text-mono uppercase tracking-[0.14em] text-ink-3">
               ▸ 14 more messages · no answer · nothing to keep
             </p>
-            <p className="mt-2 font-titling text-[15px] leading-[24px] text-ink-2">
+            <p className="mt-2 font-ui text-[15px] leading-[24px] text-ink-2">
               …and the decision is still yours, made from a summary.
             </p>
           </div>
 
           {/* The filed decision — it ends. */}
           <div>
-            <p className="font-measurement text-mono uppercase tracking-[0.14em] text-ink-3">
+            <p className="font-mono text-mono uppercase tracking-[0.14em] text-ink-3">
               A filed decision
             </p>
             <div className="mt-4">
               <FiledSheet decision={FILED_DECISION} sample />
             </div>
-            <p className="mt-5 font-measurement text-mono uppercase tracking-[0.14em] text-ink-3">
+            <p className="mt-5 font-mono text-mono uppercase tracking-[0.14em] text-ink-3">
               One sheet · the answer, the share behind it, the case against, the sources
             </p>
-            <p className="mt-2 font-titling text-[15px] leading-[24px] text-ink-2">
+            <p className="mt-2 font-ui text-[15px] leading-[24px] text-ink-2">
               …and it is on your desk, with everything that produced it.
             </p>
           </div>
         </div>
 
-        <p className="mt-10 max-w-[60ch] font-record text-[22px] leading-[32px] text-ink">
+        <p className="mt-10 max-w-[60ch] font-ui text-[22px] leading-[32px] text-ink">
           The difference is not the interface. It is what you are holding at the end.
         </p>
       </div>
@@ -627,10 +627,10 @@ function UseCases() {
       <div ref={ref} className="shell reveal">
         <div className="grid gap-8 lg:grid-cols-[380px_1fr] lg:gap-16">
           <div>
-            <h2 id="demo-cases-heading" className="font-record text-[40px] font-semibold leading-[1.1] tracking-[-0.02em] text-ink">
+            <h2 id="demo-cases-heading" className="font-ui text-[40px] font-semibold leading-[1.1] tracking-[-0.02em] text-ink">
               Where it earns its keep
             </h2>
-            <p className="mt-4 max-w-[38ch] font-titling text-[15px] leading-[24px] text-ink-2">
+            <p className="mt-4 max-w-[38ch] font-ui text-[15px] leading-[24px] text-ink-2">
               One product, one question: whether to move, and why. The answer comes back with the
               case against it and the sources each expert argued from.
             </p>
@@ -639,9 +639,9 @@ function UseCases() {
           <ul className="grid gap-4 sm:grid-cols-2">
             {cases.map((item) => (
               <Card key={item.question} as="li" pad={24} radius="lg">
-                <h3 className="font-titling text-heading text-ink">{item.question}</h3>
-                <p className="mt-2 font-titling text-[14px] leading-[22px] text-ink-2">{item.body}</p>
-                <p className="mt-4 font-measurement text-mono uppercase tracking-[0.14em] text-ink-3">{item.replaces}</p>
+                <h3 className="font-ui text-heading text-ink">{item.question}</h3>
+                <p className="mt-2 font-ui text-[14px] leading-[22px] text-ink-2">{item.body}</p>
+                <p className="mt-4 font-mono text-mono uppercase tracking-[0.14em] text-ink-3">{item.replaces}</p>
               </Card>
             ))}
           </ul>
@@ -668,33 +668,33 @@ function Limits() {
   return (
     <Band tone="band" aria-labelledby="demo-limits-heading">
       <div ref={ref} className="shell reveal">
-        <h2 id="demo-limits-heading" className="font-record text-[40px] font-semibold leading-[1.1] tracking-[-0.02em] text-ink">
+        <h2 id="demo-limits-heading" className="font-ui text-[40px] font-semibold leading-[1.1] tracking-[-0.02em] text-ink">
           What this tool does — and does not
         </h2>
-        <p className="mt-3 max-w-[56ch] font-titling text-[15px] leading-[24px] text-ink-2">
+        <p className="mt-3 max-w-[56ch] font-ui text-[15px] leading-[24px] text-ink-2">
           Three properties are built into how the product works, and three limits come with them.
           No badges, testimonials or certifications are shown, because none exist.
         </p>
 
         <div className="mt-10 grid gap-10 md:grid-cols-2 md:gap-16">
           <div>
-            <h3 className="font-titling text-heading text-ink">What it does</h3>
+            <h3 className="font-ui text-heading text-ink">What it does</h3>
             <ul className={`${ruleClasses('around')} mt-4`}>
               {does.map((line) => (
                 <li key={line.label} className="py-4">
-                  <p className="font-titling font-medium text-ink">{line.label}</p>
-                  <p className="mt-1 max-w-[52ch] font-titling text-[14px] leading-[22px] text-ink-2">{line.body}</p>
+                  <p className="font-ui font-medium text-ink">{line.label}</p>
+                  <p className="mt-1 max-w-[52ch] font-ui text-[14px] leading-[22px] text-ink-2">{line.body}</p>
                 </li>
               ))}
             </ul>
           </div>
           <div>
-            <h3 className="font-titling text-heading text-ink">What it does not do</h3>
+            <h3 className="font-ui text-heading text-ink">What it does not do</h3>
             <ul className={`${ruleClasses('around')} mt-4`}>
               {doesNot.map((line) => (
                 <li key={line.label} className="py-4">
-                  <p className="font-titling font-medium text-ink">{line.label}</p>
-                  <p className="mt-1 max-w-[52ch] font-titling text-[14px] leading-[22px] text-ink-2">{line.body}</p>
+                  <p className="font-ui font-medium text-ink">{line.label}</p>
+                  <p className="mt-1 max-w-[52ch] font-ui text-[14px] leading-[22px] text-ink-2">{line.body}</p>
                 </li>
               ))}
             </ul>
@@ -716,22 +716,22 @@ function FiledAnswer() {
       <div ref={ref} className="shell reveal">
         <div className="grid gap-12 lg:grid-cols-[1fr_440px] lg:items-center lg:gap-20">
           <div>
-            <h2 id="demo-filed-heading" className="font-record text-[40px] font-semibold leading-[1.1] tracking-[-0.02em] text-map-ink">
+            <h2 id="demo-filed-heading" className="font-ui text-[40px] font-semibold leading-[1.1] tracking-[-0.02em] text-map-ink">
               The answer is a document you can open again.
             </h2>
-            <p className="mt-4 max-w-[46ch] font-titling text-[15px] leading-[24px] text-map-ink-2">
+            <p className="mt-4 max-w-[46ch] font-ui text-[15px] leading-[24px] text-map-ink-2">
               Not a summary, and not a message that disappears. The question as it was asked, the
               answer, the confidence, the case against, the position each expert took and the
               sources each argued from — and every turn, in order.
             </p>
-            <p className="mt-6 font-measurement text-mono uppercase tracking-[0.14em] text-map-ink-2">
+            <p className="mt-6 font-mono text-mono uppercase tracking-[0.14em] text-map-ink-2">
               Reopen it and it renders exactly as it ended
             </p>
           </div>
 
           <figure>
             <img
-              className="w-full rounded-lg shadow-panel"
+              className="w-full rounded-lg shadow-map"
               style={{ aspectRatio: '1036 / 1390', objectFit: 'cover', objectPosition: '50% 0%' }}
               data-capture="answer"
               src={CAPTURES.answer.src}
@@ -800,10 +800,10 @@ function Questions() {
       <div ref={ref} className="shell reveal">
         <div className="grid gap-10 lg:grid-cols-[360px_1fr] lg:gap-20">
           <div>
-            <h2 id="demo-faq-heading" className="font-record text-[40px] font-semibold leading-[1.1] tracking-[-0.02em] text-ink">
+            <h2 id="demo-faq-heading" className="font-ui text-[40px] font-semibold leading-[1.1] tracking-[-0.02em] text-ink">
               Good questions.
             </h2>
-            <p className="mt-3 max-w-[38ch] font-titling text-[15px] leading-[24px] text-ink-2">
+            <p className="mt-3 max-w-[38ch] font-ui text-[15px] leading-[24px] text-ink-2">
               The questions owners actually ask, answered from how the product behaves — no more, no
               less.
             </p>
@@ -812,7 +812,7 @@ function Questions() {
           <div className="hero-faq">
             {items.map((item, index) => (
               <Disclosure key={item.q} summary={item.q} defaultOpen={index === 0}>
-                <p className="max-w-[68ch] font-titling text-[14px] leading-[22px] text-ink-2">{item.a}</p>
+                <p className="max-w-[68ch] font-ui text-[14px] leading-[22px] text-ink-2">{item.a}</p>
               </Disclosure>
             ))}
           </div>
@@ -828,10 +828,10 @@ function Close() {
   return (
     <Band tone="plum" aria-labelledby="demo-close-heading">
       <div ref={ref} className="shell reveal text-center">
-        <h2 id="demo-close-heading" className="mx-auto max-w-[18ch] font-record text-[44px] font-semibold leading-[1.08] tracking-[-0.02em] text-ink">
+        <h2 id="demo-close-heading" className="mx-auto max-w-[18ch] font-ui text-[44px] font-semibold leading-[1.08] tracking-[-0.02em] text-ink">
           Bring a question you can&rsquo;t look up.
         </h2>
-        <p className="mx-auto mt-4 max-w-[46ch] font-titling text-[15px] leading-[24px] text-ink-2">
+        <p className="mx-auto mt-4 max-w-[46ch] font-ui text-[15px] leading-[24px] text-ink-2">
           Your documents, a panel drawn from them, and an answer filed with the case against.
         </p>
         <div className="mt-8 flex justify-center">
@@ -839,7 +839,7 @@ function Close() {
             Start your first decision
           </Link>
         </div>
-        <p className="mt-6 font-measurement text-mono text-ink-3">Free to use · No card, no tier</p>
+        <p className="mt-6 font-mono text-mono text-ink-3">Free to use · No card, no tier</p>
       </div>
     </Band>
   )
@@ -858,9 +858,9 @@ function Footer() {
           <div>
             <div className="flex items-center gap-2.5 text-ink">
               <BrandMark />
-              <p className="font-titling text-title font-semibold text-ink">{WORDMARK}</p>
+              <p className="font-ui text-title font-semibold text-ink">{WORDMARK}</p>
             </div>
-            <p className="mt-1 font-measurement text-mono text-ink-3">Local-first · v0.0.0 · decision panel</p>
+            <p className="mt-1 font-mono text-mono text-ink-3">Local-first · v0.0.0 · decision panel</p>
           </div>
           <div className="flex flex-wrap items-center gap-3">
             <Link to="/auth/signup?next=/new" className={buttonClasses('secondary', 40)}>
@@ -882,7 +882,7 @@ function Footer() {
  */
 export default function Hero() {
   return (
-    <div className="hero-page min-h-screen bg-ground text-ink">
+    <div className="hero-page min-h-screen bg-bone text-ink">
       <Nav />
       <HeroSection />
       <Facts />

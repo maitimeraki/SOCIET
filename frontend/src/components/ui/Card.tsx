@@ -29,11 +29,11 @@ export default function Card({
   ...rest
 }: CardProps) {
   const classes = [
-    'bg-canvas',
+    'bg-paper',
     pad === 24 ? 'p-6' : 'p-4',
-    'shadow-raised',
+    'shadow-card',
     radius === 'lg' ? 'rounded-lg' : 'rounded-md',
-    hover ? 'transition-[box-shadow,transform] duration-state hover:-translate-y-px hover:shadow-floating' : '',
+    hover ? 'transition-[box-shadow,transform] duration-state hover:-translate-y-px hover:shadow-sheet' : '',
     className,
   ]
     .filter(Boolean)

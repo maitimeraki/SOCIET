@@ -8,8 +8,8 @@ import Card from './Card'
 describe('Card', () => {
   it('is an object: the canvas, one soft shadow, and no border at all', () => {
     const html = renderToStaticMarkup(<Card>body</Card>)
-    expect(html).toContain('bg-canvas')
-    expect(html).toContain('shadow-raised')
+    expect(html).toContain('bg-paper')
+    expect(html).toContain('shadow-card')
     expect(html).not.toMatch(/border(-[trblxy])?-/)
   })
 
@@ -24,8 +24,8 @@ describe('Card', () => {
   })
 
   it('lifts the object on hover only when it is asked to', () => {
-    expect(renderToStaticMarkup(<Card hover>body</Card>)).toContain('hover:shadow-floating')
-    expect(renderToStaticMarkup(<Card>body</Card>)).not.toContain('hover:shadow-floating')
+    expect(renderToStaticMarkup(<Card hover>body</Card>)).toContain('hover:shadow-sheet')
+    expect(renderToStaticMarkup(<Card>body</Card>)).not.toContain('hover:shadow-sheet')
   })
 
   it('renders the element the caller asks for', () => {

@@ -98,7 +98,7 @@ describe('each step renders its own activity into the work pane', () => {
 
 describe('the copy law (§13) holds on the workspace at every step', () => {
   // The shared, stem-tolerant pattern, matched against the RENDERED TEXT only (tags/attributes
-  // stripped), so `bg-ground` can never trip `\bround\b`.
+  // stripped), so `bg-bone` can never trip `\bround\b`.
   it.each(STEPS)('%s renders no banned word', (step) => {
     expect(renderedText(renderStep(step))).not.toMatch(BANNED_WORD)
   })

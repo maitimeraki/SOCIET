@@ -7,7 +7,7 @@ export default function SchemaCard({ title, names }: { title: string; names: str
       <Label as="h3" className="mb-3">{title}</Label>
       <div className="flex flex-wrap gap-1.5">
         {names.map((name) => (
-          <span key={name} className="rounded-xs border border-ink-4 bg-ground-2 px-1.5 py-0.5 text-micro text-ink-2">
+          <span key={name} className="rounded-xs border border-hairline bg-sand px-1.5 py-0.5 text-micro text-ink-2">
             {name}
           </span>
         ))}

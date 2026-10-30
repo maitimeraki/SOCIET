@@ -40,7 +40,7 @@ export function DocumentsPageView({
     <div>
       <header className="flex flex-wrap items-end justify-between gap-4 border-b border-rule pb-6">
         <div>
-          <h1 className="font-titling text-display text-ink">Documents</h1>
+          <h1 className="font-ui text-display text-ink">Documents</h1>
           <p className="mt-2 max-w-[60ch] text-body text-ink-2">
             Everything you've provided, and what has been read of it.
           </p>
@@ -50,7 +50,7 @@ export function DocumentsPageView({
         </Link>
       </header>
 
-      <p className="mb-2 font-measurement text-micro text-ink-3">
+      <p className="mb-2 font-mono text-micro text-ink-3">
         {fmtInt(documents.length)} DOCUMENTS · {fmtInt(read)} READ · {fmtInt(corpora)} CORPORA
       </p>
 
@@ -84,7 +84,7 @@ export function DocumentsPageView({
                 <th
                   key={heading}
                   scope="col"
-                  className="border-b border-rule px-0 pb-2 text-left font-measurement text-[8px] uppercase tracking-[0.12em] text-ink-3"
+                  className="border-b border-rule px-0 pb-2 text-left font-mono text-[8px] uppercase tracking-[0.12em] text-ink-3"
                 >
                   {heading}
                 </th>
@@ -96,7 +96,7 @@ export function DocumentsPageView({
               <tr
                 key={document.id}
                 onClick={() => onSelect(document)}
-                className="cursor-pointer border-b border-rule/40 hover:bg-ground-2"
+                className="cursor-pointer border-b border-rule/40 hover:bg-sand"
               >
                 <td className="py-3 pr-3 text-body text-ink">
                   <button
@@ -112,8 +112,8 @@ export function DocumentsPageView({
                   </button>
                 </td>
                 <td className="py-3 pr-3 text-body text-ink-2">{document.dataset_name ?? 'Not in a corpus yet'}</td>
-                <td className="py-3 pr-3 font-measurement text-mono text-ink-3">{fmtDate(document.created_at)}</td>
-                <td className="py-3 font-measurement text-micro text-ink-2">
+                <td className="py-3 pr-3 font-mono text-mono text-ink-3">{fmtDate(document.created_at)}</td>
+                <td className="py-3 font-mono text-micro text-ink-2">
                   {document.read ? '● Read' : '○ Not read yet'}
                 </td>
               </tr>

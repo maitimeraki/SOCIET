@@ -30,29 +30,8 @@
  */
 
 .hero-page {
-  /* ── The page's own ground, scoped. The tokens below are the page's; the surfaces themselves
-        are global, so a component elsewhere can take the same sky or warm. */
-  --color-ground: var(--color-page);
-  --color-ground-2: var(--color-band);
-  --color-canvas: #ffffff;
-  --color-ink: #0f172a;
-  --color-ink-2: #334155;
-  --color-ink-3: #556070; /* the app's #64748b is 3.9:1 on a tinted band and fails AA for a label */
-  --color-rule: #6b7a8d; /* a record's edge — 3.12 on the plum wash, 3.80 on the ground */
-  --color-accent: #823a86; /* the one accent — the action, and only the action */
-  --color-accent-soft: #f6eefa;
-
-  /* ── The map's own surface — the one dark surface on the page, because the work lives there. */
-  --color-map-ground: #070c16;
-  --color-map-ground-2: #16223d;
-  --color-map-ink: #e2e8f0;
-  --color-map-ink-2: #94a3b8;
-  --gradient-map: radial-gradient(
-    120% 100% at 50% 0%,
-    var(--color-map-ground-2) 0%,
-    var(--color-map-ground) 72%
-  );
-
+  /* Task 13 owns this page's rewrite. Until then it reads the global Quiet Room tokens; the only
+     local override left is the page's tighter chip radius. */
   --radius-xs: 4px; /* Tailwind v4 ships 2px; the design's chip radius is 4px */
   --default-transition-duration: 120ms; /* closes every bare `transition-colors` at 120ms — Tailwind's own default is 150ms */
 }
@@ -85,8 +64,8 @@
       the ground; it is the cheapest way to make a page look composed rather than stacked. */
 .hero-nav {
   border-radius: var(--radius-lg);
-  background: var(--color-canvas);
-  box-shadow: var(--shadow-raised);
+  background: var(--color-paper);
+  box-shadow: var(--shadow-card);
 }
 
 /* ── The one action (review §2.1): 44px, the §3 accent ramp, a 14px Archivo 500 label in white.
@@ -100,10 +79,10 @@
   justify-content: center;
   padding-inline: 24px;
   border-radius: var(--radius-md);
-  background: var(--gradient-action);
-  box-shadow: var(--shadow-raised);
-  color: var(--color-accent-ink);
-  font-family: var(--font-titling);
+  background: var(--color-accent);
+  box-shadow: var(--shadow-card);
+  color: var(--color-on-accent);
+  font-family: var(--font-ui);
   font-size: 14px;
   line-height: 21px;
   font-weight: 500;
@@ -114,7 +93,7 @@
 }
 
 .hero-action:hover {
-  box-shadow: var(--shadow-floating);
+  box-shadow: var(--shadow-sheet);
   transform: translateY(-1px);
 }
 
@@ -134,7 +113,7 @@
   position: relative;
   border-radius: var(--radius-lg);
   background: var(--gradient-map);
-  box-shadow: var(--shadow-panel);
+  box-shadow: var(--shadow-map);
   /* the room the overlapping answer card occupies */
   padding-bottom: 140px;
 }
@@ -160,7 +139,7 @@
   border-radius: var(--radius-sm);
   padding: 3px 8px;
   color: var(--color-map-ink-2);
-  font-family: var(--font-measurement);
+  font-family: var(--font-mono);
   font-size: 10px;
   line-height: 14px;
   letter-spacing: 0.14em;
@@ -189,7 +168,7 @@
   bottom: -32px;
   width: 320px;
   border-radius: var(--radius-lg);
-  background: var(--color-canvas);
+  background: var(--color-paper);
   box-shadow: var(--shadow-overlay);
 }
 

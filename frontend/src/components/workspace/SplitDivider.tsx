@@ -72,7 +72,7 @@ export default function SplitDivider({ ratio, onChange }: { ratio: number; onCha
       onLostPointerCapture={() => {
         dragging.current = false
       }}
-      className="order-2 hidden cursor-col-resize touch-none select-none items-center justify-center border-x border-rule/50 bg-ground-2 lg:flex"
+      className="order-2 hidden cursor-col-resize touch-none select-none items-center justify-center border-x border-rule/50 bg-sand lg:flex"
     >
       <span aria-hidden="true" className="text-ink-3">⋮</span>
     </div>

@@ -7,7 +7,7 @@
  *
  * The law governs RENDERED TEXT only: identifiers, route paths, API field names, `data-*`
  * attributes and log lines are exempt. `renderedText` strips the tags first (splicing back only the
- * customer-visible attribute values), so a class like `bg-ground` can never trip `\bround\b`.
+ * customer-visible attribute values), so a class like `bg-bone` can never trip `\bround\b`.
  */
 export const BANNED = [
   'agent', 'graph', 'node', 'edge', 'round', 'retrieval', 'ontology', 'model',

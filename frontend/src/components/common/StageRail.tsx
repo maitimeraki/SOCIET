@@ -57,7 +57,7 @@ export default function StageRail({
           <span className={`inline-flex items-center gap-2 whitespace-nowrap ${current ? 'text-ink' : 'text-ink-2'}`}>
             {glyph}
             <span className="text-label uppercase">{stage.label}</span>
-            {stage.note && <span className="tnum font-measurement text-micro text-ink-3">{stage.note}</span>}
+            {stage.note && <span className="tnum font-mono text-micro text-ink-3">{stage.note}</span>}
           </span>
         )
         return (
@@ -68,7 +68,7 @@ export default function StageRail({
                 type="button"
                 aria-current={current ? 'step' : undefined}
                 onClick={() => onSelect(stage.key)}
-                className="rounded-xs px-1 py-0.5 transition-colors duration-state hover:bg-ground-2"
+                className="rounded-xs px-1 py-0.5 transition-colors duration-state hover:bg-sand"
               >
                 {inner}
               </button>

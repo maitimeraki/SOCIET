@@ -92,8 +92,8 @@ export default function WorkspaceShell() {
   const title = runId ? run.query || 'This decision' : STEP_LABELS[step]
 
   return (
-    <div className="flex min-h-screen flex-col bg-ground">
-      <a href="#content" className="sr-only focus:not-sr-only focus:absolute focus:left-4 focus:top-4 focus:z-[70] focus:inline-flex focus:min-h-11 focus:items-center focus:rounded-sm focus:bg-canvas focus:px-3 focus:py-2 focus:text-body focus:text-ink">
+    <div className="flex min-h-screen flex-col bg-bone">
+      <a href="#content" className="sr-only focus:not-sr-only focus:absolute focus:left-4 focus:top-4 focus:z-[70] focus:inline-flex focus:min-h-11 focus:items-center focus:rounded-sm focus:bg-paper focus:px-3 focus:py-2 focus:text-body focus:text-ink">
         Skip to content
       </a>
       <WorkspaceTopBar title={title} />

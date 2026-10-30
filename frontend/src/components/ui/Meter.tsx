@@ -34,10 +34,10 @@ export default function Meter({
   return (
     <span className={`flex items-center gap-2 ${full ? 'w-full' : ''} ${className}`} title={`${label}: ${display}`}>
       <span className="w-9 text-micro text-ink-3">{label}</span>
-      <span className={`h-1 ${full ? 'flex-1' : 'w-14'} rounded-xs bg-ink-4`}>
+      <span className={`h-1 ${full ? 'flex-1' : 'w-14'} rounded-xs bg-hairline`}>
         {pct === null ? null : <span className={`block h-full rounded-xs ${fill}`} style={{ width: `${pct}%` }} />}
       </span>
-      <span className="tnum font-measurement text-micro text-ink-2">{display}</span>
+      <span className="tnum font-mono text-micro text-ink-2">{display}</span>
     </span>
   )
 }

@@ -253,7 +253,7 @@ function Block({ block }: { block: AnswerBlock }) {
     case 'text':
       // The reading view renders the emphasis; the export keeps its markdown markers, because the
       // export is a markdown file. Same content, two mediums.
-      return <Emphasis text={block.text} className="whitespace-pre-line font-record text-body-lg text-ink-2" />
+      return <Emphasis text={block.text} className="whitespace-pre-line font-ui text-body-lg text-ink-2" />
     case 'listing':
       return (
         <ul className="space-y-1 text-body text-ink-2">

@@ -121,7 +121,7 @@ export default function GraphPage({ onFailureChange }: { onFailureChange?: (fail
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="font-titling text-display text-ink">Grow the map</h1>
+        <h1 className="font-ui text-display text-ink">Grow the map</h1>
       </div>
 
       {reconnecting && (
@@ -141,7 +141,7 @@ export default function GraphPage({ onFailureChange }: { onFailureChange?: (fail
           {phase === 'build' && (
             <div className="space-y-4">
               <ProgressBar value={progress} label={`${fmtInt(completed)} / ${fmtInt(total)} sections`} />
-              <p className="tnum font-measurement text-mono text-ink-2">
+              <p className="tnum font-mono text-mono text-ink-2">
                 map so far · {fmtInt(result?.entity_types.length ?? 0)} entity types · {fmtInt(result?.relation_types.length ?? 0)} relation types
               </p>
               <p className="text-micro text-ink-3">Each section is written as it finishes — the map grows while the build runs.</p>

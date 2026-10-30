@@ -20,7 +20,7 @@ export default function TurnCard({ turn, round }: { turn: TurnInfo; round: numbe
       <header className="flex items-center gap-2">
         <span className="text-body text-ink">{turn.agent_name}</span>
         <PositionMark position={asStance(turn.stance)} size="sm" ground="light" />
-        <span className="tnum font-measurement text-micro text-ink-3">{fmtScore(turn.confidence)}</span>
+        <span className="tnum font-mono text-micro text-ink-3">{fmtScore(turn.confidence)}</span>
       </header>
       <Emphasis text={turn.content} className="mt-2 max-w-[66ch] select-text text-body-lg text-ink-2" />
       {references.length > 0 && (

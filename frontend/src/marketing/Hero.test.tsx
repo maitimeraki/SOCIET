@@ -132,15 +132,15 @@ describe('the kit — the vocabulary the page is built from', () => {
   })
 
   it('hands no hand-rolled top hairline to a page container', () => {
-    // §14.1’s sweep pattern, `border-t border-ink-4`: zero on this page.
-    expect(count(html, 'border-t border-ink-4')).toBe(0)
+    // §14.1’s sweep pattern, `border-t border-hairline`: zero on this page.
+    expect(count(html, 'border-t border-hairline')).toBe(0)
   })
 
   it('draws every FAQ separator with the kit’s own rule', () => {
     // The Disclosure draws its bottom rule from the kit; the page drops it in CSS
     // (`.hero-faq > div`) and draws the page’s own rule between the items instead.
     expect(count(html, 'rule-b')).toBe(10)
-    expect(count(html, 'border-ink-4')).toBe(0)
+    expect(count(html, 'border-hairline')).toBe(0)
   })
 })
 

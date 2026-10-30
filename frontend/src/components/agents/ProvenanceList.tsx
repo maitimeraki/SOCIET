@@ -11,7 +11,7 @@ export default function ProvenanceList({ links }: { links: ProvenanceLink[] }) {
           <span>
             {link.title}
             {link.breadcrumb ? ` — ${link.breadcrumb}` : ''}
-            <span className="tnum ml-2 font-measurement text-micro text-ink-3">{link.chunk_id}</span>
+            <span className="tnum ml-2 font-mono text-micro text-ink-3">{link.chunk_id}</span>
           </span>
         </li>
       ))}
