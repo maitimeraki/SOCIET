@@ -15,8 +15,8 @@ const shell = read('src/components/shell/AppShell.tsx')
 const results = read('src/pages/ResultsPage.tsx')
 
 describe('§4.8 the gradient system', () => {
-  it('opens the app shell on the morning wash', () => {
-    expect(count(shell, 'var(--gradient-morning)')).toBe(1)
+  it('keeps the morning wash off the app shell — it belongs to the Overview (§7.3)', () => {
+    expect(count(shell, 'var(--gradient-morning)')).toBe(0)
   })
 
   it('paints no gradient on the verdict sheet', () => {

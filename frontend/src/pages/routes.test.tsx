@@ -125,26 +125,32 @@ describe('the guard preserves the path a signed-out visitor was reaching for', (
   })
 })
 
-describe('the rail carries the three destinations', () => {
-  it.each(['/documents', '/runs', '/results'])('marks %s current at its own path', (path) => {
-    expect(currentHref(renderShell(path))).toBe(path)
+describe('the rail carries the four destinations', () => {
+  it.each([
+    ['/overview', 'Overview'],
+    ['/documents', 'Documents'],
+    ['/runs', 'Runs'],
+    ['/results', 'Verdict'],
+  ])('marks %s current at its own path', (path, label) => {
+    const html = renderShell(path)
+    expect(currentHref(html)).toBe(path)
+    expect(html).toContain(label)
   })
 
-  it('renders exactly three items inside the sections nav', () => {
-    const html = renderShell('/documents')
+  it('lists them in the order the work happens', () => {
+    const html = renderShell('/overview')
     const nav = html.match(/<nav[^>]*aria-label="Sections"[^>]*>[\s\S]*?<\/nav>/)?.[0] ?? ''
-    expect(nav.match(/<li>/g) ?? []).toHaveLength(3)
-    expect(nav).toContain('Documents')
-    expect(nav).toContain('Verdict')
-    expect(nav).toContain('Runs')
+    const order = ['Overview', 'Documents', 'Runs', 'Verdict'].map((label) => nav.indexOf(label))
+    expect(order).toEqual([...order].sort((a, b) => a - b))
+    expect(nav.match(/<li>/g) ?? []).toHaveLength(4)
   })
 
-  it('offers the new-decision action inside the sections nav, after the brand', () => {
-    const html = renderShell('/documents')
+  it('offers the new-decision action, then a real sign-out', () => {
+    const html = renderShell('/overview')
     const nav = html.match(/<nav[^>]*aria-label="Sections"[^>]*>[\s\S]*?<\/nav>/)?.[0] ?? ''
     expect(nav).toContain('href="/new"')
-    expect(nav).toContain('New decision')
     expect(nav.indexOf('New decision')).toBeGreaterThan(nav.indexOf('Societas'))
+    expect(html).toContain('Sign out')
   })
 })
 

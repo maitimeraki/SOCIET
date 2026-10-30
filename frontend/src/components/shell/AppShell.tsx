@@ -31,7 +31,7 @@ export function boundaryKey(pathname: string): string {
 }
 
 /**
- * §7 The app shell — ground, a 240px rail, a fluid region. There is no top bar. As a layout route it
+ * §7 The app shell — ground, a 264px rail, a fluid region. There is no top bar. As a layout route it
  * renders `<Outlet/>` instead of `children`, so the chrome stays mounted across navigation.
  *
  * The route-level boundary and the page-chunk Suspense both live INSIDE the shell, wrapping the
@@ -53,7 +53,7 @@ export default function AppShell() {
         Skip to content
       </a>
       <Rail />
-      <main id="content" className="min-w-0 flex-1 bg-[image:var(--gradient-morning)] px-6 pb-24 pt-8">
+      <main id="content" className="min-w-0 flex-1 px-6 pb-24 pt-8 lg:px-12">
         <AppErrorBoundary key={key}>
           <Suspense fallback={<RouteFallback />}>
             <Outlet />
