@@ -43,7 +43,7 @@ export default function FixMark({
           style={{ transformOrigin: '30px 10px' }}
         />
       </svg>
-      <span className="tnum font-mono text-mono-lg">
+      <span className="tnum font-mono text-mono text-[20px] leading-[26px]">
         <span className="sr-only">weighted confidence </span>
         {confidence === null ? '—' : confidence.toFixed(2)}
       </span>

@@ -414,7 +414,7 @@ function HowItWorks() {
           {steps.map((step) => (
             <li key={step.key} className={`${ruleClasses('top')} pt-4`}>
               <p className="font-mono text-mono text-ink-3">{step.key}</p>
-              <h3 className="mt-3 font-ui text-title text-ink">{step.title}</h3>
+              <h3 className="mt-3 font-ui text-heading text-ink">{step.title}</h3>
               <p className="mt-2 max-w-[38ch] font-ui text-[15px] leading-[24px] text-ink-2">{step.body}</p>
             </li>
           ))}
@@ -639,7 +639,7 @@ function UseCases() {
           <ul className="grid gap-4 sm:grid-cols-2">
             {cases.map((item) => (
               <Card key={item.question} as="li" pad={24} radius="lg">
-                <h3 className="font-ui text-heading text-ink">{item.question}</h3>
+                <h3 className="font-ui text-body-sm font-semibold text-ink">{item.question}</h3>
                 <p className="mt-2 font-ui text-[14px] leading-[22px] text-ink-2">{item.body}</p>
                 <p className="mt-4 font-mono text-mono uppercase tracking-[0.14em] text-ink-3">{item.replaces}</p>
               </Card>
@@ -678,7 +678,7 @@ function Limits() {
 
         <div className="mt-10 grid gap-10 md:grid-cols-2 md:gap-16">
           <div>
-            <h3 className="font-ui text-heading text-ink">What it does</h3>
+            <h3 className="font-ui text-body-sm font-semibold text-ink">What it does</h3>
             <ul className={`${ruleClasses('around')} mt-4`}>
               {does.map((line) => (
                 <li key={line.label} className="py-4">
@@ -689,7 +689,7 @@ function Limits() {
             </ul>
           </div>
           <div>
-            <h3 className="font-ui text-heading text-ink">What it does not do</h3>
+            <h3 className="font-ui text-body-sm font-semibold text-ink">What it does not do</h3>
             <ul className={`${ruleClasses('around')} mt-4`}>
               {doesNot.map((line) => (
                 <li key={line.label} className="py-4">
@@ -858,7 +858,7 @@ function Footer() {
           <div>
             <div className="flex items-center gap-2.5 text-ink">
               <BrandMark />
-              <p className="font-ui text-title font-semibold text-ink">{WORDMARK}</p>
+              <p className="font-ui text-heading font-semibold text-ink">{WORDMARK}</p>
             </div>
             <p className="mt-1 font-mono text-mono text-ink-3">Local-first · v0.0.0 · decision panel</p>
           </div>

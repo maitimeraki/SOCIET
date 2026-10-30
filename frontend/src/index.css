@@ -80,46 +80,65 @@
   /* the same accent band, on a nav strip turned on its side */
   --shadow-accent-inset-left: inset -2px 0 0 0 var(--color-accent);
 
-  /* ── §4 Typography — the UI and mono faces. Task 2 swaps the families. ───── */
+  /* ── §5.1 The three faces. ─────────────────────────────────────────────── */
+  --font-display: "Fraunces Variable", Fraunces, Georgia, serif;
   --font-ui: "Archivo Variable", Archivo, system-ui, sans-serif;
   --font-mono: "JetBrains Mono Variable", "JetBrains Mono", ui-monospace, monospace;
 
-  /* The default face is the UI face. */
+  /* Archivo is the default face; Fraunces is never UI chrome. */
   --default-font-family: var(--font-ui);
 
-  /* §4 The scale. Any figure that is a measurement is set in the mono, tabular. The hero is set
-        large deliberately — a small hero is what reads as an internal tool. */
-  --text-hero: clamp(2.5rem, 1.25rem + 5.5vw, 6rem); /* homepage h1 only */
-  --text-hero--line-height: 1.02;
-  --text-hero--letter-spacing: -0.01em;
-  --text-hero--font-weight: 600;
-  --text-display: 32px; /* page titles */
-  --text-display--line-height: 38px;
-  --text-display--letter-spacing: -0.01em;
-  --text-display--font-weight: 600;
-  --text-title: 24px; /* section headings */
-  --text-title--line-height: 30px;
-  --text-title--font-weight: 600;
-  --text-heading: 16px; /* card titles */
-  --text-heading--line-height: 22px;
+  /* ── §5.2 The scale. Any figure that is a measurement is set in the mono,
+        tabular. ───────────────────────────────────────────────────────────── */
+  --text-hero: clamp(56px, 4.2vw + 24px, 104px); /* the marketing h1 only */
+  --text-hero--line-height: 0.98;
+  --text-hero--letter-spacing: -0.035em;
+  --text-hero--font-weight: 500;
+
+  --text-display: clamp(40px, 3vw + 16px, 64px); /* page titles, section h2 */
+  --text-display--line-height: 1.04;
+  --text-display--letter-spacing: -0.03em;
+  --text-display--font-weight: 500;
+
+  --text-title: 32px; /* the verdict's question, card titles */
+  --text-title--line-height: 38px;
+  --text-title--letter-spacing: -0.02em;
+  --text-title--font-weight: 500;
+
+  --text-heading: 24px; /* sub-headings, drawer titles */
+  --text-heading--line-height: 30px;
+  --text-heading--letter-spacing: -0.01em;
   --text-heading--font-weight: 600;
-  --text-body: 14px; /* UI copy */
-  --text-body--line-height: 21px;
-  --text-body-lg: 15px; /* long-form reading */
-  --text-body-lg--line-height: 24px;
-  --text-label: 12px; /* caps labels */
+
+  --text-subhead: 20px; /* the hero support, section leads */
+  --text-subhead--line-height: 30px;
+  --text-subhead--font-weight: 400;
+
+  --text-body: 16px; /* body copy, app prose */
+  --text-body--line-height: 26px;
+  --text-body--font-weight: 400;
+
+  --text-body-sm: 14px; /* UI copy, table cells */
+  --text-body-sm--line-height: 22px;
+  --text-body-sm--font-weight: 400;
+
+  --text-label: 12px; /* caps labels, eyebrows, table heads */
   --text-label--line-height: 16px;
-  --text-label--letter-spacing: 0.06em;
-  --text-label--font-weight: 500;
-  --text-micro: 11px; /* captions, timestamps */
-  --text-micro--line-height: 14px;
-  --text-mono: 12px; /* identifiers */
-  --text-mono--line-height: 18px;
-  --text-mono-lg: 20px; /* a measured figure at card scale */
-  --text-mono-lg--line-height: 26px;
-  --text-numeral: 56px; /* the confidence figure */
-  --text-numeral--line-height: 56px;
-  --text-numeral--letter-spacing: -0.02em;
+  --text-label--letter-spacing: 0.08em;
+  --text-label--font-weight: 600;
+
+  --text-micro: 11px; /* captions, timestamps, legal */
+  --text-micro--line-height: 16px;
+  --text-micro--letter-spacing: 0.02em;
+  --text-micro--font-weight: 400;
+
+  --text-mono: 13px; /* measurements, ids, table numbers */
+  --text-mono--line-height: 20px;
+  --text-mono--font-weight: 400;
+
+  --text-numeral: clamp(56px, 5vw, 80px); /* the confidence figure */
+  --text-numeral--line-height: 1;
+  --text-numeral--letter-spacing: -0.04em;
   --text-numeral--font-weight: 500;
 
   /* ── §5 Space, radius, elevation. Spacing is a single 4px-based scale (Tailwind's default
@@ -153,8 +172,8 @@
     background: var(--color-bone);
     color: var(--color-ink);
     font-family: var(--font-ui);
-    font-size: 14px;
-    line-height: 21px;
+    font-size: var(--text-body);
+    line-height: var(--text-body--line-height);
     -webkit-font-smoothing: antialiased;
   }
   /* §12 Focus — a 2px accent ring at 2px offset on the light ground (`map-ground` rebinds it to

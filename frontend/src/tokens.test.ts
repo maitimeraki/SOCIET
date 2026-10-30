@@ -177,6 +177,20 @@ describe('the Quiet Room tonal ladder', () => {
       '--gradient-morning',
     ])
   })
+
+  it('names the three faces and retires Spectral', () => {
+    expect(declared.get('--font-display')).toContain('Fraunces')
+    expect(declared.get('--font-ui')).toContain('Archivo')
+    expect(declared.get('--font-mono')).toContain('JetBrains Mono')
+    expect([...declared.keys()].some((token) => token.startsWith('--font-') && token.includes('spectral'))).toBe(false)
+  })
+
+  it('sets the scale with its own line height', () => {
+    for (const name of ['hero', 'display', 'title', 'heading', 'body', 'body-sm', 'label', 'micro', 'mono', 'numeral']) {
+      expect(declared.has(`--text-${name}`), name).toBe(true)
+      expect(declared.has(`--text-${name}--line-height`), name).toBe(true)
+    }
+  })
 })
 
 describe('the retired world', () => {

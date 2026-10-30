@@ -63,7 +63,7 @@ export function DocumentReaderView({
           )}
         </div>
       ) : (
-        <p className="mt-3 max-w-[68ch] whitespace-pre-line font-ui text-body-lg text-ink-2">{text}</p>
+        <p className="mt-3 max-w-[68ch] whitespace-pre-line font-ui text-body text-ink-2">{text}</p>
       )}
     </aside>
   )

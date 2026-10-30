@@ -34,7 +34,7 @@ function Beat({
   return (
     <section>
       <header className="mb-3 flex items-center gap-2.5">
-        <span className="font-ui text-title text-ink">{number}</span>
+        <span className="font-ui text-heading text-ink">{number}</span>
         <h2 className="text-label uppercase text-ink">{title}</h2>
         {meta && <span className="tnum font-mono text-micro text-ink-3">{meta}</span>}
         {glyph}

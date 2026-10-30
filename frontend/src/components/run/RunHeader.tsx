@@ -40,7 +40,7 @@ export default function RunHeader({
 
   return (
     <div className="space-y-2">
-      <p className="font-ui text-title text-ink">{run.query || 'Waiting for the panel…'}</p>
+      <p className="font-ui text-heading text-ink">{run.query || 'Waiting for the panel…'}</p>
       {run.intent?.core_question && (
         <p className="tnum font-mono text-mono text-ink-3">reading as: {run.intent.core_question}</p>
       )}

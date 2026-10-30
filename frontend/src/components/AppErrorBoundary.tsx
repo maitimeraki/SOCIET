@@ -28,7 +28,7 @@ export function AppErrorFallback({
       tabIndex={-1}
       className={`mx-auto max-w-[720px] ${ruleClasses('top')} pt-8 outline-none`}
     >
-      <p className="text-heading text-ink">Something went wrong</p>
+      <p className="text-body-sm font-semibold text-ink">Something went wrong</p>
       <p className="mt-2 max-w-[60ch] text-body text-ink-2">
         This view failed to render. Reload to pick your work back up, or head back to your runs.
       </p>

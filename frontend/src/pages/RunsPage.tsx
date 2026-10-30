@@ -77,7 +77,7 @@ export function RunsPageView({
                   className="flex items-start justify-between gap-4 border-b border-rule/40 py-3 hover:bg-sand"
                 >
                   <span className="min-w-0">
-                    <span className="block text-heading text-ink">{entry.query}</span>
+                    <span className="block text-body-sm font-semibold text-ink">{entry.query}</span>
                     <span className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 font-mono text-micro text-ink-3">
                       {entry.verdict_stance ? (
                         <PositionMark position={entry.verdict_stance} ground="light" />

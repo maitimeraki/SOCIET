@@ -147,7 +147,7 @@ export default function IngestPage() {
       <UrlFetchRow onFetch={handleUrl} busy={fetchingUrl} />
 
       <section className="space-y-3">
-        <h2 className="text-heading text-ink">Documents</h2>
+        <h2 className="text-body-sm font-semibold text-ink">Documents</h2>
         {docs.length === 0 ? (
           <p className="text-body text-ink-3">Nothing yet. PDFs, Word files, Markdown, or text.</p>
         ) : (

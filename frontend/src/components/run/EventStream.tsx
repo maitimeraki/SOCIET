@@ -42,7 +42,7 @@ export default function EventStream({ items, live }: { items: StreamItem[]; live
           switch (item.kind) {
             case 'round-header':
               return (
-                <h3 key={index} className="pt-2 text-heading text-ink">
+                <h3 key={index} className="pt-2 text-body-sm font-semibold text-ink">
                   Pass {item.round}{' '}
                   <span className="tnum font-mono text-micro text-ink-3">{item.pairs} pairs</span>
                 </h3>

@@ -55,7 +55,7 @@ export default function AuthLayout() {
           className={`${ruleClasses('left')} px-6 py-12 sm:px-10 lg:flex lg:flex-col lg:justify-center lg:px-14 lg:py-16 max-lg:border-l-0`}
         >
           <div className={`${ruleClasses('top')} lg:border-t-0`}>
-            <p className="max-w-[26ch] font-ui text-title text-ink">{THESIS}</p>
+            <p className="max-w-[26ch] font-ui text-heading text-ink">{THESIS}</p>
             <div className="mt-10">
               <FiledSheet decision={WORKED_EXAMPLE} sample />
             </div>

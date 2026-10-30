@@ -12,7 +12,7 @@ describe('SectionHeading', () => {
   })
 
   it('sets the title in the section title face', () => {
-    expect(renderToStaticMarkup(<SectionHeading title="Your decisions" />)).toContain('text-title')
+    expect(renderToStaticMarkup(<SectionHeading title="Your decisions" />)).toContain('text-heading')
   })
 
   it('carries the lead when there is one, and nothing when there is not', () => {

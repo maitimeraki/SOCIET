@@ -33,7 +33,7 @@ export default function Figure({
           'tnum',
           label ? 'mt-1' : '',
           'font-mono',
-          size === 'numeral' ? 'text-numeral' : 'text-mono-lg',
+          size === 'numeral' ? 'text-numeral' : 'text-mono text-[20px] leading-[26px]',
           'text-ink',
         ]
           .filter(Boolean)

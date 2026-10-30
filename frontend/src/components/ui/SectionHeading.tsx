@@ -19,7 +19,7 @@ export type SectionHeadingProps = {
   className?: string
 }
 
-const TITLE = 'text-title text-ink'
+const TITLE = 'text-heading text-ink'
 
 export default function SectionHeading({
   level = 2,

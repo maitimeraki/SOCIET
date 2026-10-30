@@ -13,7 +13,7 @@ describe('Figure', () => {
   })
 
   it('takes the card scale or the panel scale', () => {
-    expect(renderToStaticMarkup(<Figure value="0.82" />)).toContain('text-mono-lg')
+    expect(renderToStaticMarkup(<Figure value="0.82" />)).toContain('text-mono text-[20px] leading-[26px]')
     expect(renderToStaticMarkup(<Figure value="0.82" size="numeral" />)).toContain('text-numeral')
   })
 

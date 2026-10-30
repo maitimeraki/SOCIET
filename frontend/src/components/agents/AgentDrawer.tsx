@@ -26,7 +26,7 @@ export default function AgentDrawer({
           <span className="text-body text-ink-2">{profile.identity.archetype}</span>
         </div>
         <p className="max-w-[60ch] text-body text-ink-2">{profile.bio}</p>
-        <Emphasis text={profile.detailed_perspective} className="max-w-[60ch] whitespace-pre-wrap text-body-lg text-ink" />
+        <Emphasis text={profile.detailed_perspective} className="max-w-[60ch] whitespace-pre-wrap text-body text-ink" />
 
         <section>
           <Label as="h3" className="mb-2">Confidence breakdown</Label>

@@ -231,7 +231,7 @@ export default function AnswerDocument({
       <FiledSheet decision={filed} />
       {sections.map((section, index) => (
         <section key={index}>
-          <h3 className="mb-3 text-heading text-ink">{section.heading}</h3>
+          <h3 className="mb-3 text-body-sm font-semibold text-ink">{section.heading}</h3>
           <div className="max-w-[60ch] space-y-3">
             {section.blocks.map((block, index) => (
               <Block key={index} block={block} />
@@ -253,7 +253,7 @@ function Block({ block }: { block: AnswerBlock }) {
     case 'text':
       // The reading view renders the emphasis; the export keeps its markdown markers, because the
       // export is a markdown file. Same content, two mediums.
-      return <Emphasis text={block.text} className="whitespace-pre-line font-ui text-body-lg text-ink-2" />
+      return <Emphasis text={block.text} className="whitespace-pre-line font-ui text-body text-ink-2" />
     case 'listing':
       return (
         <ul className="space-y-1 text-body text-ink-2">

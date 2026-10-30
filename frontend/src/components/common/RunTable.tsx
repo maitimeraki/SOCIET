@@ -53,7 +53,7 @@ export default function RunTable({ runs, loading = false }: { runs: RunSummary[]
         <li key={run.run_id}>
           <Link to={`/runs/${run.run_id}`} className="block">
             <Card hover>
-              <h3 className="text-heading text-ink">{run.query}</h3>
+              <h3 className="text-body-sm font-semibold text-ink">{run.query}</h3>
               <p className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-micro text-ink-3">
                 {outcome(run)}
                 <span className="tnum font-mono text-mono">{fmtDate(run.created_at)}</span>

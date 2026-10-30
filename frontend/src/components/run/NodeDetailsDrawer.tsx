@@ -257,7 +257,7 @@ export function NodeDetailsView({ details, onClose }: { details: MapDetails; onC
                   <PositionMark position={details.held.stance} ground="light" />
                   <span className="tnum font-mono text-mono text-ink">{details.held.confidence.toFixed(2)}</span>
                 </div>
-                <Emphasis text={details.held.view} className="mt-2 text-body-lg text-ink-2" />
+                <Emphasis text={details.held.view} className="mt-2 text-body text-ink-2" />
               </Reading>
             )}
           </>

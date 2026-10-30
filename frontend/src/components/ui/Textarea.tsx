@@ -8,7 +8,7 @@ export default function Textarea({ className = '', ...rest }: TextareaHTMLAttrib
   return (
     <textarea
       {...rest}
-      className={`corner-tick w-full resize-none border-b border-ink-3 bg-transparent p-3 text-body-lg text-ink placeholder:text-ink-2 focus:border-accent ${className}`}
+      className={`corner-tick w-full resize-none border-b border-ink-3 bg-transparent p-3 text-body text-ink placeholder:text-ink-2 focus:border-accent ${className}`}
     />
   )
 }

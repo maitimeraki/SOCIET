@@ -79,7 +79,7 @@ export default function SignUpPage() {
   return (
     <form onSubmit={onSubmit} noValidate aria-busy={submitting} className="space-y-6">
       <header>
-        <h1 className="font-ui text-title text-ink">{SIGN_UP.heading}</h1>
+        <h1 className="font-ui text-heading text-ink">{SIGN_UP.heading}</h1>
         <p className="mt-1 text-body text-ink-2">{SIGN_UP.lead}</p>
       </header>
 

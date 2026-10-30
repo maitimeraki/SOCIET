@@ -51,10 +51,10 @@ export default function Rail() {
             className="flex min-h-11 min-w-11 items-center justify-center gap-2 text-ink lg:justify-start"
           >
             {/* §7 draws a diamond, not a logo — the glyph is the mark, the wordmark names the product. */}
-            <span aria-hidden="true" className="font-ui text-title leading-none">
+            <span aria-hidden="true" className="font-display text-heading leading-none">
               ◆
             </span>
-            <span className="sr-only font-ui text-heading font-semibold lg:not-sr-only">
+            <span className="sr-only font-ui text-body-sm font-semibold lg:not-sr-only">
               Societas
             </span>
           </Link>

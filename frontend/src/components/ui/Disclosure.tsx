@@ -11,7 +11,7 @@ export default function Disclosure({ summary, children, defaultOpen = false }: {
         type="button"
         aria-expanded={open}
         onClick={() => setOpen(!open)}
-        className="flex w-full items-center gap-2 py-3 text-left text-heading text-ink"
+        className="flex w-full items-center gap-2 py-3 text-left text-body-sm font-semibold text-ink"
       >
         <CaretDown size={16} className={`transition-transform ${open ? '' : '-rotate-90'}`} aria-hidden="true" />
         {summary}

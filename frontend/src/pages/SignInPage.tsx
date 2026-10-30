@@ -73,7 +73,7 @@ export default function SignInPage() {
   return (
     <form onSubmit={onSubmit} noValidate aria-busy={submitting} className="space-y-6">
       <header>
-        <h1 className="font-ui text-title text-ink">{SIGN_IN.heading}</h1>
+        <h1 className="font-ui text-heading text-ink">{SIGN_IN.heading}</h1>
         <p className="mt-1 text-body text-ink-2">{SIGN_IN.lead}</p>
       </header>
 

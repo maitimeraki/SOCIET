@@ -162,7 +162,7 @@ export default function GraphPage({ onFailureChange }: { onFailureChange?: (fail
           {/* The finished map lives in the workspace's map pane, which stays mounted across the whole
               lifecycle — this surface no longer renders a canvas of its own (D14: one map). */}
           <div>
-            <p className="text-heading text-ink">The map is built</p>
+            <p className="text-body-sm font-semibold text-ink">The map is built</p>
             <StatRow
               items={[
                 { label: 'Sections', value: fmtInt(result?.chunks_total ?? 0) },
