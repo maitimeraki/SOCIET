@@ -9,15 +9,22 @@ export const fmtInt = (n: number): string => INT.format(Math.round(n))
 
 /**
  * A material figure for a customer: whole bytes, KB and MB below 1 GB, then GB (one decimal below
- * 10 GB). No unit is ever skipped, so a small file never reads as `0 MB`.
+ * 10 GB). Units use decimal 1000 thresholds, and a rounded 1000 promotes to the next unit, so no
+ * figure ever reads `1000 KB` or `1000 MB` — and no small file reads as `0 MB`.
  */
 export const fmtBytes = (bytes: number): string => {
   const KB = 1_000
   const MB = 1_000_000
   const GB = 1_000_000_000
   if (bytes < KB) return `${Math.round(bytes)} B`
-  if (bytes < MB) return `${Math.round(bytes / KB)} KB`
-  if (bytes < GB) return `${Math.round(bytes / MB)} MB`
+  if (bytes < MB) {
+    const kb = Math.round(bytes / KB)
+    return kb < 1000 ? `${kb} KB` : '1 MB'
+  }
+  if (bytes < GB) {
+    const mb = Math.round(bytes / MB)
+    return mb < 1000 ? `${mb} MB` : '1 GB'
+  }
   const gb = bytes / GB
   return `${gb < 10 ? Number(gb.toFixed(1)) : Math.round(gb)} GB`
 }

@@ -15,6 +15,16 @@ describe('format', () => {
     expect(fmtBytes(2_500_000_000)).toBe('2.5 GB')
     expect(fmtBytes(12_000_000_000)).toBe('12 GB')
   })
+  it('promotes a unit that rounds to 1000 instead of printing 1000', () => {
+    expect(fmtBytes(999)).toBe('999 B')
+    expect(fmtBytes(1_000)).toBe('1 KB')
+    expect(fmtBytes(999_999)).toBe('1 MB')
+    expect(fmtBytes(1_000_000)).toBe('1 MB')
+    expect(fmtBytes(999_999_999)).toBe('1 GB')
+    expect(fmtBytes(1_000_000_000)).toBe('1 GB')
+    expect(fmtBytes(9_999_999_999)).toBe('10 GB')
+    expect(fmtBytes(10_000_000_000)).toBe('10 GB')
+  })
   it('formats shares as percent', () => {
     expect(fmtPct(0.83)).toBe('83%')
   })

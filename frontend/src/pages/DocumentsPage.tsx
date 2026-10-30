@@ -84,7 +84,9 @@ export function DocumentsPageView({
                 <th
                   key={heading}
                   scope="col"
-                  className="border-b border-rule px-0 pb-2 text-left font-ui text-label uppercase tracking-[0.08em] text-ink-3"
+                  className={`border-b border-rule px-0 pb-2 font-ui text-label uppercase tracking-[0.08em] text-ink-3 ${
+                    heading === 'Added' || heading === 'Size' ? 'text-right' : 'text-left'
+                  }`}
                 >
                   {heading}
                 </th>
@@ -111,8 +113,8 @@ export function DocumentsPageView({
                     {document.name}
                   </button>
                 </td>
-                <td className="pr-3 font-mono text-mono text-ink-3">{fmtDate(document.created_at)}</td>
-                <td className="pr-3 font-mono text-mono text-ink-3">{fmtBytes(document.bytes)}</td>
+                <td className="pr-3 text-right font-mono text-mono text-ink-3">{fmtDate(document.created_at)}</td>
+                <td className="pr-3 text-right font-mono text-mono text-ink-3">{fmtBytes(document.bytes)}</td>
                 <td>
                   {document.read ? (
                     <span className="inline-flex min-h-6 items-center gap-1.5 rounded-xs bg-accent-soft px-2 font-mono text-micro uppercase tracking-[0.04em] text-ok">

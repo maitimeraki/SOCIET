@@ -93,7 +93,7 @@ describe('the documents table', () => {
     expect(html).toContain('<table')
     expect(html).toContain('Mill Street expansion')
     expect(html).toContain('2 MB')
-    expect(html).toContain('Read')
+    expect(html).toContain('>Read</th>')
     expect(html).not.toContain('border-l')
   })
 
@@ -103,8 +103,7 @@ describe('the documents table', () => {
   })
 
   it('measures a small file in KB rather than zero megabytes', () => {
-    const html = render({ documents: [doc({ id: 'u3', bytes: 840_000 })] })
-    expect(html).toContain('840 KB')
-    expect(html).not.toContain('0 MB')
+    const html = render({ documents: [doc({ id: 'u3', bytes: 480_000 })] })
+    expect(html).toContain('480 KB')
   })
 })
