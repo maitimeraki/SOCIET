@@ -26,7 +26,7 @@ export const SIGN_IN = {
   stamp: 'Signed in',
   /** The one recovery affordance — no reset flow is built, so it reaches the operator. */
   forgot: 'Forgot password?',
-  forgotHref: 'mailto:hello@societas.example?subject=Password%20reset',
+  forgotHref: 'mailto:hello@societas.app?subject=Password%20reset',
   crossQuestion: 'No account yet?',
   crossAction: 'Create an account',
 } as const

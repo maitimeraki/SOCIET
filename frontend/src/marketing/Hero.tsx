@@ -1,7 +1,7 @@
 import { Link } from 'react-router-dom'
 import type { ReactNode } from 'react'
 import Band from '../components/ui/Band'
-import { buttonClasses } from '../components/ui/Button'
+import { buttonClasses, inlineLinkClasses } from '../components/ui/Button'
 import Disclosure from '../components/ui/Disclosure'
 import FiledSheet from '../components/ui/FiledSheet'
 import PositionMark from '../components/ui/PositionMark'
@@ -75,7 +75,7 @@ function Nav() {
             <a
               key={link.href}
               href={link.href}
-              className="font-ui text-body-sm text-ink-2 transition-colors duration-state hover:text-ink"
+              className={`${inlineLinkClasses} font-ui text-body-sm text-ink-2 transition-colors duration-state hover:text-ink`}
             >
               {link.label}
             </a>
@@ -843,27 +843,33 @@ function Footer() {
               <a
                 key={link.href}
                 href={link.href}
-                className="mt-3 block font-ui text-body-sm text-ink-2 hover:text-ink"
+                className={`${inlineLinkClasses} mt-3 w-full font-ui text-body-sm text-ink-2 hover:text-ink`}
               >
                 {link.label}
               </a>
             ))}
+            <Link to="/pricing" className={`${inlineLinkClasses} mt-3 w-full font-ui text-body-sm text-ink-2 hover:text-ink`}>
+              Pricing
+            </Link>
           </div>
 
           <div>
             <p className="font-ui text-label uppercase text-ink-3">Contact</p>
             <a
-              href="mailto:hello@societas.example"
-              className="mt-3 block font-ui text-body-sm text-ink-2 hover:text-ink"
+              href="mailto:hello@societas.app"
+              className={`${inlineLinkClasses} mt-3 w-full font-ui text-body-sm text-ink-2 hover:text-ink`}
             >
               Talk to us
             </a>
-            <Link to="/auth/signin" className="mt-3 block font-ui text-body-sm text-ink-2 hover:text-ink">
+            <Link
+              to="/auth/signin"
+              className={`${inlineLinkClasses} mt-3 w-full font-ui text-body-sm text-ink-2 hover:text-ink`}
+            >
               Sign in
             </Link>
             <Link
               to="/auth/signup?next=/new"
-              className="mt-3 block font-ui text-body-sm text-ink-2 hover:text-ink"
+              className={`${inlineLinkClasses} mt-3 w-full font-ui text-body-sm text-ink-2 hover:text-ink`}
             >
               Start your first decision
             </Link>

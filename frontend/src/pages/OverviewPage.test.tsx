@@ -42,6 +42,19 @@ describe('the Overview', () => {
     expect(view()).toContain('Example')
   })
 
+  it('gives every standalone link a 44px target (§10.4)', () => {
+    const html = view({
+      recent: [
+        { runId: 'r1', question: 'Renew the lease?', state: 'Filed', stance: 'NEGATIVE', share: 0.82, passes: '4', date: '2026-10-22' },
+      ],
+    })
+    const standalone = [...html.matchAll(/<a\b[^>]*>/g)]
+      .map((match) => match[0])
+      .filter((tag) => /href="\/(?:runs|documents|pricing)"/.test(tag))
+    expect(standalone.length).toBeGreaterThanOrEqual(4)
+    for (const tag of standalone) expect(tag).toContain('min-h-11')
+  })
+
   it('reads the live filed count in the state line', () => {
     expect(view()).toContain('Nothing is running. 3 answers filed and waiting for you.')
     expect(

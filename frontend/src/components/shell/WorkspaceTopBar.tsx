@@ -1,5 +1,6 @@
 import { Link } from 'react-router-dom'
 import { STEP_LABELS } from '../../pages/workspaceSteps'
+import { inlineLinkClasses } from '../ui/Button'
 
 /**
  * §7.7 The workspace top bar: the wordmark, the question in one line, the three-step
@@ -21,7 +22,10 @@ export default function WorkspaceTopBar({ title }: { title: string }) {
           </span>
         ))}
       </nav>
-      <Link to="/runs" className="font-ui text-body-sm text-ink-2 underline underline-offset-4 hover:text-ink">
+      <Link
+        to="/runs"
+        className={`${inlineLinkClasses} font-ui text-body-sm text-ink-2 underline underline-offset-4 hover:text-ink`}
+      >
         Exit
       </Link>
     </header>

@@ -41,4 +41,12 @@ describe('the plans', () => {
   it('renders no banned word', () => {
     expect(renderedText(render())).not.toMatch(BANNED_TERMS)
   })
+
+  it('gives the header link a 44px target and uses the one real contact address', () => {
+    const html = render()
+    const open = [...html.matchAll(/<a\b[^>]*>/g)].map((match) => match[0]).find((tag) => tag.includes('href="/overview"'))
+    expect(open).toContain('min-h-11')
+    expect(html).toContain('mailto:hello@societas.app')
+    expect(html).not.toContain('societas.example')
+  })
 })

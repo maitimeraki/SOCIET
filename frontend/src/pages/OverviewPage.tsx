@@ -12,7 +12,7 @@ import type { CorpusRow } from '../components/overview/corpusRows'
 import PlanUsage from '../components/overview/PlanUsage'
 import WorkingNow from '../components/overview/WorkingNow'
 import type { WorkingRun } from '../components/overview/WorkingNow'
-import { buttonClasses } from '../components/ui/Button'
+import { buttonClasses, inlineLinkClasses } from '../components/ui/Button'
 import ErrorState from '../components/ui/ErrorState'
 import Skeleton from '../components/ui/Skeleton'
 import { fmtDay } from '../utils/format'
@@ -115,7 +115,10 @@ export function OverviewPageView({
           <p className="mt-2 max-w-[52ch] font-ui text-body-sm text-ink-2">{stateLine}</p>
         </div>
         <div className="flex items-center gap-4">
-          <Link to="/runs" className="font-ui text-body-sm text-ink-2 underline underline-offset-4 hover:text-ink">
+          <Link
+            to="/runs"
+            className={`${inlineLinkClasses} font-ui text-body-sm text-ink-2 underline underline-offset-4 hover:text-ink`}
+          >
             View all decisions
           </Link>
           <Link to="/new" className={buttonClasses('primary', 48, 'min-h-11')}>

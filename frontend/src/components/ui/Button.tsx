@@ -23,6 +23,12 @@ const VARIANT: Record<ButtonVariant, string> = {
   danger: 'border border-rule bg-paper text-danger hover:bg-danger/10',
 }
 
+/**
+ * §10.4 — a standalone text link is still a target: at least 44px tall, with its label centred.
+ * Links inside a sentence opt out explicitly; they are read as prose, not as controls.
+ */
+export const inlineLinkClasses = 'inline-flex min-h-11 min-w-11 items-center'
+
 // eslint-disable-next-line react-refresh/only-export-components -- buttonClasses is the shared Link-as-button styling API (marketing, the shell)
 export function buttonClasses(variant: ButtonVariant = 'secondary', size: ButtonSize = 40, extra = ''): string {
   const h = size === 48 ? 'h-12 px-6 text-body' : size === 40 ? 'h-10 px-4 text-body-sm' : 'h-8 px-3 text-micro'

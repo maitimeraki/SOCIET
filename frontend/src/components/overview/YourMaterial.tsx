@@ -1,4 +1,5 @@
 import { Link } from 'react-router-dom'
+import { inlineLinkClasses } from '../ui/Button'
 import type { CorpusRow } from './corpusRows'
 
 /**
@@ -15,7 +16,7 @@ export default function YourMaterial({ rows }: { rows: CorpusRow[] }) {
           <p className="font-ui text-label uppercase tracking-[0.09em] text-ink-3">Your material</p>
           <h2 className="font-display text-title font-medium tracking-[-0.02em] text-ink">What the panel argues from</h2>
         </div>
-        <Link to="/documents" className="font-ui text-body-sm text-accent underline underline-offset-4">
+        <Link to="/documents" className={`${inlineLinkClasses} font-ui text-body-sm text-accent underline underline-offset-4`}>
           Add material
         </Link>
       </div>

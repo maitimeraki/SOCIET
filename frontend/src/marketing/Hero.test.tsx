@@ -159,6 +159,25 @@ describe('the nav — a 72px bar, not a floating card', () => {
     expect(html).toContain('href="#answer"')
     expect(html).toContain('href="#questions"')
   })
+
+  it('links the pricing page from the footer, so it is not orphaned (§7.1)', () => {
+    expect(html).toContain('href="/pricing"')
+  })
+})
+
+describe('the contact and the target sizes', () => {
+  it('uses the one deliverable address everywhere on the page', () => {
+    expect(html).toContain('mailto:hello@societas.app')
+    expect(html).not.toContain('societas.example')
+  })
+
+  it('gives the footer and nav links a 44px target', () => {
+    const tags = [...html.matchAll(/<a\b[^>]*>/g)].map((match) => match[0])
+    // The section and footer text links; the CTA buttons are sized by `buttonClasses`.
+    const standalone = tags.filter((tag) => /href="(?:#|mailto:|\/pricing)/.test(tag))
+    expect(standalone.length).toBeGreaterThan(4)
+    for (const tag of standalone) expect(tag).toContain('min-h-11')
+  })
 })
 
 describe('the kit — the vocabulary the page is built from', () => {

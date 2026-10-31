@@ -162,6 +162,9 @@ describe('the workspace top bar', () => {
     expect(html).toContain('Material')
     expect(html).toContain('Question')
     expect(html).toContain('Panel')
+    // §10.4 — the way out is a real 44px target, not a bare line of text.
+    const exit = [...html.matchAll(/<a\b[^>]*>/g)].map((match) => match[0]).find((tag) => tag.includes('href="/runs"'))
+    expect(exit).toContain('min-h-11')
     // R58 — the bar's words are the capitalised step names; the in-flow rail keeps the longer labels.
     expect(html).not.toContain('Your material')
     // One dot per step: the indicator is three dots with their words, not a timeline.

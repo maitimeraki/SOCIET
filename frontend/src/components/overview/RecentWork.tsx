@@ -1,4 +1,5 @@
 import { Link } from 'react-router-dom'
+import { inlineLinkClasses } from '../ui/Button'
 import PositionMark from '../ui/PositionMark'
 import type { Position } from '../ui/PositionMark'
 
@@ -31,7 +32,7 @@ export default function RecentWork({ rows }: { rows: RecentRow[] }) {
           <p className="font-ui text-label uppercase tracking-[0.09em] text-ink-3">Your decisions</p>
           <h2 className="font-display text-title font-medium tracking-[-0.02em] text-ink">Recent work</h2>
         </div>
-        <Link to="/runs" className="font-ui text-body-sm text-accent underline underline-offset-4">
+        <Link to="/runs" className={`${inlineLinkClasses} font-ui text-body-sm text-accent underline underline-offset-4`}>
           View all
         </Link>
       </div>

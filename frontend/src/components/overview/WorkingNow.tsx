@@ -1,4 +1,5 @@
 import { Link } from 'react-router-dom'
+import { inlineLinkClasses } from '../ui/Button'
 
 export interface WorkingRun {
   runId: string
@@ -40,7 +41,10 @@ export default function WorkingNow({ run }: WorkingNowProps) {
             <span className="block h-full rounded-full bg-accent" style={{ width: `${Math.round((run.convergence ?? 0) * 100)}%` }} />
           </div>
           <p className="mt-3">
-            <Link to={`/runs/${run.runId}`} className="font-ui text-body-sm text-accent underline underline-offset-4">
+            <Link
+              to={`/runs/${run.runId}`}
+              className={`${inlineLinkClasses} font-ui text-body-sm text-accent underline underline-offset-4`}
+            >
               Open the run
             </Link>
           </p>

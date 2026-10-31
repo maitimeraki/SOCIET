@@ -895,7 +895,7 @@ function Footer() {
             <Link to="/auth/signup?next=/new" className={buttonClasses('secondary', 40)}>
               Start a decision
             </Link>
-            <a href="mailto:hello@societas.example" className={buttonClasses('ghost', 40)}>
+            <a href="mailto:hello@societas.app" className={buttonClasses('ghost', 40)}>
               Talk to us
             </a>
           </div>

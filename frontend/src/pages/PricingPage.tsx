@@ -1,5 +1,5 @@
 import { Link } from 'react-router-dom'
-import { buttonClasses } from '../components/ui/Button'
+import { buttonClasses, inlineLinkClasses } from '../components/ui/Button'
 
 /**
  * §7.9 The rate card. Two metered units, two plans, one custom door, and the rules under the
@@ -55,7 +55,10 @@ export default function PricingPage() {
           <span className="font-ui text-[18px] font-semibold">Societas</span>
         </Link>
         <div className="flex items-center gap-3">
-          <Link to="/overview" className="font-ui text-body-sm text-ink-2 underline underline-offset-4 hover:text-ink">
+          <Link
+            to="/overview"
+            className={`${inlineLinkClasses} font-ui text-body-sm text-ink-2 underline underline-offset-4 hover:text-ink`}
+          >
             Open the app
           </Link>
           <Link to="/auth/signup" className={buttonClasses('primary', 40, 'min-h-11')}>

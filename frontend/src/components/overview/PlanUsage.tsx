@@ -1,4 +1,5 @@
 import { Link } from 'react-router-dom'
+import { inlineLinkClasses } from '../ui/Button'
 import { fmtBytes } from '../../utils/format'
 
 export interface PlanUsageProps {
@@ -60,7 +61,7 @@ export default function PlanUsage({ corpusBytes, corpusLimit, decisionsUsed, dec
       </div>
       <div className="mt-4 flex items-center justify-between gap-3 border-t border-hairline pt-3 font-mono text-micro text-ink-3">
         <span>Renews {renews}</span>
-        <Link to="/pricing" className="font-ui text-body-sm text-accent underline underline-offset-4">
+        <Link to="/pricing" className={`${inlineLinkClasses} font-ui text-body-sm text-accent underline underline-offset-4`}>
           Manage plan
         </Link>
       </div>
