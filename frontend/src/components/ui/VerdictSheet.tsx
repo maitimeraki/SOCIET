@@ -12,6 +12,9 @@ export interface VerdictSheetProps {
   whoHeldWhichView: { position: Position; names: string[] }[]
   sources: { document: string; reference: string }[]
   onExport?: () => void
+  /** §7.2 — render only the filed fragment (outcome, case against, sources) for the auth evidence
+   *  panel. The reasoning and the view split belong to the full document. */
+  cropped?: boolean
 }
 
 /**
@@ -33,6 +36,7 @@ export default function VerdictSheet({
   whoHeldWhichView,
   sources,
   onExport,
+  cropped = false,
 }: VerdictSheetProps) {
   return (
     <article className="max-w-[760px] rounded-xl bg-paper p-12 shadow-sheet">
@@ -64,24 +68,28 @@ export default function VerdictSheet({
         <p className="mt-2 border-l-3 border-caution pl-4 font-ui text-body text-ink-2">{caseAgainst}</p>
       </section>
 
-      <section className="border-b border-rule py-6">
-        <p className="font-ui text-label uppercase tracking-[0.1em] text-ink-3">The reasoning</p>
-        {reasoning.map((paragraph) => (
-          <p key={paragraph} className="mt-3 max-w-[60ch] font-ui text-body text-ink-2">
-            {paragraph}
-          </p>
-        ))}
-      </section>
+      {cropped ? null : (
+        <>
+          <section className="border-b border-rule py-6">
+            <p className="font-ui text-label uppercase tracking-[0.1em] text-ink-3">The reasoning</p>
+            {reasoning.map((paragraph) => (
+              <p key={paragraph} className="mt-3 max-w-[60ch] font-ui text-body text-ink-2">
+                {paragraph}
+              </p>
+            ))}
+          </section>
 
-      <section className="border-b border-rule py-6">
-        <p className="font-ui text-label uppercase tracking-[0.1em] text-ink-3">Who held which view</p>
-        {whoHeldWhichView.map((row) => (
-          <div key={row.position} className="mt-3 grid grid-cols-[120px_1fr] gap-4 border-t border-hairline py-2.5 first:border-t-0">
-            <PositionMark position={row.position} size="sm" ground="light" />
-            <span className="font-ui text-body-sm text-ink-2">{row.names.join(', ')}</span>
-          </div>
-        ))}
-      </section>
+          <section className="border-b border-rule py-6">
+            <p className="font-ui text-label uppercase tracking-[0.1em] text-ink-3">Who held which view</p>
+            {whoHeldWhichView.map((row) => (
+              <div key={row.position} className="mt-3 grid grid-cols-[120px_1fr] gap-4 border-t border-hairline py-2.5 first:border-t-0">
+                <PositionMark position={row.position} size="sm" ground="light" />
+                <span className="font-ui text-body-sm text-ink-2">{row.names.join(', ')}</span>
+              </div>
+            ))}
+          </section>
+        </>
+      )}
 
       <section className="py-6">
         <p className="font-ui text-label uppercase tracking-[0.1em] text-ink-3">Sources</p>

@@ -6,7 +6,7 @@ import { describe, expect, it } from 'vitest'
 // rendered to static markup in Node.
 //
 // The auth surface's acceptance, in one place: the copy law, the retired world, the cost line, the
-// one filed sheet, the invalid mark's contrast, and the cascade the two forms' derivation must
+// one verdict sheet, the invalid mark's contrast, and the cascade the two forms' derivation must
 // not have.
 import { renderToStaticMarkup } from 'react-dom/server'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
@@ -63,8 +63,13 @@ describe('the auth surface speaks the new world', () => {
   })
 
   it('states the cost once, on sign-up only', () => {
-    expect(signIn.match(/Free to use/g)?.length ?? 0).toBe(0)
-    expect(signUp.match(/Free to use/g)?.length ?? 0).toBe(1)
+    expect(signIn.match(/Free to start/g)?.length ?? 0).toBe(0)
+    expect(signUp.match(/Free to start/g)?.length ?? 0).toBe(1)
+    // The retired claim: the product is not free at every volume, and it has no "no tier" promise.
+    for (const html of [signIn, signUp]) {
+      expect(html).not.toContain('Free to use')
+      expect(html).not.toMatch(/no tier/i)
+    }
   })
 
   it('cross-links the two forms to each other', () => {
@@ -80,13 +85,28 @@ describe('the auth surface speaks the new world', () => {
     }
   })
 
-  it('has one FiledSheet implementation, and the auth column renders it', () => {
+  it('has one VerdictSheet implementation, and the auth column renders it cropped', () => {
     // A primitive is defined in a source file, never in a test — so the tests are out of the sweep.
     const definitions = sourceFiles('src').filter(
-      (file) => !file.includes('.test.') && /export default function FiledSheet/.test(readFileSync(file, 'utf8')),
+      (file) => !file.includes('.test.') && /export default function VerdictSheet/.test(readFileSync(file, 'utf8')),
     )
-    expect(definitions.map((file) => file.replace(/\\/g, '/'))).toEqual(['src/components/ui/FiledSheet.tsx'])
-    expect(signIn).toContain('Worked example')
+    expect(definitions.map((file) => file.replace(/\\/g, '/'))).toEqual(['src/components/ui/VerdictSheet.tsx'])
+    for (const html of [signIn, signUp]) {
+      expect(html).toContain('A filed decision · example')
+      expect(html).toContain('The case against')
+      // Cropped: the proof fragment, not the whole filed document.
+      expect(html).not.toContain('The reasoning')
+    }
+  })
+
+  it('opens each door with its own heading and the one promise about the material', () => {
+    expect(signIn).toContain('Welcome back')
+    expect(signUp).toContain('Start your first decision')
+    for (const html of [signIn, signUp]) {
+      expect(html).toContain('Your documents stay on the machine you start it on.')
+      expect(html).not.toContain('Continue with Google')
+      expect(html).not.toContain('Continue with GitHub')
+    }
   })
 
   it('puts every field on the Quiet Room box — 48px, paper, one record rule, the 8px corner', () => {

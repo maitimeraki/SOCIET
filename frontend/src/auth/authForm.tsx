@@ -14,13 +14,12 @@ import type { AuthError } from './authRules'
    that split. */
 
 /**
- * §7.2 error state — a **warn caution line**, the mark in warn and the words in ink (R35). The rule
- * is drawn *above* the note: a coloured side border on an alert is the category default the craft
- * floor refuses, and warn is a symbol colour, never a text colour.
+ * §7.2 / §8.2 error state — the **3px danger hatch** at the left margin, the words in ink. The hatch
+ * marks the block; the message stays a `role="alert"` line, so the hue is never the only signal.
  */
 export function CautionLine({ error, onRetry }: { error: AuthError; onRetry: () => void }) {
   return (
-    <div role="alert" className="border-t-2 border-warn pt-2.5">
+    <div role="alert" className="field-invalid pl-3">
       <p className="text-body text-ink-2">{error.message}</p>
       {error.retry && (
         <Button type="button" variant="ghost" size={32} className="mt-1" onClick={onRetry}>

@@ -43,4 +43,12 @@ describe('the verdict sheet', () => {
     expect(html).toContain('Market analyst')
     expect(html).toContain('Lease counsel')
   })
+
+  it('crops to the filed fragment when a surface only needs the proof', () => {
+    const html = sheet({ cropped: true })
+    expect(html).toContain('The case against')
+    expect(html).toContain('Mill Street lease.pdf')
+    expect(html).not.toContain('The reasoning')
+    expect(html).not.toContain('Who held which view')
+  })
 })

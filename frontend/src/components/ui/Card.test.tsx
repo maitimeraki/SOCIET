@@ -22,6 +22,7 @@ describe('Card', () => {
   it('pads by the number the caller asks for', () => {
     expect(renderToStaticMarkup(<Card pad={16}>body</Card>)).toContain('p-4')
     expect(renderToStaticMarkup(<Card pad={24}>body</Card>)).toContain('p-6')
+    expect(renderToStaticMarkup(<Card pad={32}>body</Card>)).toContain('p-8')
   })
 
   it('rounds by the radius the caller asks for', () => {

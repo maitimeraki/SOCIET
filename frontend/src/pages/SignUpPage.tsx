@@ -1,13 +1,12 @@
 import { useEffect, useState, type FormEvent } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
-import { SIGN_UP } from '../auth/authCopy'
+import { SIGN_UP, TRUST_LINE } from '../auth/authCopy'
 import { CautionLine, IntakeStamp, PasswordField } from '../auth/authForm'
 import {
   MIN_PASSWORD,
   STAMP_MS,
   type AuthError,
   authErrorCopy,
-  confirmError,
   emailError,
   fieldProblem,
   nextSuffix,
@@ -20,13 +19,16 @@ import Field from '../components/ui/Field'
 import Input from '../components/ui/Input'
 
 /**
- * §14.2 Sign-up — the same intake form as sign-in plus the confirm field. It states its real cost
- * and nothing it cannot back: the form asks for an address and a password, so that is all the copy
- * claims — no plan, no price, no billing line (PRODUCT.md §4; pricing is undecided). The cost is
+ * §7.2 / §14.2 Sign-up — the intake form on the sheet: a Fraunces title, email and password with
+ * their labels above, one primary action, and the one promise about the material. The design's
+ * name field is deliberately absent: `SignupRequest` accepts only email and password, and a field
+ * whose value is silently discarded would be a trust defect (R67).
+ *
+ * It states its real cost and nothing it cannot back (PRODUCT.md §4): `Free to start · No card`,
  * stated **once**, on this form only (D2).
  *
- * The invalid mark is the field's own hatch — a mark at the left edge, never a red box — and it is
- * re-derived from each field's current value, so it clears the moment that value becomes valid.
+ * The invalid mark is the field's own 3px danger hatch — never a red box — and it is re-derived
+ * from each field's current value, so it clears the moment that value becomes valid.
  */
 export default function SignUpPage() {
   const signup = useAuthStore((s) => s.signup)
@@ -35,8 +37,7 @@ export default function SignUpPage() {
 
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
-  const [confirm, setConfirm] = useState('')
-  const [touched, setTouched] = useState({ email: false, password: false, confirm: false })
+  const [touched, setTouched] = useState({ email: false, password: false })
   const [submitted, setSubmitted] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<AuthError | null>(null)
@@ -52,15 +53,12 @@ export default function SignUpPage() {
   // a keystroke, and a submit does not freeze the other fields red while one is corrected.
   const emailProblem = fieldProblem(email, touched.email, submitted, emailError)
   const passwordProblem = fieldProblem(password, touched.password, submitted, passwordError)
-  const confirmProblem = fieldProblem(confirm, touched.confirm, submitted, (value) =>
-    confirmError(password, value),
-  )
 
   async function submit() {
     if (submitting || redirectTo !== null) return
     setSubmitted(true)
     setError(null)
-    if (emailError(email) || passwordError(password) || confirmError(password, confirm)) return
+    if (emailError(email) || passwordError(password)) return
     setSubmitting(true)
     try {
       await signup(email, password) // sets the auth store on success
@@ -79,8 +77,9 @@ export default function SignUpPage() {
   return (
     <form onSubmit={onSubmit} noValidate aria-busy={submitting} className="space-y-6">
       <header>
-        <h1 className="font-ui text-heading text-ink">{SIGN_UP.heading}</h1>
-        <p className="mt-1 text-body text-ink-2">{SIGN_UP.lead}</p>
+        <h1 className="font-display text-display font-medium tracking-[-0.03em] text-ink">
+          {SIGN_UP.heading}
+        </h1>
       </header>
 
       <Field label="Email" error={emailProblem ?? undefined}>
@@ -110,18 +109,6 @@ export default function SignUpPage() {
         disabled={submitting}
       />
 
-      <PasswordField
-        id="signup-confirm"
-        name="confirm"
-        label="Confirm password"
-        error={confirmProblem ?? undefined}
-        value={confirm}
-        onChange={setConfirm}
-        onBlur={() => setTouched((t) => ({ ...t, confirm: true }))}
-        autoComplete="new-password"
-        disabled={submitting}
-      />
-
       {error && <CautionLine error={error} onRetry={submit} />}
 
       {redirectTo !== null ? (
@@ -143,6 +130,8 @@ export default function SignUpPage() {
           {SIGN_UP.crossAction}
         </Link>
       </p>
+
+      <p className="border-t border-rule pt-4 text-body-sm text-ink-3">{TRUST_LINE}</p>
     </form>
   )
 }

@@ -108,12 +108,6 @@ export function passwordError(value: string): string | null {
   return null
 }
 
-export function confirmError(password: string, confirm: string): string | null {
-  if (confirm === '') return 'Re-enter your password.'
-  if (confirm !== password) return 'Passwords do not match.'
-  return null
-}
-
 /**
  * The invalid mark for one field: **derived from the field's current value, on every render**.
  *

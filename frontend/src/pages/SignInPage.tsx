@@ -1,6 +1,6 @@
 import { useEffect, useState, type FormEvent } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
-import { SIGN_IN } from '../auth/authCopy'
+import { SIGN_IN, TRUST_LINE } from '../auth/authCopy'
 import { CautionLine, IntakeStamp, PasswordField } from '../auth/authForm'
 import {
   STAMP_MS,
@@ -18,10 +18,10 @@ import Field from '../components/ui/Field'
 import Input from '../components/ui/Input'
 
 /**
- * §14.2 Sign-in — the intake form on the sheet. Fields sit on ruled baselines (`Field`/`Input`); the
- * submit is the route button ("Sign in"). Validation runs on blur and on submit; the invalid state
- * is the field's hatched margin note (never a red box), and the form-level error is the warn
- * caution line with its words in ink (R35). Success sets the store and routes to `next`.
+ * §7.2 / §14.2 Sign-in — the intake form on the sheet: a Fraunces title, labels above 48px fields,
+ * one primary action, one recovery link. Validation runs on blur and on submit; the invalid state
+ * is the 3px danger hatch (never a red box), and the form-level error is the same hatch with its
+ * words in ink. Success sets the store and routes to `next`.
  */
 export default function SignInPage() {
   const signin = useAuthStore((s) => s.signin)
@@ -73,8 +73,9 @@ export default function SignInPage() {
   return (
     <form onSubmit={onSubmit} noValidate aria-busy={submitting} className="space-y-6">
       <header>
-        <h1 className="font-ui text-heading text-ink">{SIGN_IN.heading}</h1>
-        <p className="mt-1 text-body text-ink-2">{SIGN_IN.lead}</p>
+        <h1 className="font-display text-display font-medium tracking-[-0.03em] text-ink">
+          {SIGN_IN.heading}
+        </h1>
       </header>
 
       <Field label="Email" error={emailProblem ?? undefined}>
@@ -113,15 +114,25 @@ export default function SignInPage() {
         </Button>
       )}
 
-      <p className="text-body text-ink-3">
-        {SIGN_IN.crossQuestion}{' '}
-        <Link
-          to={`/auth/signup${nextSuffix(params)}`}
+      <div className="flex flex-wrap items-baseline justify-between gap-x-6 gap-y-2">
+        <p className="text-body text-ink-3">
+          {SIGN_IN.crossQuestion}{' '}
+          <Link
+            to={`/auth/signup${nextSuffix(params)}`}
+            className="inline-flex min-h-11 min-w-11 items-center font-ui text-body text-ink-2 underline decoration-ink-3 underline-offset-4 transition-colors duration-state hover:text-ink hover:decoration-accent lg:min-h-0 lg:min-w-0"
+          >
+            {SIGN_IN.crossAction}
+          </Link>
+        </p>
+        <a
+          href={SIGN_IN.forgotHref}
           className="inline-flex min-h-11 min-w-11 items-center font-ui text-body text-ink-2 underline decoration-ink-3 underline-offset-4 transition-colors duration-state hover:text-ink hover:decoration-accent lg:min-h-0 lg:min-w-0"
         >
-          {SIGN_IN.crossAction}
-        </Link>
-      </p>
+          {SIGN_IN.forgot}
+        </a>
+      </div>
+
+      <p className="border-t border-rule pt-4 text-body-sm text-ink-3">{TRUST_LINE}</p>
     </form>
   )
 }

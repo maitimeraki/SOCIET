@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { ApiError, NetworkError } from '../api/rest'
 import { CautionLine, IntakeStamp } from './authForm'
-import { authErrorCopy, confirmError, emailError, passwordError, safeNext } from './authRules'
+import { authErrorCopy, emailError, passwordError, safeNext } from './authRules'
 
 describe('authForm — validation on blur and submit', () => {
   it('rejects a blank or malformed email and accepts a shaped one', () => {
@@ -18,12 +18,6 @@ describe('authForm — validation on blur and submit', () => {
     expect(passwordError('')).toBe('Enter a password.')
     expect(passwordError('short')).toBe('Use at least 8 characters.')
     expect(passwordError('longenough')).toBeNull()
-  })
-
-  it('requires the confirm field to match the password', () => {
-    expect(confirmError('longenough', '')).toBe('Re-enter your password.')
-    expect(confirmError('longenough', 'different')).toBe('Passwords do not match.')
-    expect(confirmError('longenough', 'longenough')).toBeNull()
   })
 })
 
@@ -85,12 +79,13 @@ describe('authForm — `next` is a same-origin boundary', () => {
 })
 
 describe('§7.2 marks — warn is the mark, ink is the word (R35)', () => {
-  it('draws the caution line in warn with the words in ink', () => {
+  it('marks the alert with the 3px danger hatch, and keeps the words in ink', () => {
     const html = renderToStaticMarkup(
       <CautionLine error={{ message: 'Email or password is incorrect.', retry: false }} onRetry={() => {}} />,
     )
-    expect(html).toContain('border-warn')
+    expect(html).toContain('field-invalid') // the 3px danger hatch, never a red box
     expect(html).toContain('text-ink-2')
+    expect(html).not.toContain('text-danger')
     expect(html).not.toContain('text-warn')
     expect(html).toContain('role="alert"')
   })

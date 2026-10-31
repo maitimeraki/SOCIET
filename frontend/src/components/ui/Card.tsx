@@ -13,7 +13,7 @@ export type CardElement = 'div' | 'article' | 'li' | 'section'
 export type CardProps = {
   as?: CardElement
   /** The space inside the card, in pixels. */
-  pad?: 16 | 24
+  pad?: 16 | 24 | 32
   radius?: 'md' | 'lg'
   /** Lifts the object on hover — the floating shadow. */
   hover?: boolean
@@ -30,7 +30,7 @@ export default function Card({
 }: CardProps) {
   const classes = [
     'bg-paper',
-    pad === 24 ? 'p-6' : 'p-4',
+    pad === 32 ? 'p-8' : pad === 24 ? 'p-6' : 'p-4',
     'shadow-card',
     radius === 'lg' ? 'rounded-lg' : 'rounded-md',
     hover ? 'transition-[box-shadow,transform] duration-state hover:-translate-y-px hover:shadow-sheet' : '',
