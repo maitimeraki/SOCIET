@@ -6,6 +6,7 @@ import AppErrorBoundary from '../AppErrorBoundary'
 import Skeleton from '../ui/Skeleton'
 import { ToastHost } from '../ui/Toast'
 import Rail from './Rail'
+import MobileTabBar from './MobileTabBar'
 
 /** The page-chunk loading state — the same pulse skeleton the pages use, so the swap is seamless. */
 export function RouteFallback() {
@@ -53,7 +54,11 @@ export default function AppShell() {
         Skip to content
       </a>
       <Rail />
-      <main id="content" className="mx-auto min-w-0 w-full max-w-[1320px] flex-1 px-6 pb-24 pt-8 print:max-w-none print:p-0 lg:px-12">
+      <MobileTabBar />
+      <main
+        id="content"
+        className="mx-auto min-w-0 w-full max-w-[1320px] flex-1 px-6 pb-32 pt-8 print:max-w-none print:p-0 md:pb-24 lg:px-12"
+      >
         <AppErrorBoundary key={key}>
           <Suspense fallback={<RouteFallback />}>
             <Outlet />

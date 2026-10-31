@@ -23,6 +23,10 @@ export interface DocumentsPageViewProps {
 const readerMeta = (document: UploadRow) =>
   `Added ${fmtDate(document.created_at)} · ${fmtBytes(document.bytes)} · ${document.dataset_name ?? 'Not in a corpus yet'}`
 
+/** §10.2 — below md each row is a stack of label/value pairs; at md and up it is the ruled table. */
+const STACK_CELL = 'block py-1.5 md:table-cell md:py-0 md:pr-3'
+const STACK_LABEL = 'mb-1 block font-ui text-label uppercase tracking-[0.08em] text-ink-3 md:hidden'
+
 export function DocumentsPageView({
   documents,
   loading,
@@ -78,7 +82,7 @@ export function DocumentsPageView({
         />
       ) : (
         <table className="w-full border-collapse">
-          <thead>
+          <thead className="hidden md:table-header-group">
             <tr>
               {['Name', 'Added', 'Size', 'Read', 'Corpus'].map((heading) => (
                 <th
@@ -93,14 +97,15 @@ export function DocumentsPageView({
               ))}
             </tr>
           </thead>
-          <tbody>
+          <tbody className="block md:table-row-group">
             {documents.map((document) => (
               <tr
                 key={document.id}
                 onClick={() => onSelect(document)}
-                className="h-[52px] cursor-pointer border-b border-rule/40 hover:bg-accent-soft"
+                className="block cursor-pointer border-b border-rule py-3 hover:bg-accent-soft md:table-row md:h-[52px] md:py-0"
               >
-                <td className="pr-3 font-ui text-body-sm text-ink">
+                <td data-label="Name" className={`${STACK_CELL} font-ui text-body-sm text-ink`}>
+                  <span className={STACK_LABEL}>Name</span>
                   <button
                     type="button"
                     data-document-id={document.id}
@@ -113,9 +118,22 @@ export function DocumentsPageView({
                     {document.name}
                   </button>
                 </td>
-                <td className="pr-3 text-right font-mono text-mono text-ink-3">{fmtDate(document.created_at)}</td>
-                <td className="pr-3 text-right font-mono text-mono text-ink-3">{fmtBytes(document.bytes)}</td>
-                <td>
+                <td
+                  data-label="Added"
+                  className={`${STACK_CELL} font-mono text-mono text-ink-3 md:text-right`}
+                >
+                  <span className={STACK_LABEL}>Added</span>
+                  {fmtDate(document.created_at)}
+                </td>
+                <td
+                  data-label="Size"
+                  className={`${STACK_CELL} font-mono text-mono text-ink-3 md:text-right`}
+                >
+                  <span className={STACK_LABEL}>Size</span>
+                  {fmtBytes(document.bytes)}
+                </td>
+                <td data-label="Read" className="block py-1.5 md:table-cell md:py-0">
+                  <span className={STACK_LABEL}>Read</span>
                   {document.read ? (
                     <span className="inline-flex min-h-6 items-center gap-1.5 rounded-xs bg-accent-soft px-2 font-mono text-micro uppercase tracking-[0.04em] text-ok">
                       <i className="h-1.5 w-1.5 rounded-full bg-ok" aria-hidden="true" />Read
@@ -126,7 +144,10 @@ export function DocumentsPageView({
                     </span>
                   )}
                 </td>
-                <td className="font-ui text-body-sm text-ink-2">{document.dataset_name ?? 'Not in a corpus yet'}</td>
+                <td data-label="Corpus" className={`${STACK_CELL} font-ui text-body-sm text-ink-2`}>
+                  <span className={STACK_LABEL}>Corpus</span>
+                  {document.dataset_name ?? 'Not in a corpus yet'}
+                </td>
               </tr>
             ))}
           </tbody>

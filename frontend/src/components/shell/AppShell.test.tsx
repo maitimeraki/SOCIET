@@ -28,6 +28,20 @@ describe('AppShell', () => {
     expect(render()).toMatch(/<nav[^>]*aria-label="Sections"/)
   })
 
+  it('gives the phone a bottom tab bar with the four destinations and the floating + (§7.3)', () => {
+    const html = render()
+    // The rail is desktop/tablet only; the phone gets the bar instead.
+    expect(html).toContain('print:hidden md:flex')
+    expect(html).toContain('fixed inset-x-0 bottom-0')
+    expect(html).toContain('md:hidden')
+    for (const target of ['/overview', '/documents', '/runs', '/results']) {
+      expect(html, target).toContain(`href="${target}"`)
+    }
+    expect(html).toContain('aria-label="New decision"')
+    // The bar must not sit over the content.
+    expect(html).toContain('pb-32')
+  })
+
   it('renders the routed child inside main#content', () => {
     const html = render()
     expect(html).toContain('<main id="content"')

@@ -36,7 +36,7 @@ export default function RecentWork({ rows }: { rows: RecentRow[] }) {
         </Link>
       </div>
       {rows.map((row) => (
-        <article key={row.runId} className="border-t border-hairline first:border-t-0">
+        <article key={row.runId} className="border-t border-rule first:border-t-0">
           <Link
             to={rowTarget(row)}
             className="group flex flex-wrap items-center justify-between gap-3 px-6 py-4 hover:bg-accent-soft"

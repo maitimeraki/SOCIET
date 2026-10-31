@@ -127,7 +127,7 @@ export function RunsPageView({
                   <li key={entry.run_id}>
                     <Link
                       to={`/runs/${entry.run_id}`}
-                      className="group flex flex-wrap items-center gap-x-4 gap-y-1 border-b border-rule/40 py-3 hover:bg-accent-soft focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent lg:grid lg:grid-cols-[minmax(0,1fr)_6.5rem_3.5rem_6.5rem_7rem] xl:grid-cols-[minmax(0,1fr)_7rem_4rem_7.5rem_8rem_2.5rem]"
+                      className="group flex flex-wrap items-center gap-x-4 gap-y-1 border-b border-rule py-3 hover:bg-accent-soft focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent lg:grid lg:grid-cols-[minmax(0,1fr)_6.5rem_3.5rem_6.5rem_7rem] xl:grid-cols-[minmax(0,1fr)_7rem_4rem_7.5rem_8rem_2.5rem]"
                     >
                       <span className="w-full min-w-0 font-ui text-body text-ink lg:w-auto">{entry.query}</span>
                       <span>

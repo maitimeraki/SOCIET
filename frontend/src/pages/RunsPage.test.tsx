@@ -90,6 +90,10 @@ describe('RunsPageView', () => {
     expect(html).not.toContain('Couldn&#x27;t load more.')
   })
 
+  it('draws the row boundary on the record rule, never the decorative hairline', () => {
+    expect(render({ runs: [run()] })).not.toContain('border-rule/40')
+  })
+
   it('carries no banned word', () => {
     expect(renderedText(render({ runs: [run()] }))).not.toMatch(BANNED_TERMS)
   })

@@ -106,4 +106,19 @@ describe('the documents table', () => {
     const html = render({ documents: [doc({ id: 'u3', bytes: 480_000 })] })
     expect(html).toContain('480 KB')
   })
+
+  it('stacks each row as label/value pairs below md, and keeps the ruled table at md+', () => {
+    const html = render({ documents: [doc()] })
+    for (const label of ['Name', 'Added', 'Size', 'Read', 'Corpus']) {
+      expect(html, label).toContain(`data-label="${label}"`)
+    }
+    expect(html).toContain('md:table-row')
+    expect(html).toContain('md:table-header-group')
+    // §10.2 — no horizontal scroll means no fixed-width row; every cell is a block below md.
+    expect(html).toContain('block py-1.5')
+  })
+
+  it('draws record boundaries on the record rule, never the decorative hairline', () => {
+    expect(render({ documents: [doc()] })).not.toContain('border-rule/40')
+  })
 })

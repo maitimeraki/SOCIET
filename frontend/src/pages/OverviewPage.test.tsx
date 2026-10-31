@@ -93,6 +93,11 @@ describe('the Overview', () => {
     expect(html).toContain('Failed')
     expect(html).toContain('Interrupted')
     expect(html).toContain('pass 2')
+    // §4.7 — recent-work rows are records: their boundary is the record rule, not the decorative
+    // hairline (the stats band's tile dividers stay decorative).
+    const rows = [...html.matchAll(/<article[^>]*>/g)].map((match) => match[0])
+    expect(rows).toHaveLength(4)
+    for (const row of rows) expect(row).toContain('border-t border-rule')
   })
 
   it('renders no banned word', () => {
