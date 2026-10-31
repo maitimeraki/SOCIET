@@ -107,7 +107,7 @@ describe('the three sections are real pages, not redirects', () => {
   })
 
   it('renders Runs at /runs', () => {
-    expect(renderGuarded('authed', '/runs', RunsPage)).toContain('>Runs</h1>')
+    expect(renderGuarded('authed', '/runs', RunsPage)).toContain('>Your decisions</h1>')
   })
 
   it('renders Verdicts at /results', () => {

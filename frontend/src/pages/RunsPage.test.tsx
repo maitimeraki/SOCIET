@@ -46,9 +46,21 @@ describe('RunsPageView', () => {
 
   it('marks a running run and withholds its outcome', () => {
     const html = render({ runs: [run({ status: 'running', verdict_stance: null, rounds_executed: 2 })] })
-    expect(html).toContain('still running')
-    expect(html).toContain('2 passes')
+    expect(html).toContain('Deliberating')
+    expect(html).toContain('pass 2')
     expect(html).not.toContain('Negative')
+  })
+
+  it('never reads a failed or interrupted run as live work', () => {
+    const html = render({
+      runs: [
+        run({ run_id: 'f1', status: 'failed', verdict_stance: null, rounds_executed: 2 }),
+        run({ run_id: 'i1', status: 'interrupted', verdict_stance: null, rounds_executed: 3 }),
+      ],
+    })
+    expect(html).toContain('Failed')
+    expect(html).toContain('Interrupted')
+    expect(html).not.toContain('Deliberating')
   })
 
   it('renders the empty and failed states', () => {
@@ -74,5 +86,83 @@ describe('RunsPageView', () => {
 
   it('carries no banned word', () => {
     expect(renderedText(render({ runs: [run()] }))).not.toMatch(BANNED_TERMS)
+  })
+})
+
+describe('the runs list', () => {
+  it('shows the filed share from the list, without reading every run', () => {
+    const html = renderToStaticMarkup(
+      <MemoryRouter>
+        <RunsPageView
+          runs={[
+            {
+              run_id: 'r1',
+              query: 'Should Ridgeline Coffee open a second location on Mill Street?',
+              status: 'complete',
+              rounds_executed: 4,
+              verdict_stance: 'NEGATIVE',
+              verdict_confidence: 0.82,
+              corpus_label: 'Mill Street expansion',
+              dataset_id: 'd1',
+              converged: true,
+              created_at: '2026-10-22T09:00:00+00:00',
+            },
+          ]}
+          loading={false}
+          failed={false}
+          hasMore={false}
+          loadingMore={false}
+          onLoadMore={() => {}}
+          onRetry={() => {}}
+        />
+      </MemoryRouter>,
+    )
+    expect(html).toContain('0.82')
+    expect(html).toContain('Negative')
+    expect(html).toContain('pass 4')
+  })
+
+  it('groups the rows by month, newest month first', () => {
+    const html = renderToStaticMarkup(
+      <MemoryRouter>
+        <RunsPageView
+          runs={[
+            {
+              run_id: 'r1',
+              query: 'a',
+              status: 'complete',
+              rounds_executed: 4,
+              verdict_stance: 'POSITIVE',
+              verdict_confidence: 0.74,
+              corpus_label: null,
+              dataset_id: 'd1',
+              converged: true,
+              created_at: '2026-10-18T09:00:00+00:00',
+            },
+            {
+              run_id: 'r2',
+              query: 'b',
+              status: 'complete',
+              rounds_executed: 3,
+              verdict_stance: null,
+              verdict_confidence: null,
+              corpus_label: null,
+              dataset_id: 'd1',
+              converged: true,
+              created_at: '2026-09-04T09:00:00+00:00',
+            },
+          ]}
+          loading={false}
+          failed={false}
+          hasMore={false}
+          loadingMore={false}
+          onLoadMore={() => {}}
+          onRetry={() => {}}
+        />
+      </MemoryRouter>,
+    )
+    expect(html).toContain('October 2026')
+    expect(html).toContain('September 2026')
+    expect(html.indexOf('October 2026')).toBeLessThan(html.indexOf('September 2026'))
   })
 })

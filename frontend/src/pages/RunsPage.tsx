@@ -22,6 +22,48 @@ export interface RunsPageViewProps {
   onRetry: () => void
 }
 
+export interface MonthGroup {
+  label: string
+  runs: RunSummary[]
+}
+
+/** The runs under their month, newest month first — the month label is a sticky caps label. */
+// eslint-disable-next-line react-refresh/only-export-components -- groupByMonth is the tested grouping rule
+export function groupByMonth(runs: RunSummary[]): MonthGroup[] {
+  const groups = new Map<string, RunSummary[]>()
+  for (const run of runs) {
+    const key = run.created_at.slice(0, 7)
+    const list = groups.get(key)
+    if (list) list.push(run)
+    else groups.set(key, [run])
+  }
+  return [...groups.entries()]
+    .sort(([a], [b]) => b.localeCompare(a))
+    .map(([key, list]) => ({
+      label: new Date(`${key}-01T00:00:00Z`).toLocaleDateString('en-GB', {
+        month: 'long',
+        year: 'numeric',
+        timeZone: 'UTC',
+      }),
+      runs: list,
+    }))
+}
+
+/** §7.5 — the filed outcome: position mark + word, then the share as a measurement. */
+function Outcome({ run }: { run: RunSummary }) {
+  if (!run.verdict_stance) {
+    return <span className="font-mono text-micro text-ink-3">—</span>
+  }
+  return (
+    <span className="flex items-center gap-2">
+      <PositionMark position={run.verdict_stance} size="sm" ground="light" />
+      <span className="font-mono text-micro text-ink-3">
+        {run.verdict_confidence === null ? '—' : run.verdict_confidence.toFixed(2)}
+      </span>
+    </span>
+  )
+}
+
 export function RunsPageView({
   runs,
   loading,
@@ -32,76 +74,86 @@ export function RunsPageView({
   onLoadMore,
   onRetry,
 }: RunsPageViewProps) {
+  const groups = groupByMonth(runs)
+
   return (
     <div>
       <header className="flex flex-wrap items-end justify-between gap-4 border-b border-rule pb-6">
         <div>
-          <h1 className="font-ui text-display text-ink">Runs</h1>
-          <p className="mt-2 max-w-[60ch] text-body text-ink-2">
-            Every question you've brought, and how each one ended.
-          </p>
+          <p className="font-ui text-label uppercase tracking-[0.09em] text-ink-3">Runs</p>
+          <h1 className="font-display text-display font-medium tracking-[-0.03em] text-ink">Your decisions</h1>
+          <p className="mt-2 max-w-[60ch] font-ui text-body-sm text-ink-2">Every question you have put to a panel.</p>
         </div>
-        <span className="font-mono text-micro text-ink-3">{runs.length} TOTAL</span>
+        <Link to="/new" className={buttonClasses('primary', 48, 'min-h-11')}>
+          New decision
+        </Link>
       </header>
 
       {failed && runs.length === 0 ? (
-        <ErrorState
-          title="Couldn't reach the server"
-          detail={failDetail || 'Your decisions load when the server is back.'}
-          onRetry={onRetry}
-          retryLabel="Try again"
-        />
+        <div className="mt-6">
+          <ErrorState
+            title="Couldn't reach the server"
+            detail={failDetail || 'Your decisions load when the server is back.'}
+            onRetry={onRetry}
+            retryLabel="Try again"
+          />
+        </div>
       ) : loading ? (
-        <div className="space-y-3">
-          {[0, 1, 2].map((index) => (
-            <Skeleton key={index} className="h-14 w-full" />
+        <div className="mt-6 space-y-2">
+          {[0, 1, 2, 3, 4, 5].map((index) => (
+            <Skeleton key={index} className="h-[52px] w-full" />
           ))}
         </div>
       ) : runs.length === 0 ? (
-        <EmptyState
-          line="No decisions yet. Every question you bring is listed here, with how it ended."
-          action={
-            <Link to="/new" className={buttonClasses('primary', 40, 'min-h-11')}>
-              New decision
-            </Link>
-          }
-        />
+        <div className="mt-6">
+          <EmptyState
+            line="No decisions yet. Ask the first one."
+            action={
+              <Link to="/new" className={buttonClasses('primary', 40, 'min-h-11')}>
+                Start a decision
+              </Link>
+            }
+          />
+        </div>
       ) : (
-        <ul>
-          {runs.map((entry) => {
-            const stillGoing = entry.status === 'running' || entry.status === 'queued'
-            return (
-              <li key={entry.run_id}>
-                <Link
-                  to={`/runs/${entry.run_id}`}
-                  className="flex items-start justify-between gap-4 border-b border-rule/40 py-3 hover:bg-sand"
-                >
-                  <span className="min-w-0">
-                    <span className="block text-body-sm font-semibold text-ink">{entry.query}</span>
-                    <span className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 font-mono text-micro text-ink-3">
-                      {entry.verdict_stance ? (
-                        <PositionMark position={entry.verdict_stance} ground="light" />
-                      ) : (
-                        <span>{stillGoing ? 'still running' : 'No outcome yet'}</span>
-                      )}
-                      <span>{fmtDate(entry.created_at)}</span>
+        <div className="mt-4">
+          {groups.map((group) => (
+            <section key={group.label}>
+              <h2 className="sticky top-0 z-10 border-b border-rule bg-bone py-2 font-ui text-label uppercase tracking-[0.09em] text-ink-3">
+                {group.label}
+              </h2>
+              <ul>
+                {group.runs.map((entry) => (
+                  <li key={entry.run_id}>
+                    <Link
+                      to={`/runs/${entry.run_id}`}
+                      className="group flex flex-wrap items-center gap-x-4 gap-y-1 border-b border-rule/40 py-3 hover:bg-accent-soft focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent xl:grid xl:grid-cols-[minmax(0,1fr)_7rem_4rem_7.5rem_8rem_2.5rem]"
+                    >
+                      <span className="w-full min-w-0 font-ui text-body text-ink xl:w-auto">{entry.query}</span>
                       <span>
-                        {entry.rounds_executed} {entry.rounds_executed === 1 ? 'pass' : 'passes'}
+                        <StateChip state={entry.status} />
                       </span>
-                      <span>{entry.corpus_label ?? '—'}</span>
-                    </span>
-                  </span>
-                  <StateChip state={entry.status} />
-                </Link>
-              </li>
-            )
-          })}
-        </ul>
+                      <span className="font-mono text-mono text-ink-3">pass {entry.rounds_executed}</span>
+                      <span className="font-mono text-mono text-ink-3">{fmtDate(entry.created_at)}</span>
+                      <Outcome run={entry} />
+                      <span
+                        aria-hidden="true"
+                        className="ml-auto font-mono text-micro text-ink-3 underline underline-offset-4 opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100"
+                      >
+                        Open
+                      </span>
+                    </Link>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          ))}
+        </div>
       )}
 
       {failed && runs.length > 0 && (
-        <div className="mt-4 flex flex-wrap items-center justify-center gap-3">
-          <span className="text-body text-ink-2">Couldn't load more.</span>
+        <div role="alert" className="mt-4 flex flex-wrap items-center justify-center gap-3">
+          <span className="font-ui text-body-sm text-ink-2">Couldn't load more.</span>
           <button type="button" onClick={onLoadMore} className={buttonClasses('secondary', 40, 'min-h-11')}>
             Try again
           </button>
@@ -114,7 +166,7 @@ export function RunsPageView({
             type="button"
             onClick={onLoadMore}
             disabled={loadingMore}
-            className={buttonClasses('secondary', 40, 'min-h-11')}
+            className={buttonClasses('ghost', 40, 'min-h-11')}
           >
             {loadingMore ? 'Loading…' : 'Load more'}
           </button>
