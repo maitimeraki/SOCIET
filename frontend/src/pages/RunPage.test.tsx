@@ -13,7 +13,7 @@ import { initialState, type RunState } from '../run/reducer'
 import { BANNED_TERMS, renderedText } from '../test/copyLaw'
 
 // No jsdom / no testing-library (see GraphCanvas.test.tsx): the graph stack binds WebGL at import
-// under Node, so mock the one DOM-bound module the run page pulls in through `AnswerDocument`.
+// under Node, so mock the DOM-bound module if the run page's tree ever reaches it through the floor.
 vi.mock('@react-sigma/core', () => ({ SigmaContainer: () => null, useSigma: () => null }))
 
 const RUN_ID = 'run-1'
@@ -45,11 +45,31 @@ const RUN: RunState = {
   rounds: [{ round: 1, pairs: [], turns: [], consensus: null }],
 }
 
-const render = (tab: Tab) =>
+/** The same run once its verdict is filed — the state the report tab renders from. */
+const FILED: RunState = {
+  ...RUN,
+  status: 'complete',
+  stages: [{ stage: 'verdict', index: 6, at: Date.UTC(2026, 9, 22, 9, 30), fields: {} }],
+  verdict: {
+    converged: true,
+    summary: 'The panel concluded the expansion is worth staging.',
+    narrative: '',
+    narrativeStatus: 'ok',
+    dissentingViews: [{ stance: 'NEGATIVE', view: 'Entry cost outweighs the single market.' }],
+    evidence: [],
+    confidence: 0.83,
+    clusters: null,
+    finalStances: { 'Nordic Lead': 'POSITIVE', 'Baltic Lead': 'NEGATIVE' },
+    supporting: [],
+    opposing: [],
+  },
+}
+
+const render = (tab: Tab, run: RunState = RUN) =>
   renderToStaticMarkup(
     <MemoryRouter initialEntries={[`/runs/${RUN_ID}/${tab}`]}>
       <RunPageView
-        run={RUN}
+        run={run}
         events={[]}
         tab={tab}
         runId={RUN_ID}
@@ -103,6 +123,10 @@ describe('the copy law (§13) holds on the run view in every section', () => {
   it.each(TABS)('%s renders no banned word', (tab) => {
     expect(renderedText(render(tab))).not.toMatch(BANNED_TERMS)
   })
+
+  it('the filed report renders no banned word', () => {
+    expect(renderedText(render('verdict', FILED))).not.toMatch(BANNED_TERMS)
+  })
 })
 
 /** The opening tag of the panel whose id names `tab`, so an assertion lands on that one panel. */
@@ -122,7 +146,7 @@ describe('one nav strip, and every section is a real tabpanel (§14.4)', () => {
 
   it('names the five destinations in the product’s words', () => {
     const html = render('floor')
-    for (const label of ['Roster', 'Debate', 'Verdict', 'Experts', 'Artifacts']) {
+    for (const label of ['Roster', 'Debate', 'Report', 'Experts', 'Record']) {
       expect(html, label).toContain(`>${label}</button>`)
     }
   })
@@ -142,6 +166,26 @@ describe('one nav strip, and every section is a real tabpanel (§14.4)', () => {
     for (const tab of TABS.filter((entry) => entry !== 'agents')) {
       expect(panelTag(html, tab), tab).toMatch(/hidden=""/)
     }
+  })
+})
+
+describe('the report tab files the report (§12.8, R57)', () => {
+  it('mounts the filed report, derived from the folded run state', () => {
+    const html = render('verdict', FILED)
+    expect(html).toContain('Should we expand?')
+    expect(html).toContain('22 Oct 2026')
+    expect(html).toContain('The case against')
+    expect(html).toContain('Entry cost outweighs the single market.')
+    expect(html).toContain('0.83')
+    expect(html).toContain('The passes')
+    expect(html).toContain('The panel')
+    expect(html).toContain('Nordic Lead')
+  })
+
+  it('states that the report is not filed yet instead of inventing one', () => {
+    const html = render('verdict')
+    expect(html).toContain('The report appears when the debate completes.')
+    expect(html).not.toContain('The passes')
   })
 })
 

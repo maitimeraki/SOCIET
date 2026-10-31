@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import WorkspaceShell from './WorkspaceShell'
+import WorkspaceTopBar from './WorkspaceTopBar'
 import { WorkspaceView, type MapSummary, type PaneState } from '../workspace/Workspace'
 import { useRunStore } from '../../run/runStore'
 // §13 — the one copy-law guard, shared with every rendered-string test.
@@ -45,6 +46,13 @@ const renderPanes = (state: PaneState) =>
       work={work}
       summary={SUMMARY}
     />,
+  )
+
+const renderTopBar = (title: string) =>
+  renderToStaticMarkup(
+    <MemoryRouter>
+      <WorkspaceTopBar title={title} />
+    </MemoryRouter>,
   )
 
 /** The opening tag of the first element whose markup contains `marker`. */
@@ -135,6 +143,29 @@ describe('the map host never unmounts across the pane states (§9.3, Ruling F17)
     const main = tagAround(html, 'id="content"')
     expect(main).toContain('flex-col')
     expect(main).toContain('min-h-0')
+  })
+})
+
+describe('the workspace top bar', () => {
+  it('carries the wordmark, the question and the way out', () => {
+    const html = renderTopBar('Should Ridgeline Coffee open a second location?')
+    expect(html).toContain('Societas')
+    expect(html).toContain('Should Ridgeline Coffee open a second location?')
+    expect(html).toContain('Exit')
+    // The bar is the §7.7 64px instrument, and the question is held to one line.
+    expect(html).toContain('min-h-16')
+    expect(html).toContain('truncate')
+  })
+
+  it('shows the three steps as dots, not as a chatty timeline', () => {
+    const html = renderTopBar('x')
+    expect(html).toContain('Material')
+    expect(html).toContain('Question')
+    expect(html).toContain('Panel')
+    // R58 — the bar's words are the capitalised step names; the in-flow rail keeps the longer labels.
+    expect(html).not.toContain('Your material')
+    // One dot per step: the indicator is three dots with their words, not a timeline.
+    expect(html.match(/rounded-full/g) ?? []).toHaveLength(3)
   })
 })
 

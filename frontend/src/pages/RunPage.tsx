@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import { Navigate, useLocation, useNavigate, useParams } from 'react-router-dom'
 import { useRunStore } from '../run/runStore'
-import { rosterProgress, verdictView } from '../run/selectors'
+import { rosterProgress } from '../run/selectors'
 import Button from '../components/ui/Button'
 import SectionNav, { sectionPanelId, sectionTabId } from '../components/ui/SectionNav'
 import RunHeader from '../components/run/RunHeader'
@@ -10,7 +10,8 @@ import RosterStage from '../components/run/RosterStage'
 import FlowView from '../components/run/FlowView'
 import ArtifactsTab from '../components/run/ArtifactsTab'
 import AgentsTab from '../components/run/AgentsTab'
-import AnswerDocument, { sourceTitles } from '../components/run/AnswerDocument'
+import ReportDocument from '../components/run/ReportDocument'
+import { reportFromState } from '../components/run/reportFromState'
 import ChamberFloor from '../components/chamber/ChamberFloor'
 import type { RunEvent } from '../run/events'
 import type { RunState } from '../run/reducer'
@@ -24,9 +25,9 @@ const isRunTab = (value: string | undefined): value is RunTab =>
 const TAB_LABELS: Record<RunTab, string> = {
   roster: 'Roster',
   floor: 'Debate',
-  verdict: 'Verdict',
+  verdict: 'Report',
   agents: 'Experts',
-  artifacts: 'Artifacts',
+  artifacts: 'Record',
 }
 
 const NAV_PREFIX = 'run'
@@ -57,8 +58,6 @@ export interface RunWorkProps {
   scrubbed: number | null
   /** The newest pass the run has, for the scrubber's bounds; null before any pass has landed. */
   latestRound: number | null
-  /** The run's material is gone — the answer states it rather than omitting the sources (§8.5). */
-  corpusMissing?: boolean
   onScrub: (next: number | null) => void
   onNavigate: (path: string) => void
   onReplay: () => void
@@ -69,9 +68,8 @@ export interface RunWorkProps {
  * pure view, so the two can never drift: the only thing that differs between them is the wrapper
  * around this node (`Workspace` owns the pane state; `WorkspaceView` takes it as a prop).
  */
-function RunWork({ run, events, tab, runId, scrubbed, latestRound, corpusMissing, onScrub, onNavigate, onReplay }: RunWorkProps) {
+function RunWork({ run, events, tab, runId, scrubbed, latestRound, onScrub, onNavigate, onReplay }: RunWorkProps) {
   const progress = rosterProgress(run)
-  const view = verdictView(run)
   const activeRound = scrubbed ?? latestRound
 
   const renderTab = (key: RunTab): ReactNode => {
@@ -90,19 +88,13 @@ function RunWork({ run, events, tab, runId, scrubbed, latestRound, corpusMissing
         )
       case 'floor':
         return <FlowView run={run} activeRound={activeRound} latestRound={latestRound} onScrub={onScrub} onNavigate={onNavigate} />
-      case 'verdict':
-        return view ? (
+      case 'verdict': {
+        // §12.8 — the report tab renders the filed report itself: one model, derived once, the same
+        // object every export serializes. The interactive affordances live beside it.
+        const report = reportFromState(run)
+        return report ? (
           <div className="space-y-8">
-            {/* §8.5 — the answer IS the reading view and the export: one document, derived once. The
-                raw-JSON dump it replaces is retired; the export lives inside the document, so what is
-                read here and what leaves are the same. The interactive affordances live beside it. */}
-            <AnswerDocument
-              runId={runId}
-              question={run.query}
-              view={view}
-              sources={sourceTitles(run.roster)}
-              corpusMissing={corpusMissing ?? false}
-            />
+            <ReportDocument report={report} />
             <div className="flex flex-wrap items-center gap-3 print:hidden">
               <Button onClick={onReplay}>Replay this decision</Button>
               <Button variant="ghost" onClick={() => onNavigate('/new/society')}>
@@ -111,8 +103,9 @@ function RunWork({ run, events, tab, runId, scrubbed, latestRound, corpusMissing
             </div>
           </div>
         ) : (
-          <p className="text-body text-ink-3">The verdict appears when the debate completes.</p>
+          <p className="text-body text-ink-3">The report appears when the debate completes.</p>
         )
+      }
       case 'agents':
         return <AgentsTab run={run} />
       case 'artifacts':
@@ -193,7 +186,6 @@ export default function RunPage() {
   const run = useRunStore((s) => s.run)
   const events = useRunStore((s) => s.events)
   const connection = useRunStore((s) => s.connection)
-  const corpusMissing = useRunStore((s) => s.corpusMissing)
   const maxRounds = run.config?.max_rounds ?? null
 
   const location = useLocation()
@@ -275,7 +267,6 @@ export default function RunPage() {
         runId={runId}
         scrubbed={scrubbed}
         latestRound={latestRound}
-        corpusMissing={corpusMissing}
         onScrub={setScrubbed}
         onNavigate={navigate}
         onReplay={() => navigate(`/runs/${runId}/floor`, { state: { replayFrom: 1 } })}

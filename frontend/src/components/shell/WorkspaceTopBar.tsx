@@ -1,15 +1,27 @@
 import { Link } from 'react-router-dom'
+import { STEP_LABELS } from '../../pages/workspaceSteps'
 
-/** §9 The workspace's own top bar — the wordmark, what is being worked on, and the way out. */
+/**
+ * §7.7 The workspace top bar: the wordmark, the question in one line, the three-step
+ * indicator, and the way out. The bar is 64px, bone, one hairline under it.
+ */
 export default function WorkspaceTopBar({ title }: { title: string }) {
   return (
-    <header className="flex h-16 shrink-0 items-center gap-4 border-b border-rule/60 bg-bone px-4">
-      <Link to="/runs" className="inline-flex min-h-11 items-center gap-2 text-ink">
-        <span aria-hidden="true" className="font-display text-heading leading-none">◆</span>
-        <span className="sr-only font-ui text-body-sm font-semibold lg:not-sr-only">Societas</span>
+    <header className="flex min-h-16 shrink-0 items-center gap-4 border-b border-hairline bg-bone px-6">
+      <Link to="/overview" className="flex min-h-11 items-center gap-2 text-ink">
+        <span aria-hidden="true" className="font-display text-title leading-none">◆</span>
+        <span className="sr-only font-ui text-heading font-semibold">Societas</span>
       </Link>
-      <p className="min-w-0 flex-1 truncate text-body text-ink-2">{title}</p>
-      <Link to="/runs" className="inline-flex min-h-11 items-center text-body text-ink-3 hover:text-ink">
+      <p className="min-w-0 flex-1 truncate font-ui text-body-sm text-ink-2">{title}</p>
+      <nav aria-label="The steps" className="flex items-center gap-2">
+        {(['material', 'question', 'panel'] as const).map((step) => (
+          <span key={step} className="inline-flex items-center gap-1.5 font-ui text-[10px] uppercase tracking-[0.06em] text-ink-3">
+            <i className="h-2 w-2 rounded-full bg-sand ring-1 ring-rule" />
+            {STEP_LABELS[step]}
+          </span>
+        ))}
+      </nav>
+      <Link to="/runs" className="font-ui text-body-sm text-ink-2 underline underline-offset-4 hover:text-ink">
         Exit
       </Link>
     </header>

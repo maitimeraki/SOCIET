@@ -6,17 +6,14 @@ import { describe, expect, it } from 'vitest'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { MemoryRouter } from 'react-router-dom'
 import { NewRunWorkspaceView, stepFromParam, type WorkspaceStep } from './NewRunWorkspace'
+// §13: the visible step labels — the query value (`ingest`/`graph`/`society`) is an internal
+// identifier and stays exempt; only these rendered words are governed. Read from the one label map
+// so a widened map (R13) cannot drift from the rail the customer sees.
+import { STEP_LABELS } from './workspaceSteps'
 // §13 — the one copy-law guard, shared with every rendered-string test.
 import { BANNED_TERMS, renderedText } from '../test/copyLaw'
 
 const STEPS = ['ingest', 'graph', 'society'] as const
-// §13: the visible step labels — the query value (`ingest`/`graph`/`society`) is an internal
-// identifier and stays exempt; only these rendered words are governed.
-const STEP_LABEL: Record<WorkspaceStep, string> = {
-  ingest: 'Your material',
-  graph: 'The map',
-  society: 'Your question',
-}
 
 const renderStep = (step: WorkspaceStep, failed = false) =>
   renderToStaticMarkup(
@@ -56,7 +53,7 @@ describe('stepFromParam — the step is an internal identifier, defaulting to in
 
 describe('the step indicator advances with the step (§9.4)', () => {
   it.each(STEPS)('%s marks its own stage current', (step) => {
-    expect(currentLabel(renderStep(step))).toBe(STEP_LABEL[step])
+    expect(currentLabel(renderStep(step))).toBe(STEP_LABELS[step])
   })
 })
 
