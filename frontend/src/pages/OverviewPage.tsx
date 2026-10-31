@@ -14,6 +14,7 @@ import type { WorkingRun } from '../components/overview/WorkingNow'
 import { buttonClasses } from '../components/ui/Button'
 import ErrorState from '../components/ui/ErrorState'
 import Skeleton from '../components/ui/Skeleton'
+import { fmtDay } from '../utils/format'
 
 /** The plan the account is on. Placeholder figures — the plan is a studio plan. */
 const CORPUS_LIMIT = 2_000_000_000
@@ -187,7 +188,7 @@ export default function OverviewPage() {
             stance: run.verdict_stance,
             share: run.verdict_confidence,
             passes: `${run.rounds_executed}`,
-            date: run.created_at.slice(0, 10),
+            date: fmtDay(run.created_at),
           })),
         )
         setCorpora(corpusRows(items, runs))

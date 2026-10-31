@@ -9,7 +9,7 @@ import Skeleton from '../components/ui/Skeleton'
 import { StateChip } from '../components/ui/Chip'
 import PositionMark from '../components/ui/PositionMark'
 import { PAGE_SIZE } from './pageSize'
-import { fmtDate } from '../utils/format'
+import { fmtDay } from '../utils/format'
 
 export interface RunsPageViewProps {
   runs: RunSummary[]
@@ -134,7 +134,7 @@ export function RunsPageView({
                         <StateChip state={entry.status} />
                       </span>
                       <span className="font-mono text-mono text-ink-3">pass {entry.rounds_executed}</span>
-                      <span className="font-mono text-mono text-ink-3">{fmtDate(entry.created_at)}</span>
+                      <span className="font-mono text-mono text-ink-3">{fmtDay(entry.created_at)}</span>
                       <Outcome run={entry} />
                       <span
                         aria-hidden="true"

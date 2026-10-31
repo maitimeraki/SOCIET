@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { fmtBytes, fmtDate, fmtElapsed, fmtInt, fmtPct, fmtScore, truncateId } from './format'
+import { fmtBytes, fmtDate, fmtDay, fmtElapsed, fmtInt, fmtPct, fmtScore, truncateId } from './format'
 
 describe('format', () => {
   it('formats integers with thousands separators', () => {
@@ -36,6 +36,12 @@ describe('format', () => {
   })
   it('returns a dash for invalid dates', () => {
     expect(fmtDate('not-a-date')).toBe('—')
+  })
+  it('formats a day without the time', () => {
+    expect(fmtDay('2026-10-22T09:00:00+00:00')).toBe('22 Oct 2026')
+  })
+  it('returns a dash for an invalid day', () => {
+    expect(fmtDay('not-a-date')).toBe('—')
   })
   it('truncates long ids', () => {
     expect(truncateId('8f3a41b0c2')).toBe('8f3a…c2')

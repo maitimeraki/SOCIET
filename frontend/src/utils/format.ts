@@ -39,6 +39,13 @@ export const fmtDate = (iso: string): string => {
   return `${d.getDate()} ${MONTH.format(d)} ${d.getFullYear()} ${pad(d.getHours())}:${pad(d.getMinutes())}`
 }
 
+/** The day alone — list surfaces show when a thing happened, not the clock time. */
+export const fmtDay = (iso: string): string => {
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return '—'
+  return `${d.getDate()} ${MONTH.format(d)} ${d.getFullYear()}`
+}
+
 export const fmtElapsed = (totalSeconds: number): string => {
   const s = Math.max(0, Math.floor(totalSeconds))
   const m = Math.floor(s / 60)
