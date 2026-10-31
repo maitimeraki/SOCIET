@@ -3,17 +3,19 @@ import { Link } from 'react-router-dom'
 import { getRun, listRunsPage } from '../api/rest'
 import type { RunSummary } from '../api/types'
 import type { Stance } from '../run/events'
-import AnswerDocument, { sourceTitles } from '../components/run/AnswerDocument'
+import { sourceTitles } from '../components/run/AnswerDocument'
+import { splitSections } from '../components/verdict/narrative'
 import { buttonClasses } from '../components/ui/Button'
 import EmptyState from '../components/ui/EmptyState'
 import ErrorState from '../components/ui/ErrorState'
 import Skeleton from '../components/ui/Skeleton'
 import PositionMark from '../components/ui/PositionMark'
+import VerdictSheet from '../components/ui/VerdictSheet'
 import { fold } from '../run/reducer'
-import { verdictView } from '../run/selectors'
+import { STANCE_ORDER, verdictView } from '../run/selectors'
 import type { VerdictView } from '../run/selectors'
 import { PAGE_SIZE } from './pageSize'
-import { fmtDate } from '../utils/format'
+import { fmtDay } from '../utils/format'
 
 export interface VerdictRow {
   runId: string
@@ -24,12 +26,25 @@ export interface VerdictRow {
 }
 
 export interface VerdictsPageViewProps {
-  latest: { runId: string; question: string; view: VerdictView; sources: string[]; corpusMissing: boolean } | null
+  latest: { runId: string; question: string; filed: string; view: VerdictView; sources: string[]; corpusMissing: boolean } | null
   earlier: VerdictRow[]
   loading: boolean
   failed: boolean
   failDetail?: string
   onRetry: () => void
+}
+
+/** R4 — the sheet's who-held rows are derived here, from the view's final stances, never stored. */
+function heldViews(view: VerdictView): { position: (typeof STANCE_ORDER)[number]; names: string[] }[] {
+  return STANCE_ORDER.map((position) => ({
+    position,
+    names: view.finalStances.filter((row) => row.stance === position).map((row) => row.agent),
+  })).filter((row) => row.names.length > 0)
+}
+
+/** The sheet's reasoning is prose: the summary, then the narrative's bodies — never its `##` marks. */
+function reasoningOf(view: VerdictView): string[] {
+  return [view.summary, ...splitSections(view.narrative).map((section) => section.body)].filter(Boolean)
 }
 
 export function VerdictsPageView({ latest, earlier, loading, failed, failDetail, onRetry }: VerdictsPageViewProps) {
@@ -57,33 +72,40 @@ export function VerdictsPageView({ latest, earlier, loading, failed, failDetail,
       ) : latest ? (
         <div className="grid gap-6 lg:grid-cols-12">
           <div className="lg:col-span-8">
-            {/* §4.1 — the answer sits on paper; the sheet is the verdict document and carries no gradient. */}
-            <div className="rounded-lg bg-paper p-6">
-              <AnswerDocument
-                runId={latest.runId}
-                question={latest.question}
-                view={latest.view}
-                sources={latest.sources}
-                corpusMissing={latest.corpusMissing}
-              />
-            </div>
+            <VerdictSheet
+              question={latest.question}
+              filed={fmtDay(latest.filed)}
+              position={latest.view.stance}
+              share={latest.view.confidence}
+              caseAgainst={latest.view.dissentingViews[0]?.view ?? 'No dissent was recorded.'}
+              reasoning={reasoningOf(latest.view)}
+              whoHeldWhichView={heldViews(latest.view)}
+              sources={latest.sources.map((title) => ({ document: title, reference: '' }))}
+              onExport={() => window.print()}
+            />
           </div>
           <aside className="lg:col-span-4">
-            <h2 className="mb-2 font-mono text-micro text-ink-3">EARLIER VERDICTS</h2>
-            <ul>
+            <h2 className="mb-2 font-ui text-label uppercase tracking-[0.09em] text-ink-3">Earlier answers</h2>
+            <div>
               {earlier.map((row) => (
-                <li key={row.runId}>
-                  <Link to={`/runs/${row.runId}/verdict`} className="grid grid-cols-[62px_1fr_auto] gap-3 border-b border-rule/30 py-2 hover:bg-sand">
-                    <span className="font-mono text-micro text-ink-3">{fmtDate(row.date)}</span>
-                    <span className="text-body text-ink-2">{row.question}</span>
-                    <span className="flex items-center gap-2">
+                <Link
+                  key={row.runId}
+                  to={`/runs/${row.runId}/verdict`}
+                  className="flex flex-col gap-1 border-t border-rule/40 py-3 hover:bg-accent-soft"
+                >
+                  <span className="font-ui text-body-sm font-medium text-ink">{row.question}</span>
+                  <span className="flex items-center justify-between gap-3">
+                    <span className="font-mono text-micro text-ink-3">{fmtDay(row.date)}</span>
+                    <span className="flex items-center gap-3">
                       <PositionMark position={row.stance} size="sm" ground="light" />
-                      <span className="font-mono text-mono text-ink-2">{row.share?.toFixed(2) ?? '—'}</span>
+                      <span className="tnum font-mono text-micro text-ink-2">
+                        {row.share === null ? '—' : row.share.toFixed(2)}
+                      </span>
                     </span>
-                  </Link>
-                </li>
+                  </span>
+                </Link>
               ))}
-            </ul>
+            </div>
           </aside>
         </div>
       ) : (
@@ -124,6 +146,7 @@ export async function loadVerdicts() {
         latest = {
           runId: entry.run_id,
           question: entry.query,
+          filed: entry.created_at,
           view,
           sources: sourceTitles(state.roster),
           corpusMissing: false,

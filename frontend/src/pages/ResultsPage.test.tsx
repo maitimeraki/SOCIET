@@ -24,22 +24,44 @@ const render = (props: Partial<VerdictsPageViewProps> = {}) =>
     </MemoryRouter>,
   )
 
+const filled = {
+  latest: {
+    runId: 'r1',
+    question: 'Should we expand into the European market in 2027?',
+    filed: '2026-10-09T10:00:00Z',
+    view: view!,
+    sources: ['eu-market-2027.pdf'],
+    corpusMissing: false,
+  },
+  earlier: [{ runId: 'r0', question: 'Should we hire?', stance: 'POSITIVE' as const, share: 0.74, date: '2026-09-01T10:00:00Z' }],
+}
+
 describe('VerdictsPageView', () => {
-  it('renders the latest answer and every earlier verdict', () => {
-    const html = render({
-      latest: {
-        runId: 'r1',
-        question: 'Should we expand into the European market in 2027?',
-        view: view!,
-        sources: ['eu-market-2027.pdf'],
-        corpusMissing: false,
-      },
-      earlier: [{ runId: 'r0', question: 'Should we hire?', stance: 'POSITIVE', share: 0.74, date: '2026-10-09T10:00:00Z' }],
-    })
+  it('renders the latest answer as the verdict sheet and every earlier verdict as a ruled row', () => {
+    const html = render(filled)
     expect(html).toContain('Should we expand into the European market in 2027?')
     expect(html).toContain('Should we hire?')
     expect(html).toContain('0.74')
     expect(html).toContain('/runs/r0')
+    // Position, share and date lead, before any prose (§7.6).
+    expect(html).toContain('Export document')
+    expect(html).toContain('9 Oct 2026')
+    expect(html).toContain('weighted share')
+    expect(html).toContain('0.83')
+    expect(html).toContain('The case against')
+    expect(html).toContain('Entry cost outweighs the single market.')
+    // The earlier row carries its own date, position and share.
+    expect(html).toContain('1 Sept 2026')
+    expect(html).toContain('Positive')
+  })
+
+  it('derives who held which view in STANCE_ORDER and drops the empty groups', () => {
+    const html = render(filled)
+    expect(html).toContain('D. Weber, P. Silva')
+    expect(html).toContain('M. Chen')
+    expect(html.indexOf('D. Weber')).toBeLessThan(html.indexOf('M. Chen'))
+    // L. Novak is on the roster but holds no final stance — the sheet invents no row.
+    expect(html).not.toContain('L. Novak')
   })
 
   it('renders the empty state and the failure state', () => {
@@ -51,6 +73,7 @@ describe('VerdictsPageView', () => {
 
   it('carries no banned word', () => {
     expect(renderedText(render())).not.toMatch(BANNED_TERMS)
+    expect(renderedText(render(filled))).not.toMatch(BANNED_TERMS)
   })
 })
 
@@ -110,6 +133,7 @@ describe('loadVerdicts', () => {
     const loaded = await loadVerdicts()
 
     expect(loaded.latest?.runId).toBe('r-good')
+    expect(loaded.latest?.filed).toBe('2026-10-09T10:00:00Z')
     expect(loaded.latest?.sources).toEqual(['eu-market-2027.pdf'])
     expect(loaded.earlier).toEqual([
       {
