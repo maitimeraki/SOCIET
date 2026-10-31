@@ -296,10 +296,23 @@ describe('the map’s entries list — the text alternative made visible (§8.7)
     expect(tagAround(render(summaryOf(nodes), ALL_LAYERS, 'split', [], 0, entries), 'max-h-[min(30vh,220px)]')).not.toMatch(/ hidden=""/)
   })
 
-  it('maps every node to an entry keyed by its id', () => {
-    const mapped = mapEntries(corpusNodes(2))
-    expect(mapped.map((entry) => entry.key)).toEqual(['n0', 'n1'])
-    expect(mapped[0]).toMatchObject({ key: 'n0', label: 'entry', name: 'Entry 0' })
+  it('labels every kind by its layer — expert, opinion, and the material', () => {
+    const threeKinds: Record<string, GraphNode> = {
+      'ds-1:steel tariffs': { id: 'ds-1:steel tariffs', label: 'steel tariffs', type: 'Topic' },
+      'ds-1:rate card': { id: 'ds-1:rate card', label: 'rate card', type: 'Topic', kind: 'condition' },
+      'ds-1:D. Weber': { id: 'ds-1:D. Weber', label: 'D. Weber', type: EXPERT_TYPE },
+      'ds-1:qh:1:D. Weber': { id: 'ds-1:qh:1:D. Weber', label: 'D. Weber · pass 1', type: 'Opinion' },
+    }
+    expect(mapEntries(threeKinds)).toEqual([
+      { key: 'ds-1:steel tariffs', label: 'entry', name: 'steel tariffs' },
+      { key: 'ds-1:rate card', label: 'condition', name: 'rate card' },
+      { key: 'ds-1:D. Weber', label: 'expert', name: 'D. Weber' },
+      { key: 'ds-1:qh:1:D. Weber', label: 'opinion', name: 'D. Weber · pass 1' },
+    ])
+  })
+
+  it('keys every entry by its stored id', () => {
+    expect(mapEntries(corpusNodes(2)).map((entry) => entry.key)).toEqual(['n0', 'n1'])
   })
 })
 

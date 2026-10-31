@@ -198,14 +198,12 @@ describe('the split is resizable — the divider lives only in split (§9)', () 
     expect(mapWrapper(render('minimised'))).not.toContain('lg:order-1')
   })
 
-  it('makes both sides their own scroll container — the synchronized pair (§10.3)', () => {
+  it('gives each side exactly one scroller — the work and the map’s entries list (§10.3)', () => {
     const html = render('split')
-    const workWrapper = wrapperTagBefore(html, 'aria-label="The work"')
-    const mapWrapper = wrapperTagBefore(html, 'aria-label="The map"')
-    expect(workWrapper).toContain('overflow-auto')
-    expect(mapWrapper).toContain('overflow-auto')
-    expect(workWrapper).toContain('min-h-0')
-    expect(mapWrapper).toContain('min-h-0')
+    expect(wrapperTagBefore(html, 'aria-label="The work"')).toContain('overflow-auto')
+    // The map wrapper does not scroll; the pane's entries list is the map side's one scroller.
+    expect(wrapperTagBefore(html, 'aria-label="The map"')).not.toContain('overflow-auto')
+    expect(tagAround(html, 'max-h-[min(30vh,220px)]')).toContain('overflow-auto')
   })
 
   it('draws the divider from the view’s ratio', () => {

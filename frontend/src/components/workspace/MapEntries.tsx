@@ -15,14 +15,14 @@ export default function MapEntries({ entries, connections }: { entries: MapEntry
   return (
     <div className="flex min-h-0 flex-col border-t border-map-rule pt-3">
       <p className="font-ui text-[10px] uppercase tracking-[0.1em] text-map-ink-2">
-        Entries &middot; <span className="font-mono tnum">{entries.length}</span>
+        The map &middot; <span className="font-mono tnum">{entries.length}</span>
       </p>
       {entries.length === 0 ? (
         <p className="mt-2 font-mono text-[10.5px] leading-[15px] text-map-ink-2">
           Nothing yet. The map fills as each document is read.
         </p>
       ) : (
-        <ul className="mt-2 min-h-0 flex-1 overflow-auto">
+        <ul className="mt-2">
           {entries.map((entry) => (
             <li key={entry.key} className="flex items-baseline justify-between gap-3 py-1 font-mono text-[10.5px] leading-[15px] text-map-ink-2">
               <span className="flex items-baseline gap-2">

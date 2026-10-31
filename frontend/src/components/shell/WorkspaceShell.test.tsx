@@ -127,8 +127,12 @@ describe('the map host never unmounts across the pane states (§9.3, Ruling F17)
     expect(work).not.toContain('shadow-card')
   })
 
-  it('lets the split fill the shell, so both sides are the height of the split (§10.3)', () => {
-    const main = tagAround(renderShell('/new'), 'id="content"')
+  it('bounds the workspace at lg, so the split row has exactly the viewport height (§10.3, R54)', () => {
+    const html = renderShell('/new')
+    const root = tagAround(html, 'min-h-screen')
+    expect(root).toContain('lg:h-dvh')
+    expect(root).toContain('lg:overflow-hidden')
+    const main = tagAround(html, 'id="content"')
     expect(main).toContain('flex-col')
     expect(main).toContain('min-h-0')
   })

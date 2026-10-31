@@ -14,8 +14,10 @@ describe("the map's entries list", () => {
       />,
     )
     expect(html).toContain('Mill Street lease.pdf')
-    expect(html).toContain('lease')
+    // A real kind, distinct from the entry names — a file named "lease" cannot satisfy it.
+    expect(html).toContain('condition')
     expect(html).toContain('Condition of premises')
+    expect(html).toContain('The map')
     expect(html).toContain('12')
   })
 

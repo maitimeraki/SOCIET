@@ -61,13 +61,17 @@ export function mapCounts(nodes: Record<string, GraphNode>, edges: Record<string
   return counts
 }
 
-/** §8.7 The map's entries as its visible text alternative reads them: one row per stored node. */
+/**
+ * §8.7 The map's entries as its visible text alternative reads them: one row per stored node, labelled
+ * by the layer it belongs to (an expert, an opinion, or the material) so the kind never contradicts the
+ * counts strip above. A material entry keeps its extracted kind when it has one.
+ */
 export function mapEntries(nodes: Record<string, GraphNode>): MapEntry[] {
-  return Object.values(nodes).map((node) => ({
-    key: node.id,
-    label: node.kind ?? 'entry',
-    name: node.label,
-  }))
+  return Object.values(nodes).map((node) => {
+    const layer = nodeLayer(node)
+    const label = layer === 'experts' ? 'expert' : layer === 'opinions' ? 'opinion' : (node.kind ?? 'entry')
+    return { key: node.id, label, name: node.label }
+  })
 }
 
 /**

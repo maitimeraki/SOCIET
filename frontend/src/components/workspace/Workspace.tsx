@@ -106,26 +106,44 @@ export function WorkspaceView({
   const outRef = useRef<HTMLDivElement | null>(null)
   const entriesRef = useRef<HTMLDivElement | null>(null)
 
-  // §10.3 — the two sides scroll together, by proportion. Either side may lead; the caller assigns
-  // only when the difference is more than a pixel, which is what stops the panes from chasing each
-  // other round a loop. The map's scrolling half is its entries list, so the plot stays put.
+  // §10.3/R55 — the two sides scroll together, by proportion, and only while they are actually side
+  // by side (split, at the `lg` breakpoint where the panes get their own full-height scrollers).
+  // Either side may lead; the caller assigns only when the difference is more than a pixel, which is
+  // what stops the panes from chasing each other round a loop. The map's scrolling half is its
+  // entries list, so the plot stays put.
   useEffect(() => {
     const out = outRef.current
     const entries = entriesRef.current
-    if (!out || !entries) return
+    if (!split || !out || !entries) return
     const link = (from: HTMLDivElement, to: HTMLDivElement) => () => {
       const target = mirrorScroll(from, to)
       if (shouldMirror(to.scrollTop, target)) to.scrollTop = target
     }
-    const outToEntries = link(out, entries)
-    const entriesToOut = link(entries, out)
-    out.addEventListener('scroll', outToEntries, { passive: true })
-    entries.addEventListener('scroll', entriesToOut, { passive: true })
-    return () => {
-      out.removeEventListener('scroll', outToEntries)
-      entries.removeEventListener('scroll', entriesToOut)
+    const wide = typeof matchMedia === 'function' ? matchMedia('(min-width: 1024px)') : null
+    let detach: (() => void) | null = null
+    const attach = () => {
+      if (detach) return
+      const outToEntries = link(out, entries)
+      const entriesToOut = link(entries, out)
+      out.addEventListener('scroll', outToEntries, { passive: true })
+      entries.addEventListener('scroll', entriesToOut, { passive: true })
+      detach = () => {
+        out.removeEventListener('scroll', outToEntries)
+        entries.removeEventListener('scroll', entriesToOut)
+        detach = null
+      }
     }
-  }, [])
+    const sync = () => {
+      if (!wide || wide.matches) attach()
+      else detach?.()
+    }
+    sync()
+    wide?.addEventListener('change', sync)
+    return () => {
+      wide?.removeEventListener('change', sync)
+      detach?.()
+    }
+  }, [split])
 
   return (
     <div
@@ -139,11 +157,13 @@ export function WorkspaceView({
       {/* The work sits above the map whenever the panes stack (§9 responsive); only the wide split
           reorders it to the right. Each pane rides in its own order wrapper so the outer layout owns
           the order, not the panes. */}
-      <div ref={outRef} className={split ? 'order-1 min-h-0 overflow-auto lg:order-3' : 'order-1'}>
+      <div ref={outRef} className={`order-1 min-h-0 overflow-auto ${split ? 'lg:order-3' : ''}`}>
         <ActivityPane hidden={state === 'expanded'}>{work}</ActivityPane>
       </div>
       {split && <SplitDivider ratio={ratio} onChange={onRatioChange} />}
-      <div className={split ? 'order-2 min-h-0 overflow-auto lg:order-1' : 'order-2'}>
+      {/* The work is the output side's one scroller; in split the map side's one scroller is the
+          entries list inside the pane, so its wrapper must not scroll too. */}
+      <div className={`order-2 min-h-0 ${split ? 'lg:order-1' : 'overflow-auto'}`}>
         <GraphPane
           mapId={mapId}
           state={state}

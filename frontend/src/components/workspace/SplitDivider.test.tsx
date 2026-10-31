@@ -75,7 +75,8 @@ describe('SplitDivider', () => {
 
   it('is hidden below lg and laid out as a 1px drag handle from lg up', () => {
     const html = renderToStaticMarkup(<SplitDivider ratio={0.5} onChange={() => {}} />)
-    expect(html).toContain('hidden')
+    // The `hidden` class token, not the substring `hidden` that `aria-hidden` would satisfy.
+    expect(html).toContain(' hidden ')
     expect(html).toContain('lg:flex')
     expect(html).toContain('cursor-col-resize')
     expect(html).toContain('bg-hairline')
