@@ -1,215 +1,51 @@
 /*
  * The homepage — `/`.
  *
- * A redesign of the marketing homepage: the design was built as a review preview and signed off
- * there, and this stylesheet is the page's own. Everything the page needs that is not a named
- * surface is scoped to `.hero-page` here.
- *
- * THE PLAN (the brief: a homepage has to say what the product IS, what it does for me, and how it
- * improves my work — and it must not read as a gallery of output screenshots).
- *
- *   1. The page is a sequence of BANDS, each on its own named surface, and no two neighbouring
- *      bands share one. The ground is grey, not white: a white page has no plane and no edge.
- *      Colour is meaning — warm is the fear, sky is the mechanism, plum is the answer, and the
- *      map's own near-black is the work.
- *   2. The hero is a SPLIT: the text on one side, the NOISE on the other. The noise is the product
- *      as it actually runs — the map with the material and the experts on it, the panel's turns
- *      arguing underneath it, and the filed answer overlapping the corner. That composition IS the
- *      promise: it argues the decision and shows me its work.
- *   3. Feeling before topic. The first line names what the visitor feels — a decision they cannot
- *      look up — and the use cases come AFTER the mechanism, never before it.
- *   4. Every claim is either true of the product or labelled as a worked example. There are no
- *      customers, no logos and no benchmarks, because none exist.
- *
- * The five named surfaces live in `index.css` as global tokens, so any other page or component can
- * take the same ones. This file only scopes them to this page and adds what the page needs.
- *
- * Every ratio quoted here is measured against THESE values (WCAG 2.2 relative luminance):
- *   ink-3  #556070 ≥ 4.5 on every band   |   rule #6b7a8d ≥ 3 on every band
- *   accent #823a86 ≥ 5.1 on every band   |   caution #92400e ≥ 5.0 on every band
+ * LAYOUT ONLY. The Quiet Room tokens, type scale and primitives are global (`src/index.css`,
+ * `components/ui/…`); this file keeps the page's shell width, the hero's first-light wash, the
+ * live dot's breathe, and the focus ring on the pine close. No colour is declared here.
  */
-
-.hero-page {
-  /* Task 13 owns this page's rewrite. Until then it reads the global Quiet Room tokens; the only
-     local override left is the page's tighter chip radius. */
-  --radius-xs: 4px; /* Tailwind v4 ships 2px; the design's chip radius is 4px */
-  --default-transition-duration: 120ms; /* closes every bare `transition-colors` at 120ms — Tailwind's own default is 150ms */
-}
-
-/* ── The bands and the rules are the kit's (`components/ui/Band.tsx`, `components/ui/Rule.tsx`),
-      so any surface can take the same named surfaces instead of copying this page's CSS. */
 
 .hero-page .shell {
   margin-inline: auto;
-  width: 100%;
-  /* 1440, not 1344: the shell's CONTENT box has to be 1344 wide for the hero's two columns
-     (560 + 64 + 720). 1440 minus the 48px gutters is exactly that. */
-  max-width: 1440px;
-  padding-inline: 1.25rem;
+  width: min(1360px, calc(100% - 2.5rem));
 }
 
 @media (min-width: 640px) {
   .hero-page .shell {
-    padding-inline: 2rem;
+    width: min(1360px, calc(100% - 4rem));
   }
 }
 
 @media (min-width: 1024px) {
   .hero-page .shell {
-    padding-inline: 3rem;
+    width: min(1360px, calc(100% - 6rem));
   }
 }
 
-/* ── The floating nav card. The reference floats its nav as a rounded, bordered white card over
-      the ground; it is the cheapest way to make a page look composed rather than stacked. */
-.hero-nav {
-  border-radius: var(--radius-lg);
-  background: var(--color-paper);
-  box-shadow: var(--shadow-card);
+/* §4.8 gradient 2 — the first light, the top 160px of the marketing hero, and nothing else. */
+.hero-page .hero-first-light {
+  background-image: var(--gradient-first-light);
+  background-repeat: no-repeat;
+  background-size: 100% 160px;
 }
 
-/* ── The one action (review §2.1): 44px, the §3 accent ramp, a 14px Archivo 500 label in white.
-      Hover lifts the shadow by 1px on the 120ms state curve; the ramp never breaks. The focus
-      ring is the INK, not the accent — an accent ring on an accent fill is the accent on the
-      accent. */
-.hero-action {
-  display: inline-flex;
-  height: 44px;
-  align-items: center;
-  justify-content: center;
-  padding-inline: 24px;
-  border-radius: var(--radius-md);
-  background: var(--color-accent);
-  box-shadow: var(--shadow-card);
-  color: var(--color-on-accent);
-  font-family: var(--font-ui);
-  font-size: 14px;
-  line-height: 21px;
-  font-weight: 500;
-  text-decoration: none;
-  transition:
-    box-shadow var(--duration-state) var(--ease-standard),
-    transform var(--duration-state) var(--ease-standard);
+/* §13 — on pine the focus ring is the map's ink, not the evergreen (which falls short there). */
+.hero-page .band--dark {
+  --focus-ring: var(--color-map-ink);
 }
 
-.hero-action:hover {
-  box-shadow: var(--shadow-sheet);
-  transform: translateY(-1px);
-}
-
-.hero-action:active {
-  transform: translateY(0);
-}
-
-.hero-action:focus-visible {
-  outline-color: var(--color-ink);
-}
-
-/* ── THE NOISE. The right half of the hero: the product as it actually runs. Three layers, one
-      over the other — the map (a real capture), the panel arguing on it, and the filed answer
-      overlapping the corner. This is the fix for "someone took a screenshot and pasted it": the
-      capture is a LAYER in a composition the page designed, not a picture of a result. */
-.hero-noise {
-  position: relative;
-  border-radius: var(--radius-lg);
-  background: var(--gradient-map);
-  box-shadow: var(--shadow-map);
-  /* the room the overlapping answer card occupies */
-  padding-bottom: 140px;
-}
-
-/* The map band — the real capture. The window is the map's own frame (its legend and its graph)
-   with the chrome rows below it dropped; a narrower window would cut a label in half. */
-.hero-noise__map {
-  overflow: hidden;
-  border-radius: var(--radius-lg) var(--radius-lg) 0 0;
-  background: var(--color-map-ground-2);
-}
-
-.hero-noise__strip {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 14px 20px 0;
-}
-
-.hero-noise__chip {
-  border: 1px solid var(--color-map-rule);
-  border-radius: var(--radius-sm);
-  padding: 3px 8px;
-  color: var(--color-map-ink-2);
-  font-family: var(--font-mono);
-  font-size: 10px;
-  line-height: 14px;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
-  white-space: nowrap;
-}
-
-/* One turn of the argument. Position is shape + colour + word, never colour alone. The hairline
-   above each turn is the kit's own rule in its dark tone — the map's rule, the same one the
-   dark band draws — so the page takes the vocabulary instead of copying it. */
-.hero-noise__row {
-  padding: 8px 20px;
-}
-
-.hero-noise__note {
-  margin-left: auto;
-  max-width: 300px;
-  text-align: right;
-}
-
-/* The filed answer — the white card that overlaps the panel's bottom-left corner and breaks its
-   edge. It is the only white object inside the dark surface, which is what makes it read first. */
-.hero-verdict {
-  position: absolute;
-  left: -28px;
-  bottom: -32px;
-  width: 320px;
-  border-radius: var(--radius-lg);
-  background: var(--color-paper);
-  box-shadow: var(--shadow-overlay);
-}
-
-/* ── The separation vocabulary (review §3.4) is the kit's (`components/ui/Rule.tsx`): the app
-      hand-rolls the record divider in 17 files because there is no rule primitive; here the rule
-      is one token and one class, and the dashboard can take the same one. */
-
-/* The shared Disclosure draws its own hairline. On this page the separator is the page's rule
-   token, so the shared one is dropped and the rule is drawn between the items instead. */
-.hero-page .hero-faq > div {
-  border-bottom: 0;
-}
-
-.hero-page .hero-faq > div + div {
-  border-top: 1px solid var(--color-rule);
-}
-
-/*
- * Motion (review §2.1). The page carries three intentional motions: the hero stagger, the
- * section reveals, and the caret (legalised to 120ms).
- *
- * The section reveal RISES and does not fade, and that is deliberate. The product's own `enter`
- * fades from opacity 0, which is right for content that appears in place — but a section that is
- * faded out is INVISIBLE in a full-page capture (nothing scrolls, so nothing intersects) and in
- * any print or screenshot pass. The page must always show its whole page. The section sits 8px
- * low until it enters the viewport and rises into place: a reveal that reads the same and hides
- * nothing.
- */
-@keyframes hero-rise {
-  from {
-    transform: translateY(8px);
+/* §9.1 Breathe — the live dot's opacity, and the only looping motion on the page. */
+@keyframes hero-breathe {
+  0%,
+  100% {
+    opacity: 0.55;
   }
-  to {
-    transform: none;
+  50% {
+    opacity: 1;
   }
 }
 
-.hero-page .reveal {
-  transform: translateY(8px);
-}
-
-.hero-page .reveal.is-revealed {
-  animation: hero-rise var(--duration-enter) var(--ease-standard) both;
+.hero-page .hero-live-dot {
+  animation: hero-breathe 2.4s ease-in-out infinite;
 }

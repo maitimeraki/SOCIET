@@ -14,7 +14,7 @@ const html = renderToStaticMarkup(
   </MemoryRouter>,
 )
 
-/** The first viewport ends where the lower bands begin — the facts band is the first one below it. */
+/** The first viewport ends where the lower bands begin — the facts strip is the first one below it. */
 const FIRST_VIEWPORT_END = 'aria-label="What is true of the product"'
 
 const firstViewport = () => {
@@ -25,22 +25,51 @@ const firstViewport = () => {
 
 const count = (haystack: string, needle: string) => haystack.split(needle).length - 1
 
-/** The page's bands, in document order — the twelve parts of §13.3, each on its own surface. */
+/** The page's section bands, in document order — §7.1's alternating grounds. */
 const bands = [...html.matchAll(/<(?:section|footer)[^>]*class="band ([^"]*)"/g)].map((match) => match[1])
 const bandTones = bands.map((classes) => classes.split(' ')[0])
 
+/** The FAQ's own details, sliced out so the nav's mobile disclosure cannot count as a question. */
+const faq = html.slice(html.indexOf('Good questions.'), html.indexOf('Bring a question'))
+
+describe('the marketing page', () => {
+  it('names the feeling in the first line', () => {
+    // R10 — the source carries the curly apostrophe; renderToStaticMarkup passes it through, so an
+    // `&rsquo;` entity in the expectation could never match.
+    expect(html).toContain('The decision you can’t look up.')
+    expect(html).not.toContain('&rsquo;')
+    expect(html).toContain('A panel of experts')
+  })
+
+  it('offers one action, and says what is free', () => {
+    expect(html).toContain('Start your first decision')
+    expect(html).toContain('Free to start')
+    expect(html).not.toContain('Free to use')
+    expect(html).not.toContain('Get started')
+  })
+
+  it('states what it does not do', () => {
+    expect(html).toContain('What it does not do')
+  })
+
+  it('states the cost in the five places, and never claims a free product at every volume', () => {
+    // R63 / DESIGN §7.9 — hero trust line, the facts strip, trust proof 04, the FAQ answer, the close.
+    expect(count(html, 'Free to start · No card')).toBe(5)
+    expect(html).not.toContain('No card, no tier')
+    expect(html).not.toContain('What does it cost? Nothing')
+  })
+})
+
 describe('the first viewport — the map, the feeling, the one action', () => {
-  it('carries the map capture, and not the answer capture', () => {
-    // D3: the hero's frame is the map. The filed answer's capture lives further down the page.
+  it('carries the map capture, and no answer capture', () => {
     expect(count(firstViewport(), 'data-capture="map"')).toBe(1)
-    expect(count(firstViewport(), 'data-capture="answer"')).toBe(0)
-    expect(count(html, 'data-capture="answer"')).toBe(1)
+    expect(count(html, 'data-capture="answer"')).toBe(0)
   })
 
   it('names the feeling in one h1, and no more', () => {
     expect(count(html, '<h1')).toBe(1)
     const h1 = renderedText(html.match(/<h1[^>]*>([\s\S]*?)<\/h1>/)?.[1] ?? '')
-    expect(h1).toBe('A decision you can’t look up.')
+    expect(h1).toBe('The decision you can’t look up.')
   })
 
   it('offers exactly one primary action, and it points at sign-up carrying a next', () => {
@@ -56,7 +85,12 @@ describe('the first viewport — the map, the feeling, the one action', () => {
     expect(actionTags[0]).toContain('href="/auth/signup?next=/new"')
   })
 
-  it('labels the authored panel turns a worked example', () => {
+  it('keeps one evergreen object on the page — the hero action', () => {
+    // The nav's Start free is a secondary control; the close's one action is mint on pine.
+    expect(count(html, 'action-fill')).toBe(1)
+  })
+
+  it('labels the authored evidence a worked example', () => {
     expect(renderedText(html)).toContain('Worked example')
   })
 })
@@ -64,44 +98,66 @@ describe('the first viewport — the map, the feeling, the one action', () => {
 describe('the twelve parts — in order, each on its own surface', () => {
   it('renders the section headings in document order', () => {
     // Read the real <h2>s in document order — a substring search would match one heading inside
-    // another ("What this tool does" inside "What this tool does — and does not").
+    // another ("What it does" inside "What it does. What it does not do.").
     const headings = [...html.matchAll(/<h2[^>]*>([\s\S]*?)<\/h2>/g)].map((match) => renderedText(match[1]))
     expect(headings).toEqual([
       'The argument is the thing you’re missing.',
-      'How it works',
-      'What you get back',
+      'Four movements, always in the same order.',
       'Not a conversation. A filed decision.',
-      'Where it earns its keep',
-      'What this tool does — and does not',
-      'The answer is a document you can open again.',
+      'Four objects, every time.',
+      'No borrowed credibility. The work is the proof.',
+      'What it does. What it does not do.',
+      'Where it earns its keep.',
       'Good questions.',
       'Bring a question you can’t look up.',
     ])
   })
 
-  it('lays the twelve bands out in order', () => {
-    expect(bands).toHaveLength(12)
+  it('alternates bone and sand, and gives the pine close the only dark band', () => {
+    expect(bands).toHaveLength(11)
     expect(bandTones).toEqual([
       'band--page',
       'band--band',
-      'band--warm',
-      'band--sky',
-      'band--plum',
+      'band--page',
       'band--band',
       'band--page',
       'band--band',
+      'band--page',
+      'band--band',
+      'band--page',
       'band--dark',
       'band--page',
-      'band--plum',
-      'band--band',
     ])
+    expect(count(html, 'band--dark')).toBe(1)
   })
 
-  it('tightens three of them, and never gives two neighbours the same surface', () => {
-    expect(count(html, 'band--dense')).toBe(3)
-    for (let index = 1; index < bandTones.length; index += 1) {
-      expect(bandTones[index], `bands ${index - 1} and ${index} share a surface`).not.toBe(bandTones[index - 1])
-    }
+  it('opens with the ruled facts strip between the hero and the problem', () => {
+    const facts = html.indexOf(FIRST_VIEWPORT_END)
+    expect(facts).toBeGreaterThan(html.indexOf('A panel of experts'))
+    expect(facts).toBeLessThan(html.indexOf('The argument is the thing you’re missing.'))
+    const strip = html.slice(facts, html.indexOf('The argument is the thing you’re missing.', facts))
+    expect(count(strip, 'rule-y')).toBe(1)
+  })
+
+  it('draws the FAQ as six native disclosures, one marker each', () => {
+    expect(count(faq, '<details')).toBe(6)
+    expect(count(faq, 'group-open:hidden')).toBe(6)
+  })
+})
+
+describe('the nav — a 72px bar, not a floating card', () => {
+  it('sits on one hairline under a bone bar', () => {
+    const header = html.match(/<header[^>]*>/)?.[0] ?? ''
+    expect(header).toContain('sticky')
+    expect(header).toContain('border-b')
+    expect(header).not.toContain('shadow-card')
+    expect(header).not.toContain('rounded-lg')
+  })
+
+  it('links to the three sections it names', () => {
+    expect(html).toContain('href="#how-it-works"')
+    expect(html).toContain('href="#answer"')
+    expect(html).toContain('href="#questions"')
   })
 })
 
@@ -113,34 +169,9 @@ describe('the kit — the vocabulary the page is built from', () => {
     expect(ruleClasses('around')).toBe('divide-rule')
   })
 
-  it('takes every one of the page’s top rules from the kit', () => {
-    // Eight call sites; three of them map over a list — the 3 facts, the 3 lines and the 4 steps —
-    // so the page renders fifteen hairlines there, and one fewer would mean a site went
-    // hand-rolled. The page's own FiledSheet drew three of those rules; the kit's FiledSheet
-    // draws four, and the panel's four turns draw the rule in its dark tone — the same class,
-    // on the map's own hairline. The ten FAQ Disclosures now open on the kit's own top rule.
-    // 15 − 3 + 4 + 4 + 10 = 30.
-    expect(count(html, 'rule-t')).toBe(30)
-  })
-
-  it('takes the panel’s hairlines from the kit in the map’s own rule', () => {
-    // The noise panel is a dark surface outside the dark band, so its rows name the dark tone.
-    expect(count(html, 'rule-dark')).toBe(4)
-  })
-
-  it('takes every one of the page’s divided lists from the kit', () => {
-    expect(count(html, 'divide-rule')).toBe(2)
-  })
-
-  it('hands no hand-rolled top hairline to a page container', () => {
-    // §14.1’s sweep pattern, `border-t border-hairline`: zero on this page.
+  it('hands no hand-rolled hairline to a page container', () => {
+    // §14.1's sweep pattern, `border-t border-hairline`, and its bare form: zero on this page.
     expect(count(html, 'border-t border-hairline')).toBe(0)
-  })
-
-  it('draws every FAQ separator with the kit’s own top rule', () => {
-    // The Disclosure opens on the kit's top rule; the page draws no hand-rolled separator.
-    expect(count(html, '<details')).toBe(10)
-    expect(count(html, 'rule-b')).toBe(0)
     expect(count(html, 'border-hairline')).toBe(0)
   })
 })
