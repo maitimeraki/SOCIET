@@ -121,7 +121,11 @@ export default function GraphPage({ onFailureChange }: { onFailureChange?: (fail
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="font-ui text-display text-ink">Grow the map</h1>
+        <p className="font-ui text-label uppercase tracking-[0.09em] text-ink-3">The map</p>
+        <h1 className="mt-3 font-display text-display font-medium tracking-[-0.03em] text-ink">Grow the map</h1>
+        <p className="mt-3 max-w-[60ch] font-ui text-body text-ink-2">
+          Your material becomes one map the panel argues from.
+        </p>
       </div>
 
       {reconnecting && (
@@ -133,18 +137,18 @@ export default function GraphPage({ onFailureChange }: { onFailureChange?: (fail
       {phase !== 'done' && phase !== 'failed' && (
         <div className={`space-y-4 ${ruleClasses('top')} pt-5`}>
           <StageLine
-            label="Discovering the kinds of things in your material"
+            label="Finding the kinds of things in your material"
             state={phase === 'ontology' ? 'active' : 'done'}
-            helper="Discovery takes about a minute per ten documents."
+            helper="Reading takes about a minute per ten documents."
           />
-          <StageLine label="Extracting entities and relations" state={phase === 'build' ? 'active' : 'pending'} />
+          <StageLine label="Finding the entries and connections" state={phase === 'build' ? 'active' : 'pending'} />
           {phase === 'build' && (
             <div className="space-y-4">
               <ProgressBar value={progress} label={`${fmtInt(completed)} / ${fmtInt(total)} sections`} />
               <p className="tnum font-mono text-mono text-ink-2">
-                map so far · {fmtInt(result?.entity_types.length ?? 0)} entity types · {fmtInt(result?.relation_types.length ?? 0)} relation types
+                map so far · {fmtInt(result?.entity_types.length ?? 0)} entry types · {fmtInt(result?.relation_types.length ?? 0)} connection types
               </p>
-              <p className="text-micro text-ink-3">Each section is written as it finishes — the map grows while the build runs.</p>
+              <p className="font-ui text-micro text-ink-3">Each section is written as it finishes — the map grows while the build runs.</p>
             </div>
           )}
         </div>
@@ -162,13 +166,13 @@ export default function GraphPage({ onFailureChange }: { onFailureChange?: (fail
           {/* The finished map lives in the workspace's map pane, which stays mounted across the whole
               lifecycle — this surface no longer renders a canvas of its own (D14: one map). */}
           <div>
-            <p className="text-body-sm font-semibold text-ink">The map is built</p>
+            <h2 className="font-display text-heading font-medium tracking-[-0.01em] text-ink">The map is built</h2>
             <StatRow
               items={[
                 { label: 'Sections', value: fmtInt(result?.chunks_total ?? 0) },
                 { label: 'Documents', value: fmtInt(result?.docs_built ?? 0) },
-                { label: 'Entity types', value: fmtInt(result?.entity_types.length ?? 0) },
-                { label: 'Relation types', value: fmtInt(result?.relation_types.length ?? 0) },
+                { label: 'Entry types', value: fmtInt(result?.entity_types.length ?? 0) },
+                { label: 'Connection types', value: fmtInt(result?.relation_types.length ?? 0) },
               ]}
             />
           </div>

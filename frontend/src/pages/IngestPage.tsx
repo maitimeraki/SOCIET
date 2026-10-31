@@ -113,8 +113,9 @@ export default function IngestPage() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="font-ui text-display text-ink">Build the corpus</h1>
-        <p className="mt-3 max-w-[60ch] text-body text-ink-2">
+        <p className="font-ui text-label uppercase tracking-[0.09em] text-ink-3">Your material</p>
+        <h1 className="mt-3 font-display text-display font-medium tracking-[-0.03em] text-ink">Add the material</h1>
+        <p className="mt-3 max-w-[60ch] font-ui text-body text-ink-2">
           Add the documents your experts would have read — PDFs, Word files, Markdown, plain text, or a web page.
         </p>
       </div>
@@ -147,7 +148,7 @@ export default function IngestPage() {
       <UrlFetchRow onFetch={handleUrl} busy={fetchingUrl} />
 
       <section className="space-y-3">
-        <h2 className="text-body-sm font-semibold text-ink">Documents</h2>
+        <h2 className="font-display text-heading font-medium tracking-[-0.01em] text-ink">Documents</h2>
         {docs.length === 0 ? (
           <p className="text-body text-ink-3">Nothing yet. PDFs, Word files, Markdown, or text.</p>
         ) : (

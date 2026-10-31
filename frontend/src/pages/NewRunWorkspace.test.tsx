@@ -87,7 +87,7 @@ describe('a failed step reads as failed in the rail, never as running (§9.4)', 
 
 describe('each step renders its own activity into the work pane', () => {
   it('the ingest step renders the material surface', () => {
-    expect(renderStep('ingest')).toContain('Build the corpus')
+    expect(renderStep('ingest')).toContain('Add the material')
   })
 
   it('the graph step renders the map-building surface', () => {
@@ -95,12 +95,29 @@ describe('each step renders its own activity into the work pane', () => {
   })
 
   it('the society step renders the question surface', () => {
-    expect(renderStep('society')).toContain('Set the question')
+    expect(renderStep('society')).toContain('Ask the question')
   })
 
   it('does not render another step’s surface', () => {
     expect(renderStep('ingest')).not.toContain('Grow the map')
-    expect(renderStep('graph')).not.toContain('Build the corpus')
+    expect(renderStep('graph')).not.toContain('Add the material')
+  })
+})
+
+describe('the step pages have been re-shelled to the Quiet Room (§7.7)', () => {
+  it.each(STEPS)('%s leads with a Fraunces page title', (step) => {
+    const html = renderStep(step)
+    expect(html).toContain('font-display text-display')
+  })
+
+  it('asks the question in the large Fraunces field', () => {
+    const html = renderStep('society')
+    expect(html).toContain('text-[28px]')
+    expect(html).toContain('font-display')
+  })
+
+  it('names the panel, not the old debate, on the one primary action', () => {
+    expect(renderStep('society')).toContain('Convene the panel')
   })
 })
 

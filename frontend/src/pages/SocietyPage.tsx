@@ -74,8 +74,9 @@ export default function SocietyPage() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="font-ui text-display text-ink">Set the question</h1>
-        <p className="tnum mt-2 font-mono text-mono text-ink-3">
+        <p className="font-ui text-label uppercase tracking-[0.09em] text-ink-3">Your question</p>
+        <h1 className="mt-3 font-display text-display font-medium tracking-[-0.03em] text-ink">Ask the question</h1>
+        <p className="tnum mt-3 font-mono text-mono text-ink-3">
           Corpus: {corpusName}
           {graphSummary ? ` (${fmtInt(graphSummary.chunks)} sections)` : ''}
         </p>
@@ -86,7 +87,7 @@ export default function SocietyPage() {
           Your question
         </Label>
         <QueryComposer id="society-question" value={query} onChange={setQuery} onSubmit={convene} />
-        <p className="mt-2 max-w-[60ch] text-micro text-ink-3">
+        <p className="mt-2 max-w-[60ch] font-ui text-body-sm text-ink-2">
           The question picks which parts of the map speak. Broader questions convene more of your panel.
         </p>
       </div>
@@ -97,9 +98,9 @@ export default function SocietyPage() {
 
       <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
         <Button variant="primary" className="w-full sm:w-auto" loading={submitting} disabled={!query.trim()} onClick={convene}>
-          Convene the debate
+          Convene the panel
         </Button>
-        <span className="text-micro text-ink-3">Decisions take a few minutes — you can watch every pass live.</span>
+        <span className="font-ui text-micro text-ink-3">Decisions take a few minutes — you can watch every pass live.</span>
       </div>
     </div>
   )
