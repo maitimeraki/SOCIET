@@ -19,6 +19,12 @@ interface RunStoreState {
   corpus: GraphSnapshot | null
   /** True when that read came back with nothing: the map pane says so rather than showing an empty map. */
   corpusMissing: boolean
+  /**
+   * The stored run doc's `created_at` — the one stable date a reopened report can state. Null while a
+   * live run has no doc, or when the doc read failed, so the report says the date is not recorded
+   * rather than passing a fold clock off as the filing day.
+   */
+  runCreatedAt: string | null
   /** The run `version` the map was last built from — the key `seedMap` rebuilds against (§11.2). */
   mapVersion: number
   /** The pass the map was last replayed to, alongside `mapVersion`; null = every pass. */
@@ -115,6 +121,7 @@ export const useRunStore = create<RunStoreState>((set, get) => {
     socket: null,
     corpus: null,
     corpusMissing: false,
+    runCreatedAt: null,
     mapVersion: -1,
     mapRound: null,
 
@@ -159,7 +166,7 @@ export const useRunStore = create<RunStoreState>((set, get) => {
     loadAndConnect: async (runId: string, options?: { keepMap?: boolean }) => {
       get().disconnect()
       const generation = ++loadGeneration
-      set({ run: { ...initialState, runId }, events: [], connection: 'connecting' })
+      set({ run: { ...initialState, runId }, events: [], connection: 'connecting', runCreatedAt: null })
 
       // Instant paint for reopened / mid-run views. The WS replay below refolds the
       // full buffer, so this fold is display-only and the seam is invisible (§11.5).
@@ -173,7 +180,13 @@ export const useRunStore = create<RunStoreState>((set, get) => {
         // The replayed event buffer carries no corpus, so the material is read on its own.
         const corpus = await readCorpus(runId)
         if (generation !== loadGeneration) return
-        set({ run: reopened, events: doc.events, corpus: corpus.snapshot, corpusMissing: corpus.missing })
+        set({
+          run: reopened,
+          events: doc.events,
+          corpus: corpus.snapshot,
+          corpusMissing: corpus.missing,
+          runCreatedAt: doc.created_at,
+        })
         // Seed the map from the run's own state. A reopened run builds its map here; a live run seeds
         // the same layers and the WS replay below re-adds them idempotently, so the seam is invisible.
         // A live handoff keeps the extraction map already in the store: seeding would replace it.

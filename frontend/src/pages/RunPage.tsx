@@ -58,6 +58,8 @@ export interface RunWorkProps {
   scrubbed: number | null
   /** The newest pass the run has, for the scrubber's bounds; null before any pass has landed. */
   latestRound: number | null
+  /** The stored run doc's `created_at`; null when the run has no doc — the report states the day is unknown. */
+  runCreatedAt: string | null
   onScrub: (next: number | null) => void
   onNavigate: (path: string) => void
   onReplay: () => void
@@ -68,7 +70,7 @@ export interface RunWorkProps {
  * pure view, so the two can never drift: the only thing that differs between them is the wrapper
  * around this node (`Workspace` owns the pane state; `WorkspaceView` takes it as a prop).
  */
-function RunWork({ run, events, tab, runId, scrubbed, latestRound, onScrub, onNavigate, onReplay }: RunWorkProps) {
+function RunWork({ run, events, tab, runId, scrubbed, latestRound, runCreatedAt, onScrub, onNavigate, onReplay }: RunWorkProps) {
   const progress = rosterProgress(run)
   const activeRound = scrubbed ?? latestRound
 
@@ -91,7 +93,7 @@ function RunWork({ run, events, tab, runId, scrubbed, latestRound, onScrub, onNa
       case 'verdict': {
         // §12.8 — the report tab renders the filed report itself: one model, derived once, the same
         // object every export serializes. The interactive affordances live beside it.
-        const report = reportFromState(run)
+        const report = reportFromState(run, runCreatedAt)
         return report ? (
           <div className="space-y-8">
             <ReportDocument report={report} />
@@ -186,6 +188,7 @@ export default function RunPage() {
   const run = useRunStore((s) => s.run)
   const events = useRunStore((s) => s.events)
   const connection = useRunStore((s) => s.connection)
+  const runCreatedAt = useRunStore((s) => s.runCreatedAt)
   const maxRounds = run.config?.max_rounds ?? null
 
   const location = useLocation()
@@ -267,6 +270,7 @@ export default function RunPage() {
         runId={runId}
         scrubbed={scrubbed}
         latestRound={latestRound}
+        runCreatedAt={runCreatedAt}
         onScrub={setScrubbed}
         onNavigate={navigate}
         onReplay={() => navigate(`/runs/${runId}/floor`, { state: { replayFrom: 1 } })}

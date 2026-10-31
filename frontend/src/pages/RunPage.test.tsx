@@ -17,6 +17,8 @@ import { BANNED_TERMS, renderedText } from '../test/copyLaw'
 vi.mock('@react-sigma/core', () => ({ SigmaContainer: () => null, useSigma: () => null }))
 
 const RUN_ID = 'run-1'
+/** The stored run doc's `created_at` — the date the report states, independent of the fold clock. */
+const RUN_CREATED_AT = '2026-10-22T09:30:00Z'
 const TABS = ['roster', 'floor', 'verdict', 'agents', 'artifacts'] as const
 type Tab = (typeof TABS)[number]
 
@@ -75,6 +77,7 @@ const render = (tab: Tab, run: RunState = RUN) =>
         runId={RUN_ID}
         scrubbed={null}
         latestRound={1}
+        runCreatedAt={RUN_CREATED_AT}
         onScrub={() => {}}
         onNavigate={() => {}}
         onReplay={() => {}}

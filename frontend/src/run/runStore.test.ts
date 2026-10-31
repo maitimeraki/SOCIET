@@ -58,6 +58,19 @@ describe('runStore.loadAndConnect supersession', () => {
     await pending
     expect(connectRun).not.toHaveBeenCalled()
   })
+
+  it('keeps the stored run doc date the report states (R59)', async () => {
+    getRun.mockResolvedValue(doc({ created_at: '2026-09-30T12:00:00Z' }))
+    await useRunStore.getState().loadAndConnect('run-1')
+    expect(useRunStore.getState().runCreatedAt).toBe('2026-09-30T12:00:00Z')
+  })
+
+  it('keeps the stored date across the socket reset that precedes a live replay', async () => {
+    getRun.mockResolvedValue(doc({ created_at: '2026-09-30T12:00:00Z' }))
+    await useRunStore.getState().loadAndConnect('run-1')
+    useRunStore.getState().reset()
+    expect(useRunStore.getState().runCreatedAt).toBe('2026-09-30T12:00:00Z')
+  })
 })
 
 describe('runStore rAF batching', () => {

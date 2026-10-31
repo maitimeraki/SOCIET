@@ -57,6 +57,17 @@ describe('the step indicator advances with the step (§9.4)', () => {
   })
 })
 
+describe('the rail keeps its literal step words', () => {
+  // Pinned literally as well as against `STEP_LABELS`: widening the map (R13) must not reword the rail.
+  it.each([
+    ['ingest', 'Your material'],
+    ['graph', 'The map'],
+    ['society', 'Your question'],
+  ] as const)('%s reads %s', (step, word) => {
+    expect(currentLabel(renderStep(step))).toBe(word)
+  })
+})
+
 describe('a failed step reads as failed in the rail, never as running (§9.4)', () => {
   // The old GraphPage rail carried a `failed` marker (XCircle in `text-danger`); when it moved into
   // the workspace the marker was lost, so a failure showed a *pulsing* dot beside the body's error —

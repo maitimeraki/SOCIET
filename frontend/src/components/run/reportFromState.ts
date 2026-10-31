@@ -1,7 +1,6 @@
-import type { Stance } from '../../run/events'
-import { asStance } from '../../run/events'
-import type { RunRound, RunState } from '../../run/reducer'
-import { STANCE_ORDER, verdictView } from '../../run/selectors'
+import type { AgentProfile } from '../../run/events'
+import type { RunState } from '../../run/reducer'
+import { STANCE_ORDER, convergenceSeries, verdictView } from '../../run/selectors'
 import type { VerdictView } from '../../run/selectors'
 import { splitSections } from '../verdict/narrative'
 import { fmtDay } from '../../utils/format'
@@ -12,37 +11,49 @@ import type { ReportModel } from './exportReport'
  * §12.8 / R57 — the one derivation of the filed report from folded run state. The report tab renders
  * this model and every export serializes it, so there is no second writer to drift.
  *
+ * `filedAt` is the stored run doc's `created_at`, threaded from the store (R59). The event buffer
+ * carries no timestamp of its own, so when the store has none the day is stated as not recorded —
+ * never a fold clock passed off as the filing day.
+ *
  * Null before a verdict is filed: the tab states that the report is not there yet rather than
  * fabricating one.
  */
-export function reportFromState(state: RunState): ReportModel | null {
+export function reportFromState(state: RunState, filedAt: string | null): ReportModel | null {
   const view = verdictView(state)
   if (!view) return null
   return {
     question: state.query || 'This decision',
-    filed: filedDay(state),
+    filed: filedAt ? fmtDay(filedAt) : '—',
     position: view.stance,
     share: view.confidence,
     caseAgainst: view.dissentingViews[0]?.view ?? 'No dissent was recorded.',
     reasoning: reasoningOf(view),
     whoHeldWhichView: heldViews(view),
-    sources: sourceTitles(state.roster).map((title) => ({ document: title, reference: '' })),
-    passes: state.rounds.map(passRow),
+    sources: sourceRows(state.roster),
+    passes: convergenceSeries(state).map((tick) => ({
+      pass: `P${tick.round}`,
+      negative: tick.weights.NEGATIVE,
+      positive: tick.weights.POSITIVE,
+      ambivalent: tick.weights.AMBIVALENT,
+    })),
     panel: panelRows(state, view),
     warnings: state.warnings,
   }
 }
 
 /**
- * The newest moment the folded event buffer recorded — the run's filing day as far as the buffer
- * carries one. No stage recorded = the day is not known, stated as a dash, never invented.
+ * The distinct source titles in first-seen order (the one `sourceTitles` reader), each with the first
+ * breadcrumb the roster recorded for it. A title with no breadcrumb keeps an empty reference; the
+ * document still stands, nothing is invented.
  */
-function filedDay(state: RunState): string {
-  const newest = state.stages.reduce<number | null>(
-    (latest, stage) => (latest === null || stage.at > latest ? stage.at : latest),
-    null,
-  )
-  return newest === null ? '—' : fmtDay(new Date(newest).toISOString())
+function sourceRows(profiles: AgentProfile[]): ReportModel['sources'] {
+  const references = new Map<string, string>()
+  for (const profile of profiles) {
+    for (const link of profile.summary_provenance) {
+      if (link.title && link.breadcrumb && !references.has(link.title)) references.set(link.title, link.breadcrumb)
+    }
+  }
+  return sourceTitles(profiles).map((document) => ({ document, reference: references.get(document) ?? '' }))
 }
 
 /**
@@ -60,30 +71,6 @@ function heldViews(view: VerdictView): ReportModel['whoHeldWhichView'] {
     position,
     names: view.finalStances.filter((row) => row.stance === position).map((row) => row.agent),
   })).filter((row) => row.names.length > 0)
-}
-
-/** One row per pass, from the pass's own consensus weights when it recorded them. */
-function passRow(round: RunRound): ReportModel['passes'][number] {
-  const weights = round.consensus?.weights ?? turnWeights(round)
-  return {
-    pass: `P${round.round}`,
-    negative: weights.NEGATIVE,
-    positive: weights.POSITIVE,
-    ambivalent: weights.AMBIVALENT,
-  }
-}
-
-/** Pre-consensus passes: approximate the share from turn counts, one equal vote per turn. */
-function turnWeights(round: RunRound): Record<Stance, number> {
-  const counts: Record<Stance, number> = { POSITIVE: 0, NEGATIVE: 0, NEUTRAL: 0, AMBIVALENT: 0 }
-  for (const turn of round.turns) counts[asStance(turn.stance)] += 1
-  const total = round.turns.length || 1
-  return {
-    POSITIVE: counts.POSITIVE / total,
-    NEGATIVE: counts.NEGATIVE / total,
-    NEUTRAL: counts.NEUTRAL / total,
-    AMBIVALENT: counts.AMBIVALENT / total,
-  }
 }
 
 /**

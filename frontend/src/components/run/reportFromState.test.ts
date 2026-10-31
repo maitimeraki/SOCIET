@@ -4,17 +4,24 @@ import { fold } from '../../run/reducer'
 import { RUN_SAMPLE } from '../../run/__fixtures__/run-sample'
 import { reportFromState } from './reportFromState'
 
-// One fixed clock for the whole fold — the report's filing day is the newest recorded moment.
-const FILED_AT = Date.UTC(2026, 9, 22, 9, 30)
-const STATE = fold(RUN_SAMPLE, () => FILED_AT)
-const REPORT = reportFromState(STATE)!
+// The fold clock is deliberately NOT the stored day: the report reads the run doc's stored date, not
+// the moment the buffer was refolded (R59).
+const FOLD_CLOCK = Date.UTC(2026, 10, 5, 14, 0)
+const STORED_AT = '2026-10-22T09:30:00Z'
+const STATE = fold(RUN_SAMPLE, () => FOLD_CLOCK)
+const REPORT = reportFromState(STATE, STORED_AT)!
 
 describe('the filed report is derived from folded run state (R57)', () => {
-  it('carries the question, the filing day, the position and the share', () => {
+  it('carries the question, the stored filing day, the position and the share', () => {
     expect(REPORT.question).toBe('Should we expand into the European market in 2027?')
     expect(REPORT.filed).toBe('22 Oct 2026')
     expect(REPORT.position).toBe('POSITIVE')
     expect(REPORT.share).toBe(0.83)
+  })
+
+  it('reads the stored day even when a reopened run is refolded later', () => {
+    const reopened = fold(RUN_SAMPLE, () => Date.UTC(2026, 11, 1, 8, 0))
+    expect(reportFromState(reopened, STORED_AT)?.filed).toBe('22 Oct 2026')
   })
 
   it('takes the case against from the first dissenting view', () => {
@@ -22,7 +29,7 @@ describe('the filed report is derived from folded run state (R57)', () => {
   })
 
   it('states the honest fallback when no dissent was recorded', () => {
-    const noDissent = reportFromState({ ...STATE, verdict: { ...STATE.verdict!, dissentingViews: [] } })
+    const noDissent = reportFromState({ ...STATE, verdict: { ...STATE.verdict!, dissentingViews: [] } }, STORED_AT)
     expect(noDissent?.caseAgainst).toBe('No dissent was recorded.')
   })
 
@@ -36,10 +43,10 @@ describe('the filed report is derived from folded run state (R57)', () => {
 
   it('does not print a fallback narrative twice — a fallback narrative is the summary', () => {
     const verdict = STATE.verdict!
-    const fallback = reportFromState({
-      ...STATE,
-      verdict: { ...verdict, narrative: verdict.summary, narrativeStatus: 'fallback' },
-    })
+    const fallback = reportFromState(
+      { ...STATE, verdict: { ...verdict, narrative: verdict.summary, narrativeStatus: 'fallback' } },
+      STORED_AT,
+    )
     expect(fallback?.reasoning).toEqual([verdict.summary])
   })
 
@@ -50,11 +57,22 @@ describe('the filed report is derived from folded run state (R57)', () => {
     ])
   })
 
-  it('names the sources from the roster provenance, once each', () => {
-    expect(REPORT.sources).toEqual([{ document: 'eu-market-2027.pdf', reference: '' }])
+  it('names the sources from the roster provenance, once each, with their breadcrumb', () => {
+    expect(REPORT.sources).toEqual([{ document: 'eu-market-2027.pdf', reference: 'Section 3' }])
   })
 
-  it('reads the passes from the consensus weights the round events carry', () => {
+  it('keeps an empty reference when the roster recorded no breadcrumb', () => {
+    const bare = {
+      ...STATE,
+      roster: STATE.roster.map((profile) => ({
+        ...profile,
+        summary_provenance: profile.summary_provenance.map((link) => ({ ...link, breadcrumb: undefined })),
+      })),
+    }
+    expect(reportFromState(bare, STORED_AT)?.sources).toEqual([{ document: 'eu-market-2027.pdf', reference: '' }])
+  })
+
+  it('reads the passes through the convergence series the tape reads', () => {
     expect(REPORT.passes).toEqual([
       { pass: 'P1', negative: 0.2, positive: 0.55, ambivalent: 0.1 },
       { pass: 'P2', negative: 0.15, positive: 0.72, ambivalent: 0.05 },
@@ -79,15 +97,15 @@ describe('the filed report is derived from folded run state (R57)', () => {
   })
 
   it('carries the run warnings', () => {
-    const warned = reportFromState({ ...STATE, warnings: ['The demand study is a proxy.'] })
+    const warned = reportFromState({ ...STATE, warnings: ['The demand study is a proxy.'] }, STORED_AT)
     expect(warned?.warnings).toEqual(['The demand study is a proxy.'])
   })
 
   it('is null before a verdict is filed — the tab states that, never a fabricated report', () => {
-    expect(reportFromState({ ...STATE, verdict: null })).toBeNull()
+    expect(reportFromState({ ...STATE, verdict: null }, STORED_AT)).toBeNull()
   })
 
-  it('states a dash when the buffer recorded no filing day', () => {
-    expect(reportFromState({ ...STATE, stages: [] })?.filed).toBe('—')
+  it('states a dash when the store has no stored filing date — never the fold clock', () => {
+    expect(reportFromState(STATE, null)?.filed).toBe('—')
   })
 })
