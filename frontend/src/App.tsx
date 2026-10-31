@@ -25,6 +25,7 @@ const ResultsPage = lazy(() => import('./pages/ResultsPage'))
 const LandingPage = lazy(() => import('./pages/LandingPage'))
 const SignInPage = lazy(() => import('./pages/SignInPage'))
 const SignUpPage = lazy(() => import('./pages/SignUpPage'))
+const PricingPage = lazy(() => import('./pages/PricingPage'))
 
 /**
  * The route tree (plan §1). Three layout routes, so `/` and `/auth/*` render without shell chrome:
@@ -44,6 +45,7 @@ export default function App() {
         <Routes>
           <Route element={<MarketingLayout />}>
             <Route path="/" element={<Hero />} />
+            <Route path="/pricing" element={<PricingPage />} />
             <Route path="/demo-home" element={<HomeDemo />} />
           </Route>
 
