@@ -32,6 +32,7 @@ export function recentState(run: RunSummary): RecentRow['state'] {
   if (run.verdict_stance) return 'Filed'
   if (run.status === 'failed') return 'Failed'
   if (run.status === 'interrupted') return 'Interrupted'
+  if (run.status === 'cancelled') return 'Cancelled'
   return 'Deliberating'
 }
 

@@ -51,6 +51,12 @@ describe('RunsPageView', () => {
     expect(html).not.toContain('Negative')
   })
 
+  it('renders a cancelled run without throwing or reading it as live work', () => {
+    const html = render({ runs: [run({ status: 'cancelled', verdict_stance: null, rounds_executed: 2 })] })
+    expect(html).toContain('Cancelled')
+    expect(html).not.toContain('Deliberating')
+  })
+
   it('never reads a failed or interrupted run as live work', () => {
     const html = render({
       runs: [

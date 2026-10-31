@@ -112,6 +112,7 @@ describe('the state a recent run is written in', () => {
   it('reads an ended run as ended, never as still working', () => {
     expect(recentState(run({ status: 'failed' }))).toBe('Failed')
     expect(recentState(run({ status: 'interrupted' }))).toBe('Interrupted')
+    expect(recentState(run({ status: 'cancelled' }))).toBe('Cancelled')
     expect(recentState(run({ status: 'running' }))).toBe('Deliberating')
   })
 })

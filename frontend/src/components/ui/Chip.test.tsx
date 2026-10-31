@@ -37,12 +37,20 @@ describe('StateChip', () => {
       ['queued', 'Queued'],
       ['running', 'Deliberating'],
       ['complete', 'Complete'],
+      ['completed', 'Complete'],
       ['converged', 'Converged'],
       ['failed', 'Failed'],
       ['interrupted', 'Interrupted'],
+      ['cancelled', 'Cancelled'],
     ] as const) {
       expect(renderToStaticMarkup(<StateChip state={state} />)).toContain(word)
     }
+  })
+
+  it('stays total: an unknown status reads as Unknown instead of throwing', () => {
+    const html = renderToStaticMarkup(<StateChip state="suspended" />)
+    expect(html).toContain('Unknown')
+    expect(html).not.toContain('Deliberating')
   })
 
   it('turns the live mark and settles it when the run is no longer live', () => {

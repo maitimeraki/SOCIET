@@ -132,7 +132,7 @@ export interface RunSummary {
   /** The client's corpus name at start; null when no corpus was named (backend `run_doc._summarize`). */
   corpus_label: string | null
   dataset_id: string
-  status: 'queued' | 'running' | 'complete' | 'failed' | 'interrupted'
+  status: 'queued' | 'running' | 'complete' | 'completed' | 'failed' | 'interrupted' | 'cancelled'
   rounds_executed: number
   converged: boolean | null
   verdict_stance: Stance | null

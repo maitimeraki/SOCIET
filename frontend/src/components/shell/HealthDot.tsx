@@ -21,9 +21,10 @@ export default function HealthDot() {
   // The mark is the map's own reading, never a stance hue: a live reading takes --accent, a failed one
   // the danger hue, and an unread one the idle hairline ink.
   const dot = state === 'online' ? 'bg-accent' : state === 'offline' ? 'bg-danger' : 'bg-hairline'
-  // §7.3/§12.3 — the customer sees Connected or Working, never server or API jargon.
+  // §7.3/§12.3 — the customer sees Connected or Not connected, never server or API jargon. The
+  // dot is aria-hidden, so this word is the only signal: it must not say Working while offline.
   const label =
-    state === 'online' ? 'Connected' : state === 'offline' ? 'Working' : 'Checking…'
+    state === 'online' ? 'Connected' : state === 'offline' ? 'Not connected' : 'Checking…'
 
   return (
     <span className="inline-flex items-center gap-2">

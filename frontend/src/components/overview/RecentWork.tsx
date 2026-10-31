@@ -5,7 +5,7 @@ import type { Position } from '../ui/PositionMark'
 export interface RecentRow {
   runId: string
   question: string
-  state: 'Filed' | 'Deliberating' | 'Failed' | 'Interrupted'
+  state: 'Filed' | 'Deliberating' | 'Failed' | 'Interrupted' | 'Cancelled'
   stance: Position | null
   share: number | null
   passes: string

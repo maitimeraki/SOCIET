@@ -6,10 +6,12 @@ import { describe, expect, it } from 'vitest'
 const source = readFileSync('src/components/shell/HealthDot.tsx', 'utf8')
 
 describe('the connection reading speaks the customer’s words (§7.3)', () => {
-  it('says Connected when the service answers, and Working otherwise', () => {
+  it('says Connected when the service answers, and an honest failure word otherwise', () => {
     expect(source).toContain("'Connected'")
-    expect(source).toContain("'Working'")
+    expect(source).toContain("'Not connected'")
     expect(source).toContain("'Checking…'")
+    // The dot is aria-hidden, so the word is the only signal — it must never claim work while off.
+    expect(source).not.toContain("'Working'")
   })
 
   it('never shows server or API jargon', () => {
