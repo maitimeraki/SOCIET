@@ -55,7 +55,7 @@ function Outcome({ run }: { run: RunSummary }) {
     return <span className="font-mono text-micro text-ink-3">—</span>
   }
   return (
-    <span className="flex items-center gap-2">
+    <span className="flex w-full items-center gap-2 md:w-auto">
       <PositionMark position={run.verdict_stance} size="sm" ground="light" />
       <span className="font-mono text-micro text-ink-3">
         {run.verdict_confidence === null ? '—' : run.verdict_confidence.toFixed(2)}
@@ -127,9 +127,9 @@ export function RunsPageView({
                   <li key={entry.run_id}>
                     <Link
                       to={`/runs/${entry.run_id}`}
-                      className="group flex flex-wrap items-center gap-x-4 gap-y-1 border-b border-rule/40 py-3 hover:bg-accent-soft focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent xl:grid xl:grid-cols-[minmax(0,1fr)_7rem_4rem_7.5rem_8rem_2.5rem]"
+                      className="group flex flex-wrap items-center gap-x-4 gap-y-1 border-b border-rule/40 py-3 hover:bg-accent-soft focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent lg:grid lg:grid-cols-[minmax(0,1fr)_6.5rem_3.5rem_6.5rem_7rem] xl:grid-cols-[minmax(0,1fr)_7rem_4rem_7.5rem_8rem_2.5rem]"
                     >
-                      <span className="w-full min-w-0 font-ui text-body text-ink xl:w-auto">{entry.query}</span>
+                      <span className="w-full min-w-0 font-ui text-body text-ink lg:w-auto">{entry.query}</span>
                       <span>
                         <StateChip state={entry.status} />
                       </span>
@@ -138,7 +138,7 @@ export function RunsPageView({
                       <Outcome run={entry} />
                       <span
                         aria-hidden="true"
-                        className="ml-auto font-mono text-micro text-ink-3 underline underline-offset-4 opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100"
+                        className="ml-auto hidden font-mono text-micro text-ink-3 underline underline-offset-4 opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100 xl:block"
                       >
                         Open
                       </span>

@@ -3,6 +3,7 @@
 // fixed English; only the seam exists.
 const INT = new Intl.NumberFormat('en-US')
 const MONTH = new Intl.DateTimeFormat('en-GB', { month: 'short' })
+const MONTH_UTC = new Intl.DateTimeFormat('en-GB', { month: 'short', timeZone: 'UTC' })
 const pad = (n: number): string => String(n).padStart(2, '0')
 
 export const fmtInt = (n: number): string => INT.format(Math.round(n))
@@ -39,11 +40,15 @@ export const fmtDate = (iso: string): string => {
   return `${d.getDate()} ${MONTH.format(d)} ${d.getFullYear()} ${pad(d.getHours())}:${pad(d.getMinutes())}`
 }
 
-/** The day alone — list surfaces show when a thing happened, not the clock time. */
+/**
+ * The day alone — list surfaces show when a thing happened, not the clock time. Read in UTC, the
+ * same calendar the list groups by (`groupByMonth` keys on the UTC `YYYY-MM` slice), so a run filed
+ * just after UTC midnight never renders under the neighbouring month.
+ */
 export const fmtDay = (iso: string): string => {
   const d = new Date(iso)
   if (Number.isNaN(d.getTime())) return '—'
-  return `${d.getDate()} ${MONTH.format(d)} ${d.getFullYear()}`
+  return `${d.getUTCDate()} ${MONTH_UTC.format(d)} ${d.getUTCFullYear()}`
 }
 
 export const fmtElapsed = (totalSeconds: number): string => {

@@ -43,6 +43,10 @@ describe('format', () => {
   it('returns a dash for an invalid day', () => {
     expect(fmtDay('not-a-date')).toBe('—')
   })
+  it('reads the day in UTC, not the host zone', () => {
+    // 2026-10-31T23:30-02:00 is 2026-11-01T01:30Z — the UTC day is 1 November.
+    expect(fmtDay('2026-10-31T23:30:00-02:00')).toBe('1 Nov 2026')
+  })
   it('truncates long ids', () => {
     expect(truncateId('8f3a41b0c2')).toBe('8f3a…c2')
   })
