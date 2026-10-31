@@ -185,6 +185,15 @@ describe('the report tab files the report (§12.8, R57)', () => {
     expect(html).toContain('Nordic Lead')
   })
 
+  it('offers the one export bar over the one construction (§11.4/§12.8)', () => {
+    const html = render('verdict', FILED)
+    expect(html).toContain('Copy for Google Docs')
+    expect(html).toContain('>Markdown</button>')
+    expect(html).toContain('>HTML</button>')
+    expect(html).toContain('>JSON</button>')
+    expect(html).toContain('aria-label="Export this decision"')
+  })
+
   it('states that the report is not filed yet instead of inventing one', () => {
     const html = render('verdict')
     expect(html).toContain('The report appears when the debate completes.')

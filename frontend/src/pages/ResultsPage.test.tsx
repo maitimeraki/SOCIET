@@ -2,13 +2,18 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { MemoryRouter } from 'react-router-dom'
 import { DEBATE_CONFIG_DEFAULTS, type RunDoc, type RunSummary } from '../api/types'
+import { NARRATIVE_FALLBACK_COPY } from '../components/verdict/NarrativeFallbackNotice'
+import { reportFromState } from '../components/run/reportFromState'
 import { fold } from '../run/reducer'
 import { verdictView } from '../run/selectors'
 import { RUN_SAMPLE } from '../run/__fixtures__/run-sample'
 import { BANNED_TERMS, renderedText } from '../test/copyLaw'
 import { VerdictsPageView, loadVerdicts, type VerdictsPageViewProps } from './ResultsPage'
 
-const view = verdictView(fold(RUN_SAMPLE))
+const FILED_AT = '2026-10-09T10:00:00Z'
+const STATE = fold(RUN_SAMPLE)
+const view = verdictView(STATE)
+const report = reportFromState(STATE, FILED_AT)!
 
 const render = (props: Partial<VerdictsPageViewProps> = {}) =>
   renderToStaticMarkup(
@@ -25,14 +30,7 @@ const render = (props: Partial<VerdictsPageViewProps> = {}) =>
   )
 
 const filled = {
-  latest: {
-    runId: 'r1',
-    question: 'Should we expand into the European market in 2027?',
-    filed: '2026-10-09T10:00:00Z',
-    view: view!,
-    sources: ['eu-market-2027.pdf'],
-    corpusMissing: false,
-  },
+  latest: { runId: 'r1', report, narrativeStatus: view!.narrativeStatus },
   earlier: [{ runId: 'r0', question: 'Should we hire?', stance: 'POSITIVE' as const, share: 0.74, date: '2026-09-01T10:00:00Z' }],
 }
 
@@ -50,9 +48,29 @@ describe('VerdictsPageView', () => {
     expect(html).toContain('0.83')
     expect(html).toContain('The case against')
     expect(html).toContain('Entry cost outweighs the single market.')
+    // The source row keeps its real provenance breadcrumb (R62) instead of a dangling dash.
+    expect(html).toContain('Section 3')
     // The earlier row carries its own date, position and share.
     expect(html).toContain('1 Sept 2026')
     expect(html).toContain('Positive')
+  })
+
+  it('shows the narrative fallback notice, and does not print the fallback summary twice', () => {
+    const verdict = STATE.verdict!
+    const summary = verdict.summary
+    const fallback = reportFromState(
+      { ...STATE, verdict: { ...verdict, narrative: summary, narrativeStatus: 'fallback' } },
+      FILED_AT,
+    )!
+    const html = render({ latest: { runId: 'r1', report: fallback, narrativeStatus: 'fallback' }, earlier: [] })
+    expect(html).toContain(NARRATIVE_FALLBACK_COPY)
+    expect(html.split(summary)).toHaveLength(2)
+  })
+
+  it('isolates the sheet for printing — chrome and the archive stay off the page', () => {
+    const html = render(filled)
+    expect(html).toContain('print:hidden')
+    expect(html).toContain('print:block')
   })
 
   it('derives who held which view in STANCE_ORDER and drops the empty groups', () => {
@@ -133,8 +151,8 @@ describe('loadVerdicts', () => {
     const loaded = await loadVerdicts()
 
     expect(loaded.latest?.runId).toBe('r-good')
-    expect(loaded.latest?.filed).toBe('2026-10-09T10:00:00Z')
-    expect(loaded.latest?.sources).toEqual(['eu-market-2027.pdf'])
+    expect(loaded.latest?.report.filed).toBe('9 Oct 2026')
+    expect(loaded.latest?.report.sources).toEqual([{ document: 'eu-market-2027.pdf', reference: 'Section 3' }])
     expect(loaded.earlier).toEqual([
       {
         runId: 'r-bad',

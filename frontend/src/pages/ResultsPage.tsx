@@ -3,8 +3,9 @@ import { Link } from 'react-router-dom'
 import { getRun, listRunsPage } from '../api/rest'
 import type { RunSummary } from '../api/types'
 import type { Stance } from '../run/events'
-import { sourceTitles } from '../components/run/AnswerDocument'
-import { splitSections } from '../components/verdict/narrative'
+import { reportFromState } from '../components/run/reportFromState'
+import type { ReportModel } from '../components/run/exportReport'
+import NarrativeFallbackNotice from '../components/verdict/NarrativeFallbackNotice'
 import { buttonClasses } from '../components/ui/Button'
 import EmptyState from '../components/ui/EmptyState'
 import ErrorState from '../components/ui/ErrorState'
@@ -12,8 +13,7 @@ import Skeleton from '../components/ui/Skeleton'
 import PositionMark from '../components/ui/PositionMark'
 import VerdictSheet from '../components/ui/VerdictSheet'
 import { fold } from '../run/reducer'
-import { STANCE_ORDER, verdictView } from '../run/selectors'
-import type { VerdictView } from '../run/selectors'
+import { verdictView } from '../run/selectors'
 import { PAGE_SIZE } from './pageSize'
 import { fmtDay } from '../utils/format'
 
@@ -26,7 +26,7 @@ export interface VerdictRow {
 }
 
 export interface VerdictsPageViewProps {
-  latest: { runId: string; question: string; filed: string; view: VerdictView; sources: string[]; corpusMissing: boolean } | null
+  latest: { runId: string; report: ReportModel; narrativeStatus: string } | null
   earlier: VerdictRow[]
   loading: boolean
   failed: boolean
@@ -34,31 +34,11 @@ export interface VerdictsPageViewProps {
   onRetry: () => void
 }
 
-/** R4 — the sheet's who-held rows are derived here, from the view's final stances, never stored. */
-function heldViews(view: VerdictView): { position: (typeof STANCE_ORDER)[number]; names: string[] }[] {
-  return STANCE_ORDER.map((position) => ({
-    position,
-    names: view.finalStances.filter((row) => row.stance === position).map((row) => row.agent),
-  })).filter((row) => row.names.length > 0)
-}
-
-/** The sheet's reasoning is prose: the summary, then the narrative's bodies — never its `##` marks. */
-function reasoningOf(view: VerdictView): string[] {
-  return [view.summary, ...splitSections(view.narrative).map((section) => section.body)].filter(Boolean)
-}
-
 export function VerdictsPageView({ latest, earlier, loading, failed, failDetail, onRetry }: VerdictsPageViewProps) {
   return (
     <div>
-      <header className="flex flex-wrap items-end justify-between gap-4 border-b border-rule pb-6">
-        <div>
-          <h1 className="font-ui text-display text-ink">Verdicts</h1>
-          <p className="mt-2 max-w-[60ch] text-body text-ink-2">
-            The final answer to every question you've brought.
-          </p>
-        </div>
-        <span className="font-mono text-micro text-ink-3">{earlier.length + (latest ? 1 : 0)} TOTAL</span>
-      </header>
+      {/* §7.6/§12.7 — the outcome is the first thing; the page's name is for the document outline only. */}
+      <h1 className="sr-only font-display">Verdicts</h1>
 
       {failed ? (
         <ErrorState
@@ -70,28 +50,31 @@ export function VerdictsPageView({ latest, earlier, loading, failed, failDetail,
       ) : loading ? (
         <Skeleton className="h-64 w-full" />
       ) : latest ? (
-        <div className="grid gap-6 lg:grid-cols-12">
-          <div className="lg:col-span-8">
+        <div className="grid gap-6 lg:grid-cols-12 print:block">
+          <div className="lg:col-span-8 print:block">
+            <NarrativeFallbackNotice status={latest.narrativeStatus} />
             <VerdictSheet
-              question={latest.question}
-              filed={fmtDay(latest.filed)}
-              position={latest.view.stance}
-              share={latest.view.confidence}
-              caseAgainst={latest.view.dissentingViews[0]?.view ?? 'No dissent was recorded.'}
-              reasoning={reasoningOf(latest.view)}
-              whoHeldWhichView={heldViews(latest.view)}
-              sources={latest.sources.map((title) => ({ document: title, reference: '' }))}
+              question={latest.report.question}
+              filed={latest.report.filed}
+              position={latest.report.position}
+              share={latest.report.share}
+              caseAgainst={latest.report.caseAgainst}
+              reasoning={latest.report.reasoning}
+              whoHeldWhichView={latest.report.whoHeldWhichView}
+              sources={latest.report.sources}
               onExport={() => window.print()}
             />
           </div>
-          <aside className="lg:col-span-4">
-            <h2 className="mb-2 font-ui text-label uppercase tracking-[0.09em] text-ink-3">Earlier answers</h2>
+          <aside className="lg:col-span-4 print:hidden">
+            <h2 className="mb-2 font-ui text-label uppercase tracking-[0.09em] text-ink-3">
+              Earlier answers <span className="font-mono text-micro text-ink-3">{earlier.length}</span>
+            </h2>
             <div>
               {earlier.map((row) => (
                 <Link
                   key={row.runId}
                   to={`/runs/${row.runId}/verdict`}
-                  className="flex flex-col gap-1 border-t border-rule/40 py-3 hover:bg-accent-soft"
+                  className="flex flex-col gap-1 border-t border-rule py-3 hover:bg-accent-soft"
                 >
                   <span className="font-ui text-body-sm font-medium text-ink">{row.question}</span>
                   <span className="flex items-center justify-between gap-3">
@@ -136,21 +119,17 @@ export async function loadVerdicts() {
   // Every earlier row takes its stance/share/date from the list, so one unreadable run
   // (deleted, 404, transient 5xx) never blanks the archive — and the archive never fans out
   // into one document read per run.
+  // §11.3 — the sheet is the same `reportFromState` construction the run page renders and every
+  // export serializes; the page never re-derives the reasoning or the sources.
   let latest: VerdictsPageViewProps['latest'] = null
   for (const entry of answered) {
     try {
       const doc = await getRun(entry.run_id)
       const state = fold(doc.events)
       const view = verdictView(state)
-      if (view) {
-        latest = {
-          runId: entry.run_id,
-          question: entry.query,
-          filed: entry.created_at,
-          view,
-          sources: sourceTitles(state.roster),
-          corpusMissing: false,
-        }
+      const report = reportFromState(state, entry.created_at)
+      if (view && report) {
+        latest = { runId: entry.run_id, report, narrativeStatus: view.narrativeStatus }
         break
       }
     } catch (error) {

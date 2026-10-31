@@ -12,6 +12,8 @@ import ArtifactsTab from '../components/run/ArtifactsTab'
 import AgentsTab from '../components/run/AgentsTab'
 import ReportDocument from '../components/run/ReportDocument'
 import { reportFromState } from '../components/run/reportFromState'
+import { reportHtml, reportJson, reportMarkdown } from '../components/run/exportReport'
+import { toast } from '../components/ui/Toast'
 import ChamberFloor from '../components/chamber/ChamberFloor'
 import type { RunEvent } from '../run/events'
 import type { RunState } from '../run/reducer'
@@ -32,6 +34,17 @@ const TAB_LABELS: Record<RunTab, string> = {
 
 const NAV_PREFIX = 'run'
 const NAV_ITEMS = TABS.map((key) => ({ key, label: TAB_LABELS[key] }))
+
+/** Hand one serialized report to the browser — the same `ReportModel` the sheet renders (§11.3). */
+function downloadReport(runId: string, extension: string, mime: string, contents: string) {
+  const blob = new Blob([contents], { type: mime })
+  const url = URL.createObjectURL(blob)
+  const anchor = document.createElement('a')
+  anchor.href = url
+  anchor.download = `decision-${runId}.${extension}`
+  anchor.click()
+  URL.revokeObjectURL(url)
+}
 
 /**
  * §14.4 The run's one nav strip — a real tablist. The strip scrolls inside its own row at 390px
@@ -96,6 +109,33 @@ function RunWork({ run, events, tab, runId, scrubbed, latestRound, runCreatedAt,
         const report = reportFromState(run, runCreatedAt)
         return report ? (
           <div className="space-y-8">
+            {/* §11.4/§12.8 — one export bar over the one construction: copy the document, or take
+                the same document as a file. Every serialization reads the same `report`. */}
+            <div role="group" aria-label="Export this decision" className="flex flex-wrap items-center gap-3 print:hidden">
+              <Button
+                variant="primary"
+                onClick={() => {
+                  const copied = navigator.clipboard
+                    ? navigator.clipboard.writeText(reportMarkdown(report))
+                    : Promise.reject(new Error('clipboard unavailable'))
+                  void copied.then(
+                    () => toast('neutral', 'Copied for Google Docs'),
+                    () => toast('neutral', 'Could not copy — download Markdown instead.'),
+                  )
+                }}
+              >
+                Copy for Google Docs
+              </Button>
+              <Button variant="ghost" onClick={() => downloadReport(runId, 'md', 'text/markdown', reportMarkdown(report))}>
+                Markdown
+              </Button>
+              <Button variant="ghost" onClick={() => downloadReport(runId, 'html', 'text/html', reportHtml(report))}>
+                HTML
+              </Button>
+              <Button variant="ghost" onClick={() => downloadReport(runId, 'json', 'application/json', reportJson(report))}>
+                JSON
+              </Button>
+            </div>
             <ReportDocument report={report} />
             <div className="flex flex-wrap items-center gap-3 print:hidden">
               <Button onClick={onReplay}>Replay this decision</Button>

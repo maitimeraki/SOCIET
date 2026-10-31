@@ -49,4 +49,21 @@ describe('the exports speak the customer words', () => {
     expect(reportMarkdown({ ...REPORT, share: null })).toContain('**Negative · — weighted share**')
     expect(JSON.parse(reportJson({ ...REPORT, share: null })).outcome.share).toBeNull()
   })
+
+  it('escapes customer text in the HTML export — a question is not markup', () => {
+    const html = reportHtml({
+      ...REPORT,
+      question: '<script>alert(1)</script>',
+      caseAgainst: 'Rent < 4,200 & rising > 3%',
+      reasoning: ['<img src=x onerror=alert(1)>'],
+      sources: [{ document: '<b>lease</b>.pdf', reference: 'p.4 < 5' }],
+      warnings: ['<em>proxy</em>'],
+    })
+    expect(html).not.toContain('<script>')
+    expect(html).not.toContain('<img')
+    expect(html).not.toContain('<em>')
+    expect(html).toContain('&lt;script&gt;alert(1)&lt;/script&gt;')
+    expect(html).toContain('&amp;')
+    expect(html).toContain('&lt;b&gt;lease&lt;/b&gt;')
+  })
 })

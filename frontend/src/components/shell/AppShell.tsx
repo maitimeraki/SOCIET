@@ -53,14 +53,16 @@ export default function AppShell() {
         Skip to content
       </a>
       <Rail />
-      <main id="content" className="mx-auto min-w-0 w-full max-w-[1320px] flex-1 px-6 pb-24 pt-8 lg:px-12">
+      <main id="content" className="mx-auto min-w-0 w-full max-w-[1320px] flex-1 px-6 pb-24 pt-8 print:max-w-none print:p-0 lg:px-12">
         <AppErrorBoundary key={key}>
           <Suspense fallback={<RouteFallback />}>
             <Outlet />
           </Suspense>
         </AppErrorBoundary>
       </main>
-      <ToastHost />
+      <div className="print:hidden">
+        <ToastHost />
+      </div>
     </div>
   )
 }

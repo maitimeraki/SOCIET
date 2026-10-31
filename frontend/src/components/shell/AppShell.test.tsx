@@ -44,6 +44,15 @@ describe('AppShell', () => {
     expect(render()).toContain('href="#content"')
   })
 
+  it('takes the chrome off the page when printing the sheet', () => {
+    const html = render()
+    const main = html.match(/<main[^>]*id="content"[^>]*>/)?.[0] ?? ''
+    expect(main).toContain('print:p-0')
+    expect(main).toContain('print:max-w-none')
+    // The rail is chrome; it must not print above the document.
+    expect(html.split('print:hidden').length).toBeGreaterThan(1)
+  })
+
   it('marks the current section with aria-current', () => {
     expect(openingTag(render(), 'href="/documents"')).toContain('aria-current="page"')
   })

@@ -32,7 +32,7 @@ export default function Rail() {
   const initials = email.split('@')[0].slice(0, 2).toUpperCase()
 
   return (
-    <div className="flex w-[72px] shrink-0 flex-col border-r border-hairline bg-bone lg:w-[264px]">
+    <div className="flex w-[72px] shrink-0 flex-col border-r border-hairline bg-bone print:hidden lg:w-[264px]">
       <nav aria-label="Sections" className="flex flex-1 flex-col">
         <div className="flex h-14 shrink-0 items-center gap-2 px-2 lg:px-4">
           <Link

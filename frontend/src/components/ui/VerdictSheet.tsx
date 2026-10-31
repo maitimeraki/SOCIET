@@ -39,14 +39,14 @@ export default function VerdictSheet({
   cropped = false,
 }: VerdictSheetProps) {
   return (
-    <article className="max-w-[760px] rounded-xl bg-paper p-12 shadow-sheet">
+    <article className="max-w-[760px] rounded-xl bg-paper p-12 shadow-sheet print:max-w-none print:rounded-none print:shadow-none">
       <div className="flex items-center justify-between gap-4">
         <p className="font-mono text-micro uppercase tracking-[0.08em] text-ink-3">Filed &middot; {filed}</p>
         {onExport ? (
           <button
             type="button"
             onClick={onExport}
-            className="min-h-11 font-ui text-body-sm text-accent underline underline-offset-4"
+            className="min-h-11 font-ui text-body-sm text-accent underline underline-offset-4 print:hidden"
           >
             Export document
           </button>
