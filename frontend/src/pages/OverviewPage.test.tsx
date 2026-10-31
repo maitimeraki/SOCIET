@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { MemoryRouter } from 'react-router-dom'
 import type { RunSummary } from '../api/types'
-import { OverviewPageView, monthKeyUtc, recentState } from './OverviewPage'
+import { OverviewPageView, greetingName, monthKeyUtc, recentRows, recentState } from './OverviewPage'
 import { BANNED_TERMS, renderedText } from '../test/copyLaw'
 
 const NOOP = () => {}
@@ -30,6 +30,16 @@ describe('the Overview', () => {
     const html = view()
     expect(html).toContain('Good morning')
     expect(html.indexOf('Decisions this month')).toBeLessThan(html.indexOf('Recent work'))
+  })
+
+  it('greets the signed-in account, and invents no name when there is none', () => {
+    expect(view({ accountName: 'Anupam' })).toContain('Good morning, Anupam.')
+    expect(view()).toContain('Good morning.')
+    expect(view()).not.toContain('Anupam')
+  })
+
+  it('labels the illustrative plan figures as an example', () => {
+    expect(view()).toContain('Example')
   })
 
   it('reads the live filed count in the state line', () => {
@@ -114,6 +124,27 @@ describe('the state a recent run is written in', () => {
     expect(recentState(run({ status: 'interrupted' }))).toBe('Interrupted')
     expect(recentState(run({ status: 'cancelled' }))).toBe('Cancelled')
     expect(recentState(run({ status: 'running' }))).toBe('Deliberating')
+  })
+
+  it('feeds recent work from the whole history, not only the current month', () => {
+    const rows = recentRows([
+      run({ run_id: 'old', created_at: '2026-09-30T10:00:00Z', verdict_stance: 'POSITIVE' }),
+      run({ run_id: 'new', created_at: '2026-11-01T00:05:00Z' }),
+    ])
+    expect(rows.map((row) => row.runId)).toEqual(['old', 'new'])
+    expect(rows[0].state).toBe('Filed')
+    expect(rows[0].date).toBe('30 Sept 2026')
+  })
+})
+
+describe('the greeting name comes from the session, never from the page', () => {
+  it('reads the email local part and capitalises it', () => {
+    expect(greetingName('anupam@example.com')).toBe('Anupam')
+    expect(greetingName('anupam.sharma@example.com')).toBe('Anupam')
+  })
+
+  it('renders no name for an empty or missing address', () => {
+    expect(greetingName('')).toBe('')
   })
 })
 

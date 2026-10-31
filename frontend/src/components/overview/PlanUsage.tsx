@@ -32,7 +32,8 @@ export default function PlanUsage({ corpusBytes, corpusLimit, decisionsUsed, dec
     <section className="rounded-lg bg-paper p-5 shadow-card">
       <div className="flex items-start justify-between gap-3">
         <div>
-          <p className="font-ui text-label uppercase tracking-[0.09em] text-ink-3">This month</p>
+          {/* §14.2 — no billing exists yet, so every figure here is illustrative and says so. */}
+          <p className="font-ui text-label uppercase tracking-[0.09em] text-ink-3">This month · Example</p>
           <h2 className="font-display text-title font-medium tracking-[-0.02em] text-ink">Plan &amp; usage</h2>
         </div>
         <span className="inline-flex min-h-6 items-center gap-1.5 rounded-xs bg-accent-soft px-2 font-mono text-micro uppercase tracking-[0.04em] text-ok">

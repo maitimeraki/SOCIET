@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { getRun, listRunsPage, listUploads } from '../api/rest'
 import type { RunSummary, UploadRow } from '../api/types'
+import { useAuthStore } from '../auth/authStore'
 import StatsBand from '../components/overview/StatsBand'
 import RecentWork from '../components/overview/RecentWork'
 import type { RecentRow } from '../components/overview/RecentWork'
@@ -36,6 +37,33 @@ export function recentState(run: RunSummary): RecentRow['state'] {
   return 'Deliberating'
 }
 
+/**
+ * Recent work reads the whole history, newest first — the month filter belongs to the stats band,
+ * not to the sheet. On the first of a month the sheet still shows the last decisions.
+ */
+// eslint-disable-next-line react-refresh/only-export-components -- recentRows is the tested mapping
+export function recentRows(runs: RunSummary[], limit = 4): RecentRow[] {
+  return runs.slice(0, limit).map((run) => ({
+    runId: run.run_id,
+    question: run.query,
+    state: recentState(run),
+    stance: run.verdict_stance,
+    share: run.verdict_confidence,
+    passes: `${run.rounds_executed}`,
+    date: fmtDay(run.created_at),
+  }))
+}
+
+/**
+ * The signed-in account's display name, from the only real source: the email's local part. An
+ * absent or empty email yields no name, so the greeting never borrows a stranger's.
+ */
+// eslint-disable-next-line react-refresh/only-export-components -- greetingName is the tested session rule
+export function greetingName(email: string): string {
+  const first = (email.split('@')[0] ?? '').split(/[._-]/)[0]
+  return first ? first.charAt(0).toUpperCase() + first.slice(1) : ''
+}
+
 export interface OverviewStats {
   decisions: number
   filed: number
@@ -52,16 +80,28 @@ export interface OverviewPageViewProps {
   working: WorkingRun | null
   loading: boolean
   failed: boolean
+  /** The signed-in account's display name; empty/absent renders the greeting without a name. */
+  accountName?: string
   onRetry: () => void
 }
 
-export function OverviewPageView({ stats, recent, corpora, working, loading, failed, onRetry }: OverviewPageViewProps) {
+export function OverviewPageView({
+  stats,
+  recent,
+  corpora,
+  working,
+  loading,
+  failed,
+  accountName = '',
+  onRetry,
+}: OverviewPageViewProps) {
   const today = new Date().toLocaleDateString('en-GB', {
     weekday: 'long',
     day: 'numeric',
     month: 'long',
     timeZone: 'UTC',
   })
+  const greeting = accountName ? `Good morning, ${accountName}.` : 'Good morning.'
   // §14.2 — the state line is honest: it reads the live filed count, never a fixed number.
   const stateLine = working
     ? `One question is with the panel.${stats.filed > 0 ? ` ${stats.filed} filed and waiting for you.` : ' Nothing is filed yet.'}`
@@ -71,7 +111,7 @@ export function OverviewPageView({ stats, recent, corpora, working, loading, fai
       <header className="flex flex-wrap items-end justify-between gap-4 border-b border-rule pb-6">
         <div>
           <p className="font-ui text-label uppercase tracking-[0.09em] text-ink-3">{today}</p>
-          <h1 className="font-display text-display font-medium tracking-[-0.03em] text-ink">Good morning, Anupam.</h1>
+          <h1 className="font-display text-display font-medium tracking-[-0.03em] text-ink">{greeting}</h1>
           <p className="mt-2 max-w-[52ch] font-ui text-body-sm text-ink-2">{stateLine}</p>
         </div>
         <div className="flex items-center gap-4">
@@ -135,6 +175,7 @@ async function loadRecentRuns(): Promise<RunSummary[]> {
 }
 
 export default function OverviewPage() {
+  const accountName = useAuthStore((s) => greetingName(s.user?.email ?? ''))
   const [stats, setStats] = useState<OverviewStats>({
     decisions: 0,
     filed: 0,
@@ -163,14 +204,20 @@ export default function OverviewPage() {
         const running = runs.find((run) => run.status === 'running' || run.status === 'queued')
         let live: WorkingRun | null = null
         if (running) {
-          const doc = await getRun(running.run_id)
-          if (cancelled) return
-          live = {
-            runId: running.run_id,
-            question: running.query,
-            passes: `${running.rounds_executed} of ${doc.config.max_rounds}`,
-            note: `Pass ${running.rounds_executed} of ${doc.config.max_rounds}.`,
-            convergence: null,
+          // §8.9 — one unreadable run document costs the Working now card, not the whole page.
+          try {
+            const doc = await getRun(running.run_id)
+            if (cancelled) return
+            live = {
+              runId: running.run_id,
+              question: running.query,
+              passes: `${running.rounds_executed} of ${doc.config.max_rounds}`,
+              note: `Pass ${running.rounds_executed} of ${doc.config.max_rounds}.`,
+              convergence: null,
+            }
+          } catch (error) {
+            if (cancelled) return
+            console.error('OverviewPage: could not read the working run.', error)
           }
         }
         setStats({
@@ -181,17 +228,7 @@ export default function OverviewPage() {
           decisionsLeft: Math.max(0, DECISIONS_LIMIT - monthRuns.length),
           decisionsLimit: DECISIONS_LIMIT,
         })
-        setRecent(
-          monthRuns.slice(0, 4).map((run) => ({
-            runId: run.run_id,
-            question: run.query,
-            state: recentState(run),
-            stance: run.verdict_stance,
-            share: run.verdict_confidence,
-            passes: `${run.rounds_executed}`,
-            date: fmtDay(run.created_at),
-          })),
-        )
+        setRecent(recentRows(runs))
         setCorpora(corpusRows(items, runs))
         setWorking(live)
         setFailed(false)
@@ -217,6 +254,7 @@ export default function OverviewPage() {
       working={working}
       loading={loading}
       failed={failed}
+      accountName={accountName}
       onRetry={() => {
         setLoading(true)
         setFailed(false)
