@@ -113,11 +113,24 @@ describe('the map host never unmounts across the pane states (§9.3, Ruling F17)
     ])
   })
 
-  it('keeps the work and the map on one seam radius (§14.4)', () => {
+  it('draws neither pane as a card — the split is one instrument (§10.3)', () => {
     const html = renderPanes('split')
-    expect(tagAround(html, 'aria-label="The work"')).toContain('rounded-lg')
-    expect(tagAround(html, 'aria-label="The map"')).toContain('rounded-lg')
-    expect(tagAround(html, 'aria-label="The map"')).not.toContain('rounded-md')
+    const map = tagAround(html, 'aria-label="The map"')
+    const work = tagAround(html, 'aria-label="The work"')
+    expect(map).toContain('plot-ground')
+    expect(map).toContain('rounded-none')
+    expect(map).toContain('shadow-none')
+    expect(map).not.toContain('rounded-lg')
+    expect(map).not.toContain('shadow-map')
+    expect(work).toContain('bg-paper')
+    expect(work).not.toContain('rounded-lg')
+    expect(work).not.toContain('shadow-card')
+  })
+
+  it('lets the split fill the shell, so both sides are the height of the split (§10.3)', () => {
+    const main = tagAround(renderShell('/new'), 'id="content"')
+    expect(main).toContain('flex-col')
+    expect(main).toContain('min-h-0')
   })
 })
 

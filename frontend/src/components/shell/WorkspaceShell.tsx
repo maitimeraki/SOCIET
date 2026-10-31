@@ -97,7 +97,9 @@ export default function WorkspaceShell() {
         Skip to content
       </a>
       <WorkspaceTopBar title={title} />
-      <main id="content" className="min-w-0 flex-1 px-4 pb-8 pt-4">
+      {/* A growing flex column: the split fills the viewport below the bar, so both sides are exactly
+          the height of the split and their own scroll containers can move (§10.3). */}
+      <main id="content" className="flex min-h-0 min-w-0 flex-1 flex-col px-4 pb-8 pt-4">
         <AppErrorBoundary key={runId ?? 'new'}>
           <Workspace
             mapId={mapId}

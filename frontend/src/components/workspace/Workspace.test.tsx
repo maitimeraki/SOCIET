@@ -175,9 +175,18 @@ describe('the split is resizable — the divider lives only in split (§9)', () 
     expect(render('minimised')).not.toContain('role="separator"')
   })
 
-  it('makes the 8px handle column the whole seam — no horizontal gap at lg', () => {
-    expect(render('split')).toContain('lg:gap-x-0')
+  it('makes the 1px seam the whole join — map, one rule, output, with no gap at lg', () => {
+    const html = render('split')
+    expect(html).toContain('lg:grid-cols-[var(--map-w,40%)_1px_minmax(0,1fr)]')
+    expect(html).toContain('lg:grid-rows-[minmax(0,1fr)]')
+    expect(html).toContain('lg:gap-x-0')
     expect(render('minimised')).not.toContain('lg:gap-x-0')
+  })
+
+  it('opens at the 40% map / 60% output default (§7.7, R51)', () => {
+    const html = render('split')
+    expect(html).toContain('--map-w:40%')
+    expect(html).toContain('aria-valuenow="40"')
   })
 
   it('orders map left / work right only in split; stacked states keep work above map', () => {
@@ -187,6 +196,16 @@ describe('the split is resizable — the divider lives only in split (§9)', () 
     expect(mapWrapper(render('split'))).toContain('lg:order-1')
     expect(workWrapper(render('minimised'))).not.toContain('lg:order-3')
     expect(mapWrapper(render('minimised'))).not.toContain('lg:order-1')
+  })
+
+  it('makes both sides their own scroll container — the synchronized pair (§10.3)', () => {
+    const html = render('split')
+    const workWrapper = wrapperTagBefore(html, 'aria-label="The work"')
+    const mapWrapper = wrapperTagBefore(html, 'aria-label="The map"')
+    expect(workWrapper).toContain('overflow-auto')
+    expect(mapWrapper).toContain('overflow-auto')
+    expect(workWrapper).toContain('min-h-0')
+    expect(mapWrapper).toContain('min-h-0')
   })
 
   it('draws the divider from the view’s ratio', () => {
@@ -202,6 +221,7 @@ describe('the split is resizable — the divider lives only in split (§9)', () 
       />,
     )
     expect(html).toContain('aria-valuenow="30"')
+    expect(html).toContain('--map-w:30%')
   })
 })
 

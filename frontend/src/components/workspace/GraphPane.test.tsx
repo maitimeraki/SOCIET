@@ -17,7 +17,8 @@ import {
   showNodeLabels,
   syncGraph,
 } from '../graph/GraphCanvas'
-import { GraphPaneView, mapCounts } from './GraphPane'
+import { GraphPaneView, mapCounts, mapEntries } from './GraphPane'
+import type { MapEntry } from './MapEntries'
 import type { MapSummary, PaneState } from './Workspace'
 // §13 — the one copy-law guard, shared with every rendered-string test.
 import { BANNED_TERMS, renderedText } from '../../test/copyLaw'
@@ -47,6 +48,7 @@ const render = (
   state: PaneState = 'split',
   relations: string[] = [],
   omitted = 0,
+  entries: MapEntry[] = [],
 ) =>
   renderToStaticMarkup(
     <GraphPaneView
@@ -54,6 +56,7 @@ const render = (
       state={state}
       onStateChange={() => {}}
       summary={summary}
+      entries={entries}
       layers={layers}
       onToggleLayer={() => {}}
       relations={relations}
@@ -81,6 +84,13 @@ function hostBlock(html: string): { start: number; end: number } {
     if (depth === 0) return { start, end: tag.lastIndex }
   }
   return { start, end: html.length }
+}
+
+/** The opening tag of the first element whose markup contains `marker`. */
+function tagAround(html: string, marker: string): string {
+  const at = html.indexOf(marker)
+  if (at < 0) return ''
+  return html.slice(html.lastIndexOf('<', at), html.indexOf('>', at) + 1)
 }
 
 /** The opening tag of the toggle button whose text is `label`, so an assertion lands on one button. */
@@ -265,6 +275,31 @@ describe('the map’s text alternative is present in every pane state (§14.4 ro
   it('says how many relations the cap left out', () => {
     const html = render(summaryOf(corpusNodes(2)), ALL_LAYERS, 'split', RELATIONS, 7)
     expect(html).toContain('and 7 more')
+  })
+})
+
+describe('the map’s entries list — the text alternative made visible (§8.7)', () => {
+  const nodes: Record<string, GraphNode> = {
+    lease: { id: 'lease', label: 'Mill Street lease.pdf', type: 'Topic', kind: 'lease' },
+  }
+
+  it('names every stored entry and its kind, under the counts strip', () => {
+    const html = render(summaryOf(nodes), ALL_LAYERS, 'split', [], 0, mapEntries(nodes))
+    expect(html).toContain('Mill Street lease.pdf')
+    expect(html).toContain('lease')
+    expect(html).toContain('Connections')
+  })
+
+  it('hides the list with the map in minimised, and shows it in split', () => {
+    const entries = mapEntries(nodes)
+    expect(tagAround(render(summaryOf(nodes), ALL_LAYERS, 'minimised', [], 0, entries), 'max-h-[min(30vh,220px)]')).toMatch(/ hidden=""/)
+    expect(tagAround(render(summaryOf(nodes), ALL_LAYERS, 'split', [], 0, entries), 'max-h-[min(30vh,220px)]')).not.toMatch(/ hidden=""/)
+  })
+
+  it('maps every node to an entry keyed by its id', () => {
+    const mapped = mapEntries(corpusNodes(2))
+    expect(mapped.map((entry) => entry.key)).toEqual(['n0', 'n1'])
+    expect(mapped[0]).toMatchObject({ key: 'n0', label: 'entry', name: 'Entry 0' })
   })
 })
 

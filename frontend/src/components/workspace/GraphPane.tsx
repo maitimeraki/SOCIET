@@ -1,8 +1,10 @@
 /* eslint-disable react-refresh/only-export-components -- this module deliberately exports its pure helpers (the counts by kind and the state-free view) so the no-DOM suite can drive every toggle state and every map size without a renderer. */
 import { useMemo, useState } from 'react'
-import type { ReactNode } from 'react'
+import type { ReactNode, Ref } from 'react'
 import { ArrowsInSimple, ArrowsOutSimple, CaretUp, Minus } from '@phosphor-icons/react'
 import IconButton from '../ui/IconButton'
+import MapEntries from './MapEntries'
+import type { MapEntry } from './MapEntries'
 import { LayerIcon } from '../../graph/layerIcons'
 import { ALL_LAYERS, LAYER_NAMES, LayerVisibilityContext, nodeLayer } from '../../graph/layers'
 import type { LayerName } from '../../graph/layers'
@@ -16,12 +18,16 @@ export interface GraphPaneProps {
   state: PaneState
   onStateChange: (next: PaneState) => void
   summary: MapSummary
+  /** The entries list's scroll container — the split's map half (§10.3). */
+  entriesRef?: Ref<HTMLDivElement>
   children: ReactNode
 }
 
 // §9.1/§9.3 The pane's own height per state — minimised collapses to the live strip under the map.
+// In split the pane fills the height of the split's row (`min-h-full`), so the pine ground runs
+// edge to edge and the entries list is the half that scrolls (§10.3).
 const SIZE: Record<PaneState, string> = {
-  split: 'min-h-[60vh] lg:min-h-[70vh]',
+  split: 'min-h-[60vh] lg:min-h-full',
   expanded: 'min-h-[70vh]',
   minimised: 'min-h-0',
 }
@@ -53,6 +59,15 @@ export function mapCounts(nodes: Record<string, GraphNode>, edges: Record<string
     else counts.entries += 1
   }
   return counts
+}
+
+/** §8.7 The map's entries as its visible text alternative reads them: one row per stored node. */
+export function mapEntries(nodes: Record<string, GraphNode>): MapEntry[] {
+  return Object.values(nodes).map((node) => ({
+    key: node.id,
+    label: node.kind ?? 'entry',
+    name: node.label,
+  }))
 }
 
 /**
@@ -103,6 +118,8 @@ export interface GraphPaneViewProps extends GraphPaneProps {
   /** The layers the canvas may draw. */
   layers: ReadonlySet<LayerName>
   onToggleLayer: (key: LayerToggle) => void
+  /** The map's entries — the text alternative made visible, and the split's scrolling half. */
+  entries?: MapEntry[]
   /** The map's relations, as text (`Source —REL→ Target`) — the half of the text alternative that
    *  lives outside the canvas host so it survives every pane state. */
   relations?: string[]
@@ -124,6 +141,8 @@ export function GraphPaneView({
   state,
   onStateChange,
   summary,
+  entries = [],
+  entriesRef,
   layers,
   onToggleLayer,
   relations = [],
@@ -139,7 +158,7 @@ export function GraphPaneView({
   return (
     <section
       aria-label="The map"
-      className={`plot-ground order-2 flex flex-col overflow-hidden rounded-lg shadow-map transition-[min-height] duration-layout lg:order-1 ${SIZE[state]}`}
+      className={`plot-ground flex flex-col overflow-hidden rounded-none shadow-none transition-[min-height] duration-layout ${SIZE[state]}`}
     >
       <div id={hostId} className="flex min-h-0 flex-1 flex-col" hidden={minimised} aria-hidden={minimised || undefined}>
         <LayerVisibilityContext.Provider value={layers}>{children}</LayerVisibilityContext.Provider>
@@ -210,6 +229,17 @@ export function GraphPaneView({
           )}
         </div>
       </div>
+
+      {/* §8.7 — the map's visible text alternative, and the scroll half of the split. The plot above
+          stays put; this list is what moves with the output (§10.3). Hidden with the map when the
+          pane is minimised. */}
+      <div
+        ref={entriesRef}
+        className="max-h-[min(30vh,220px)] flex-none overflow-auto px-3 pb-2"
+        hidden={minimised}
+      >
+        <MapEntries entries={entries} connections={counts.connections} />
+      </div>
     </section>
   )
 }
@@ -234,6 +264,7 @@ export default function GraphPane(props: GraphPaneProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- version is the invalidation key for nodes/edges
     [version],
   )
+  const entries = useMemo(() => mapEntries(nodes), [nodes])
 
   const toggleLayer = (key: LayerToggle) =>
     setLayers((current) => {
@@ -247,6 +278,7 @@ export default function GraphPane(props: GraphPaneProps) {
   return (
     <GraphPaneView
       {...props}
+      entries={entries}
       layers={layers}
       onToggleLayer={toggleLayer}
       relations={fallback.lines}
