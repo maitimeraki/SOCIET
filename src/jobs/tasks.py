@@ -16,6 +16,7 @@ writes are the same code.
 
 import asyncio
 import base64
+import contextlib
 import json
 import logging
 import time
@@ -487,6 +488,51 @@ CORES = {
     "account_export": _account_export_core,
 }
 
+#: Job kinds that call the LLM, and the source their usage is charged to.
+#: ``extract_upload`` and the account kinds make no LLM calls.
+_METERED_SOURCES = {
+    "debate": "debate",
+    "ontology": "ontology",
+    "build_graph": "ontology",
+    "normalize_graph": "ontology",
+}
+
+
+async def _metering_scope(kind: str, job_id: str, payload: dict[str, Any]):
+    """The metering scope for a kind, or a no-op when it makes no LLM calls.
+
+    The period and plan are resolved before the body runs, so a broken read
+    fails the job before the first LLM call spends anything.
+    """
+    source = _METERED_SOURCES.get(kind)
+    owner = payload.get("user_id")
+    if source is None or not owner:
+        return contextlib.nullcontext()
+
+    from sqlalchemy import select
+
+    from src.billing import metering
+    from src.billing.plans import get_plan
+    from src.billing.units import resolve_period
+    from src.db.engine import get_session_factory
+    from src.db.models import User
+
+    user_id = uuid.UUID(str(owner))
+    async with get_session_factory()() as db:
+        period_start, _ = await resolve_period(db, user_id)
+        plan_key = (
+            await db.execute(select(User.plan_key).where(User.id == user_id))
+        ).scalar_one_or_none()
+    run_id = payload.get("run_id")
+    return metering.metering_scope(
+        user_id=user_id,
+        period_start=period_start,
+        source=source,
+        job_id=uuid.UUID(str(job_id)),
+        run_id=uuid.UUID(str(run_id)) if run_id else None,
+        plan_units=get_plan(plan_key).units,
+    )
+
 
 async def _set_status(
     job_id: str, status: str, error: str | None = None, only_if_active: bool = False
@@ -521,7 +567,9 @@ async def execute(kind: str, job_id: str, payload: dict[str, Any]) -> None:
         await _set_status(job_id, "running")
         timeout = timeout_for(kind)
         try:
-            await asyncio.wait_for(CORES[kind](job_id, payload), timeout=timeout)
+            scope = await _metering_scope(kind, job_id, payload)
+            with scope:
+                await asyncio.wait_for(CORES[kind](job_id, payload), timeout=timeout)
         except (asyncio.TimeoutError, TimeoutError):
             message = f"job exceeded its {timeout}s timeout"
             logger.error("job %s (%s): %s", job_id, kind, message)

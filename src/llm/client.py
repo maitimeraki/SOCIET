@@ -11,10 +11,13 @@ import asyncio
 import logging
 import os
 import uuid
+from collections.abc import Mapping
+from types import SimpleNamespace
 from typing import AsyncGenerator, Optional
 
 import litellm
 
+from src.billing import metering
 from src.llm.config_llm import LLMConfig
 
 logger = logging.getLogger(__name__)
@@ -93,6 +96,7 @@ class LLMClient:
         max_tokens: Optional[int] = None,
     ) -> str:
         """Generate a completion. Falls back through the provider chain on failure."""
+        metering.check_metering()
         provider = provider or getattr(LLMConfig, "default_llm_provider", "ollama")
         # LLMClient is the debate stack: with no model named, use the debate tier.
         model = model or LLMConfig.debate_model
@@ -103,6 +107,11 @@ class LLMClient:
 
         chain = [provider] + [p for p in self.FALLBACK_ORDER if p != provider]
         errors: list[str] = []
+        output_cap = (
+            max_tokens
+            if max_tokens is not None
+            else getattr(LLMConfig, "max_output_tokens", 2048)
+        )
 
         async def _run_chain() -> str:
             for p in chain:
@@ -111,11 +120,10 @@ class LLMClient:
                     # named; a fallback leg must use its own configured model.
                     leg_model = model if p == provider else None
                     kwargs = self._call_kwargs(p)
-                    if max_tokens is not None:
-                        kwargs["max_tokens"] = max_tokens
-                        if p == "ollama":
-                            # Ollama's native API names the output cap num_predict.
-                            kwargs["num_predict"] = max_tokens
+                    kwargs["max_tokens"] = output_cap
+                    if p == "ollama":
+                        # Ollama's native API names the output cap num_predict.
+                        kwargs["num_predict"] = output_cap
                     response = await litellm.acompletion(
                         model=self._model_str(p, leg_model),
                         messages=[
@@ -127,6 +135,12 @@ class LLMClient:
                         num_retries=LLM_NUM_RETRIES,
                         **kwargs,
                     )
+                    if metering.current_context() is not None:
+                        await metering.record_response(
+                            response,
+                            provider=p,
+                            fallback_model=self._model_str(p, leg_model),
+                        )
                     return response.choices[0].message.content or ""
                 except Exception as exc:
                     errors.append(f"{p}: {exc}")
@@ -153,12 +167,16 @@ class LLMClient:
         model: Optional[str] = None,
     ) -> AsyncGenerator[str, None]:
         """Stream tokens; degrades to a single generate() call on failure."""
+        metering.check_metering()
         provider = provider or getattr(LLMConfig, "default_llm_provider", "ollama")
         model = model or LLMConfig.debate_model
         if provider not in self.PROVIDERS:
             raise ValueError(
                 f"Unknown provider: {provider}. Available: {self.PROVIDERS}"
             )
+        last_usage = None
+        last_model = None
+        last_hidden = None
         try:
             response = await litellm.acompletion(
                 model=self._model_str(provider, model),
@@ -172,6 +190,13 @@ class LLMClient:
                 **self._call_kwargs(provider),
             )
             async for chunk in response:
+                usage = getattr(chunk, "usage", None)
+                if usage is not None:
+                    last_usage = usage
+                    last_model = getattr(chunk, "model", None) or last_model
+                    hidden = getattr(chunk, "_hidden_params", None)
+                    if isinstance(hidden, Mapping):
+                        last_hidden = hidden
                 delta = chunk.choices[0].delta.content if chunk.choices else None
                 if delta:
                     yield str(delta)
@@ -181,9 +206,18 @@ class LLMClient:
                 provider,
                 exc,
             )
+            # generate() meters its own call — never record this stream too.
             yield await self.generate(
                 system_prompt, user_prompt, provider=provider, model=model
             )
+            return
+        await metering.record_response(
+            SimpleNamespace(
+                usage=last_usage, model=last_model, _hidden_params=last_hidden or {}
+            ),
+            provider=provider,
+            fallback_model=self._model_str(provider, model),
+        )
 
     def get_available_providers(self) -> dict:
         """Which providers are configured/reachable."""

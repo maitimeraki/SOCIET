@@ -207,6 +207,8 @@ class VerdictSynthesizer:
             f"DEBATE TRANSCRIPT (last {turns_used} turns):\n{transcript}"
         )
         cfg = get_llm_config()
+        from src.billing import metering
+
         for attempt in range(1, VERDICT_MAX_ATTEMPTS + 1):
             prompt = (
                 user_prompt
@@ -214,13 +216,14 @@ class VerdictSynthesizer:
                 else user_prompt + VERDICT_JSON_REINFORCEMENT
             )
             try:
-                raw = await llm_client.generate(
-                    system_prompt=VERDICT_SYSTEM,
-                    user_prompt=prompt,
-                    temperature=0.4,
-                    max_tokens=cfg.verdict_max_tokens,
-                    model=cfg.verdict_model,
-                )
+                with metering.source_scope("verdict"):
+                    raw = await llm_client.generate(
+                        system_prompt=VERDICT_SYSTEM,
+                        user_prompt=prompt,
+                        temperature=0.4,
+                        max_tokens=cfg.verdict_max_tokens,
+                        model=cfg.verdict_model,
+                    )
             except Exception:
                 logger.exception(
                     "verdict answer-writer attempt %d/%d raised",

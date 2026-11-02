@@ -1,11 +1,15 @@
 """Tests for the LiteLLM-backed LLMClient."""
 
 import asyncio
+import datetime
+import uuid
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 import pytest
 
+from src.billing import metering
+from src.billing.metering import MeteringError
 from src.llm import client as llm_client
 from src.llm.client import LLMClient
 from src.llm.config_llm import LLMConfig
@@ -217,3 +221,63 @@ async def test_total_deadline_stops_fallback_chain(monkeypatch):
         )
     assert len(attempted) == 1
     assert attempted[0].startswith("openai/")
+
+
+@pytest.mark.asyncio
+async def test_generate_reports_the_serving_provider_and_model():
+    with metering.metering_scope(
+        user_id=uuid.uuid4(),
+        period_start=datetime.datetime.now(datetime.UTC),
+        source="debate",
+    ):
+        with patch(
+            "src.billing.metering.record_response", new_callable=AsyncMock
+        ) as record:
+            with patch(
+                "src.llm.client.litellm.acompletion", new_callable=AsyncMock
+            ) as ac:
+                ac.return_value = _resp("ok")
+                await LLMClient().generate(
+                    "sys", "usr", provider="openai", model="gpt-4o-mini"
+                )
+                ac.side_effect = [RuntimeError("boom"), _resp("fallback ok")]
+                await LLMClient().generate(
+                    "sys", "usr", provider="openai", model="gpt-4o-mini"
+                )
+
+        assert record.await_count == 2
+        first, second = record.await_args_list
+        assert first.kwargs["provider"] == "openai"
+        assert first.kwargs["fallback_model"] == "openai/gpt-4o-mini"
+        assert second.kwargs["provider"] == "ollama"
+        assert second.kwargs["fallback_model"].startswith("ollama/")
+
+
+@pytest.mark.asyncio
+async def test_generate_raises_when_metering_already_failed():
+    with metering.metering_scope(
+        user_id=uuid.uuid4(),
+        period_start=datetime.datetime.now(datetime.UTC),
+        source="debate",
+    ) as context:
+        context.failed = True
+        context.failure_reason = "balance exhausted"
+        with patch(
+            "src.llm.client.litellm.acompletion", new_callable=AsyncMock
+        ) as ac:
+            with pytest.raises(MeteringError):
+                await LLMClient().generate("sys", "usr", provider="openai")
+            ac.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_generate_without_context_does_not_meter():
+    with patch(
+        "src.billing.metering.record_response", new_callable=AsyncMock
+    ) as record:
+        with patch(
+            "src.llm.client.litellm.acompletion", new_callable=AsyncMock
+        ) as ac:
+            ac.return_value = _resp("ok")
+            await LLMClient().generate("sys", "usr", provider="openai")
+    record.assert_not_awaited()

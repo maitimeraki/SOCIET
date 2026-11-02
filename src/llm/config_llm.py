@@ -46,6 +46,9 @@ class LLMConfig:
     # Default provider (user's favorite)
     default_llm_provider: str = os.getenv("DEFAULT_LLM_PROVIDER", "ollama")
 
+    # Output cap applied when a caller does not name max_tokens.
+    max_output_tokens: int = int(os.getenv("LLM_MAX_OUTPUT_TOKENS", "2048"))
+
     # Two-tier model defaults — the single source for every model reference.
     # ANALYSIS: cheap but capable — ontology discovery and graph analysis.
     # DEBATE: the most powerful — agent debate in the simulation world.
