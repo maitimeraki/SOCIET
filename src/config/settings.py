@@ -104,6 +104,67 @@ class Settings(BaseSettings):
     # finish before the API process exits. Never blocks past it.
     shutdown_drain_seconds: int = 30
 
+    # --- Billing and entitlements (plan §4, §6). billing_enabled stays False until
+    # legal + entity + Stripe are ready; the free plan is the entitlement while off.
+    billing_enabled: bool = False
+    stripe_secret_key: str | None = None
+    stripe_webhook_secret: str | None = None
+    stripe_price_starter: str | None = None
+    stripe_price_studio: str | None = None
+    legal_entity_name: str = ""
+    legal_contact_email: str = "hello@societas.app"
+
+    plan_free_units: int = 1_000
+    plan_starter_units: int = 8_000
+    plan_studio_units: int = 16_000
+    plan_enterprise_units: int = 80_000
+
+    plan_free_max_agents: int = 10
+    plan_starter_max_agents: int = 20
+    plan_studio_max_agents: int = 20
+    plan_enterprise_max_agents: int = 40
+
+    plan_free_max_rounds: int = 3
+    plan_starter_max_rounds: int = 4
+    plan_studio_max_rounds: int = 4
+    plan_enterprise_max_rounds: int = 4
+
+    unit_tokens: int = 1_000  # internal meter; never rendered
+    chars_per_unit: int = 2_000  # pre-flight estimate only
+    unit_cost_usd: float = 0.0002  # internal only; margin checks
+    billing_reservation_lease_seconds: int = 3_600
+
+    @model_validator(mode="after")
+    def _validate_billing(self) -> "Settings":
+        if self.billing_enabled:
+            for name in (
+                "stripe_secret_key",
+                "stripe_webhook_secret",
+                "stripe_price_starter",
+                "stripe_price_studio",
+            ):
+                if not getattr(self, name):
+                    raise ValueError(f"{name} is required when billing_enabled is true")
+
+        for plan in ("free", "starter", "studio", "enterprise"):
+            if getattr(self, f"plan_{plan}_units") <= 0:
+                raise ValueError(f"plan_{plan}_units must be > 0")
+            max_agents = getattr(self, f"plan_{plan}_max_agents")
+            if not 2 <= max_agents <= 100 or max_agents % 2:
+                raise ValueError(f"plan_{plan}_max_agents must be even and in [2, 100]")
+            if not 1 <= getattr(self, f"plan_{plan}_max_rounds") <= 10:
+                raise ValueError(f"plan_{plan}_max_rounds must be in [1, 10]")
+
+        if self.unit_tokens <= 0:
+            raise ValueError("unit_tokens must be > 0")
+        if self.chars_per_unit <= 0:
+            raise ValueError("chars_per_unit must be > 0")
+        if self.unit_cost_usd < 0:
+            raise ValueError("unit_cost_usd must be >= 0")
+        if self.billing_reservation_lease_seconds <= 0:
+            raise ValueError("billing_reservation_lease_seconds must be > 0")
+        return self
+
     @field_validator(
         "cors_allowed_origins", "allowed_hosts", "job_retry_intervals", mode="before"
     )

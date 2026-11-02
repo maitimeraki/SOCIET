@@ -9,11 +9,14 @@ import uuid
 
 from sqlalchemy import (
     BigInteger,
+    Boolean,
+    CheckConstraint,
     DateTime,
     Double,
     ForeignKey,
     Index,
     Integer,
+    PrimaryKeyConstraint,
     Text,
     UniqueConstraint,
     text,
@@ -45,6 +48,22 @@ class User(Base):
     updated_at: Mapped[datetime.datetime] = _timestamptz_default()
     disabled_at: Mapped[datetime.datetime | None] = mapped_column(
         DateTime(timezone=True)
+    )
+    role: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default=text("'user'")
+    )
+    plan_key: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default=text("'free'")
+    )
+    email_verified_at: Mapped[datetime.datetime | None] = mapped_column(
+        DateTime(timezone=True)
+    )
+    age_confirmed_at: Mapped[datetime.datetime | None] = mapped_column(
+        DateTime(timezone=True)
+    )
+
+    __table_args__ = (
+        CheckConstraint("role IN ('user','support','admin')", name="ck_users_role"),
     )
 
 
@@ -144,6 +163,15 @@ class Job(Base):
     finished_at: Mapped[datetime.datetime | None] = mapped_column(
         DateTime(timezone=True)
     )
+    reserved_units: Mapped[int] = mapped_column(
+        BigInteger, nullable=False, server_default=text("0")
+    )
+    reserved_period_start: Mapped[datetime.datetime | None] = mapped_column(
+        DateTime(timezone=True)
+    )
+    reserved_at: Mapped[datetime.datetime | None] = mapped_column(
+        DateTime(timezone=True)
+    )
 
     __table_args__ = (Index("jobs_user_id_idx", "user_id"),)
 
@@ -195,4 +223,186 @@ class RunEvent(Base):
 
     __table_args__ = (
         UniqueConstraint("run_id", "seq", name="uq_run_events_run_id_seq"),
+    )
+
+
+class Subscription(Base):
+    __tablename__ = "subscriptions"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()")
+    )
+    user_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), index=True
+    )
+    stripe_customer_id: Mapped[str] = mapped_column(Text, nullable=False, index=True)
+    stripe_subscription_id: Mapped[str | None] = mapped_column(Text, unique=True)
+    price_id: Mapped[str | None] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(Text, nullable=False)
+    current_period_start: Mapped[datetime.datetime | None] = mapped_column(
+        DateTime(timezone=True)
+    )
+    current_period_end: Mapped[datetime.datetime | None] = mapped_column(
+        DateTime(timezone=True)
+    )
+    cancel_at_period_end: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("false")
+    )
+    created_at: Mapped[datetime.datetime] = _timestamptz_default()
+    updated_at: Mapped[datetime.datetime] = _timestamptz_default()
+
+
+class UsagePeriod(Base):
+    __tablename__ = "usage_periods"
+
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    period_start: Mapped[datetime.datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    units_used: Mapped[int] = mapped_column(
+        BigInteger, nullable=False, server_default=text("0")
+    )
+    units_reserved: Mapped[int] = mapped_column(
+        BigInteger, nullable=False, server_default=text("0")
+    )
+
+    __table_args__ = (
+        PrimaryKeyConstraint("user_id", "period_start"),
+        CheckConstraint("units_used >= 0", name="ck_usage_periods_units_used"),
+        CheckConstraint("units_reserved >= 0", name="ck_usage_periods_units_reserved"),
+    )
+
+
+class UsageEvent(Base):
+    __tablename__ = "usage_events"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()")
+    )
+    user_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL")
+    )
+    period_start: Mapped[datetime.datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    kind: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default=text("'units'")
+    )
+    source: Mapped[str] = mapped_column(Text, nullable=False)
+    amount: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    idempotency_key: Mapped[str] = mapped_column(Text, nullable=False)
+    reason: Mapped[str | None] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default=text("'consumed'")
+    )
+    created_at: Mapped[datetime.datetime] = _timestamptz_default()
+
+    __table_args__ = (
+        UniqueConstraint(
+            "user_id",
+            "period_start",
+            "kind",
+            "idempotency_key",
+            name="uq_usage_events_idempotency",
+        ),
+        Index("usage_events_user_id_period_start_idx", "user_id", "period_start"),
+    )
+
+
+class LLMUsage(Base):
+    __tablename__ = "llm_usage"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()")
+    )
+    user_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL")
+    )
+    run_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    job_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    call_id: Mapped[str] = mapped_column(Text, nullable=False, unique=True)
+    source: Mapped[str] = mapped_column(Text, nullable=False)
+    provider: Mapped[str | None] = mapped_column(Text)
+    model: Mapped[str | None] = mapped_column(Text)
+    prompt_tokens: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default=text("0")
+    )
+    completion_tokens: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default=text("0")
+    )
+    cost_usd: Mapped[float | None] = mapped_column(Double)
+    created_at: Mapped[datetime.datetime] = _timestamptz_default()
+
+    __table_args__ = (
+        Index("llm_usage_user_id_created_at_idx", "user_id", "created_at"),
+    )
+
+
+class WebhookEvent(Base):
+    __tablename__ = "webhook_events"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()")
+    )
+    provider_event_id: Mapped[str] = mapped_column(Text, nullable=False, unique=True)
+    event_type: Mapped[str] = mapped_column(Text, nullable=False)
+    payload_hash: Mapped[str] = mapped_column(Text, nullable=False)
+    payload: Mapped[dict | None] = mapped_column(JSONB)
+    received_at: Mapped[datetime.datetime] = _timestamptz_default()
+    processed_at: Mapped[datetime.datetime | None] = mapped_column(
+        DateTime(timezone=True)
+    )
+    status: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default=text("'pending'")
+    )
+    error: Mapped[str | None] = mapped_column(Text)
+
+    __table_args__ = (
+        Index("webhook_events_status_received_at_idx", "status", "received_at"),
+    )
+
+
+class LegalDocument(Base):
+    __tablename__ = "legal_documents"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()")
+    )
+    slug: Mapped[str] = mapped_column(Text, nullable=False)
+    version: Mapped[str] = mapped_column(Text, nullable=False)
+    effective_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    content_sha256: Mapped[str] = mapped_column(Text, nullable=False)
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+
+    __table_args__ = (
+        UniqueConstraint("slug", "version", name="uq_legal_documents_slug_version"),
+    )
+
+
+class UserConsent(Base):
+    __tablename__ = "user_consents"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()")
+    )
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    document_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("legal_documents.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    accepted_at: Mapped[datetime.datetime] = _timestamptz_default()
+    ip: Mapped[str | None] = mapped_column(INET)
+    user_agent: Mapped[str | None] = mapped_column(Text)
+
+    __table_args__ = (
+        UniqueConstraint(
+            "user_id", "document_id", name="uq_user_consents_user_document"
+        ),
     )
