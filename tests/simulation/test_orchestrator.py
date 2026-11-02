@@ -1304,3 +1304,38 @@ async def test_result_carries_the_verdict_payload_for_the_ui():
     # Step 8 output must reach the delivered result, JSON-safe.
     assert result.provenance_by_claim["Steel tariffs"][0]["title"] == "Trade Report"
     assert isinstance(result.provenance_by_claim["Steel tariffs"][0]["chunk_id"], str)
+
+
+@pytest.mark.asyncio
+async def test_metering_error_is_not_absorbed_by_the_round_loop():
+    """R9: a metering failure escapes the round loop instead of being a warning."""
+    from src.billing.metering import MeteringError
+
+    synth = AsyncMock(spec=ProfileSynthesizer)
+    topo = AsyncMock(spec=CommunicationTopology)
+    llm_runner = MagicMock(spec=BatchedLLMRunner)
+    verdict_synth = MagicMock(spec=VerdictSynthesizer)
+    society_memory = AsyncMock(spec=SocietyMemory)
+
+    synth.synthesize.return_value = [_make_profile(1, "Alice"), _make_profile(2, "Bob")]
+    topo.compute_round_pairs.return_value = [
+        CommPair(agent_a="Alice", agent_b="Bob", shared_entities=[], score=0.5)
+    ]
+    verdict_synth.asynthesize.return_value = _make_verdict()
+    llm_runner.gather = MagicMock(
+        side_effect=MeteringError("metering failed: usage missing")
+    )
+    society_memory.commit_round.return_value = _ok_receipt()
+
+    orchestrator = DebateOrchestrator(
+        profile_synthesizer=synth,
+        topology=topo,
+        llm_runner=llm_runner,
+        verdict_synthesizer=verdict_synth,
+        society_memory=society_memory,
+    )
+
+    with pytest.raises(MeteringError):
+        await orchestrator.run(
+            "test query", "ds1", DebateConfig(max_agents=5, max_rounds=3), AsyncMock()
+        )

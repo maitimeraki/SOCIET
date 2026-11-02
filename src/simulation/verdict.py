@@ -224,6 +224,10 @@ class VerdictSynthesizer:
                         max_tokens=cfg.verdict_max_tokens,
                         model=cfg.verdict_model,
                     )
+            except metering.MeteringError:
+                # Accounting already failed: stop the job instead of retrying
+                # into a deterministic fallback verdict (R9).
+                raise
             except Exception:
                 logger.exception(
                     "verdict answer-writer attempt %d/%d raised",

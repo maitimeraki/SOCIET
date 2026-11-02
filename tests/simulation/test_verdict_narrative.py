@@ -263,3 +263,25 @@ class TestVerdictConfig:
             assert llm.calls[0]["kwargs"]["model"] == "sentinel-model"
         finally:
             get_llm_config.cache_clear()
+
+
+class TestMeteringFailure:
+    @pytest.mark.asyncio
+    async def test_metering_error_propagates_instead_of_falling_back(self):
+        """A metering failure stops the job; it is not a fallback verdict (R9)."""
+        from src.billing.metering import MeteringError
+
+        rounds, profiles = two_agent_debate()
+        llm = _ScriptedLLM(MeteringError("metering failed: usage missing"))
+
+        with pytest.raises(MeteringError):
+            await VerdictSynthesizer().asynthesize(
+                rounds=rounds,
+                profiles=profiles,
+                llm_client=llm,
+                query="Should we expand to Europe?",
+                run_id="run-42",
+            )
+
+        # No retry into a deterministic fallback — the first failure propagates.
+        assert len(llm.calls) == 1

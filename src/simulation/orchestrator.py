@@ -43,6 +43,7 @@ import logging
 from dataclasses import asdict, dataclass, field
 from typing import Any, Awaitable, Callable, List, Optional
 
+from src.billing.metering import MeteringError
 from src.persona.agent import Agent, Stance
 from src.simulation.debate_config import DebateConfig
 from src.simulation.llm_batch import BatchedLLMRunner
@@ -416,6 +417,10 @@ class DebateOrchestrator:
                 if self._check_convergence(rounds, profiles, config=config):
                     break
 
+            except MeteringError:
+                # A metering failure is not a round failure to absorb — the
+                # job must stop before its next LLM call (R9).
+                raise
             except Exception as exc:
                 rounds_failed += 1
                 warnings.append(f"Round {round_num} failed: {exc}")

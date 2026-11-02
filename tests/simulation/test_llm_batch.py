@@ -98,3 +98,31 @@ async def test_results_correlation(mock_llm):
     assert result_by_id["alpha"].response == "mock response"
     assert result_by_id["beta"].response == "mock response"
     assert result_by_id["gamma"].response == "mock response"
+
+
+@pytest.mark.asyncio
+async def test_metering_error_propagates_from_run_single():
+    """A metering failure must stop the job, not become an empty turn (R9)."""
+    from src.billing.metering import MeteringError
+
+    llm = AsyncMock()
+    llm.generate = AsyncMock(side_effect=MeteringError("metering failed: usage missing"))
+    runner = BatchedLLMRunner(llm)
+
+    with pytest.raises(MeteringError):
+        await runner._run_single(PairPrompt(system_prompt="s", user_prompt="u", pair_id="p"))
+
+
+@pytest.mark.asyncio
+async def test_metering_error_propagates_through_gather():
+    from src.billing.metering import MeteringError
+
+    llm = AsyncMock()
+    llm.generate = AsyncMock(side_effect=MeteringError("metering failed: balance exhausted"))
+    runner = BatchedLLMRunner(llm)
+
+    with pytest.raises(MeteringError):
+        async for _ in runner.gather(
+            [PairPrompt(system_prompt="s", user_prompt="u", pair_id="p")]
+        ):
+            pass
