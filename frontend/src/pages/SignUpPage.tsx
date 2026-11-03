@@ -57,6 +57,9 @@ export default function SignUpPage() {
   const emailProblem = fieldProblem(email, touched.email, submitted, emailError)
   const passwordProblem = fieldProblem(password, touched.password, submitted, passwordError)
   const consentProblem = submitted ? consentError(acceptTerms, ageConfirmed) : null
+  // Per-field: only the attestation still missing is marked invalid, never one already checked.
+  const termsInvalid = submitted && !acceptTerms
+  const ageInvalid = submitted && !ageConfirmed
 
   async function submit() {
     if (submitting || redirectTo !== null) return
@@ -119,28 +122,30 @@ export default function SignUpPage() {
             id="signup-terms"
             name="accept_terms"
             type="checkbox"
+            required
             checked={acceptTerms}
             onChange={(e) => setAcceptTerms(e.target.checked)}
             disabled={submitting}
-            aria-invalid={consentProblem ? true : undefined}
+            aria-invalid={termsInvalid ? true : undefined}
             className="mt-1 h-4 w-4 shrink-0 accent-accent"
           />
-          <div className="text-body-sm text-ink-2">
-            <label htmlFor="signup-terms">I agree to the </label>
+          <label htmlFor="signup-terms" className="text-body-sm text-ink-2">
+            I agree to the{' '}
             <Link to="/terms" className="underline underline-offset-4 hover:text-ink">Terms</Link>
             {' and '}
             <Link to="/privacy" className="underline underline-offset-4 hover:text-ink">Privacy Policy</Link>.
-          </div>
+          </label>
         </div>
         <div className="flex min-h-11 items-start gap-2.5">
           <input
             id="signup-age"
             name="age_confirmed"
             type="checkbox"
+            required
             checked={ageConfirmed}
             onChange={(e) => setAgeConfirmed(e.target.checked)}
             disabled={submitting}
-            aria-invalid={consentProblem ? true : undefined}
+            aria-invalid={ageInvalid ? true : undefined}
             className="mt-1 h-4 w-4 shrink-0 accent-accent"
           />
           <label htmlFor="signup-age" className="text-body-sm text-ink-2">

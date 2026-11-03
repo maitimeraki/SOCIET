@@ -97,6 +97,26 @@ describe('SignUpPage — the consent attestations (Task 10)', () => {
     expect(html).toContain('I am 18 or older.')
   })
 
+  it('gives each checkbox the complete statement as its accessible label', () => {
+    const html = render()
+    const labelFor = (id: string) => {
+      const match = html.match(new RegExp(`<label[^>]*for="${id}"[^>]*>([\\s\\S]*?)</label>`))
+      expect(match).not.toBeNull()
+      return renderedText(match![0])
+    }
+    expect(labelFor('signup-terms')).toContain('I agree to the Terms and Privacy Policy')
+    expect(labelFor('signup-age')).toContain('I am 18 or older.')
+  })
+
+  it('marks both attestations required and keeps the 44px target', () => {
+    const html = render()
+    for (const id of ['signup-terms', 'signup-age']) {
+      const input = html.match(new RegExp(`<input[^>]*id="${id}"[^>]*>`))?.[0] ?? ''
+      expect(input).toContain('required')
+    }
+    expect(html.match(/class="flex min-h-11 items-start gap-2.5"/g)?.length).toBe(2)
+  })
+
   it('blocks a signup until both are checked', () => {
     expect(consentError(false, false)).not.toBeNull()
     expect(consentError(true, false)).not.toBeNull()
