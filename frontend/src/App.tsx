@@ -25,6 +25,10 @@ const ResultsPage = lazy(() => import('./pages/ResultsPage'))
 const LandingPage = lazy(() => import('./pages/LandingPage'))
 const SignInPage = lazy(() => import('./pages/SignInPage'))
 const SignUpPage = lazy(() => import('./pages/SignUpPage'))
+const VerifyEmailPage = lazy(() => import('./pages/VerifyEmailPage'))
+const ForgotPasswordPage = lazy(() => import('./pages/ForgotPasswordPage'))
+const ResetPasswordPage = lazy(() => import('./pages/ResetPasswordPage'))
+const AccountPage = lazy(() => import('./pages/AccountPage'))
 const PricingPage = lazy(() => import('./pages/PricingPage'))
 const LegalIndexPage = lazy(() => import('./pages/LegalIndexPage'))
 const LegalPage = lazy(() => import('./pages/LegalPage'))
@@ -62,6 +66,9 @@ export default function App() {
             <Route index element={<Navigate to="/auth/signin" replace />} />
             <Route path="signin" element={<SignInPage />} />
             <Route path="signup" element={<SignUpPage />} />
+            <Route path="verify" element={<VerifyEmailPage />} />
+            <Route path="forgot" element={<ForgotPasswordPage />} />
+            <Route path="reset" element={<ResetPasswordPage />} />
           </Route>
 
           <Route element={<RequireAuth />}>
@@ -89,6 +96,7 @@ export default function App() {
               <Route path="/dashboard" element={<Navigate to="/overview" replace />} />
               <Route path="/panel" element={<Navigate to="/overview" replace />} />
               <Route path="/agents" element={<AgentsPage />} />
+              <Route path="/account" element={<AccountPage />} />
               <Route path="*" element={<NotFoundPage />} />
             </Route>
           </Route>

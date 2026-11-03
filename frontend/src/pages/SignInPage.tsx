@@ -124,12 +124,12 @@ export default function SignInPage() {
             {SIGN_IN.crossAction}
           </Link>
         </p>
-        <a
-          href={SIGN_IN.forgotHref}
+        <Link
+          to={SIGN_IN.forgotHref}
           className="inline-flex min-h-11 min-w-11 items-center font-ui text-body text-ink-2 underline decoration-ink-3 underline-offset-4 transition-colors duration-state hover:text-ink hover:decoration-accent lg:min-h-0 lg:min-w-0"
         >
           {SIGN_IN.forgot}
-        </a>
+        </Link>
       </div>
 
       <p className="border-t border-rule pt-4 text-body-sm text-ink-3">{TRUST_LINE}</p>

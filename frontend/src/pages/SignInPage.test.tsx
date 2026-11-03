@@ -39,7 +39,7 @@ describe('SignInPage — the door back in (§7.2)', () => {
 
   it('offers one recovery link, and no second primary action for it', () => {
     expect(page).toContain('Forgot password?')
-    expect(page).toContain('href="mailto:hello@societas.app?subject=Password%20reset"')
+    expect(page).toContain('href="/auth/forgot"')
   })
 
   it('is not busy, invalid or alerting before a submit', () => {

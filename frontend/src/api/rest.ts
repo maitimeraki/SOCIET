@@ -224,6 +224,30 @@ export const authSignup = (
 
 export const authLogout = () => request<void>('/api/v1/auth/logout', { method: 'POST' })
 
+/** Resend the confirmation link to the signed-in account. */
+export const authVerifySend = () => request<void>('/api/v1/auth/verify/send', { method: 'POST' })
+
+export const authVerify = (token: string) =>
+  request<void>('/api/v1/auth/verify', jsonInit('POST', { token }))
+
+/** Always 202 — the server never says whether the address exists. */
+export const authResetRequest = (email: string) =>
+  request<{ status: string }>('/api/v1/auth/reset/request', jsonInit('POST', { email }))
+
+export const authResetConfirm = (token: string, newPassword: string) =>
+  request<void>('/api/v1/auth/reset/confirm', jsonInit('POST', { token, new_password: newPassword }))
+
+/** The export is a queued job; poll `GET /api/v1/jobs/{id}` and use the `download_url` it mints. */
+export const accountExport = () =>
+  request<{ job_id: string; status: string }>('/api/v1/account/export', { method: 'POST' })
+
+export const accountDelete = (confirm: string) =>
+  request<{ job_id: string; status: string }>('/api/v1/account', {
+    method: 'DELETE',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ confirm }),
+  })
+
 /** The published legal documents, current version only. Public — no session needed. */
 export const legalDocuments = () => request<LegalDocumentMeta[]>('/api/v1/legal/documents')
 

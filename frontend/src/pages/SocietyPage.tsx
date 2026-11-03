@@ -4,13 +4,33 @@ import { useNavigate } from 'react-router-dom'
 import { ApiError, startDebate } from '../api/rest'
 import { DEBATE_CONFIG_DEFAULTS } from '../api/types'
 import type { DebateConfig, DebateStartRequest } from '../api/types'
+import { useAuthStore } from '../auth/authStore'
 import { useDraftStore } from '../wizard/draftStore'
 import QueryComposer from '../components/society/QueryComposer'
 import ConfigPanel from '../components/society/ConfigPanel'
+import type { PlanLimits } from '../components/society/ConfigPanel'
 import Button from '../components/ui/Button'
 import Label from '../components/ui/Label'
 import { toast } from '../components/ui/Toast'
 import { fmtInt } from '../utils/format'
+
+/**
+ * The config a fresh form starts with: the defaults, lowered to the plan's caps. An untouched form
+ * must always start inside the plan so the server never has to reject it.
+ */
+export function initialConfig(limits?: PlanLimits): DebateConfig {
+  return clampConfig(DEBATE_CONFIG_DEFAULTS, limits)
+}
+
+/** Keep an already-edited config inside the plan when entitlements change under it. */
+export function clampConfig(value: DebateConfig, limits?: PlanLimits): DebateConfig {
+  if (!limits) return value
+  return {
+    ...value,
+    max_agents: Math.min(value.max_agents, limits.max_agents),
+    max_rounds: Math.min(value.max_rounds, limits.max_rounds),
+  }
+}
 
 /**
  * The debate request, or null while there is nothing to ask: no question, or no map (the corpus
@@ -41,8 +61,11 @@ export default function SocietyPage() {
   const corpusName = useDraftStore((s) => s.corpusName)
   const graphSummary = useDraftStore((s) => s.graphSummary)
   const clear = useDraftStore((s) => s.clear)
+  const limits = useAuthStore((s) => s.user?.entitlements)
   const [query, setQuery] = useState('')
-  const [config, setConfig] = useState<DebateConfig>(DEBATE_CONFIG_DEFAULTS)
+  const [config, setConfig] = useState<DebateConfig>(() => initialConfig(limits))
+  // Derived each render so a plan change cannot leave an out-of-range value in the payload.
+  const effectiveConfig = clampConfig(config, limits)
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -50,7 +73,7 @@ export default function SocietyPage() {
   // the note IngestPage renders when the corpus is gone. `convene` still refuses without a graph id.
 
   const convene = async () => {
-    const body = debateRequest(datasetId, corpusName, query, config)
+    const body = debateRequest(datasetId, corpusName, query, effectiveConfig)
     if (!body || submitting) return
     setSubmitting(true)
     setError(null)
@@ -92,7 +115,7 @@ export default function SocietyPage() {
         </p>
       </div>
 
-      <ConfigPanel value={config} onChange={setConfig} />
+      <ConfigPanel value={effectiveConfig} onChange={setConfig} limits={limits} />
 
       {error && <p className="border-t border-danger/40 pt-3 text-body text-ink-2">{error}</p>}
 

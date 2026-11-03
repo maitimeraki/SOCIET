@@ -24,9 +24,9 @@ export const SIGN_IN = {
   action: 'Sign in',
   /** The success stamp: the mark the account is now open. */
   stamp: 'Signed in',
-  /** The one recovery affordance — no reset flow is built, so it reaches the operator. */
+  /** The one recovery affordance — the reset request screen. */
   forgot: 'Forgot password?',
-  forgotHref: 'mailto:hello@societas.app?subject=Password%20reset',
+  forgotHref: '/auth/forgot',
   crossQuestion: 'No account yet?',
   crossAction: 'Create an account',
 } as const

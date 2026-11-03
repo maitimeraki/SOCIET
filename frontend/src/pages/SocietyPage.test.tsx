@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { debateRequest } from './SocietyPage'
+import { clampConfig, debateRequest, initialConfig } from './SocietyPage'
 import { DEBATE_CONFIG_DEFAULTS } from '../api/types'
 
 // No jsdom / no testing-library in this repo (see AppErrorBoundary.test.tsx), and zustand serves its
@@ -16,6 +16,30 @@ describe('the question cannot become a request before the map exists (§9, D3)',
 
   it('refuses a request with no question, however the map stands', () => {
     expect(debateRequest('ds-1', 'EU expansion', '   ', CONFIG)).toBeNull()
+  })
+})
+
+describe('the form starts inside the plan (§7.10)', () => {
+  it('a free plan starts at 10 experts and 3 passes, not the absolute 50/5', () => {
+    expect(initialConfig({ max_agents: 10, max_rounds: 3 })).toMatchObject({
+      max_agents: 10,
+      max_rounds: 3,
+    })
+  })
+
+  it('keeps the absolute defaults when no plan cap is known', () => {
+    expect(initialConfig()).toMatchObject({
+      max_agents: DEBATE_CONFIG_DEFAULTS.max_agents,
+      max_rounds: DEBATE_CONFIG_DEFAULTS.max_rounds,
+    })
+  })
+
+  it('clamps an already-edited config when the plan caps change', () => {
+    const edited = { ...DEBATE_CONFIG_DEFAULTS, max_agents: 40, max_rounds: 12 }
+    expect(clampConfig(edited, { max_agents: 10, max_rounds: 3 })).toMatchObject({
+      max_agents: 10,
+      max_rounds: 3,
+    })
   })
 })
 

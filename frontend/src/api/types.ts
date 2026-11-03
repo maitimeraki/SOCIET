@@ -15,6 +15,9 @@ export interface User {
   }
 }
 
+/** The authorization roles the API assigns; the client's guards are UX only. */
+export type Role = User['role']
+
 /** `GET /api/v1/billing/usage` — the server's only usage figures; the client invents none. */
 export interface BillingUsage {
   plan: string

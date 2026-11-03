@@ -75,14 +75,20 @@ export default function Rail() {
         <div className="hidden px-4 pb-2 lg:block">
           <HealthDot />
         </div>
-        <div className="flex items-center gap-2 px-3 py-2">
-          <span
-            aria-hidden="true"
-            className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-accent-soft font-ui text-micro font-medium text-accent"
+        <div className="px-3 py-2">
+          <Link
+            to="/account"
+            aria-label="Account"
+            className="flex min-h-11 items-center gap-2 rounded-sm hover:bg-sand"
           >
-            {initials}
-          </span>
-          <span className={`${LABEL} text-label text-ink-2`}>Account</span>
+            <span
+              aria-hidden="true"
+              className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-accent-soft font-ui text-micro font-medium text-accent"
+            >
+              {initials}
+            </span>
+            <span className={`${LABEL} text-label text-ink-2`}>Account</span>
+          </Link>
         </div>
         {/* §8.11 — the account row carries a real sign-out, never a dead span. */}
         <div className="px-3 pb-3">
