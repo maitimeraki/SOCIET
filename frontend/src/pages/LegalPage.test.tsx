@@ -3,10 +3,11 @@ import { describe, expect, it } from 'vitest'
 // required because the page's way out is a `<Link>`.
 import { renderToStaticMarkup } from 'react-dom/server'
 import { MemoryRouter } from 'react-router-dom'
+import { ApiError } from '../api/rest'
 import type { LegalDocument } from '../api/types'
 import { BANNED_TERMS, copyLawApplies, isLegalPath, renderedText } from '../test/copyLaw'
 import { LegalIndexView } from './LegalIndexPage'
-import { LegalPageView, splitLegalContent } from './LegalPage'
+import { isNotFoundError, LegalPageView, splitLegalContent } from './LegalPage'
 
 const DOC: LegalDocument = {
   slug: 'privacy',
@@ -53,6 +54,12 @@ describe('LegalPageView', () => {
     expect(html).toContain('border-danger')
     expect(html).toContain('nothing was lost')
     expect(html).toContain('Try again')
+  })
+
+  it('maps a 404 to the not-found state, and every other failure to the error state', () => {
+    expect(isNotFoundError(new ApiError(404, 'Legal document not found.'))).toBe(true)
+    expect(isNotFoundError(new ApiError(500, 'boom'))).toBe(false)
+    expect(isNotFoundError(new Error('network'))).toBe(false)
   })
 
   it('splits the first heading from the body, keeping the served text intact', () => {

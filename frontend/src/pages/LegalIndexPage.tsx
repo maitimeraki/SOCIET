@@ -4,6 +4,7 @@ import { legalDocuments } from '../api/rest'
 import type { LegalDocumentMeta } from '../api/types'
 import ErrorState from '../components/ui/ErrorState'
 import Skeleton from '../components/ui/Skeleton'
+import { LEGAL_LINKS } from '../config/legalLinks'
 import { fmtDay } from '../utils/format'
 
 /**
@@ -12,14 +13,8 @@ import { fmtDay } from '../utils/format'
  */
 const COLUMN = 'mx-auto w-[min(760px,calc(100%-48px))]'
 
-const LABELS: Record<string, string> = {
-  privacy: 'Privacy',
-  terms: 'Terms',
-  refund: 'Refund',
-  subprocessors: 'Subprocessors',
-}
-
-const labelFor = (slug: string) => LABELS[slug] ?? slug
+const labelFor = (slug: string) =>
+  LEGAL_LINKS.find((link) => link.href === slug || link.href.endsWith(`/${slug}`))?.label ?? slug
 
 export interface LegalIndexViewProps {
   documents: LegalDocumentMeta[]

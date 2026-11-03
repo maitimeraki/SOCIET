@@ -2,6 +2,7 @@ import { Link } from 'react-router-dom'
 import { useEffect, useRef } from 'react'
 import type { ReactNode } from 'react'
 import { buttonClasses } from '../components/ui/Button'
+import { LEGAL_LINKS } from '../config/legalLinks'
 import Disclosure from '../components/ui/Disclosure'
 import './home-demo.css'
 
@@ -473,7 +474,7 @@ function TheAnswer() {
           What you get back
         </h2>
         <p className="mt-3 max-w-[56ch] font-ui text-[15px] leading-[24px] text-ink-2">
-          Four objects, every time — and none of them is a chat you have to keep prompting.
+          Four objects, every time — and none of them is a chat you have to keep asking.
         </p>
 
         <ul className="mt-10 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
@@ -788,7 +789,7 @@ function Questions() {
   const items = [
     {
       q: 'What is Societas?',
-      a: 'A local tool that reads the documents your experts would have read, maps what is in them, and convenes a panel of experts drawn from that material to argue one question to an answer.',
+      a: 'A decision panel that reads the documents your experts would have read, maps what is in them, and convenes a panel of experts drawn from that material to argue one question to an answer.',
     },
     {
       q: 'Do I need my own documents?',
@@ -900,6 +901,17 @@ function Footer() {
             </a>
           </div>
         </div>
+        <nav aria-label="Legal" className="mt-6 flex flex-wrap items-center gap-x-5 gap-y-2">
+          {LEGAL_LINKS.map((link) => (
+            <Link
+              key={link.href}
+              to={link.href}
+              className="font-mono text-mono text-ink-3 underline underline-offset-4 hover:text-ink"
+            >
+              {link.label}
+            </Link>
+          ))}
+        </nav>
       </div>
     </footer>
   )

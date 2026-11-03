@@ -25,6 +25,11 @@ export function splitLegalContent(content: string): { title: string; body: strin
   return { title, body }
 }
 
+/** A 404 is the registry saying "no such slug"; every other failure is the server being unreachable. */
+// eslint-disable-next-line react-refresh/only-export-components -- a pure mapping shared with its test, not a component
+export const isNotFoundError = (error: unknown): boolean =>
+  error instanceof ApiError && error.status === 404
+
 export interface LegalPageViewProps {
   doc: LegalDocument | null
   loading: boolean
@@ -112,7 +117,7 @@ function LegalDocument({ slug }: { slug: string }) {
       .catch((error: unknown) => {
         if (cancelled) return
         setDoc(null)
-        if (error instanceof ApiError && error.status === 404) setNotFound(true)
+        if (isNotFoundError(error)) setNotFound(true)
         else setFailed(true)
       })
       .finally(() => {
