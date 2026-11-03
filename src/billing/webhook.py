@@ -84,7 +84,10 @@ async def handle_event(db: AsyncSession, event: dict) -> None:
         "invoice.payment_failed",
         "invoice.finalization_failed",
     ):
-        subscription_id = obj.get("subscription")
+        # API 2025-03-31 (Basil) moved this under parent.subscription_details.
+        subscription_id = obj.get("subscription") or (
+            (obj.get("parent") or {}).get("subscription_details") or {}
+        ).get("subscription")
         if subscription_id:
             await _sync_subscription(
                 db,
@@ -189,7 +192,15 @@ async def _sync_subscription(
     subscription_id = sub.get("id")
     customer_id = sub.get("customer")
     items = (sub.get("items") or {}).get("data") or []
-    price_id = ((items[0].get("price") or {}).get("id")) if items else None
+    first_item = items[0] if items else {}
+    price_id = (first_item.get("price") or {}).get("id")
+    # API 2025-03-31 (Basil) moved the period onto the subscription item.
+    period_start = sub.get("current_period_start") or first_item.get(
+        "current_period_start"
+    )
+    period_end = sub.get("current_period_end") or first_item.get(
+        "current_period_end"
+    )
 
     row = await _find_mirror(
         db, subscription_id=subscription_id, customer_id=customer_id
@@ -201,8 +212,8 @@ async def _sync_subscription(
     row.stripe_customer_id = customer_id
     row.status = sub.get("status")
     row.price_id = price_id
-    row.current_period_start = _unix(sub.get("current_period_start"))
-    row.current_period_end = _unix(sub.get("current_period_end"))
+    row.current_period_start = _unix(period_start)
+    row.current_period_end = _unix(period_end)
     row.cancel_at_period_end = bool(sub.get("cancel_at_period_end"))
     row.updated_at = datetime.datetime.now(datetime.UTC)
     await db.commit()

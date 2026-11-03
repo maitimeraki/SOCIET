@@ -656,15 +656,57 @@ def process_stripe_event(event_row_id: str) -> None:
 
 
 async def reconcile_subscriptions_core() -> dict[str, int]:
-    """Re-fetch every mirrored subscription; one failure never aborts the sweep."""
-    from sqlalchemy import select
+    """Re-sync every mirrored subscription and replay stranded webhook events.
+
+    Webhook events are acked before processing, so a failed enqueue or a
+    transient Stripe/DB error leaves a row no one re-visits: `pending` rows
+    older than 60s and `failed` rows older than an hour are re-processed here,
+    bounded per run. One bad row never aborts the sweep.
+    """
+    from sqlalchemy import and_, or_, select
 
     from src.billing import stripe_client, webhook
     from src.db.engine import get_session_factory
-    from src.db.models import Subscription
+    from src.db.models import Subscription, WebhookEvent
 
-    counts = {"checked": 0, "updated": 0, "failed": 0}
+    counts = {"checked": 0, "updated": 0, "failed": 0, "webhook_retried": 0}
+    now = datetime.datetime.now(datetime.UTC)
     async with get_session_factory()() as db:
+        stranded = list(
+            (
+                await db.execute(
+                    select(WebhookEvent.id)
+                    .where(
+                        or_(
+                            and_(
+                                WebhookEvent.status == "pending",
+                                WebhookEvent.received_at
+                                < now - datetime.timedelta(seconds=60),
+                            ),
+                            and_(
+                                WebhookEvent.status == "failed",
+                                WebhookEvent.received_at
+                                < now - datetime.timedelta(hours=1),
+                            ),
+                        )
+                    )
+                    .order_by(WebhookEvent.received_at)
+                    .limit(50)
+                )
+            ).scalars()
+        )
+        for event_row_id in stranded:
+            try:
+                await process_stripe_event_core(str(event_row_id))
+                counts["webhook_retried"] += 1
+            except Exception as exc:
+                logger.warning(
+                    "reconcile: webhook event %s retry failed: %s",
+                    event_row_id,
+                    exc,
+                )
+                counts["failed"] += 1
+
         subscription_ids = list(
             (
                 await db.execute(

@@ -211,12 +211,17 @@ async def stripe_webhook(
 ) -> dict:
     """Verify, record idempotently, and hand off processing — never on this path."""
     settings = get_settings()
+    if not settings.stripe_webhook_secret:
+        # Fail closed: an empty HMAC key would let anyone forge events. Billing
+        # off without a secret is the only way to reach this.
+        raise _service_unavailable()
+
     raw_body = await request.body()
     try:
         webhook_events.verify_signature(
             raw_body,
             request.headers.get("Stripe-Signature"),
-            secret=settings.stripe_webhook_secret or "",
+            secret=settings.stripe_webhook_secret,
             tolerance=settings.stripe_webhook_tolerance_seconds,
         )
         event = webhook_events.parse_event(raw_body)
@@ -239,13 +244,20 @@ async def stripe_webhook(
         )
     ).scalar_one()
 
+    from rq import Retry
+
     from src.jobs import queue as jobs_queue
     from src.jobs import tasks
 
     try:
         if settings.queue_mode == "rq":
             jobs_queue.get_queue().enqueue(
-                tasks.process_stripe_event, str(row_id)
+                tasks.process_stripe_event,
+                str(row_id),
+                retry=Retry(
+                    max=settings.job_retry_max,
+                    interval=list(settings.job_retry_intervals),
+                ),
             )
         else:
             asyncio.create_task(tasks.process_stripe_event_core(str(row_id)))

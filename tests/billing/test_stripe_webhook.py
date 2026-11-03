@@ -100,7 +100,9 @@ async def _make_mirror(
         await db.commit()
 
 
-async def _record_event(factory, event: dict) -> uuid.UUID:
+async def _record_event(
+    factory, event: dict, *, received_at: datetime.datetime | None = None
+) -> uuid.UUID:
     async with factory() as db:
         row = WebhookEvent(
             provider_event_id=event["id"],
@@ -108,6 +110,8 @@ async def _record_event(factory, event: dict) -> uuid.UUID:
             payload_hash="0" * 64,
             payload=event,
         )
+        if received_at is not None:
+            row.received_at = received_at
         db.add(row)
         await db.flush()
         row_id = row.id
@@ -336,6 +340,122 @@ async def test_past_due_leaves_the_plan_unchanged(session_factory, monkeypatch):
         assert mirror.status == "past_due"
     finally:
         await _cleanup(factory, user_id=user_id, event_ids=[event["id"]])
+
+
+def _modern_subscription(
+    *,
+    status: str = "active",
+    price_id: str = "price_starter",
+    subscription_id: str = "sub_1",
+    customer_id: str = "cus_1",
+) -> dict:
+    """API 2025-03-31 (Basil) shape: the period lives on the item."""
+    now = _now()
+    return {
+        "id": subscription_id,
+        "customer": customer_id,
+        "status": status,
+        "cancel_at_period_end": False,
+        "items": {
+            "data": [
+                {
+                    "price": {"id": price_id},
+                    "current_period_start": now,
+                    "current_period_end": now + 30 * 86_400,
+                }
+            ]
+        },
+    }
+
+
+@pytest.mark.asyncio
+async def test_modern_subscription_shape_reads_the_item_period(
+    session_factory, monkeypatch
+):
+    factory = session_factory
+    user_id = await _make_user(factory)
+    await _make_mirror(factory, user_id)
+    event = _event("customer.subscription.updated", {"id": "sub_1"})
+    row_id = await _record_event(factory, event)
+    modern = _modern_subscription()
+    monkeypatch.setattr(
+        stripe_client, "retrieve_subscription", lambda _id: modern
+    )
+
+    try:
+        await tasks.process_stripe_event_core(str(row_id))
+
+        async with factory() as db:
+            user = await db.get(User, user_id)
+            mirror = (
+                await db.execute(
+                    select(Subscription).where(Subscription.user_id == user_id)
+                )
+            ).scalar_one()
+
+        assert user.plan_key == "starter"
+        assert mirror.current_period_start is not None
+        assert mirror.current_period_end is not None
+        assert (
+            mirror.current_period_end - mirror.current_period_start
+        ) == datetime.timedelta(days=30)
+    finally:
+        await _cleanup(factory, user_id=user_id, event_ids=[event["id"]])
+
+
+@pytest.mark.asyncio
+async def test_modern_invoice_shape_finds_the_subscription(
+    session_factory, monkeypatch
+):
+    factory = session_factory
+    user_id = await _make_user(factory)
+    await _make_mirror(factory, user_id)
+    # API 2025-03-31 (Basil): the invoice references the subscription under
+    # parent.subscription_details, not at the root.
+    event = _event(
+        "invoice.paid",
+        {"parent": {"subscription_details": {"subscription": "sub_1"}}},
+    )
+    row_id = await _record_event(factory, event)
+    monkeypatch.setattr(
+        stripe_client, "retrieve_subscription", lambda _id: _subscription()
+    )
+
+    try:
+        await tasks.process_stripe_event_core(str(row_id))
+
+        async with factory() as db:
+            user = await db.get(User, user_id)
+
+        assert user.plan_key == "starter"
+    finally:
+        await _cleanup(factory, user_id=user_id, event_ids=[event["id"]])
+
+
+@pytest.mark.asyncio
+async def test_reconcile_replays_a_stranded_pending_event(
+    session_factory, monkeypatch
+):
+    factory = session_factory
+    event = _event("customer.updated", {"id": "cus_1"})
+    stale = datetime.datetime.now(datetime.UTC) - datetime.timedelta(minutes=5)
+    row_id = await _record_event(factory, event, received_at=stale)
+    # Any leftover mirror row from another test must not hit the network.
+    monkeypatch.setattr(
+        stripe_client, "retrieve_subscription", lambda _id: _subscription()
+    )
+
+    try:
+        counts = await tasks.reconcile_subscriptions_core()
+
+        async with factory() as db:
+            row = await db.get(WebhookEvent, row_id)
+
+        assert counts["webhook_retried"] >= 1
+        assert row.status == "processed"
+        assert row.processed_at is not None
+    finally:
+        await _cleanup(factory, event_ids=[event["id"]])
 
 
 @pytest.mark.asyncio

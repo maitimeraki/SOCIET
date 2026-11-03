@@ -23,6 +23,7 @@ from src.api.errors import install_error_handlers
 from src.billing.plans import clear_plan_cache
 from src.config.settings import get_settings
 from src.db.models import Subscription, WebhookEvent
+from src.jobs import queue as jobs_queue
 from src.jobs import tasks
 
 if sys.platform == "win32":
@@ -329,6 +330,89 @@ async def test_webhook_needs_no_csrf_cookie_or_header(db, billing_on, monkeypatc
                 "/api/v1/billing/webhook", content=raw, headers=headers
             )
         assert response.status_code == 200
+    finally:
+        await db.execute(
+            delete(WebhookEvent).where(WebhookEvent.provider_event_id == event["id"])
+        )
+        await db.commit()
+
+
+@requires_db
+@pytest.mark.asyncio
+async def test_webhook_enqueues_with_the_retry_policy(db, billing_on, monkeypatch):
+    monkeypatch.setenv("QUEUE_MODE", "rq")
+    get_settings.cache_clear()
+    captured: dict = {}
+
+    class _Queue:
+        def enqueue(self, func, *args, **kwargs):
+            captured["func"] = func
+            captured["args"] = args
+            captured["retry"] = kwargs.get("retry")
+
+    monkeypatch.setattr(jobs_queue, "get_queue", lambda: _Queue())
+    event = {
+        "id": f"evt_test_{uuid.uuid4().hex}",
+        "type": "customer.updated",
+        "data": {"object": {"id": "cus_1"}},
+    }
+    raw, headers = _signed(event)
+
+    try:
+        async with _client() as client:
+            response = await client.post(
+                "/api/v1/billing/webhook", content=raw, headers=headers
+            )
+
+        assert response.status_code == 200
+        assert captured["func"] is tasks.process_stripe_event
+        assert captured["retry"] is not None
+        assert captured["retry"].max == get_settings().job_retry_max
+    finally:
+        await db.execute(
+            delete(WebhookEvent).where(WebhookEvent.provider_event_id == event["id"])
+        )
+        await db.commit()
+
+
+@requires_db
+@pytest.mark.asyncio
+async def test_webhook_fails_closed_without_a_secret(db, monkeypatch):
+    """No secret means no verifiable signature — refuse instead of using ""."""
+    # Billing off is the only reachable state here: the validator forbids
+    # billing_enabled=True without a secret.
+    monkeypatch.delenv("BILLING_ENABLED", raising=False)
+    monkeypatch.delenv("STRIPE_WEBHOOK_SECRET", raising=False)
+    get_settings.cache_clear()
+
+    event = {
+        "id": f"evt_test_{uuid.uuid4().hex}",
+        "type": "customer.updated",
+        "data": {"object": {"id": "cus_1"}},
+    }
+    raw, headers = _signed(event)
+
+    try:
+        async with _client() as client:
+            response = await client.post(
+                "/api/v1/billing/webhook", content=raw, headers=headers
+            )
+
+        assert response.status_code == 503
+        assert response.json()["error"]["code"] == "service_unavailable"
+
+        rows = (
+            (
+                await db.execute(
+                    select(WebhookEvent).where(
+                        WebhookEvent.provider_event_id == event["id"]
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        assert rows == []
     finally:
         await db.execute(
             delete(WebhookEvent).where(WebhookEvent.provider_event_id == event["id"])
