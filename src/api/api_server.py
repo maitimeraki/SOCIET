@@ -250,6 +250,7 @@ from src.api.graph_stream_api import router as graph_stream_router
 from src.api.ingest_api import router as ingest_router
 from src.api.jobs_api import enqueue_or_http
 from src.api.jobs_api import router as jobs_router
+from src.api.legal_api import router as legal_router
 from src.api.persona_api import router as persona_router
 
 app.include_router(persona_router, prefix="/api")  # /api/personas/hatch
@@ -270,6 +271,9 @@ app.include_router(ws_ticket_router)
 
 # Billing (read-only usage) under /api/v1/billing — no legacy /api alias.
 app.include_router(billing_router)
+
+# Legal documents + consent under /api/v1/legal — no legacy /api alias.
+app.include_router(legal_router)
 
 # Unified graph jobs (ontology / build_graph / normalize_graph / jobs). The
 # router is populated at the bottom of this module, so it is mounted there.
