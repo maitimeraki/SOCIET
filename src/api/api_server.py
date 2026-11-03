@@ -244,6 +244,7 @@ init_sentry()
 # functions, so the guards on them cover both.
 from src.api.auth_api import router as auth_router
 from src.api.auth_api import ws_ticket_router
+from src.api.billing_api import router as billing_router
 from src.api.debate_api import router as debate_router
 from src.api.graph_stream_api import router as graph_stream_router
 from src.api.ingest_api import router as ingest_router
@@ -266,6 +267,9 @@ app.include_router(
 # Auth API (accounts, sessions, CSRF) under /api/v1/auth
 app.include_router(auth_router)
 app.include_router(ws_ticket_router)
+
+# Billing (read-only usage) under /api/v1/billing — no legacy /api alias.
+app.include_router(billing_router)
 
 # Unified graph jobs (ontology / build_graph / normalize_graph / jobs). The
 # router is populated at the bottom of this module, so it is mounted there.

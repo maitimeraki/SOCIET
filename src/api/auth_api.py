@@ -4,7 +4,7 @@ import datetime
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
-from pydantic import BaseModel, ConfigDict, EmailStr, Field
+from pydantic import BaseModel, EmailStr, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.api.limits import limiter
@@ -18,6 +18,7 @@ from src.auth.cookies import (
     verify_csrf,
 )
 from src.auth.deps import cookie_session_id, current_user, require_owner
+from src.billing.entitlements import resolve_entitlements
 from src.config.settings import get_settings
 from src.db.engine import get_db
 from src.db.models import User, UserSession
@@ -49,11 +50,33 @@ class PasswordChangeRequest(BaseModel):
 
 
 class UserOut(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
-
     id: uuid.UUID
     email: str
+    role: str
+    plan: str
     created_at: datetime.datetime
+
+    @classmethod
+    def from_user(cls, user: User, **extra) -> "UserOut":
+        return cls(
+            id=user.id,
+            email=user.email,
+            role=user.role,
+            plan=user.plan_key,
+            created_at=user.created_at,
+            **extra,
+        )
+
+
+class EntitlementOut(BaseModel):
+    max_agents: int
+    max_rounds: int
+    units_remaining: int
+    period_end: datetime.datetime
+
+
+class MeOut(UserOut):
+    entitlements: EntitlementOut
 
 
 class SessionOut(BaseModel):
@@ -101,7 +124,7 @@ async def signup(
     )
     set_session_cookie(response, session.id)
     set_csrf_cookie(response)
-    return UserOut.model_validate(user)
+    return UserOut.from_user(user)
 
 
 @router.post("/login", response_model=UserOut)
@@ -122,7 +145,7 @@ async def login(
     set_session_cookie(response, session.id)
     set_csrf_cookie(response)
     await audit_record(db, "login", user_id=user.id, ip=_client_ip(request))
-    return UserOut.model_validate(user)
+    return UserOut.from_user(user)
 
 
 @router.post("/logout", status_code=204)
@@ -140,9 +163,20 @@ async def logout(
     await audit_record(db, "logout", user_id=user.id, ip=_client_ip(request))
 
 
-@router.get("/me", response_model=UserOut)
-async def me(user: User = Depends(current_user)) -> UserOut:
-    return UserOut.model_validate(user)
+@router.get("/me", response_model=MeOut)
+async def me(
+    user: User = Depends(current_user), db: AsyncSession = Depends(get_db)
+) -> MeOut:
+    entitlements = await resolve_entitlements(db, user=user)
+    return MeOut.from_user(
+        user,
+        entitlements=EntitlementOut(
+            max_agents=entitlements.plan.max_agents,
+            max_rounds=entitlements.plan.max_rounds,
+            units_remaining=entitlements.units_remaining,
+            period_end=entitlements.period_end,
+        ),
+    )
 
 
 @router.post("/password", status_code=204)

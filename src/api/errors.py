@@ -14,10 +14,10 @@ import logging
 import uuid
 from collections.abc import Mapping
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
-from starlette.exceptions import HTTPException
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from src.api.middleware import security_headers
 
@@ -26,6 +26,7 @@ logger = logging.getLogger(__name__)
 CODE_BY_STATUS: dict[int, str] = {
     400: "bad_request",
     401: "unauthorized",
+    402: "payment_required",
     403: "forbidden",
     404: "not_found",
     409: "conflict",
@@ -68,14 +69,22 @@ def error_response(
     )
 
 
-def _code_and_message(exc: HTTPException) -> tuple[str, str]:
+def payment_required(message: str) -> HTTPException:
+    return HTTPException(
+        status_code=402, detail={"code": "payment_required", "message": message}
+    )
+
+
+def _code_and_message(exc: StarletteHTTPException) -> tuple[str, str]:
     detail = exc.detail
     if isinstance(detail, dict) and "code" in detail and "message" in detail:
         return str(detail["code"]), str(detail["message"])
     return CODE_BY_STATUS.get(exc.status_code, FALLBACK_CODE), str(detail)
 
 
-async def http_exception_handler(request: Request, exc: HTTPException) -> JSONResponse:
+async def http_exception_handler(
+    request: Request, exc: StarletteHTTPException
+) -> JSONResponse:
     code, message = _code_and_message(exc)
     return error_response(exc.status_code, code, message, request, headers=exc.headers)
 
@@ -123,7 +132,7 @@ def install_error_handlers(app: FastAPI) -> None:
     # class the router raises for an unmatched path.
     # Starlette types the handler against the base `Exception`, so the narrower
     # handler signatures above are rejected by mypy's contravariance check.
-    app.add_exception_handler(HTTPException, http_exception_handler)  # type: ignore[arg-type]
+    app.add_exception_handler(StarletteHTTPException, http_exception_handler)  # type: ignore[arg-type]
     app.add_exception_handler(
         RequestValidationError, validation_exception_handler  # type: ignore[arg-type]
     )

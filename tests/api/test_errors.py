@@ -13,7 +13,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
 from pydantic import BaseModel
 
-from src.api.errors import install_error_handlers
+from src.api.errors import CODE_BY_STATUS, install_error_handlers, payment_required
 from src.api.middleware import LoggingMiddleware, SecurityHeadersMiddleware
 from src.config.settings import Settings
 
@@ -44,6 +44,10 @@ def _client() -> TestClient:
     @app.post("/validate")
     async def validate(body: _Body):
         return {"name": body.name}
+
+    @app.get("/pay")
+    async def pay():
+        raise payment_required("Your plan's units are exhausted.")
 
     @app.get("/boom")
     async def boom():
@@ -107,6 +111,19 @@ def test_validation_error_is_422_with_a_human_message(caplog):
     # Field details are for operators, not the client.
     assert "name" in caplog.text
     assert "name" not in error["message"]
+
+
+def test_payment_required_is_402_with_its_code():
+    assert CODE_BY_STATUS[402] == "payment_required"
+
+    response = _client().get("/pay", headers={CORRELATION_HEADER: "cid-402"})
+
+    assert response.status_code == 402
+    assert _error(response) == {
+        "code": "payment_required",
+        "message": "Your plan's units are exhausted.",
+        "correlation_id": "cid-402",
+    }
 
 
 def test_unhandled_exception_is_500_internal_error():

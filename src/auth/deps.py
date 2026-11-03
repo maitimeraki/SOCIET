@@ -2,6 +2,7 @@
 
 import datetime
 import uuid
+from enum import Enum
 
 from fastapi import Depends, HTTPException, Request
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -10,8 +11,15 @@ from starlette.websockets import WebSocket
 
 from src.auth.cookies import SESSION_COOKIE
 from src.auth.service import redeem_ws_ticket
+from src.billing.entitlements import Entitlements, resolve_entitlements
 from src.db.engine import get_db, get_session_factory
 from src.db.models import User, UserSession
+
+
+class Role(str, Enum):
+    USER = "user"
+    SUPPORT = "support"
+    ADMIN = "admin"
 
 
 def _unauthenticated() -> HTTPException:
@@ -95,6 +103,23 @@ def _as_uuid(value: uuid.UUID | str | None) -> uuid.UUID | None:
         return uuid.UUID(str(value))
     except (TypeError, ValueError):
         return None
+
+
+def require_role(*allowed: Role | str):
+    """Router-level guard (never per handler): 403 unless the user holds a role."""
+
+    async def _dep(user: User = Depends(current_user)) -> User:
+        if user.role not in {a.value if isinstance(a, Role) else a for a in allowed}:
+            raise HTTPException(status_code=403, detail="Forbidden.")
+        return user
+
+    return _dep
+
+
+async def get_entitlements(
+    user: User = Depends(current_user), db: AsyncSession = Depends(get_db)
+) -> Entitlements:
+    return await resolve_entitlements(db, user=user)
 
 
 async def require_owner(resource_user_id: uuid.UUID | str | None, user: User) -> None:
