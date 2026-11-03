@@ -182,6 +182,7 @@ async def _write_usage(
                     source=source,
                     amount=amount,
                     idempotency_key=call_id,
+                    job_id=context.job_id,
                 )
                 if context.plan_units is not None:
                     units_used, _ = await get_balance(

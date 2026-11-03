@@ -267,6 +267,17 @@ async def enqueue(kind: str, payload: dict[str, Any]) -> str:
             "could not dispatch %s job %s: %s", kind, job_id, exc, exc_info=exc
         )
         await run_doc.set_job_status(job_id, "failed", error=str(exc))
+        # The caller releases the period itself; clear the row so the lease
+        # sweep cannot subtract the same amount from a sibling's hold.
+        try:
+            await run_doc.clear_job_reservation(job_id)
+        except Exception as clear_exc:
+            logger.warning(
+                "could not clear reservation for %s job %s: %s",
+                kind,
+                job_id,
+                clear_exc,
+            )
         raise
     logger.info("enqueued %s job %s", kind, job_id)
     return job_id

@@ -142,6 +142,55 @@ async def test_success_releases_the_leftover_reservation(owner, monkeypatch):
     assert balance == (0, 0)
 
 
+async def _settle(owner, period_start: datetime.datetime, job_id: str, amount: int):
+    async with get_session_factory()() as session:
+        await units.settle_call(
+            session,
+            user_id=owner.id,
+            period_start=period_start,
+            source="debate",
+            amount=amount,
+            idempotency_key=uuid.uuid4().hex,
+            job_id=uuid.UUID(job_id),
+        )
+
+
+async def test_a_partially_settled_failed_run_still_passes_on_retry(owner):
+    """The remaining hold is what a retry re-checks, not the original estimate."""
+    job_id, period_start = await _write_job(owner, reserve=True)
+    await _settle(owner, period_start, job_id, 10)
+
+    job, balance = await _job_and_balance(job_id, owner, period_start)
+    assert job.reserved_units == ESTIMATE - 10
+    assert balance == (10, ESTIMATE - 10)
+
+    await tasks._assert_reservation(job_id)  # must not raise
+
+    runner = AsyncMock()
+    with patch("src.api.debate_api._run_debate_async", new=runner):
+        await tasks._debate_core(job_id, _PAYLOAD)
+    runner.assert_awaited_once()
+
+
+async def test_a_sibling_settling_and_releasing_does_not_break_the_other(
+    owner, monkeypatch
+):
+    a_id, a_period = await _write_job(owner, reserve=True)
+    b_id, b_period = await _write_job(owner, reserve=True)
+    await _settle(owner, a_period, a_id, 10)
+
+    async def core(_job_id, _payload):
+        return None
+
+    monkeypatch.setitem(tasks.CORES, "debate", core)
+    await tasks.execute("debate", a_id, {"user_id": str(owner.id), **_PAYLOAD})
+
+    await tasks._assert_reservation(b_id)  # A's release took only A's remaining 50
+    job_b, balance = await _job_and_balance(b_id, owner, b_period)
+    assert job_b.reserved_units == ESTIMATE
+    assert balance == (10, ESTIMATE)
+
+
 async def test_failure_leaves_the_reservation_for_the_lease_sweep(owner, monkeypatch):
     job_id, period_start = await _write_job(owner, reserve=True)
 

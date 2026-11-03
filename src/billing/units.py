@@ -167,48 +167,62 @@ async def settle_call(
     amount: int,
     idempotency_key: str,
     reason: str | None = None,
+    job_id: uuid.UUID | None = None,
 ) -> bool:
+    """Settle one measured call against the period balance and the job's hold.
+
+    ``jobs.reserved_units`` is the job's *remaining* hold: every settlement
+    consumes the same amount from it, so a later release (or the lease sweep)
+    gives back only what the job never spent. The event insert decides the
+    winner; the loser commits the no-op and touches no counter.
+    """
     if source not in SOURCES:
         raise ValueError(f"source must be one of {sorted(SOURCES)}")
     amount = _non_negative_int(amount, "amount")
     await ensure_period(db, user_id, period_start)
 
-    inserted = (
-        pg_insert(UsageEvent)
-        .values(
-            user_id=user_id,
-            period_start=period_start,
-            source=source,
-            amount=amount,
-            idempotency_key=idempotency_key,
-            reason=reason,
+    inserted_id = (
+        await db.execute(
+            pg_insert(UsageEvent)
+            .values(
+                user_id=user_id,
+                period_start=period_start,
+                source=source,
+                amount=amount,
+                idempotency_key=idempotency_key,
+                reason=reason,
+            )
+            .on_conflict_do_nothing(
+                index_elements=["user_id", "period_start", "kind", "idempotency_key"]
+            )
+            .returning(UsageEvent.id)
         )
-        .on_conflict_do_nothing(
-            index_elements=["user_id", "period_start", "kind", "idempotency_key"]
-        )
-        .returning(UsageEvent.id)
-        .cte("inserted")
-    )
-    periods = UsagePeriod.__table__
-    settle = (
-        periods.update()
+    ).scalar_one_or_none()
+    if inserted_id is None:
+        # The call was already settled; release the transaction and change
+        # nothing (neither counter is decremented twice).
+        await db.commit()
+        return False
+
+    await db.execute(
+        update(UsagePeriod)
         .where(
-            periods.c.user_id == user_id,
-            periods.c.period_start == period_start,
-            select(inserted.c.id).exists(),
+            UsagePeriod.user_id == user_id,
+            UsagePeriod.period_start == period_start,
         )
         .values(
-            units_used=periods.c.units_used + amount,
-            units_reserved=func.greatest(periods.c.units_reserved - amount, 0),
+            units_used=UsagePeriod.units_used + amount,
+            units_reserved=func.greatest(UsagePeriod.units_reserved - amount, 0),
         )
-        .returning(periods.c.user_id)
-        .add_cte(inserted)
     )
-    # The period row exists (ensure_period), so a row comes back iff the event
-    # was newly inserted — a conflict skips the update.
-    event_was_new = (await db.execute(settle)).first() is not None
+    if job_id is not None:
+        await db.execute(
+            update(Job)
+            .where(Job.id == job_id)
+            .values(reserved_units=func.greatest(Job.reserved_units - amount, 0))
+        )
     await db.commit()
-    return event_was_new
+    return True
 
 
 async def release_reservation(

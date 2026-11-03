@@ -584,20 +584,28 @@ async def create_debate(
             },
         )
     except Exception:
-        await billing_units.release_reservation(
-            db,
-            user_id=user.id,
-            period_start=reservation.period_start,
-            amount=reservation.amount,
-        )
-        await audit_record(
-            db,
-            "units_release",
-            user_id=user.id,
-            target=None,
-            ip=ip,
-            meta={"estimate": estimate, "reason": "enqueue_failed"},
-        )
+        # The enqueue failure is the error the caller must see; a release
+        # failure is logged, never allowed to mask it.
+        try:
+            await billing_units.release_reservation(
+                db,
+                user_id=user.id,
+                period_start=reservation.period_start,
+                amount=reservation.amount,
+            )
+        except Exception as release_exc:
+            logger.warning(
+                "could not release reservation for user %s: %s", user.id, release_exc
+            )
+        else:
+            await audit_record(
+                db,
+                "units_release",
+                user_id=user.id,
+                target=None,
+                ip=ip,
+                meta={"estimate": estimate, "reason": "enqueue_failed"},
+            )
         raise
 
     await audit_record(

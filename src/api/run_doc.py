@@ -499,6 +499,23 @@ async def set_job_status(
     return bool(applied.rowcount)
 
 
+async def clear_job_reservation(job_id: str) -> None:
+    """Drop a job's remaining hold without touching the period balance.
+
+    The caller that already released the period (a dispatch failure, where the
+    API released exactly once) clears the row so the lease sweep cannot later
+    subtract the same amount from a sibling job's hold.
+    """
+    key = _as_uuid(job_id)
+    if key is None:
+        return
+    async with get_session_factory()() as session:
+        await session.execute(
+            update(Job).where(Job.id == key).values(reserved_units=0, reserved_at=None)
+        )
+        await session.commit()
+
+
 async def count_active_jobs(user_id: uuid.UUID | str) -> int:
     """Non-terminal jobs owned by a user, across every kind — the concurrency cap."""
     owner = _as_uuid(user_id)

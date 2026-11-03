@@ -631,15 +631,18 @@ async def execute(kind: str, job_id: str, payload: dict[str, Any]) -> None:
                 from src.audit import record as audit_record
                 from src.billing import units
                 from src.db.engine import get_session_factory
+                from src.db.models import Job
 
+                key = uuid.UUID(job_id)
                 async with get_session_factory()() as db:
-                    released = await units.release_job_reservation(
-                        db, uuid.UUID(job_id)
-                    )
+                    job = await db.get(Job, key)
+                    user_id = job.user_id if job is not None else None
+                    released = await units.release_job_reservation(db, key)
                     if released:
                         await audit_record(
                             db,
                             "units_release",
+                            user_id=user_id,
                             target=job_id,
                             meta={"released": released, "reason": "job_finished"},
                         )

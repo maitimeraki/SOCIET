@@ -187,3 +187,34 @@ async def test_explicit_rounds_over_cap_is_rejected_but_cap_exactly_is_allowed(
     doc = await run_doc.read_run_doc(allowed.json()["job_id"])
     assert doc["config"]["max_agents"] == 10
     assert doc["config"]["max_rounds"] == 3
+
+
+async def test_dispatch_failure_clears_the_row_and_releases_exactly_once(
+    client, account, monkeypatch
+):
+    def boom(*args, **kwargs):
+        raise RuntimeError("redis down")
+
+    monkeypatch.setattr("src.jobs.queue._dispatch", boom)
+
+    with pytest.raises(RuntimeError, match="redis down"):
+        await _post(client)
+
+    async with get_session_factory()() as session:
+        jobs = (
+            (await session.execute(select(Job).where(Job.user_id == account.id)))
+            .scalars()
+            .all()
+        )
+    assert len(jobs) == 1
+    assert jobs[0].status == "failed"
+    assert jobs[0].reserved_units == 0
+    assert await _balance(account.id) == (0, 0)
+
+    async with get_session_factory()() as session:
+        released = await units.release_expired_reservations(
+            session,
+            now=datetime.datetime.now(datetime.UTC) + datetime.timedelta(hours=2),
+        )
+    assert released == []
+    assert await _balance(account.id) == (0, 0)
