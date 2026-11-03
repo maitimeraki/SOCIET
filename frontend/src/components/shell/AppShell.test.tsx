@@ -34,7 +34,7 @@ describe('AppShell', () => {
     expect(html).toContain('print:hidden md:flex')
     expect(html).toContain('fixed inset-x-0 bottom-0')
     expect(html).toContain('md:hidden')
-    for (const target of ['/overview', '/documents', '/runs', '/results']) {
+    for (const target of ['/overview', '/documents', '/runs', '/results', '/account']) {
       expect(html, target).toContain(`href="${target}"`)
     }
     expect(html).toContain('aria-label="New decision"')

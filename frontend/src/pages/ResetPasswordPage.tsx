@@ -21,6 +21,22 @@ export function resetProblem(password: string, confirm: string): string | null {
   return passwordError(password) ?? confirmError(password, confirm)
 }
 
+/**
+ * Only 400/422 are the server saying the link or the password is dead. Anything else (5xx,
+ * network) is retryable and must not send the customer down the "expired link" path.
+ */
+// eslint-disable-next-line react-refresh/only-export-components -- resetFailure is the tested mapping
+export function resetFailure(error: unknown): { invalid: boolean; message: string } {
+  if (error instanceof ApiError && (error.status === 400 || error.status === 422)) {
+    return { invalid: true, message: error.detail }
+  }
+  if (error instanceof ApiError) return { invalid: false, message: error.detail }
+  return {
+    invalid: false,
+    message: "Couldn't reach the server. Check your connection and try again.",
+  }
+}
+
 export function ResetPasswordView({ state, message }: { state: 'success' | 'invalid'; message?: string }) {
   if (state === 'success') {
     return (
@@ -78,16 +94,13 @@ export default function ResetPasswordPage() {
       await authResetConfirm(token, password)
       setPhase('success')
     } catch (err) {
-      if (err instanceof ApiError && err.status !== 422) {
-        setMessage(err.detail)
+      const failure = resetFailure(err)
+      if (failure.invalid) {
+        setMessage(failure.message)
         setPhase('invalid')
         return
       }
-      setError(
-        err instanceof ApiError
-          ? err.detail
-          : "Couldn't reach the server. Check your connection and try again.",
-      )
+      setError(failure.message)
       setSubmitting(false)
     }
   }

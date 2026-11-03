@@ -2,9 +2,9 @@ import { describe, expect, it } from 'vitest'
 // No jsdom / no testing-library in this repo (see AppErrorBoundary.test.tsx): static markup in Node.
 import { renderToStaticMarkup } from 'react-dom/server'
 import { MemoryRouter } from 'react-router-dom'
-import type { User } from '../api/types'
+import type { JobStatus, User } from '../api/types'
 import { BANNED_TERMS, renderedText } from '../test/copyLaw'
-import { AccountPageView, deleteMatches, type AccountPageViewProps } from './AccountPage'
+import { AccountPageView, deleteMatches, exportTick, type AccountPageViewProps } from './AccountPage'
 
 const USER: User = {
   id: 'u1',
@@ -38,6 +38,16 @@ const render = (props: Partial<AccountPageViewProps> = {}) =>
       />
     </MemoryRouter>,
   )
+
+const job = (
+  patch: Partial<JobStatus<{ object_key?: string }>> = {},
+): JobStatus<{ object_key?: string }> => ({
+  job_id: 'j1',
+  status: 'running',
+  stage: 'export',
+  progress: 0,
+  ...patch,
+})
 
 /** The delete control's opening tag, and its `disabled` ATTRIBUTE (the classes mention `disabled:`). */
 const deleteButton = (html: string) => html.match(/<button[^>]*>Delete my account<\/button>/)?.[0] ?? ''
@@ -87,8 +97,25 @@ describe('AccountPageView — honest failure states', () => {
     )
   })
 
+  it('reads the poll tick fraction as a percentage', () => {
+    expect(exportTick(job({ progress: 0.4 })).percent).toBe(40)
+    expect(exportTick(job({ progress: 0.01 })).percent).toBe(1)
+    expect(exportTick(job({ progress: 1 })).percent).toBe(100)
+  })
+
+  it('clamps a malformed tick into 0–100', () => {
+    expect(exportTick(job({ progress: -1 })).percent).toBe(0)
+    expect(exportTick(job({ progress: 3 })).percent).toBe(100)
+  })
+
+  it('reads the signed URL from the job doc’s top level, not result', () => {
+    const tick = job({ status: 'completed', progress: 1, download_url: 'https://signed.example/x' })
+    expect(exportTick(tick).url).toBe('https://signed.example/x')
+    expect(exportTick(job({})).url).toBeNull()
+  })
+
   it('announces progress while the export is prepared', () => {
-    const html = render({ exporting: true, exportProgress: 40 })
+    const html = render({ exporting: true, exportProgress: exportTick(job({ progress: 0.4 })).percent })
     expect(html).toContain('role="status"')
     expect(html).toContain('Preparing your download — 40%')
   })

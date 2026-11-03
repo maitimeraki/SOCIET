@@ -1,11 +1,13 @@
 import { Link, NavLink } from 'react-router-dom'
-import { CheckCircle, House, ListChecks, Plus, SquaresFour } from '@phosphor-icons/react'
+import { CheckCircle, House, ListChecks, Plus, SquaresFour, UserCircle } from '@phosphor-icons/react'
 
 const ITEMS = [
   { to: '/overview', label: 'Overview', Icon: House },
   { to: '/documents', label: 'Documents', Icon: SquaresFour },
   { to: '/runs', label: 'Runs', Icon: ListChecks },
   { to: '/results', label: 'Verdict', Icon: CheckCircle },
+  // The account controls (export/delete) must be reachable below `md`, where the rail is hidden.
+  { to: '/account', label: 'Account', Icon: UserCircle },
 ]
 
 const itemClass = ({ isActive }: { isActive: boolean }) =>

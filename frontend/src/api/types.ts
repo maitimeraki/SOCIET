@@ -142,6 +142,8 @@ export interface JobStatus<TResult = GraphJobResult> {
   progress: number
   error?: string | null
   result?: TResult | null
+  /** An export job's short-lived signed URL, minted at read time on the job doc itself. */
+  download_url?: string
 }
 
 export interface DebateStartRequest {

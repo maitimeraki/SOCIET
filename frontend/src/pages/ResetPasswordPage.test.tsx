@@ -2,8 +2,14 @@ import { describe, expect, it } from 'vitest'
 // No jsdom / no testing-library in this repo (see AppErrorBoundary.test.tsx): static markup in Node.
 import { renderToStaticMarkup } from 'react-dom/server'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
+import { ApiError } from '../api/rest'
 import { BANNED_TERMS, renderedText } from '../test/copyLaw'
-import ResetPasswordPage, { ResetPasswordView, confirmError, resetProblem } from './ResetPasswordPage'
+import ResetPasswordPage, {
+  ResetPasswordView,
+  confirmError,
+  resetFailure,
+  resetProblem,
+} from './ResetPasswordPage'
 
 const renderView = (state: 'success' | 'invalid', message?: string) =>
   renderToStaticMarkup(
@@ -49,6 +55,23 @@ describe('ResetPasswordPage — the new password', () => {
 
   it('treats a missing token as an invalid link', () => {
     expect(renderWithoutToken()).toContain('This link is invalid or has expired')
+  })
+
+  it('maps only the server’s 400/422 to the invalid-link view', () => {
+    expect(resetFailure(new ApiError(400, 'This reset link has expired.'))).toEqual({
+      invalid: true,
+      message: 'This reset link has expired.',
+    })
+    expect(resetFailure(new ApiError(422, 'Use a stronger password.'))).toEqual({
+      invalid: true,
+      message: 'Use a stronger password.',
+    })
+  })
+
+  it('leaves a server or network failure retryable, never a dead link', () => {
+    expect(resetFailure(new ApiError(500, 'Internal error')).invalid).toBe(false)
+    expect(resetFailure(new TypeError('offline')).invalid).toBe(false)
+    expect(resetFailure(new TypeError('offline')).message).toContain("Couldn't reach the server")
   })
 
   it('speaks the copy law', () => {

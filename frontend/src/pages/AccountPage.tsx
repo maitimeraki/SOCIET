@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { ApiError, accountDelete, accountExport } from '../api/rest'
 import { pollJob } from '../api/poll'
-import type { Role, User } from '../api/types'
+import type { JobStatus, Role, User } from '../api/types'
 import { useAuthStore } from '../auth/authStore'
 import Button from '../components/ui/Button'
 import DefinitionList from '../components/ui/DefinitionList'
@@ -11,9 +11,18 @@ import Field from '../components/ui/Field'
 import Input from '../components/ui/Input'
 import { fmtDay, fmtInt } from '../utils/format'
 
-/** The queued export's result: the signed URL the server mints, never one the client invents. */
+/** The queued export's nested result carries the object key; the URL is minted top-level. */
 interface ExportJobResult {
-  download_url?: string
+  object_key?: string
+}
+
+/** One poll tick → the percent shown and the signed URL the job read minted (top-level). */
+// eslint-disable-next-line react-refresh/only-export-components -- exportTick is the tested mapping
+export function exportTick(tick: JobStatus<ExportJobResult>): { percent: number; url: string | null } {
+  return {
+    percent: Math.max(0, Math.min(100, Math.round(tick.progress * 100))),
+    url: tick.download_url ?? null,
+  }
 }
 
 const ROLE_LABEL: Record<Role, string> = {
@@ -166,17 +175,17 @@ export default function AccountPage() {
     try {
       const { job_id } = await accountExport()
       const job = await pollJob<ExportJobResult>(job_id, (tick) =>
-        setExportProgress(Math.round(tick.progress)),
+        setExportProgress(exportTick(tick).percent),
       )
-      const url = job.result?.download_url
+      const url = exportTick(job).url
       if (!url || job.status === 'failed' || job.status === 'cancelled') {
         setExportError(job.error ?? "The server couldn't prepare your download. Try again.")
-        setExporting(false)
         return
       }
       window.location.assign(url)
     } catch (err) {
       setExportError(err instanceof ApiError ? err.detail : "Couldn't reach the server. Try again.")
+    } finally {
       setExporting(false)
     }
   }
