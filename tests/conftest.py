@@ -15,6 +15,21 @@ os.environ.setdefault("RATE_LIMIT_LOGIN", "1000/minute")
 os.environ.setdefault("RATE_LIMIT_SIGNUP", "10000/hour")
 os.environ.setdefault("RATE_LIMIT_DEBATE_ENQUEUE", "10000/hour")
 
+# Stage construction requires an extraction key; the tests mock every LLM call
+# and never dial NVIDIA. Local .env files provide one, CI does not, so a blank
+# or absent value gets a non-secret placeholder before config_llm reads env.
+# EXTRACTION_API_KEY outranks NVIDIA_NIM_API_KEY in provider resolution, so it
+# is only injected when a non-default provider is selected — otherwise the
+# unchanged NIM-credential tests would see the placeholder instead.
+if not os.environ.get("NVIDIA_NIM_API_KEY"):
+    os.environ["NVIDIA_NIM_API_KEY"] = "test-nim-key"
+if (
+    os.environ.get("EXTRACTION_PROVIDER")
+    and os.environ["EXTRACTION_PROVIDER"] != "nvidia_nim"
+    and not os.environ.get("EXTRACTION_API_KEY")
+):
+    os.environ["EXTRACTION_API_KEY"] = "test-extraction-key"
+
 import pytest_asyncio
 from sqlalchemy import delete
 

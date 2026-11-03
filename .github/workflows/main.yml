@@ -117,6 +117,10 @@ jobs:
       REDIS_URL: redis://localhost:6379/0
       NEO4J_URI: bolt://localhost:7687
       QUEUE_MODE: inline
+      # Non-secret placeholder: tests mock every LLM call and never dial NVIDIA.
+      # EXTRACTION_API_KEY is intentionally absent — it outranks this NIM key in
+      # resolution, and the unchanged credential tests assert the NIM values.
+      NVIDIA_NIM_API_KEY: test-nim-key
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
