@@ -41,6 +41,17 @@ describe('the plans', () => {
     expect(renderedText(render())).not.toMatch(BANNED_TERMS)
   })
 
+  it('reaches all four legal documents from the footer', () => {
+    const html = render()
+    for (const href of ['/privacy', '/terms', '/refund', '/legal/subprocessors']) {
+      expect(html).toContain(`href="${href}"`)
+    }
+    expect(html).toContain('Privacy')
+    expect(html).toContain('Terms')
+    expect(html).toContain('Refund')
+    expect(html).toContain('Subprocessors')
+  })
+
   it('keeps the enterprise mailto and the 44px targets', () => {
     const html = render()
     const open = [...html.matchAll(/<a\b[^>]*>/g)].map((match) => match[0]).find((tag) => tag.includes('href="/overview"'))

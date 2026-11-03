@@ -157,6 +157,12 @@ describe('the workspace top bar', () => {
     expect(html).toContain('truncate')
   })
 
+  it('stands the AI-interaction disclosure on every workspace step', () => {
+    for (const path of ['/new', '/runs/run-1/floor']) {
+      expect(renderShell(path)).toContain('These are AI-generated perspectives, not human advisors.')
+    }
+  })
+
   it('shows the three steps as dots, not as a chatty timeline', () => {
     const html = renderTopBar('x')
     expect(html).toContain('Material')

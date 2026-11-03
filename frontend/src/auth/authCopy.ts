@@ -16,7 +16,7 @@ export const DESCRIPTOR = 'Decision panel'
 export const THESIS = 'A panel of experts reads your documents, argues the question, and files an answer.'
 
 /** §7.2 — the one promise the page makes about the material, under the form on both doors. */
-export const TRUST_LINE = 'Your documents stay on the machine you start it on.'
+export const TRUST_LINE = 'Your documents are used only to answer your questions; export or delete them anytime.'
 
 /** The sign-in form's own words. */
 export const SIGN_IN = {

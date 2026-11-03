@@ -6,6 +6,7 @@ import Disclosure from '../components/ui/Disclosure'
 import FiledSheet from '../components/ui/FiledSheet'
 import PositionMark from '../components/ui/PositionMark'
 import { ruleClasses } from '../components/ui/Rule'
+import { LEGAL_LINKS } from '../config/legalLinks'
 import './hero.css'
 
 /**
@@ -245,9 +246,7 @@ function HeroSection() {
                 See what it files
               </a>
             </div>
-            <p className="mt-5 font-mono text-micro text-ink-3">
-              Free to start · No card · Runs on the machine you start it on
-            </p>
+            <p className="mt-5 font-mono text-micro text-ink-3">Free to start · No card</p>
           </div>
 
           <div className="min-w-0">
@@ -263,8 +262,8 @@ function HeroSection() {
 function Facts() {
   const facts = [
     {
-      label: 'Local-first',
-      body: 'The documents, the map and every decision stay on the machine you start the tool on.',
+      label: 'Your material, handled plainly',
+      body: 'The documents you add are read by the extraction provider configured for this deployment; the Privacy page names it. Export or delete them anytime.',
     },
     {
       label: 'Free to start · No card',
@@ -542,7 +541,7 @@ function Trust() {
     {
       num: '03',
       title: 'Your material stays yours.',
-      body: 'The documents, the map, and every decision stay on the machine you start it on. The answer leaves as a document.',
+      body: 'The documents, the map, and every decision stay yours: export or delete them anytime; the provider is named in the Privacy page. The answer leaves as a document.',
     },
     {
       num: '04',
@@ -587,8 +586,8 @@ function Trust() {
 function Limits() {
   const does = [
     {
-      title: 'It runs on your machine.',
-      body: 'The documents, the map and every decision stay on the machine you start the tool on.',
+      title: 'It runs where your operator points it.',
+      body: 'The extraction provider is configurable, including a local endpoint. Your documents are never used to train a third party where the provider’s terms let us require that.',
     },
     {
       title: 'Every claim has a source.',
@@ -610,7 +609,7 @@ function Limits() {
     },
     {
       title: 'It does not keep the text from your provider.',
-      body: 'The text your experts read and write goes to the provider you configure. Point it at a provider on your own machine if it must not leave.',
+      body: 'The provider is chosen by the operator of this deployment and named in the Privacy page.',
     },
   ]
 
@@ -748,7 +747,7 @@ function Questions() {
     },
     {
       q: 'Where does my material go?',
-      a: 'The documents, the map and every decision stay on the machine you start it on. The text your experts read and write goes to the provider you configure.',
+      a: 'The documents you add are read by the extraction provider configured for this deployment; the Privacy page names it. Export or delete them anytime.',
     },
     {
       q: 'What does it cost?',
@@ -824,7 +823,7 @@ function Footer() {
   return (
     <Band as="footer" tone="page" dense>
       <div className="shell">
-        <div className={`${ruleClasses('top')} grid gap-10 pt-10 sm:grid-cols-2 lg:grid-cols-[2fr_1fr_1fr]`}>
+        <div className={`${ruleClasses('top')} grid gap-10 pt-10 sm:grid-cols-2 lg:grid-cols-[2fr_1fr_1fr_1fr]`}>
           <div>
             <Link to="/" className="inline-flex items-center gap-2.5 text-ink" aria-label={WORDMARK}>
               <BrandMark />
@@ -834,7 +833,7 @@ function Footer() {
               A decision you can open again: your documents, a panel drawn from them, and the answer
               filed with the case against.
             </p>
-            <p className="mt-4 font-mono text-micro text-ink-3">Local-first · Free to start · decision panel</p>
+            <p className="mt-4 font-mono text-micro text-ink-3">Free to start · decision panel</p>
           </div>
 
           <div>
@@ -851,6 +850,19 @@ function Footer() {
             <Link to="/pricing" className={`${inlineLinkClasses} mt-3 w-full font-ui text-body-sm text-ink-2 hover:text-ink`}>
               Pricing
             </Link>
+          </div>
+
+          <div>
+            <p className="font-ui text-label uppercase text-ink-3">Legal</p>
+            {LEGAL_LINKS.map((link) => (
+              <Link
+                key={link.href}
+                to={link.href}
+                className={`${inlineLinkClasses} mt-3 w-full font-ui text-body-sm text-ink-2 hover:text-ink`}
+              >
+                {link.label}
+              </Link>
+            ))}
           </div>
 
           <div>

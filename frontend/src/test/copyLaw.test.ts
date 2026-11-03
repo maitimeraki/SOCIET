@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { BANNED_TERMS, BANNED_WORD, renderedText } from './copyLaw'
+import { BANNED_TERMS, BANNED_WORD, copyLawApplies, isLegalPath, renderedText } from './copyLaw'
 
 // The guard sees the text BETWEEN tags AND the four customer-visible attribute values. A prior bug
 // replaced each whole tag, so a banned word in aria-label/title/placeholder/alt was invisible.
@@ -36,6 +36,17 @@ describe('renderedText — the guard reads what the customer reads', () => {
 
   it('reads single-quoted attribute values', () => {
     expect(banned("<button aria-label='remove this agent'>x</button>")).toBe(true)
+  })
+})
+
+describe('the legal-route exemption', () => {
+  it('exempts the legal routes only, and every other surface keeps the law', () => {
+    expect(isLegalPath('/legal/privacy')).toBe(true)
+    expect(isLegalPath('/privacy')).toBe(true)
+    expect(isLegalPath('/legal')).toBe(true)
+    expect(isLegalPath('/pricing')).toBe(false)
+    expect(copyLawApplies('/pricing')).toBe(true)
+    expect(copyLawApplies('/terms')).toBe(false)
   })
 })
 

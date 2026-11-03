@@ -18,6 +18,14 @@ const sheet = (over: Partial<Parameters<typeof VerdictSheet>[0]> = {}) =>
   )
 
 describe('the verdict sheet', () => {
+  it('stands the AI-interaction disclosure at the very top, before the question', () => {
+    const html = sheet()
+    expect(html).toContain('These are AI-generated perspectives, not human advisors.')
+    expect(html.indexOf('These are AI-generated perspectives')).toBeLessThan(html.indexOf('Should Ridgeline'))
+    // Standing, not dismissible, and it prints with the document.
+    expect(html).not.toContain('print:hidden')
+  })
+
   it('leads with the position, the share and the date, before any prose', () => {
     const html = sheet()
     expect(html.indexOf('Negative')).toBeLessThan(html.indexOf('The case against'))

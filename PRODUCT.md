@@ -98,7 +98,7 @@ The product is four moments, and the customer must be able to see the work at ev
 - A finished answer is read on screen **and** leaves the app as a document.
 - A run is reconstructible: **replay = live**. A run reopened next month renders the identical map it ended with, because the map is a view of stored truth, not a likeness.
 - Experts are created only from the customer's own material — there is no hardcoded expert store.
-- Local-first posture: corpus, map, and runs stay on the machine running the tool; expert text goes to the configured analysis provider.
+- Provider posture: the extraction and analysis provider is configured by the deployment operator — including a local endpoint — and the Privacy page names it. Customer material is exportable and deletable at any time, and is never used to train a third party where the provider's terms let us require that.
 
 ## Capabilities and Constraints
 
@@ -107,12 +107,12 @@ The product is four moments, and the customer must be able to see the work at ev
 - Position, confidence and intensity are parsed from expert turns; a run can take several passes, and new experts can join between passes.
 - **Stack:** React 19 + Vite + Tailwind v4 + sigma/graphology; FastAPI + Postgres + Neo4j behind it.
 - **Undecided — do not invent:** the auth provider, whether marketing and app share a host, and the demo video's content and length.
-- **Decided — pricing.** The product is **free to use**. "Start free" is a true statement about the product and is the door's label. **No paid tier exists, and none may be implied** on any surface: no price, no tier name, no "upgrade", no "pro", no feature comparison that implies a paid variant. If a paid tier is ever introduced, it is a new decision with its own surface — not something a surface may hint at today.
+- **Decided — pricing.** The product is **free to start**, and paid tiers exist: **Starter $10 / 8,000 units per month**, **Studio $20 / 16,000 units per month**, and **Enterprise custom**. One unit pool per month; no per-question invoice; no seats. The pricing page and `GET /api/v1/billing/usage` are the authoritative surfaces. No model names or token counts are rendered on any customer surface.
 
 ## Brand Commitments
 
 - **Name:** *Societas* (rename of the internal "Simulation World"). The internal codename "The Chamber" is retired from customer surfaces.
-- **No fabricated commercial claims.** No customer logos, testimonials, benchmarks, press, or capability the product does not have. Where a surface wants proof and none exists, it ships authored demonstrative material clearly labelled as an example — and that material goes on the replacement list handed to the owner at finish. **Prices and tiers are a separate matter:** the product is free to use (decided above), so stating that is a fact, not a fabrication; what is banned is any price, tier, benchmark or comparison the product has not been decided to have.
+- **No fabricated commercial claims.** No customer logos, testimonials, benchmarks, press, or capability the product does not have. Where a surface wants proof and none exists, it ships authored demonstrative material clearly labelled as an example — and that material goes on the replacement list handed to the owner at finish. **Prices and tiers are decided** (see the pricing record above): the product is free to start, with Starter and Studio paid tiers and an Enterprise plan. What is banned is any price, tier, benchmark or comparison the product has not been decided to have.
 - **The visual world.** The incumbent worlds — "The Chamber" and its successor "The Survey" — are retired; they are *evidence, not authority*. Kept from them: the three installed faces (Archivo, Spectral, JetBrains Mono) and the four-position system. The committed world is the **standard premium-SaaS system** in `docs/DESIGN_SPEC.md`: a neutral daylight ground, one considered accent, cards as the material, and the map as the single dark surface in the product. It is deliberately *not* the cream-and-serif editorial default, *not* near-black with a neon accent, and *not* a generic purple-gradient product page. Gradients are material with a job, never wallpaper. The `impeccable` direction roll in Phase 2 may confirm or replace the palette's roots — every token hangs off one accent and one ground, so the change is one variable wide.
 - **The target dashboard's surfaces.** The committed world stays. Gradients remain material with a job: the one primary action's ramp, the map's radial ramp, the answer band's tonal wash, and a 320px page-ground lift. Cards stay flat white; no gradient on a card, a record or a panel. The content grid is the standard 12-column grid, max 1280px, 24px gutters, on the 4px spacing scale.
 

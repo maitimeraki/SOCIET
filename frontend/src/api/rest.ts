@@ -8,6 +8,8 @@ import type {
   IngestedDoc,
   IngestedDocument,
   JobStatus,
+  LegalDocument,
+  LegalDocumentMeta,
   RunDoc,
   RunListPage,
   RunSummary,
@@ -221,6 +223,13 @@ export const authSignup = (
   )
 
 export const authLogout = () => request<void>('/api/v1/auth/logout', { method: 'POST' })
+
+/** The published legal documents, current version only. Public — no session needed. */
+export const legalDocuments = () => request<LegalDocumentMeta[]>('/api/v1/legal/documents')
+
+/** One legal document's metadata and served content; an unknown slug is a 404 `ApiError`. */
+export const legalDocument = (slug: string) =>
+  request<LegalDocument>(`/api/v1/legal/documents/${encodeURIComponent(slug)}`)
 
 export const billingUsage = () => request<BillingUsage>('/api/v1/billing/usage')
 

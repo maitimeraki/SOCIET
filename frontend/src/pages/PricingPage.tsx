@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom'
 import { ApiError, billingCheckout } from '../api/rest'
 import { useAuthStore } from '../auth/authStore'
 import { buttonClasses, inlineLinkClasses } from '../components/ui/Button'
+import { LEGAL_LINKS } from '../config/legalLinks'
 
 /**
  * §7.9 The rate card. One metered pool, two plans, one custom door, and the rules under the
@@ -197,12 +198,17 @@ export default function PricingPage() {
         </div>
       </section>
 
-      <p className="mx-auto w-[min(1100px,calc(100%-48px))] border-t border-rule py-6 font-mono text-micro text-ink-3">
-        Your material stays yours — export or delete it anytime.{' '}
+      <footer className="mx-auto flex w-[min(1100px,calc(100%-48px))] flex-wrap items-center gap-x-5 gap-y-2 border-t border-rule py-6 font-mono text-micro text-ink-3">
+        <span>Your material stays yours — export or delete it anytime.</span>
+        {LEGAL_LINKS.map((link) => (
+          <Link key={link.href} to={link.href} className="text-accent underline underline-offset-4">
+            {link.label}
+          </Link>
+        ))}
         <Link to="/" className="text-accent underline underline-offset-4">
           Back to the product
         </Link>
-      </p>
+      </footer>
     </div>
   )
 }

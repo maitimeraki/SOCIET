@@ -27,6 +27,19 @@ export interface BillingUsage {
   billing_enabled: boolean
 }
 
+/** `GET /api/v1/legal/documents` — one current version per slug, no content. */
+export interface LegalDocumentMeta {
+  slug: string
+  version: string
+  effective_at: string
+  content_sha256: string
+}
+
+/** `GET /api/v1/legal/documents/{slug}` — the metadata plus the served statutory text. */
+export interface LegalDocument extends LegalDocumentMeta {
+  content: string
+}
+
 export interface IngestedDoc {
   document_id: string
   title: string

@@ -300,7 +300,7 @@ function Hero() {
               </a>
             </div>
             <p className="enter mt-8 font-mono text-mono text-ink-3" style={{ animationDelay: '240ms' }}>
-              Runs on the machine you start it on · Free to use · No card, no tier
+              Free to start · No card
             </p>
           </div>
 
@@ -320,12 +320,12 @@ function Hero() {
 function Facts() {
   const facts = [
     {
-      label: 'Local-first',
-      body: 'The documents, the map and every decision stay on the machine running the tool.',
+      label: 'Your material, handled plainly',
+      body: 'The documents you add are read by the extraction provider configured for this deployment; the Privacy page names it. Export or delete them anytime.',
     },
     {
-      label: 'No card, no tier',
-      body: 'The product is free to use. It states its cost once and invents nothing else.',
+      label: 'Free to start · No card',
+      body: 'The first decisions are free. A plan appears only when the material or the number of decisions outgrows the free tier.',
     },
     {
       label: 'The case against',
@@ -688,14 +688,14 @@ function UseCases() {
 function Limits() {
   const ref = useReveal<HTMLDivElement>()
   const does = [
-    { label: 'It runs on your machine', body: 'The documents, the map and every decision stay on the machine running the tool.' },
+    { label: 'It runs where your operator points it', body: 'The extraction provider is configurable, including a local endpoint. Your documents are never used to train a third party where the provider’s terms let us require that.' },
     { label: 'Every claim has a source', body: 'Each answer names the material each expert argued from, traceable to the section it was read from.' },
     { label: 'Every decision is kept', body: 'A finished decision reopens and renders exactly as it ended, pass by pass.' },
   ]
   const doesNot = [
     { label: 'It cannot invent a panel', body: 'The experts are drawn only from what you add. With no documents there is no panel and no answer.' },
     { label: 'It does not guarantee the answer', body: 'Confidence is the weighted share behind the position. It measures the panel, not the truth; a split is filed as a split.' },
-    { label: 'It does not keep the text from your provider', body: 'The text your experts read and write goes to the provider you configure. Point it at a provider on your own machine if it must not leave.' },
+    { label: 'It does not keep the text from your provider', body: 'The provider is chosen by the operator of this deployment and named in the Privacy page.' },
   ]
 
   return (
@@ -808,11 +808,11 @@ function Questions() {
     },
     {
       q: 'Where does my data live?',
-      a: 'The documents, the map and every decision stay on the machine running the tool. The text your experts read and write goes to the provider you configure — point it at a provider on your own machine if you want it to stay home.',
+      a: 'The documents you add are read by the extraction provider configured for this deployment; the Privacy page names it. Export or delete them anytime.',
     },
     {
       q: 'Which providers work?',
-      a: 'The one you configure. The product is not tied to a single provider, and a local provider keeps the text on your machine.',
+      a: 'The one the operator of this deployment configures. The product is not tied to a single provider, and the Privacy page names the one in use.',
     },
     {
       q: 'How long does a decision take?',
@@ -872,7 +872,7 @@ function Close() {
             Start your first decision
           </Link>
         </div>
-        <p className="mt-6 font-mono text-mono text-ink-3">Free to use · No card, no tier</p>
+        <p className="mt-6 font-mono text-mono text-ink-3">Free to start · No card</p>
       </div>
     </section>
   )
@@ -889,7 +889,7 @@ function Footer() {
               <BrandMark />
               <p className="font-ui text-heading font-semibold text-ink">{WORDMARK}</p>
             </div>
-            <p className="mt-1 font-mono text-mono text-ink-3">Local-first · v0.0.0 · decision panel</p>
+            <p className="mt-1 font-mono text-mono text-ink-3">Free to start · decision panel</p>
           </div>
           <div className="flex flex-wrap items-center gap-3">
             <Link to="/auth/signup?next=/new" className={buttonClasses('secondary', 40)}>

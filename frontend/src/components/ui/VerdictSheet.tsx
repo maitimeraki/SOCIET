@@ -40,6 +40,9 @@ export default function VerdictSheet({
 }: VerdictSheetProps) {
   return (
     <article className="max-w-[760px] rounded-xl bg-paper p-12 shadow-sheet print:max-w-none print:rounded-none print:shadow-none">
+      {/* Standing, not dismissible: AI Act Art. 50(1). It prints with the document. */}
+      <p className="mb-4 font-mono text-micro text-ink-3">These are AI-generated perspectives, not human advisors.</p>
+
       <div className="flex items-center justify-between gap-4">
         <p className="font-mono text-micro uppercase tracking-[0.08em] text-ink-3">Filed &middot; {filed}</p>
         {onExport ? (

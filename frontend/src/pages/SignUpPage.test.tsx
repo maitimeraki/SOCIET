@@ -20,7 +20,7 @@ describe('the sign-up surface', () => {
   it('asks for two fields and says what happens to the material', () => {
     const html = render()
     expect(html).toContain('Start your first decision')
-    expect(html).toContain('Your documents stay on the machine you start it on.')
+    expect(html).toContain('Your documents are used only to answer your questions; export or delete them anytime.')
   })
 
   it('offers no social sign-in until a provider is configured', () => {
@@ -70,7 +70,7 @@ describe('SignUpPage — the door in (§7.2)', () => {
 
   it('puts the trust line under the form, after the action and the switch', () => {
     const action = page.indexOf('Create account')
-    const trust = page.indexOf('Your documents stay on the machine you start it on.')
+    const trust = page.indexOf('Your documents are used only to answer your questions; export or delete them anytime.')
     expect(action).toBeGreaterThan(-1)
     expect(trust).toBeGreaterThan(action)
   })

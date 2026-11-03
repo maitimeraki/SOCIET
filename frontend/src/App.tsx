@@ -26,6 +26,8 @@ const LandingPage = lazy(() => import('./pages/LandingPage'))
 const SignInPage = lazy(() => import('./pages/SignInPage'))
 const SignUpPage = lazy(() => import('./pages/SignUpPage'))
 const PricingPage = lazy(() => import('./pages/PricingPage'))
+const LegalIndexPage = lazy(() => import('./pages/LegalIndexPage'))
+const LegalPage = lazy(() => import('./pages/LegalPage'))
 
 /**
  * The route tree (plan §1). Three layout routes, so `/` and `/auth/*` render without shell chrome:
@@ -47,6 +49,13 @@ export default function App() {
             <Route path="/" element={<Hero />} />
             <Route path="/pricing" element={<PricingPage />} />
             <Route path="/demo-home" element={<HomeDemo />} />
+            {/* Statutory text is served, never authored here (Task 9's registry). The copy law is
+                exempt on exactly these routes — see `test/copyLaw.ts`'s `isLegalPath`. */}
+            <Route path="/legal" element={<LegalIndexPage />} />
+            <Route path="/legal/:slug" element={<LegalPage />} />
+            <Route path="/privacy" element={<LegalPage slug="privacy" />} />
+            <Route path="/terms" element={<LegalPage slug="terms" />} />
+            <Route path="/refund" element={<LegalPage slug="refund" />} />
           </Route>
 
           <Route path="/auth" element={<AuthLayout />}>

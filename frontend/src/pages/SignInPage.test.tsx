@@ -34,7 +34,7 @@ describe('SignInPage — the door back in (§7.2)', () => {
   it('welcomes the visitor back in the display face, and states what happens to the material', () => {
     expect(page).toContain('font-display text-display')
     expect(page).toContain('Welcome back')
-    expect(page).toContain('Your documents stay on the machine you start it on.')
+    expect(page).toContain('Your documents are used only to answer your questions; export or delete them anytime.')
   })
 
   it('offers one recovery link, and no second primary action for it', () => {

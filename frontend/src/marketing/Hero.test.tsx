@@ -52,6 +52,13 @@ describe('the marketing page', () => {
     expect(html).toContain('What it does not do')
   })
 
+  it('makes no local-first claim and reaches every legal document', () => {
+    expect(renderedText(html)).not.toMatch(/local-first|runs on the machine/i)
+    for (const href of ['/privacy', '/terms', '/refund', '/legal/subprocessors']) {
+      expect(html).toContain(`href="${href}"`)
+    }
+  })
+
   it('states the cost in the five places, and never claims a free product at every volume', () => {
     // R63 / DESIGN §7.9 — hero trust line, the facts strip, trust proof 04, the FAQ answer, the close.
     expect(count(html, 'Free to start · No card')).toBe(5)

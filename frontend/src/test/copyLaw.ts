@@ -69,6 +69,21 @@ const CLICHE_PATTERN = new RegExp(
 export const BANNED_TERMS = new RegExp(`${BANNED_WORD.source}|${CLICHE_PATTERN.source}`, 'i')
 
 /**
+ * The routes that serve statutory text. The law governs product copy, not the law itself: the
+ * served legal document may say "model" or "agent" because counsel wrote it, and rewriting it in
+ * the frontend is forbidden. The exemption is route-scoped — every other surface still obeys.
+ */
+export const LEGAL_PATHS = ['/legal', '/privacy', '/terms', '/refund'] as const
+
+export function isLegalPath(path: string): boolean {
+  return LEGAL_PATHS.some((base) => path === base || path.startsWith(`${base}/`))
+}
+
+export function copyLawApplies(path: string): boolean {
+  return !isLegalPath(path)
+}
+
+/**
  * The attributes that are RENDERED to the customer (screen readers, tooltips, placeholders, image
  * text). `className`/`data-*` are identifiers and stay out — `className="rounded-md"` would
  * false-positive on the `round` stem. Captures the quoted value of whichever quote style is used.

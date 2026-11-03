@@ -103,7 +103,7 @@ describe('the auth surface speaks the new world', () => {
     expect(signIn).toContain('Welcome back')
     expect(signUp).toContain('Start your first decision')
     for (const html of [signIn, signUp]) {
-      expect(html).toContain('Your documents stay on the machine you start it on.')
+      expect(html).toContain('Your documents are used only to answer your questions; export or delete them anytime.')
       expect(html).not.toContain('Continue with Google')
       expect(html).not.toContain('Continue with GitHub')
     }
