@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { getRun, listRunsPage, listUploads } from '../api/rest'
-import type { RunSummary, UploadRow } from '../api/types'
+import { billingUsage, getRun, listRunsPage, listUploads } from '../api/rest'
+import type { BillingUsage, RunSummary, UploadRow } from '../api/types'
 import { useAuthStore } from '../auth/authStore'
 import StatsBand from '../components/overview/StatsBand'
 import RecentWork from '../components/overview/RecentWork'
@@ -17,16 +17,6 @@ import ErrorState from '../components/ui/ErrorState'
 import Skeleton from '../components/ui/Skeleton'
 import { fmtDay } from '../utils/format'
 
-/** The plan the account is on. Placeholder figures — the plan is a studio plan. */
-const CORPUS_LIMIT = 2_000_000_000
-const DECISIONS_LIMIT = 20
-
-/** `YYYY-MM` in UTC — the month the page measures, taken from the clock, never a literal. */
-// eslint-disable-next-line react-refresh/only-export-components -- monthKeyUtc is the tested clock rule
-export function monthKeyUtc(date: Date): string {
-  return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, '0')}`
-}
-
 /** A failed or interrupted run is not still working — its summary says which state it ended in. */
 // eslint-disable-next-line react-refresh/only-export-components -- recentState is the tested status rule
 export function recentState(run: RunSummary): RecentRow['state'] {
@@ -37,10 +27,7 @@ export function recentState(run: RunSummary): RecentRow['state'] {
   return 'Deliberating'
 }
 
-/**
- * Recent work reads the whole history, newest first — the month filter belongs to the stats band,
- * not to the sheet. On the first of a month the sheet still shows the last decisions.
- */
+/** Recent work reads the whole history, newest first — the sheet is not filtered to a month. */
 // eslint-disable-next-line react-refresh/only-export-components -- recentRows is the tested mapping
 export function recentRows(runs: RunSummary[], limit = 4): RecentRow[] {
   return runs.slice(0, limit).map((run) => ({
@@ -64,17 +51,13 @@ export function greetingName(email: string): string {
   return first ? first.charAt(0).toUpperCase() + first.slice(1) : ''
 }
 
-export interface OverviewStats {
-  decisions: number
-  filed: number
-  corpusBytes: number
-  corpusLimit: number
-  decisionsLeft: number
-  decisionsLimit: number
-}
+/** The billing read is the page's only usage source — there is no client-side limit. */
+export type OverviewStats = BillingUsage
 
 export interface OverviewPageViewProps {
-  stats: OverviewStats
+  stats: OverviewStats | null
+  /** The filed count comes from the runs list, not the billing read. */
+  filed: number
   recent: RecentRow[]
   corpora: CorpusRow[]
   working: WorkingRun | null
@@ -87,6 +70,7 @@ export interface OverviewPageViewProps {
 
 export function OverviewPageView({
   stats,
+  filed,
   recent,
   corpora,
   working,
@@ -104,8 +88,8 @@ export function OverviewPageView({
   const greeting = accountName ? `Good morning, ${accountName}.` : 'Good morning.'
   // §14.2 — the state line is honest: it reads the live filed count, never a fixed number.
   const stateLine = working
-    ? `One question is with the panel.${stats.filed > 0 ? ` ${stats.filed} filed and waiting for you.` : ' Nothing is filed yet.'}`
-    : `Nothing is running.${stats.filed > 0 ? ` ${stats.filed} answer${stats.filed === 1 ? '' : 's'} filed and waiting for you.` : ' Nothing is filed yet.'}`
+    ? `One question is with the panel.${filed > 0 ? ` ${filed} filed and waiting for you.` : ' Nothing is filed yet.'}`
+    : `Nothing is running.${filed > 0 ? ` ${filed} answer${filed === 1 ? '' : 's'} filed and waiting for you.` : ' Nothing is filed yet.'}`
   return (
     <div className="bg-[image:var(--gradient-morning)] bg-no-repeat">
       <header className="flex flex-wrap items-end justify-between gap-4 border-b border-rule pb-6">
@@ -136,7 +120,7 @@ export function OverviewPageView({
             retryLabel="Try again"
           />
         </div>
-      ) : loading ? (
+      ) : loading || stats === null ? (
         <div className="mt-6 space-y-4">
           <Skeleton className="h-28 w-full" />
           <Skeleton className="h-56 w-full" />
@@ -145,23 +129,23 @@ export function OverviewPageView({
         <div className="mt-6 grid grid-cols-1 items-start gap-7 lg:grid-cols-[minmax(0,1.6fr)_minmax(300px,0.75fr)]">
           <div>
             <StatsBand
-              decisions={stats.decisions}
-              filed={stats.filed}
-              corpusBytes={stats.corpusBytes}
-              corpusLimit={stats.corpusLimit}
-              decisionsLeft={stats.decisionsLeft}
-              decisionsLimit={stats.decisionsLimit}
+              plan={stats.plan}
+              unitsUsed={stats.units_used}
+              unitsTotal={stats.units_total}
+              unitsRemaining={stats.units_remaining}
+              periodEnd={stats.period_end}
             />
             <RecentWork rows={recent} />
             <YourMaterial rows={corpora} />
           </div>
           <aside className="grid gap-5">
             <PlanUsage
-              corpusBytes={stats.corpusBytes}
-              corpusLimit={stats.corpusLimit}
-              decisionsUsed={stats.decisionsLimit - stats.decisionsLeft}
-              decisionsLimit={stats.decisionsLimit}
-              renews="1 Nov 2026"
+              plan={stats.plan}
+              unitsUsed={stats.units_used}
+              unitsTotal={stats.units_total}
+              unitsRemaining={stats.units_remaining}
+              periodEnd={stats.period_end}
+              billingEnabled={stats.billing_enabled}
             />
             <WorkingNow run={working} />
           </aside>
@@ -171,7 +155,7 @@ export function OverviewPageView({
   )
 }
 
-/** The newest runs — the page measures the current month's share of them. */
+/** The newest runs — Recent work and the filed count read them. */
 async function loadRecentRuns(): Promise<RunSummary[]> {
   const page = await listRunsPage({ limit: 25 })
   return page.items
@@ -179,14 +163,8 @@ async function loadRecentRuns(): Promise<RunSummary[]> {
 
 export default function OverviewPage() {
   const accountName = useAuthStore((s) => greetingName(s.user?.email ?? ''))
-  const [stats, setStats] = useState<OverviewStats>({
-    decisions: 0,
-    filed: 0,
-    corpusBytes: 0,
-    corpusLimit: CORPUS_LIMIT,
-    decisionsLeft: DECISIONS_LIMIT,
-    decisionsLimit: DECISIONS_LIMIT,
-  })
+  const [stats, setStats] = useState<OverviewStats | null>(null)
+  const [filed, setFiled] = useState(0)
   const [recent, setRecent] = useState<RecentRow[]>([])
   const [corpora, setCorpora] = useState<CorpusRow[]>([])
   const [working, setWorking] = useState<WorkingRun | null>(null)
@@ -196,14 +174,11 @@ export default function OverviewPage() {
 
   useEffect(() => {
     let cancelled = false
-    Promise.all([listUploads(), loadRecentRuns()])
-      .then(async ([uploads, runs]) => {
+    Promise.all([listUploads(), loadRecentRuns(), billingUsage()])
+      .then(async ([uploads, runs, usage]) => {
         if (cancelled) return
         const items: UploadRow[] = uploads.items ?? []
-        const corpusBytes = items.reduce((sum, item) => sum + item.bytes, 0)
-        const month = monthKeyUtc(new Date())
-        const monthRuns = runs.filter((run) => monthKeyUtc(new Date(run.created_at)) === month)
-        const filed = monthRuns.filter((run) => run.verdict_stance).length
+        const filedCount = runs.filter((run) => run.verdict_stance).length
         const running = runs.find((run) => run.status === 'running' || run.status === 'queued')
         let live: WorkingRun | null = null
         if (running) {
@@ -223,14 +198,8 @@ export default function OverviewPage() {
             console.error('OverviewPage: could not read the working run.', error)
           }
         }
-        setStats({
-          decisions: monthRuns.length,
-          filed,
-          corpusBytes,
-          corpusLimit: CORPUS_LIMIT,
-          decisionsLeft: Math.max(0, DECISIONS_LIMIT - monthRuns.length),
-          decisionsLimit: DECISIONS_LIMIT,
-        })
+        setStats(usage)
+        setFiled(filedCount)
         setRecent(recentRows(runs))
         setCorpora(corpusRows(items, runs))
         setWorking(live)
@@ -252,6 +221,7 @@ export default function OverviewPage() {
   return (
     <OverviewPageView
       stats={stats}
+      filed={filed}
       recent={recent}
       corpora={corpora}
       working={working}

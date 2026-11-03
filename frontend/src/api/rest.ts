@@ -1,4 +1,5 @@
 import type {
+  BillingUsage,
   DebateConfig,
   DebateStartRequest,
   DebateStatus,
@@ -208,10 +209,25 @@ export const authMe = () => request<User>('/api/v1/auth/me')
 export const authLogin = (email: string, password: string) =>
   request<User>('/api/v1/auth/login', jsonInit('POST', { email, password }))
 
-export const authSignup = (email: string, password: string) =>
-  request<User>('/api/v1/auth/signup', jsonInit('POST', { email, password }))
+export const authSignup = (
+  email: string,
+  password: string,
+  acceptTerms: boolean,
+  ageConfirmed: boolean,
+) =>
+  request<User>(
+    '/api/v1/auth/signup',
+    jsonInit('POST', { email, password, accept_terms: acceptTerms, age_confirmed: ageConfirmed }),
+  )
 
 export const authLogout = () => request<void>('/api/v1/auth/logout', { method: 'POST' })
+
+export const billingUsage = () => request<BillingUsage>('/api/v1/billing/usage')
+
+export const billingCheckout = (plan: 'starter' | 'studio') =>
+  request<{ url: string }>('/api/v1/billing/checkout', jsonInit('POST', { plan }))
+
+export const billingPortal = () => request<{ url: string }>('/api/v1/billing/portal', { method: 'POST' })
 
 /** Mint a one-time WebSocket ticket (R4) — never a long-lived token, never in a query string but here. */
 export const fetchWsTicket = () =>

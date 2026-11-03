@@ -13,7 +13,7 @@ export interface AuthStoreState {
   /** Drop the session locally: `anon` + no user. Called by sign-out and the 401 seam. */
   clear: () => void
   signin: (email: string, password: string) => Promise<void>
-  signup: (email: string, password: string) => Promise<void>
+  signup: (email: string, password: string, acceptTerms: boolean, ageConfirmed: boolean) => Promise<void>
   signout: () => Promise<void>
 }
 
@@ -29,8 +29,8 @@ export const useAuthStore = create<AuthStoreState>((set, get) => ({
     set({ status: 'authed', user })
   },
 
-  signup: async (email, password) => {
-    const user = await authSignup(email, password) // throws ApiError(409) on a taken email
+  signup: async (email, password, acceptTerms, ageConfirmed) => {
+    const user = await authSignup(email, password, acceptTerms, ageConfirmed) // throws ApiError(409) on a taken email
     set({ status: 'authed', user })
   },
 

@@ -111,7 +111,8 @@ describe('the auth surface speaks the new world', () => {
 
   it('puts every field on the Quiet Room box — 48px, paper, one record rule, the 8px corner', () => {
     for (const html of [signIn, signUp]) {
-      const inputs = html.match(/<input[^>]*>/g) ?? []
+      // Text fields only: the consent checkboxes are controls, not the Quiet Room's text box.
+      const inputs = html.match(/<input(?![^>]*type="checkbox")[^>]*>/g) ?? []
       expect(inputs.length).toBeGreaterThan(0)
       for (const input of inputs) {
         const classes = (input.match(/class="([^"]*)"/)?.[1] ?? '').split(' ')

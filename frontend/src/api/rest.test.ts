@@ -1,5 +1,5 @@
 import { describe, expect, it, vi, afterEach } from 'vitest'
-import { NetworkError, health, ingestFiles } from './rest'
+import { NetworkError, authSignup, health, ingestFiles } from './rest'
 
 afterEach(() => {
   vi.unstubAllGlobals()
@@ -22,6 +22,31 @@ describe('rest client', () => {
   it('throws NetworkError when fetch rejects', async () => {
     vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new TypeError('fetch failed')))
     await expect(health()).rejects.toBeInstanceOf(NetworkError)
+  })
+
+  it('sends the signup consent attestations the backend requires', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          id: 'u1',
+          email: 'a@b.c',
+          created_at: '2026-01-01T00:00:00Z',
+          role: 'user',
+          plan: 'free',
+          entitlements: { max_agents: 20, max_rounds: 4, units_remaining: 100, period_end: '2026-12-01T00:00:00Z' },
+        }),
+      ),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    await authSignup('a@b.c', 'password1', true, true)
+
+    expect(JSON.parse(String(fetchMock.mock.calls[0][1].body))).toEqual({
+      email: 'a@b.c',
+      password: 'password1',
+      accept_terms: true,
+      age_confirmed: true,
+    })
   })
 
   it('sends files as multipart form data', async () => {

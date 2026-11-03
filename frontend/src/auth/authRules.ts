@@ -100,6 +100,20 @@ export function emailError(value: string): string | null {
   return null
 }
 
+/**
+ * Sign-up's consent gate. The backend requires both attestations (`accept_terms` +
+ * `age_confirmed`) and rejects a signup without them with a 422, so the form blocks first.
+ * Derived from the current checkbox values, so checking one clears its half of the caution.
+ */
+export function consentError(acceptTerms: boolean, ageConfirmed: boolean): string | null {
+  if (!acceptTerms && !ageConfirmed) {
+    return 'Agree to the Terms and Privacy Policy, and confirm you are 18 or older.'
+  }
+  if (!acceptTerms) return 'Agree to the Terms and Privacy Policy.'
+  if (!ageConfirmed) return 'Confirm you are 18 or older.'
+  return null
+}
+
 export const MIN_PASSWORD = 8
 
 export function passwordError(value: string): string | null {

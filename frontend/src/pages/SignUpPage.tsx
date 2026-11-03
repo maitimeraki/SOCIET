@@ -7,6 +7,7 @@ import {
   STAMP_MS,
   type AuthError,
   authErrorCopy,
+  consentError,
   emailError,
   fieldProblem,
   nextSuffix,
@@ -19,10 +20,10 @@ import Field from '../components/ui/Field'
 import Input from '../components/ui/Input'
 
 /**
- * §7.2 / §14.2 Sign-up — the intake form on the sheet: a Fraunces title, email and password with
- * their labels above, one primary action, and the one promise about the material. The design's
- * name field is deliberately absent: `SignupRequest` accepts only email and password, and a field
- * whose value is silently discarded would be a trust defect (R67).
+ * §7.2 / §14.2 Sign-up — the intake form on the sheet: a Fraunces title, email, password and the
+ * two consent attestations the backend now requires, one primary action, and the one promise about
+ * the material. The design's name field is deliberately absent: `SignupRequest` accepts no name,
+ * and a field whose value is silently discarded would be a trust defect (R67).
  *
  * It states its real cost and nothing it cannot back (PRODUCT.md §4): `Free to start · No card`,
  * stated **once**, on this form only (D2).
@@ -37,6 +38,8 @@ export default function SignUpPage() {
 
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
+  const [acceptTerms, setAcceptTerms] = useState(false)
+  const [ageConfirmed, setAgeConfirmed] = useState(false)
   const [touched, setTouched] = useState({ email: false, password: false })
   const [submitted, setSubmitted] = useState(false)
   const [submitting, setSubmitting] = useState(false)
@@ -53,15 +56,16 @@ export default function SignUpPage() {
   // a keystroke, and a submit does not freeze the other fields red while one is corrected.
   const emailProblem = fieldProblem(email, touched.email, submitted, emailError)
   const passwordProblem = fieldProblem(password, touched.password, submitted, passwordError)
+  const consentProblem = submitted ? consentError(acceptTerms, ageConfirmed) : null
 
   async function submit() {
     if (submitting || redirectTo !== null) return
     setSubmitted(true)
     setError(null)
-    if (emailError(email) || passwordError(password)) return
+    if (emailError(email) || passwordError(password) || consentError(acceptTerms, ageConfirmed)) return
     setSubmitting(true)
     try {
-      await signup(email, password) // sets the auth store on success
+      await signup(email, password, acceptTerms, ageConfirmed) // sets the auth store on success
       setRedirectTo(safeNext(params.get('next')))
     } catch (err) {
       setError(authErrorCopy(err, 'signup'))
@@ -108,6 +112,47 @@ export default function SignUpPage() {
         autoComplete="new-password"
         disabled={submitting}
       />
+
+      <div className={`space-y-2.5 pl-2.5 ${consentProblem ? 'field-invalid' : ''}`}>
+        <div className="flex min-h-11 items-start gap-2.5">
+          <input
+            id="signup-terms"
+            name="accept_terms"
+            type="checkbox"
+            checked={acceptTerms}
+            onChange={(e) => setAcceptTerms(e.target.checked)}
+            disabled={submitting}
+            aria-invalid={consentProblem ? true : undefined}
+            className="mt-1 h-4 w-4 shrink-0 accent-accent"
+          />
+          <div className="text-body-sm text-ink-2">
+            <label htmlFor="signup-terms">I agree to the </label>
+            <Link to="/terms" className="underline underline-offset-4 hover:text-ink">Terms</Link>
+            {' and '}
+            <Link to="/privacy" className="underline underline-offset-4 hover:text-ink">Privacy Policy</Link>.
+          </div>
+        </div>
+        <div className="flex min-h-11 items-start gap-2.5">
+          <input
+            id="signup-age"
+            name="age_confirmed"
+            type="checkbox"
+            checked={ageConfirmed}
+            onChange={(e) => setAgeConfirmed(e.target.checked)}
+            disabled={submitting}
+            aria-invalid={consentProblem ? true : undefined}
+            className="mt-1 h-4 w-4 shrink-0 accent-accent"
+          />
+          <label htmlFor="signup-age" className="text-body-sm text-ink-2">
+            I am 18 or older.
+          </label>
+        </div>
+        {consentProblem && (
+          <p role="alert" className="text-micro text-ink-2">
+            {consentProblem}
+          </p>
+        )}
+      </div>
 
       {error && <CautionLine error={error} onRetry={submit} />}
 

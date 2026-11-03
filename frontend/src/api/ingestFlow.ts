@@ -13,7 +13,7 @@ import type { IngestedDocument, IngestJobResult, JobStatus } from './types'
 export type IngestOutcome =
   | { kind: 'documents'; documents: IngestedDocument[] }
   | { kind: 'failed'; reason: string }
-  | { kind: 'quota'; message: string; retryAfterSeconds: number | null }
+  | { kind: 'units_exhausted'; message: string }
 
 function uploadIds(result: IngestJobResult | null | undefined): string[] {
   const ids = result?.upload_ids
@@ -37,9 +37,10 @@ async function attempt(
     const { documents } = await getIngestDocuments(ids)
     return { kind: 'documents', documents }
   } catch (error) {
-    // A 429 is the quota/cap rejection — a distinct state with retry semantics, not a generic failure.
-    if (error instanceof ApiError && error.status === 429) {
-      return { kind: 'quota', message: error.detail, retryAfterSeconds: error.retryAfter }
+    // A 402 is the unit-balance gate — recoverable once the period resets, and never retried.
+    // Its server message carries the reset date.
+    if (error instanceof ApiError && error.status === 402) {
+      return { kind: 'units_exhausted', message: error.detail }
     }
     return { kind: 'failed', reason: error instanceof Error ? error.message : 'unknown error' }
   }

@@ -12,12 +12,14 @@ import { toast } from '../components/ui/Toast'
 import { useDraftStore } from '../wizard/draftStore'
 import type { DraftDoc } from '../wizard/draftStore'
 
-/** The 429's `Retry-After` is delta-seconds; say it plainly. */
-function retryLine(seconds: number | null): string {
-  if (seconds === null) return 'Try again later.'
-  if (seconds < 90) return `Try again in about ${Math.max(1, Math.round(seconds))} s.`
-  if (seconds < 5400) return `Try again in about ${Math.round(seconds / 60)} min.`
-  return `Try again in about ${Math.round(seconds / 3600)} h.`
+/** The exhausted unit balance is recoverable: a warn mark, ink words, and the server's reset date. */
+export function UnitsGate({ message }: { message: string }) {
+  return (
+    <div role="status" className="flex items-start gap-2 border-t border-warn/40 pt-3">
+      <Warning size={16} className="mt-0.5 shrink-0 text-warn" aria-hidden="true" />
+      <p className="text-body text-ink">{message}</p>
+    </div>
+  )
 }
 
 export default function IngestPage() {
@@ -27,13 +29,13 @@ export default function IngestPage() {
   const { corpusName, docs, setCorpusName, addDocs, updateDoc, removeDoc, setDatasetId } = useDraftStore()
   const [fetchingUrl, setFetchingUrl] = useState(false)
   const [failure, setFailure] = useState<string | null>(null)
-  const [quota, setQuota] = useState<{ message: string; retryAfterSeconds: number | null } | null>(null)
+  const [unitsGate, setUnitsGate] = useState<string | null>(null)
 
   /** POST the batch, poll the extraction job, and reconcile the extracted payloads onto the existing
    *  cards — consume-matched by title, so a duplicate-name batch updates each card exactly once. */
   const submitFiles = async (placeholders: DraftDoc[], files: File[]) => {
     setFailure(null)
-    setQuota(null)
+    setUnitsGate(null)
     const outcome = await runFileIngest(files)
     if (outcome.kind === 'documents') {
       const pending = [...placeholders]
@@ -49,12 +51,12 @@ export default function IngestPage() {
       }
       return
     }
-    const reason = outcome.kind === 'quota' ? 'the upload quota is full' : outcome.reason
-    for (const placeholder of placeholders) updateDoc(placeholder.document_id, { status: 'failed', error: reason })
-    if (outcome.kind === 'quota') {
-      setQuota({ message: outcome.message, retryAfterSeconds: outcome.retryAfterSeconds })
+    if (outcome.kind === 'units_exhausted') {
+      for (const placeholder of placeholders) updateDoc(placeholder.document_id, { status: 'failed', error: 'no units remaining' })
+      setUnitsGate(outcome.message)
       return
     }
+    for (const placeholder of placeholders) updateDoc(placeholder.document_id, { status: 'failed', error: outcome.reason })
     setFailure(outcome.reason)
   }
 
@@ -75,15 +77,15 @@ export default function IngestPage() {
   const handleUrl = async (url: string) => {
     setFetchingUrl(true)
     setFailure(null)
-    setQuota(null)
+    setUnitsGate(null)
     try {
       const outcome = await runUrlIngest(url)
       if (outcome.kind === 'documents') {
         addDocs(outcome.documents.map((doc) => ({ ...doc, status: 'ready' as const })))
         return
       }
-      if (outcome.kind === 'quota') {
-        setQuota({ message: outcome.message, retryAfterSeconds: outcome.retryAfterSeconds })
+      if (outcome.kind === 'units_exhausted') {
+        setUnitsGate(outcome.message)
         return
       }
       setFailure(outcome.reason)
@@ -124,18 +126,12 @@ export default function IngestPage() {
         <p className="border-t border-warn/40 pt-3 text-body text-ink-2">{note}</p>
       )}
 
-      {/* R35: the mark may be the warn hue, the words are ink — a full quota is a distinct, recoverable state. */}
-      {quota && (
-        <div role="status" className="flex items-start gap-2 border-t border-warn/40 pt-3">
-          <Warning size={16} className="mt-0.5 shrink-0 text-warn" aria-hidden="true" />
-          <p className="text-body text-ink">
-            {quota.message} {retryLine(quota.retryAfterSeconds)}
-          </p>
-        </div>
-      )}
+      {/* R35: the mark may be the warn hue, the words are ink — an exhausted unit balance is a
+          distinct, recoverable state. The server message carries the reset date. */}
+      {unitsGate && <UnitsGate message={unitsGate} />}
 
       {/* R46 m4: the failure surfaces *after* an action, so it is an assertive error — `role="alert"`
-          (the quota banner is an informational, recoverable notice, so it stays `role="status"`). It is
+          (the units banner is an informational, recoverable notice, so it stays `role="status"`). It is
           the single announcement: the duplicate error toasts below were removed so the same string is
           not read twice. */}
       {failure && (

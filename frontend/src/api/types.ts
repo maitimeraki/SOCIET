@@ -5,6 +5,26 @@ export interface User {
   id: string
   email: string
   created_at: string
+  role: 'user' | 'support' | 'admin'
+  plan: string
+  entitlements: {
+    max_agents: number
+    max_rounds: number
+    units_remaining: number
+    period_end: string
+  }
+}
+
+/** `GET /api/v1/billing/usage` — the server's only usage figures; the client invents none. */
+export interface BillingUsage {
+  plan: string
+  units_total: number
+  units_used: number
+  units_remaining: number
+  period_start: string
+  period_end: string
+  limits: { max_agents: number; max_rounds: number }
+  billing_enabled: boolean
 }
 
 export interface IngestedDoc {

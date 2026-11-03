@@ -1,11 +1,23 @@
 import { describe, expect, it } from 'vitest'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { MemoryRouter } from 'react-router-dom'
-import type { RunSummary } from '../api/types'
-import { OverviewPageView, greetingName, monthKeyUtc, recentRows, recentState } from './OverviewPage'
+import type { BillingUsage, RunSummary } from '../api/types'
+import { OverviewPageView, greetingName, recentRows, recentState } from './OverviewPage'
 import { BANNED_TERMS, renderedText } from '../test/copyLaw'
 
 const NOOP = () => {}
+
+// Server truth for the page's only usage source (`GET /api/v1/billing/usage`).
+const STATS: BillingUsage = {
+  plan: 'starter',
+  units_total: 5000,
+  units_used: 3200,
+  units_remaining: 1800,
+  period_start: '2026-10-01T00:00:00Z',
+  period_end: '2026-11-01T00:00:00Z',
+  limits: { max_agents: 20, max_rounds: 4 },
+  billing_enabled: false,
+}
 
 // The view carries `<Link>`s, and react-router's `Link` needs a router context even under SSR —
 // the wrapper is the same one every page-view test in this repo uses (DocumentsPage.test.tsx).
@@ -13,7 +25,8 @@ const view = (over: Partial<Parameters<typeof OverviewPageView>[0]> = {}) =>
   renderToStaticMarkup(
     <MemoryRouter>
       <OverviewPageView
-        stats={{ decisions: 5, filed: 3, corpusBytes: 620_000_000, corpusLimit: 2_000_000_000, decisionsLeft: 15, decisionsLimit: 20 }}
+        stats={STATS}
+        filed={3}
         recent={[]}
         corpora={[{ name: 'Mill Street expansion', documents: 5, read: 4, reading: 1, lastUsed: '2026-10-22T09:00:00+00:00' }]}
         working={null}
@@ -29,17 +42,13 @@ describe('the Overview', () => {
   it('answers the question before any prose', () => {
     const html = view()
     expect(html).toContain('Good morning')
-    expect(html.indexOf('Decisions this month')).toBeLessThan(html.indexOf('Recent work'))
+    expect(html.indexOf('Units used')).toBeLessThan(html.indexOf('Recent work'))
   })
 
   it('greets the signed-in account, and invents no name when there is none', () => {
     expect(view({ accountName: 'Anupam' })).toContain('Good morning, Anupam.')
     expect(view()).toContain('Good morning.')
     expect(view()).not.toContain('Anupam')
-  })
-
-  it('labels the illustrative plan figures as an example', () => {
-    expect(view()).toContain('Example')
   })
 
   it('gives every standalone link a 44px target (§10.4)', () => {
@@ -64,7 +73,7 @@ describe('the Overview', () => {
 
   it('carries all five sections', () => {
     const html = view()
-    expect(html).toContain('Decisions this month')
+    expect(html).toContain('Units used')
     expect(html).toContain('Recent work')
     expect(html).toContain('Your material')
     expect(html).toContain('Plan &amp; usage')
@@ -79,15 +88,24 @@ describe('the Overview', () => {
     expect(html).toContain('divide-rule')
   })
 
-  it('states the plan and the room left on it', () => {
+  it('states the plan and the room left on it, from the server values', () => {
     const html = view()
-    expect(html).toContain('Corpus')
-    expect(html).toContain('620 MB')
-    expect(html).toContain('of 2 GB')
-    expect(html).toContain('Deep decisions')
-    expect(html).toContain('15')
-    expect(html).toContain('of 20')
+    expect(html).toContain('Units used')
+    expect(html).toContain('3,200')
+    expect(html).toContain('of 5,000')
+    expect(html).toContain('Units remaining')
+    expect(html).toContain('1,800')
+    expect(html).toContain('Starter')
+    expect(html).toContain('Resets 1 Nov 2026')
     expect(html).toContain('Manage plan')
+  })
+
+  it('renders no invented meter, example label or literal plan name', () => {
+    const html = view()
+    expect(html).not.toContain('Corpus')
+    expect(html).not.toContain('Deep decisions')
+    expect(html).not.toContain('Example')
+    expect(html).not.toContain('Studio')
   })
 
   it('opens each decision at its own address', () => {
@@ -163,12 +181,5 @@ describe('the greeting name comes from the session, never from the page', () => 
 
   it('renders no name for an empty or missing address', () => {
     expect(greetingName('')).toBe('')
-  })
-})
-
-describe('the month the page measures', () => {
-  it('derives the key from the clock in UTC', () => {
-    expect(monthKeyUtc(new Date('2026-10-31T23:30:00Z'))).toBe('2026-10')
-    expect(monthKeyUtc(new Date('2026-11-01T00:30:00Z'))).toBe('2026-11')
   })
 })

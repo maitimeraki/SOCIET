@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { MemoryRouter } from 'react-router-dom'
 import { BANNED_TERMS, renderedText } from '../test/copyLaw'
+import { consentError } from '../auth/authRules'
 import SignUpPage from './SignUpPage'
 
 const render = () =>
@@ -83,5 +84,23 @@ describe('SignUpPage — the door in (§7.2)', () => {
     const text = renderedText(page)
     expect(text).not.toMatch(BANNED_TERMS)
     expect(text).not.toMatch(/survey/i)
+  })
+})
+
+describe('SignUpPage — the consent attestations (Task 10)', () => {
+  it('renders both required checkboxes, with their policy links', () => {
+    const html = render()
+    expect(html).toContain('id="signup-terms"')
+    expect(html).toContain('id="signup-age"')
+    expect(html).toContain('href="/terms"')
+    expect(html).toContain('href="/privacy"')
+    expect(html).toContain('I am 18 or older.')
+  })
+
+  it('blocks a signup until both are checked', () => {
+    expect(consentError(false, false)).not.toBeNull()
+    expect(consentError(true, false)).not.toBeNull()
+    expect(consentError(false, true)).not.toBeNull()
+    expect(consentError(true, true)).toBeNull()
   })
 })

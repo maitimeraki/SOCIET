@@ -1,52 +1,73 @@
+import { useState } from 'react'
 import { Link } from 'react-router-dom'
+import { ApiError, billingCheckout } from '../api/rest'
+import { useAuthStore } from '../auth/authStore'
 import { buttonClasses, inlineLinkClasses } from '../components/ui/Button'
 
 /**
- * §7.9 The rate card. Two metered units, two plans, one custom door, and the rules under the
- * plans. No calculator, no slider, no annual toggle, no urgency — the page's job is to make
- * the two units obvious and the custom path easy.
- *
- * The prices are placeholders pending unit economics: the hierarchy and the two units are the
- * design; the figures are not.
+ * §7.9 The rate card. One metered pool, two plans, one custom door, and the rules under the
+ * plans. Every figure is the §4 plan table (units only): the client invents no limit.
  */
 const PLANS = [
   {
-    name: 'Desk',
-    for: 'For the first question.',
-    amount: '$0',
+    key: 'starter',
+    name: 'Starter',
+    for: 'For the first questions.',
+    amount: '$10',
     per: '/ month',
     rows: [
-      ['Corpus', '250 MB / month'],
-      ['Deep decisions', '3 / month'],
-      ['The answer includes', 'Sources & case against'],
-      ['Local-first', 'Included'],
+      ['Units / month', '8,000'],
+      ['Panel size', '20'],
+      ['Passes per decision', '4'],
     ],
-    action: 'Start free',
+    action: 'Start with Starter',
     featured: false,
   },
   {
+    key: 'studio',
     name: 'Studio',
     for: 'For a standing practice.',
-    amount: '$29',
+    amount: '$20',
     per: '/ month',
     rows: [
-      ['Corpus', '2 GB / month'],
-      ['Deep decisions', '20 / month'],
-      ['The answer includes', 'Sources & case against'],
-      ['Local-first', 'Included'],
+      ['Units / month', '16,000'],
+      ['Panel size', '20'],
+      ['Passes per decision', '4'],
     ],
     action: 'Start with Studio',
     featured: true,
   },
 ] as const
 
+const ENTERPRISE_ROWS = [
+  ['Units / month', 'Custom'],
+  ['Panel size', '40'],
+  ['Passes per decision', '4'],
+] as const
+
 const RULES = [
-  ['A document counts once.', 'Added to a corpus, read by the panel, re-read in a later decision: it counts once against that month.'],
-  ['A deep decision counts once.', 'From the first pass to the filed answer. Reopening a filed answer does not count again.'],
-  ['No seats.', 'One account, however many people read the verdict. The panel is the only metered thing.'],
+  ['One pool.', 'A unit is spent when the panel reads your material or argues a pass.'],
+  ['It resets each period.', 'The balance resets at the end of the billing period; nothing rolls over.'],
+  ['No seats.', 'One account, however many people read the verdict.'],
 ] as const
 
 export default function PricingPage() {
+  const user = useAuthStore((s) => s.user)
+  const [buying, setBuying] = useState<'starter' | 'studio' | null>(null)
+  const [checkoutError, setCheckoutError] = useState<string | null>(null)
+
+  async function buy(plan: 'starter' | 'studio') {
+    setCheckoutError(null)
+    setBuying(plan)
+    try {
+      const { url } = await billingCheckout(plan)
+      window.location.assign(url)
+    } catch (error) {
+      setCheckoutError(error instanceof ApiError ? error.detail : "Checkout isn't available yet.")
+      setBuying(null)
+    }
+  }
+
   return (
     <div className="min-h-[calc(100dvh-52px)] bg-bone">
       <header className="flex items-center justify-between gap-4 border-b border-hairline px-8 py-5">
@@ -61,8 +82,8 @@ export default function PricingPage() {
           >
             Open the app
           </Link>
-          <Link to="/auth/signup" className={buttonClasses('primary', 40, 'min-h-11')}>
-            Start free
+          <Link to="/auth/signup?next=/pricing" className={buttonClasses('primary', 40, 'min-h-11')}>
+            Free to start · No card
           </Link>
         </div>
       </header>
@@ -73,45 +94,28 @@ export default function PricingPage() {
           Pay for the material. And the arguments.
         </h1>
         <p className="mt-4 max-w-[56ch] font-ui text-body text-ink-2">
-          Two things set every plan: how much your panel reads in a month, and how many deep decisions
-          it argues. No seats. No per-question invoice.
+          One unit pool per month, sized by how much material your panel reads and how many passes it
+          argues. No seats. No per-question invoice.
         </p>
 
-        <div className="mt-10 grid grid-cols-1 border-y border-rule sm:grid-cols-2">
-          <div className="grid grid-cols-[36px_1fr] gap-4 py-[22px] sm:border-r sm:border-rule sm:pr-8">
-            <span className="font-mono text-micro text-ink-3">01</span>
-            <div>
-              <strong className="block font-ui text-body-sm font-semibold text-ink">Corpus size</strong>
-              <p className="mt-1 max-w-[44ch] font-ui text-body-sm text-ink-2">
-                The source material your panel can hold and read in a month. A document counts once,
-                however often it is read.
-              </p>
-            </div>
-          </div>
-          <div className="grid grid-cols-[36px_1fr] gap-4 border-t border-rule py-[22px] sm:border-t-0 sm:pl-8">
-            <span className="font-mono text-micro text-ink-3">02</span>
-            <div>
-              <strong className="block font-ui text-body-sm font-semibold text-ink">Deep decisions</strong>
-              <p className="mt-1 max-w-[44ch] font-ui text-body-sm text-ink-2">
-                A question the panel argues to a filed answer. One decision counts once, however many
-                passes it takes.
-              </p>
-            </div>
+        <div className="mt-10 grid grid-cols-[36px_1fr] gap-4 border-y border-rule py-[22px]">
+          <span className="font-mono text-micro text-ink-3">01</span>
+          <div>
+            <strong className="block font-ui text-body-sm font-semibold text-ink">One unit pool per month</strong>
+            <p className="mt-1 max-w-[52ch] font-ui text-body-sm text-ink-2">
+              A unit is spent when the panel reads your material or argues a pass. The balance resets at
+              the end of the billing period. No per-question invoice. No seats.
+            </p>
           </div>
         </div>
       </div>
 
-      <div className="mx-auto grid w-[min(1100px,calc(100%-48px))] grid-cols-1 gap-5 sm:grid-cols-[1fr_1.18fr]">
+      <div className="mx-auto grid w-[min(1100px,calc(100%-48px))] grid-cols-1 gap-5 sm:grid-cols-2">
         {PLANS.map((plan) => (
           <article
             key={plan.name}
             className={`flex flex-col rounded-xl p-8 shadow-card ${plan.featured ? 'bg-[image:var(--gradient-marked)] shadow-sheet' : 'bg-paper'}`}
           >
-            {plan.featured ? (
-              <span className="mb-4 self-start rounded-full bg-accent px-2.5 py-1 font-mono text-[10px] uppercase tracking-[0.08em] text-on-accent">
-                Most chosen
-              </span>
-            ) : null}
             <p className="font-ui text-label uppercase tracking-[0.1em] text-ink-3">{plan.name}</p>
             <p className="mt-1.5 font-ui text-body-sm text-ink-2">{plan.for}</p>
             <p className="my-6 flex items-baseline gap-2 border-b border-hairline pb-6">
@@ -126,29 +130,55 @@ export default function PricingPage() {
                 </li>
               ))}
             </ul>
-            <Link
-              to="/auth/signup"
-              className={buttonClasses(plan.featured ? 'primary' : 'secondary', 48, 'mt-auto min-h-11 w-full')}
-            >
-              {plan.action}
-            </Link>
+            {user ? (
+              <button
+                type="button"
+                onClick={() => void buy(plan.key)}
+                disabled={buying !== null}
+                className={buttonClasses(plan.featured ? 'primary' : 'secondary', 48, 'mt-auto min-h-11 w-full')}
+              >
+                {buying === plan.key ? 'Opening checkout…' : plan.action}
+              </button>
+            ) : (
+              <Link
+                to="/auth/signup?next=/pricing"
+                className={buttonClasses(plan.featured ? 'primary' : 'secondary', 48, 'mt-auto min-h-11 w-full')}
+              >
+                {plan.action}
+              </Link>
+            )}
           </article>
         ))}
       </div>
+
+      {checkoutError && (
+        <div role="alert" className="field-invalid mx-auto mt-4 w-[min(1100px,calc(100%-48px))] pl-3">
+          <p className="text-body text-ink-2">{checkoutError}</p>
+        </div>
+      )}
 
       <section className="mx-auto mt-5 grid w-[min(1100px,calc(100%-48px))] grid-cols-1 items-center gap-10 rounded-xl bg-sand p-10 lg:grid-cols-[1.5fr_0.8fr]">
         <div>
           <p className="font-ui text-label uppercase tracking-[0.09em] text-ink-3">Custom</p>
           <h2 className="mt-2 max-w-[20ch] font-display text-heading font-medium tracking-[-0.025em] text-ink">
-            A standing panel, or a corpus that keeps growing.
+            Enterprise
           </h2>
+          <p className="mt-2 font-mono text-mono uppercase tracking-[0.06em] text-ink-3">Custom pricing</p>
           <p className="mt-3 max-w-[52ch] font-ui text-body-sm text-ink-2">
-            More than 2 GB a month, or the same panel against a living archive. Tell me the material
-            and the question; I will propose the plan and the monthly price.
+            More than 16,000 units a month, or the same panel against material that keeps growing. Tell
+            us the material and the question; we will propose the plan and the monthly price.
           </p>
+          <ul className="mt-5 max-w-[36ch]">
+            {ENTERPRISE_ROWS.map(([label, value]) => (
+              <li key={label} className="flex items-baseline justify-between gap-4 border-t border-hairline py-2.5 first:border-t-0">
+                <span className="font-ui text-body-sm text-ink-2">{label}</span>
+                <strong className="text-right font-mono text-mono font-medium text-ink">{value}</strong>
+              </li>
+            ))}
+          </ul>
         </div>
         <div className="grid justify-items-start gap-2.5">
-          <a href="mailto:hello@societas.app?subject=Custom%20plan" className={buttonClasses('primary', 48, 'min-h-11')}>
+          <a href="mailto:hello@societas.app?subject=Enterprise%20plan" className={buttonClasses('primary', 48, 'min-h-11')}>
             Talk to the founder
           </a>
           <p className="font-mono text-micro text-ink-3">Monthly billing &middot; cancel anytime &middot; prices in USD</p>
@@ -168,7 +198,7 @@ export default function PricingPage() {
       </section>
 
       <p className="mx-auto w-[min(1100px,calc(100%-48px))] border-t border-rule py-6 font-mono text-micro text-ink-3">
-        Every plan runs on the machine you start it on.{' '}
+        Your material stays yours — export or delete it anytime.{' '}
         <Link to="/" className="text-accent underline underline-offset-4">
           Back to the product
         </Link>

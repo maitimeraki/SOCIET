@@ -14,39 +14,40 @@ const render = () =>
   )
 
 describe('the plans', () => {
-  it('names exactly two metered units', () => {
+  it('names the three plan lines, with no popularity claim', () => {
     const html = render()
-    expect(html).toContain('Corpus size')
-    expect(html).toContain('Deep decisions')
-    // R12 — no per-seat pricing. The copy's deliberate "No seats." is not a metered unit.
-    expect(html).not.toMatch(/per[- ]seat/i)
-    expect(html).toContain('No seats.')
-  })
-
-  it('shows two plans and one custom band', () => {
-    const html = render()
-    expect(html).toContain('Desk')
+    expect(html).toContain('Starter')
     expect(html).toContain('Studio')
-    expect(html).toContain('Most chosen')
-    expect(html).toContain('A standing panel, or a corpus that keeps growing.')
+    expect(html).toContain('Enterprise')
+    expect(html).not.toContain('Desk')
+    expect(html).not.toContain('Most chosen')
   })
 
-  it('has no calculator, no slider and no annual toggle', () => {
+  it('states units per month, panel size and passes per decision — and no material volume', () => {
     const html = render()
-    expect(html).not.toContain('type="range"')
-    expect(html).not.toContain('Annual')
-    expect(html).not.toContain('Save 20')
+    expect(html).toContain('Units / month')
+    expect(html).toContain('8,000')
+    expect(html).toContain('16,000')
+    expect(html).toContain('Panel size')
+    expect(html).toContain('Passes per decision')
+    expect(html).not.toContain('MB')
+    expect(html).not.toContain('GB')
+    expect(html).not.toMatch(/corpus/i)
+    expect(html).not.toContain('decision / month')
+    expect(html).not.toContain('Local-first')
   })
 
   it('renders no banned word', () => {
     expect(renderedText(render())).not.toMatch(BANNED_TERMS)
   })
 
-  it('gives the header link a 44px target and uses the one real contact address', () => {
+  it('keeps the enterprise mailto and the 44px targets', () => {
     const html = render()
     const open = [...html.matchAll(/<a\b[^>]*>/g)].map((match) => match[0]).find((tag) => tag.includes('href="/overview"'))
     expect(open).toContain('min-h-11')
-    expect(html).toContain('mailto:hello@societas.app')
+    expect(html).toContain('mailto:hello@societas.app?subject=Enterprise%20plan')
     expect(html).not.toContain('societas.example')
+    // Anonymous visitors get the signup door, never a checkout control.
+    expect(html).toContain('href="/auth/signup?next=/pricing"')
   })
 })

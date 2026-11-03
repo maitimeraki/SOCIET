@@ -7,7 +7,7 @@ import { runFileIngest, runUrlIngest } from '../api/ingestFlow'
 import DocCard from '../components/ingest/DocCard'
 import { BANNED_TERMS, renderedText } from '../test/copyLaw'
 import type { DraftDoc } from '../wizard/draftStore'
-import IngestPage from './IngestPage'
+import IngestPage, { UnitsGate } from './IngestPage'
 
 // vitest runs in the node environment; poll.ts sleeps via window.setTimeout.
 beforeEach(() => {
@@ -90,20 +90,20 @@ describe('the R17 ingest transport (202 → poll → documents)', () => {
     expect(paths(fetchMock)).toHaveLength(2)
   })
 
-  it('a 429 is its own quota state with the Retry-After, not a generic failure', async () => {
+  it('a 402 is a recoverable units-exhausted gate with the reset date, never retried', async () => {
     const fetchMock = vi.fn().mockResolvedValueOnce(
       json(
-        { detail: { code: 'quota_exceeded', message: 'Upload quota exceeded for this month.' } },
-        { status: 429, headers: { 'Retry-After': '3600' } },
+        { detail: { code: 'payment_required', message: 'Units used up. They reset on 2026-12-01.' } },
+        { status: 402 },
       ),
     )
     vi.stubGlobal('fetch', fetchMock)
 
     expect(await runUrlIngest('https://example.com')).toEqual({
-      kind: 'quota',
-      message: 'Upload quota exceeded for this month.',
-      retryAfterSeconds: 3600,
+      kind: 'units_exhausted',
+      message: 'Units used up. They reset on 2026-12-01.',
     })
+    expect(fetchMock).toHaveBeenCalledTimes(1) // no retry
   })
 
   it('a URL fetch follows the same 202 → poll → documents path', async () => {
@@ -117,6 +117,15 @@ describe('the R17 ingest transport (202 → poll → documents)', () => {
     const outcome = await runUrlIngest('https://example.com/report')
     expect(outcome.kind).toBe('documents')
     expect(paths(fetchMock)[0]).toContain('/api/v1/ingest/url')
+  })
+})
+
+describe('an exhausted unit balance is a gate, not a failure', () => {
+  it('renders the server message and reset date as a recoverable notice', () => {
+    const html = renderToStaticMarkup(<UnitsGate message="Units used up. They reset on 2026-12-01." />)
+    expect(html).toContain('role="status"')
+    expect(html).toContain('Units used up. They reset on 2026-12-01.')
+    expect(html).not.toContain('Extraction failed')
   })
 })
 
