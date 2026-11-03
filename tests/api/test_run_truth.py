@@ -63,7 +63,7 @@ def _app_for(account, *routers_with_prefixes) -> FastAPI:
     for router, prefix in routers_with_prefixes:
         app.include_router(router, prefix=prefix)
     app.dependency_overrides[current_user] = lambda: SimpleNamespace(
-        id=uuid.UUID(account.id)
+        id=uuid.UUID(account.id), plan_key="free"
     )
     return app
 

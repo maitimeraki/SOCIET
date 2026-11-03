@@ -105,7 +105,7 @@ async def db_client(job_owner):
     app = FastAPI()
     app.include_router(router)
     app.dependency_overrides[current_user] = lambda: SimpleNamespace(
-        id=uuid.UUID(job_owner.id)
+        id=uuid.UUID(job_owner.id), plan_key="free"
     )
     transport = ASGITransport(app=app, client=("10.99.8.3", 5000))
     async with AsyncClient(transport=transport, base_url="http://testserver") as http:

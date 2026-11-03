@@ -51,11 +51,41 @@ _SUCCESS_STATUS = {
 }
 
 
+async def _assert_reservation(job_id: str) -> None:
+    """Abort before spending when the API's reservation is gone.
+
+    The row is the authority: a missing job, a job with no reservation, a
+    missing period, or a period whose reservation no longer covers the job all
+    mean the balance was released (lease sweep, release, or a broken enqueue).
+    No LLM call may be made past this point.
+    """
+    from sqlalchemy import select
+
+    from src.db.engine import get_session_factory
+    from src.db.models import Job, UsagePeriod
+
+    async with get_session_factory()() as db:
+        job = await db.get(Job, uuid.UUID(job_id))
+        if job is None or job.reserved_units <= 0 or job.reserved_period_start is None:
+            raise RuntimeError("unit reservation missing; refusing to spend")
+        period = (
+            await db.execute(
+                select(UsagePeriod).where(
+                    UsagePeriod.user_id == job.user_id,
+                    UsagePeriod.period_start == job.reserved_period_start,
+                )
+            )
+        ).scalar_one_or_none()
+        if period is None or period.units_reserved < job.reserved_units:
+            raise RuntimeError("unit reservation missing; refusing to spend")
+
+
 async def _debate_core(job_id: str, payload: dict[str, Any]) -> None:
     from src.api import debate_api
     from src.simulation.debate_config import DebateConfig
     from src.simulation.orchestrator import DebateCancelled
 
+    await _assert_reservation(job_id)
     try:
         await debate_api._run_debate_async(
             job_id=job_id,
@@ -594,6 +624,29 @@ async def execute(kind: str, job_id: str, payload: dict[str, Any]) -> None:
         JOB_DURATION.labels(kind=kind, status=status).observe(
             time.monotonic() - started
         )
+        # Success/cancel release the surplus reservation; a failure does not —
+        # RQ may retry it and the lease sweep is the backstop (Task 2).
+        if kind == "debate" and status != "failed":
+            try:
+                from src.audit import record as audit_record
+                from src.billing import units
+                from src.db.engine import get_session_factory
+
+                async with get_session_factory()() as db:
+                    released = await units.release_job_reservation(
+                        db, uuid.UUID(job_id)
+                    )
+                    if released:
+                        await audit_record(
+                            db,
+                            "units_release",
+                            target=job_id,
+                            meta={"released": released, "reason": "job_finished"},
+                        )
+            except Exception as exc:
+                logger.warning(
+                    "could not release reservation for job %s: %s", job_id, exc
+                )
         reset_correlation_id(token)
 
 

@@ -199,6 +199,9 @@ async def _write_queued_rows(kind: str, job_id: str, payload: dict[str, Any]) ->
                 "dataset_id": payload.get("graph_id"),
                 "corpus_label": payload.get("corpus_label"),
                 "config": payload.get("config"),
+                "reserved_units": payload.get("reserved_units") or 0,
+                "reserved_period_start": payload.get("reserved_period_start"),
+                "reserved_at": payload.get("reserved_at"),
                 "result": None,
                 "error": None,
             }

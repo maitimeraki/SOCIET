@@ -23,6 +23,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.api import run_doc
+from src.api.errors import payment_required
 from src.api.graph_snapshot import read_snapshot as read_graph_snapshot
 from src.api.jobs_api import enqueue_or_http
 from src.api.limits import limiter, service_available
@@ -30,6 +31,8 @@ from src.audit import client_ip
 from src.audit import record as audit_record
 from src.auth.cookies import verify_csrf
 from src.auth.deps import current_user, require_owner, websocket_user
+from src.billing import units as billing_units
+from src.billing.entitlements import resolve_entitlements
 from src.config.settings import get_settings
 from src.db.engine import get_db
 from src.db.models import Dataset, User
@@ -472,12 +475,86 @@ async def create_debate(
                 detail={"code": "not_found", "message": "Corpus not found."},
             )
 
+    # The plan is the session user's row, never the body (§4): any plan/units
+    # in the request is ignored, and only the plan's caps bound the work.
+    ent = await resolve_entitlements(db, user=user)
+    requested = body.config
+    explicit = requested.model_fields_set
+    ip = client_ip(request)
+
+    for field, cap, noun in (
+        ("max_agents", ent.plan.max_agents, "agents"),
+        ("max_rounds", ent.plan.max_rounds, "rounds"),
+    ):
+        if field in explicit and getattr(requested, field) > cap:
+            await audit_record(
+                db,
+                "plan_denied",
+                user_id=user.id,
+                target=None,
+                ip=ip,
+                meta={
+                    "field": field,
+                    "requested": getattr(requested, field),
+                    "cap": cap,
+                },
+            )
+            raise HTTPException(
+                status_code=403,
+                detail={
+                    "code": "plan_limit_exceeded",
+                    "message": f"Your plan allows at most {cap} {noun}.",
+                },
+            )
+
+    agents = min(requested.max_agents, ent.plan.max_agents)
+    rounds = min(requested.max_rounds, ent.plan.max_rounds)
+    pairs = min(requested.max_pairs_per_round, agents)
+    applied = {
+        "max_agents": agents,
+        "max_rounds": rounds,
+        "max_pairs_per_round": pairs,
+    }
+    requested_values = {
+        "max_agents": requested.max_agents,
+        "max_rounds": requested.max_rounds,
+        "max_pairs_per_round": requested.max_pairs_per_round,
+    }
+    if applied != requested_values:
+        await audit_record(
+            db,
+            "plan_clamp",
+            user_id=user.id,
+            target=None,
+            ip=ip,
+            meta={"requested": requested_values, "applied": applied},
+        )
+
+    # §4: agents × rounds LLM-pair calls × the two turns in a pair.
+    estimate = agents * rounds * 2
+    try:
+        reservation = await billing_units.reserve_units(
+            db, user_id=user.id, plan_key=user.plan_key, estimate=estimate
+        )
+    except billing_units.InsufficientUnits as exc:
+        await audit_record(
+            db,
+            "units_denied",
+            user_id=user.id,
+            target=None,
+            ip=ip,
+            meta={"estimate": estimate, "period_end": exc.period_end.isoformat()},
+        )
+        raise payment_required(
+            f"Units used up. They reset on {exc.period_end.date().isoformat()}."
+        ) from exc
+
     config = DebateConfig(
-        max_agents=body.config.max_agents,
-        max_rounds=body.config.max_rounds,
+        max_agents=agents,
+        max_rounds=rounds,
         comm_radius=body.config.comm_radius,
         min_entity_overlap=body.config.min_entity_overlap,
-        max_pairs_per_round=body.config.max_pairs_per_round,
+        max_pairs_per_round=pairs,
         convergence_threshold=body.config.convergence_threshold,
         llm_concurrency=body.config.llm_concurrency,
         topology_score_threshold=body.config.topology_score_threshold,
@@ -486,19 +563,53 @@ async def create_debate(
     )
 
     # Durable at accept time: `enqueue` writes the queued rows before it
-    # dispatches, so the 202 always follows a row that exists.
-    job_id = await enqueue_or_http(
-        "debate",
-        {
-            "user_id": str(user.id),
-            "query": body.query,
-            "graph_id": body.graph_id,
-            "corpus_label": body.corpus_label,
-            "config": asdict(config),
-            "selected_domains": body.selected_domains,
-            "simulation_depth": body.simulation_depth,
-            "context": body.context,
-            "correlation_id": getattr(request.state, "correlation_id", None),
+    # dispatches, so the 202 always follows a row that exists — and the row
+    # carries the reservation, which is what the worker re-checks.
+    try:
+        job_id = await enqueue_or_http(
+            "debate",
+            {
+                "user_id": str(user.id),
+                "query": body.query,
+                "graph_id": body.graph_id,
+                "corpus_label": body.corpus_label,
+                "config": asdict(config),
+                "selected_domains": body.selected_domains,
+                "simulation_depth": body.simulation_depth,
+                "context": body.context,
+                "correlation_id": getattr(request.state, "correlation_id", None),
+                "reserved_units": reservation.amount,
+                "reserved_period_start": reservation.period_start.isoformat(),
+                "reserved_at": datetime.now(timezone.utc).isoformat(),
+            },
+        )
+    except Exception:
+        await billing_units.release_reservation(
+            db,
+            user_id=user.id,
+            period_start=reservation.period_start,
+            amount=reservation.amount,
+        )
+        await audit_record(
+            db,
+            "units_release",
+            user_id=user.id,
+            target=None,
+            ip=ip,
+            meta={"estimate": estimate, "reason": "enqueue_failed"},
+        )
+        raise
+
+    await audit_record(
+        db,
+        "units_reserve",
+        user_id=user.id,
+        target=job_id,
+        ip=ip,
+        meta={
+            "estimate": estimate,
+            "units_used": reservation.units_used,
+            "units_reserved": reservation.units_reserved,
         },
     )
 

@@ -57,7 +57,7 @@ def _client(user_id: str, *, debate: bool = False) -> AsyncClient:
     if debate:
         app.include_router(debate_router, prefix="/api/v1")
     app.dependency_overrides[current_user] = lambda: SimpleNamespace(
-        id=uuid.UUID(str(user_id))
+        id=uuid.UUID(str(user_id)), plan_key="free"
     )
     return AsyncClient(
         transport=ASGITransport(app=app, client=("10.99.8.4", 5000)),

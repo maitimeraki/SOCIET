@@ -106,6 +106,10 @@ def _job_values(
         "queued_at": _parse_dt(doc.get("created_at")) or _now(),
         "started_at": _now() if status == "running" else None,
         "finished_at": _now() if status in TERMINAL_STATUSES else None,
+        # Set once by the enqueue write; the upsert below never updates them.
+        "reserved_units": doc.get("reserved_units") or 0,
+        "reserved_period_start": _parse_dt(doc.get("reserved_period_start")),
+        "reserved_at": _parse_dt(doc.get("reserved_at")),
     }
 
 
