@@ -17,6 +17,7 @@ writes are the same code.
 import asyncio
 import base64
 import contextlib
+import datetime
 import json
 import logging
 import time
@@ -144,10 +145,24 @@ def _read_object(object_key: str) -> bytes:
 
 
 async def _extract_file_upload(
-    user_id: str, upload_id: str, filename: str, timeout: int, max_output_bytes: int
+    user_id: str,
+    upload_id: str,
+    filename: str,
+    timeout: int,
+    max_output_bytes: int,
+    period_start: datetime.datetime,
+    job_id: str,
 ) -> None:
-    """Read one stored object, re-sniff it, extract it in the bounded child."""
+    """Read one stored object, re-sniff it, extract it in the bounded child.
+
+    A repeated ``sha256`` for the same user is not re-extracted or re-charged:
+    the prior row's text is copied and a zero-unit event records the reason.
+    """
+    from sqlalchemy import select
+
+    from src.billing import units
     from src.db.engine import get_session_factory
+    from src.db.models import Upload
     from src.ingest import repository
     from src.ingest.bounded import run_extraction
     from src.ingest.extract import ExtractionError, validate_upload
@@ -156,7 +171,35 @@ async def _extract_file_upload(
         row = await repository.get_upload_row(session, upload_id)
         if row is None or str(row.user_id) != str(user_id):
             raise ExtractionError(f"upload {upload_id} is not on the job's owner")
+        owner_id = row.user_id
         object_key = row.object_key
+        prior = (
+            await session.execute(
+                select(Upload)
+                .where(
+                    Upload.user_id == owner_id,
+                    Upload.sha256 == row.sha256,
+                    Upload.extracted_text.is_not(None),
+                    Upload.id != row.id,
+                )
+                .order_by(Upload.created_at)
+                .limit(1)
+            )
+        ).scalar_one_or_none()
+        if prior is not None:
+            row.extracted_text = prior.extracted_text
+            await session.commit()
+            await units.settle_call(
+                session,
+                user_id=owner_id,
+                period_start=period_start,
+                source="ingest",
+                amount=0,
+                idempotency_key=f"ingest:{upload_id}",
+                reason="duplicate sha256",
+                job_id=uuid.UUID(str(job_id)),
+            )
+            return
 
     data = await asyncio.to_thread(_read_object, object_key)
     # Defense in depth: the route already sniffed this, but the bytes have left
@@ -176,19 +219,37 @@ async def _extract_file_upload(
         row = await repository.get_upload_row(session, upload_id)
         if row is not None:
             row.extracted_text = json.dumps(result["document"], ensure_ascii=False)
-            await session.commit()
+            await units.settle_call(
+                session,
+                user_id=owner_id,
+                period_start=period_start,
+                source="ingest",
+                amount=units.units_for_chars(len(result["document"]["text"])),
+                idempotency_key=f"ingest:{upload_id}",
+                job_id=uuid.UUID(str(job_id)),
+            )
 
 
 async def _extract_url_upload(
-    user_id: str, url: str, timeout: int, max_output_bytes: int
+    user_id: str,
+    url: str,
+    timeout: int,
+    max_output_bytes: int,
+    period_start: datetime.datetime,
+    job_id: str,
 ) -> str:
     """Fetch + extract one URL in the bounded child; record it as an upload row.
 
     A URL has no object to store, so ``object_key`` is the source URL itself —
     the row is only a carrier for the extracted payload the documents endpoint
-    serves. Returns the new upload id.
+    serves. The body's ``sha256`` dedupes: a repeat is reused and settles zero
+    units instead of inserting a second row. Returns the upload id.
     """
+    from sqlalchemy import select
+
+    from src.billing import units
     from src.db.engine import get_session_factory
+    from src.db.models import Upload
     from src.ingest import repository
     from src.ingest.bounded import run_extraction
 
@@ -199,12 +260,39 @@ async def _extract_url_upload(
         max_output_bytes=max_output_bytes,
     )
     meta = result["meta"]
-    upload_id = uuid.uuid4()
+    owner_id = uuid.UUID(str(user_id))
+    job_uuid = uuid.UUID(str(job_id))
     async with get_session_factory()() as session:
+        prior = (
+            await session.execute(
+                select(Upload)
+                .where(
+                    Upload.user_id == owner_id,
+                    Upload.sha256 == meta["sha256"],
+                    Upload.extracted_text.is_not(None),
+                )
+                .order_by(Upload.created_at)
+                .limit(1)
+            )
+        ).scalar_one_or_none()
+        if prior is not None:
+            await units.settle_call(
+                session,
+                user_id=owner_id,
+                period_start=period_start,
+                source="ingest",
+                amount=0,
+                idempotency_key=f"ingest:{job_id}",
+                reason="duplicate sha256",
+                job_id=job_uuid,
+            )
+            return str(prior.id)
+
+        upload_id = uuid.uuid4()
         repository.insert_upload(
             session,
             upload_id=upload_id,
-            user_id=uuid.UUID(str(user_id)),
+            user_id=owner_id,
             object_key=meta["source_url"],
             name=url,
             size=meta["bytes"],
@@ -212,24 +300,50 @@ async def _extract_url_upload(
             sha256=meta["sha256"],
             extracted_text=json.dumps(result["document"], ensure_ascii=False),
         )
-        await session.commit()
+        await units.settle_call(
+            session,
+            user_id=owner_id,
+            period_start=period_start,
+            source="ingest",
+            amount=units.units_for_chars(len(result["document"]["text"])),
+            idempotency_key=f"ingest:{upload_id}",
+            job_id=job_uuid,
+        )
     return str(upload_id)
 
 
 async def _extract_upload_core(job_id: str, payload: dict[str, Any]) -> None:
     """The extraction job body: file batch or one URL, output into the rows."""
     from src.api import run_doc
+    from src.billing import units
     from src.config.settings import get_settings
+    from src.db.engine import get_session_factory
 
     settings = get_settings()
     timeout = settings.extract_timeout_seconds
     max_output_bytes = settings.extract_max_output_bytes
     user_id = payload["user_id"]
 
+    period_start = payload.get("reserved_period_start")
+    if isinstance(period_start, str):
+        period_start = datetime.datetime.fromisoformat(period_start)
+    if not isinstance(period_start, datetime.datetime):
+        # A legacy job without the reservation fields: the period is resolved
+        # once here so every upload in the batch settles against the same one.
+        async with get_session_factory()() as session:
+            period_start, _ = await units.resolve_period(
+                session, uuid.UUID(str(user_id))
+            )
+
     if payload.get("kind") == "url":
         upload_ids = [
             await _extract_url_upload(
-                user_id, payload["url"], timeout, max_output_bytes
+                user_id,
+                payload["url"],
+                timeout,
+                max_output_bytes,
+                period_start,
+                job_id,
             )
         ]
     else:
@@ -242,6 +356,8 @@ async def _extract_upload_core(job_id: str, payload: dict[str, Any]) -> None:
                 filenames.get(upload_id) or upload_id,
                 timeout,
                 max_output_bytes,
+                period_start,
+                job_id,
             )
 
     await run_doc.write_job_doc(
@@ -624,9 +740,12 @@ async def execute(kind: str, job_id: str, payload: dict[str, Any]) -> None:
         JOB_DURATION.labels(kind=kind, status=status).observe(
             time.monotonic() - started
         )
-        # Success/cancel release the surplus reservation; a failure does not —
-        # RQ may retry it and the lease sweep is the backstop (Task 2).
-        if kind == "debate" and status != "failed":
+        # Debate releases the surplus on success/cancel; a failure keeps its
+        # hold because RQ may retry it and the lease sweep is the backstop
+        # (Task 2). An ingest extraction spends no LLM tokens and charges
+        # nothing on failure (plan §8 item 8), so it releases on every exit.
+        release = kind == "extract_upload" or (kind == "debate" and status != "failed")
+        if release:
             try:
                 from src.audit import record as audit_record
                 from src.billing import units

@@ -1,11 +1,13 @@
-"""Ingest API: the 202 enqueue flow, quota/cap gates, and worker extraction.
+"""Ingest API: the 202 enqueue flow, unit/cap gates, and worker extraction.
 
-The routes never extract — they validate, store to the (mocked) bucket, write
-the ``uploads`` rows, and queue one ``extract_upload`` job. Extraction is driven
-here by a real ``rq.SimpleWorker`` burst against the local Redis and moto S3.
+The routes never extract — they validate, reserve units, store to the (mocked)
+bucket, write the ``uploads`` rows, and queue one ``extract_upload`` job.
+Extraction is driven here by a real ``rq.SimpleWorker`` burst against the local
+Redis and moto S3.
 """
 
 import asyncio
+import datetime
 import os
 import sys
 import uuid
@@ -89,7 +91,7 @@ def _client(user_id: str | None) -> AsyncClient:
     app.include_router(ingest_router, prefix="/api/v1")
     if user_id is not None:
         app.dependency_overrides[current_user] = lambda: SimpleNamespace(
-            id=uuid.UUID(str(user_id))
+            id=uuid.UUID(str(user_id)), plan_key="free"
         )
     return AsyncClient(
         transport=ASGITransport(app=app, client=("10.9.9.9", 5000)),
@@ -199,46 +201,55 @@ async def test_url_blank_is_422(owner):
     assert response.status_code == 422, response.text
 
 
-@pytest.mark.asyncio
-async def test_over_quota_is_429_with_retry_after(owner, monkeypatch):
-    monkeypatch.setenv("UPLOAD_QUOTA_BYTES_MONTH", "1")
+async def _exhaust_units(owner: str) -> datetime.datetime:
+    """Spend the whole free plan, returning the period end for the reset date."""
+    from src.billing import units
     from src.config.settings import get_settings
 
-    get_settings.cache_clear()
-    try:
-        async with _client(owner) as client:
-            response = await client.post(
-                "/api/v1/ingest/files",
-                files={"files": ("notes.txt", TEXT, "text/plain")},
-            )
-    finally:
-        get_settings.cache_clear()
+    factory = get_session_factory()
+    async with factory() as session:
+        period_start, period_end = await units.resolve_period(session, uuid.UUID(owner))
+        await units.settle_call(
+            session,
+            user_id=uuid.UUID(owner),
+            period_start=period_start,
+            source="ingest",
+            amount=get_settings().plan_free_units,
+            idempotency_key=f"exhaust-{uuid.uuid4().hex}",
+        )
+    return period_end
 
-    assert response.status_code == 429, response.text
-    assert _error(response)["code"] == "quota_exceeded"
-    assert int(response.headers["Retry-After"]) >= 1
+
+@pytest.mark.asyncio
+async def test_exhausted_units_is_402_with_the_reset_date(owner):
+    period_end = await _exhaust_units(owner)
+    async with _client(owner) as client:
+        response = await client.post(
+            "/api/v1/ingest/files",
+            files={"files": ("notes.txt", TEXT, "text/plain")},
+        )
+
+    assert response.status_code == 402, response.text
+    error = _error(response)
+    assert error["code"] == "payment_required"
+    assert period_end.date().isoformat() in error["message"]
     assert await _uploads_for(owner) == []
 
 
 @pytest.mark.asyncio
-async def test_url_over_quota_is_429_with_retry_after(owner, monkeypatch):
-    # The SSRF guard is out of scope here; the quota gate is what is under test.
+async def test_url_with_exhausted_units_is_402(owner, monkeypatch):
+    # The SSRF guard is out of scope here; the unit gate is what is under test.
     monkeypatch.setattr("src.api.ingest_api.validate_url", lambda url: url)
-    monkeypatch.setenv("UPLOAD_QUOTA_FILES_MONTH", "0")
-    from src.config.settings import get_settings
+    period_end = await _exhaust_units(owner)
+    async with _client(owner) as client:
+        response = await client.post(
+            "/api/v1/ingest/url", json={"url": "https://example.com/report"}
+        )
 
-    get_settings.cache_clear()
-    try:
-        async with _client(owner) as client:
-            response = await client.post(
-                "/api/v1/ingest/url", json={"url": "https://example.com/report"}
-            )
-    finally:
-        get_settings.cache_clear()
-
-    assert response.status_code == 429, response.text
-    assert _error(response)["code"] == "quota_exceeded"
-    assert int(response.headers["Retry-After"]) >= 1
+    assert response.status_code == 402, response.text
+    error = _error(response)
+    assert error["code"] == "payment_required"
+    assert period_end.date().isoformat() in error["message"]
 
 
 # --- the 202 flow + worker extraction ----------------------------------------

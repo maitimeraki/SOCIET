@@ -73,11 +73,6 @@ class Settings(BaseSettings):
     s3_bucket: str = "societas-uploads"
     s3_region: str = "us-east-1"
 
-    # --- Per-user upload quota (plan §7): usage is SUM(bytes)/COUNT(*) over
-    # the user's `uploads` rows for the current calendar month.
-    upload_quota_bytes_month: int = 104_857_600  # 100 MB
-    upload_quota_files_month: int = 200
-
     # --- Bounded extraction (plan §7): the worker runs every extractor in an
     # isolated child process with a hard wall-clock timeout and an output cap.
     extract_timeout_seconds: int = 30

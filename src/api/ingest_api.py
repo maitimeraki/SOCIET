@@ -1,14 +1,17 @@
 """Ingest API: accept uploads and hand extraction to the worker (R17).
 
 Both routes validate at the trust boundary and *enqueue* — they never extract:
-``POST /files`` magic-byte-checks each upload, enforces the per-user quota, puts
-the bytes in the object bucket, writes the ``uploads`` rows, and queues one
-``extract_upload`` job; ``POST /url`` runs the SSRF guard and queues the fetch.
-Both answer ``202 {job_id, status: "queued"}`` (uniform with the debate
-enqueue). The extracted payloads are read back through ``GET /documents``.
+``POST /files`` magic-byte-checks each upload, reserves a byte ceiling of units,
+puts the bytes in the object bucket, writes the ``uploads`` rows, and queues one
+``extract_upload`` job; ``POST /url`` runs the SSRF guard, reserves the fetch
+cap, and queues the fetch. Both answer ``202 {job_id, status: "queued"}``
+(uniform with the debate enqueue). The worker settles the measured characters
+and releases the surplus. ``DELETE /uploads/{id}`` removes one owned document.
+The extracted payloads are read back through ``GET /documents``.
 """
 
 import asyncio
+import datetime
 import hashlib
 import json
 import logging
@@ -19,17 +22,19 @@ from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.api.errors import payment_required
 from src.api.jobs_api import enqueue_or_http
 from src.audit import client_ip
 from src.audit import record as audit_record
 from src.auth.cookies import verify_csrf
-from src.auth.deps import current_user
+from src.auth.deps import current_user, require_owner
+from src.billing import units
+from src.billing.units import Reservation
 from src.config.settings import get_settings
 from src.db.engine import get_db
 from src.db.models import Dataset, Upload, User
 from src.ingest import repository
 from src.ingest.extract import IngestValidationError, mime_for_filename, validate_upload
-from src.ingest.quota import QuotaExceeded, enforce_upload_quota
 from src.ingest.ssrf import validate_url
 from src.ingest.storage import delete_upload, put_upload
 
@@ -55,26 +60,33 @@ def _validation_error(detail: str) -> HTTPException:
     )
 
 
-async def _enforce_quota(
-    db: AsyncSession, user_id, *, incoming_bytes: int = 0, incoming_files: int = 0
-) -> None:
-    """The per-user quota gate, mapped onto the uniform 429 + Retry-After."""
+async def _reserve_ingest(
+    db: AsyncSession, *, user, estimate: int, request
+) -> Reservation:
+    """Reserve the upload's byte ceiling; an exhausted balance is a 402."""
     try:
-        await enforce_upload_quota(
-            db,
-            user_id,
-            incoming_bytes=incoming_bytes,
-            incoming_files=incoming_files,
+        reservation = await units.reserve_units(
+            db, user_id=user.id, plan_key=user.plan_key, estimate=max(1, estimate)
         )
-    except QuotaExceeded as exc:
-        raise HTTPException(
-            status_code=429,
-            detail={
-                "code": "quota_exceeded",
-                "message": "Upload quota exceeded for this month.",
-            },
-            headers={"Retry-After": str(exc.retry_after)},
+    except units.InsufficientUnits as exc:
+        await audit_record(
+            db,
+            "units_denied",
+            user_id=user.id,
+            ip=client_ip(request),
+            meta={"estimate": estimate, "period_end": exc.period_end.isoformat()},
+        )
+        raise payment_required(
+            f"Units used up. They reset on {exc.period_end.date().isoformat()}."
         ) from exc
+    await audit_record(
+        db,
+        "units_reserve",
+        user_id=user.id,
+        ip=client_ip(request),
+        meta={"estimate": estimate, "source": "ingest"},
+    )
+    return reservation
 
 
 async def _discard_staged(db: AsyncSession, object_keys: list[str]) -> None:
@@ -132,46 +144,58 @@ async def ingest_files(
             raise _validation_error(exc.detail) from exc
         staged.append((uuid.uuid4(), name, data))
 
-    # Quota is checked before anything is stored (429 + Retry-After).
-    await _enforce_quota(
-        db,
-        user.id,
-        incoming_bytes=sum(len(data) for _, _, data in staged),
-        incoming_files=len(staged),
+    # The reservation is a conservative ceiling (bytes >= extracted chars), so
+    # it is taken before anything is stored; the worker settles the measured
+    # character count and releases the surplus.
+    cap = get_settings().extract_max_output_bytes
+    estimate = sum(
+        max(1, units.units_for_chars(min(len(data), cap))) for _, _, data in staged
+    )
+    reservation = await _reserve_ingest(
+        db, user=user, estimate=estimate, request=request
     )
 
     upload_ids: list[str] = []
     filenames: dict[str, str] = {}
     object_keys: list[str] = []
-    for upload_id, name, data in staged:
-        key = await asyncio.to_thread(put_upload, user.id, upload_id, data)
-        object_keys.append(key)
-        repository.insert_upload(
-            db,
-            upload_id=upload_id,
-            user_id=user.id,
-            object_key=key,
-            name=name,
-            size=len(data),
-            mime=mime_for_filename(name),
-            sha256=hashlib.sha256(data).hexdigest(),
-        )
-        upload_ids.append(str(upload_id))
-        filenames[str(upload_id)] = name
-    await db.commit()
-
     try:
+        for upload_id, name, data in staged:
+            key = await asyncio.to_thread(put_upload, user.id, upload_id, data)
+            object_keys.append(key)
+            repository.insert_upload(
+                db,
+                upload_id=upload_id,
+                user_id=user.id,
+                object_key=key,
+                name=name,
+                size=len(data),
+                mime=mime_for_filename(name),
+                sha256=hashlib.sha256(data).hexdigest(),
+            )
+            upload_ids.append(str(upload_id))
+            filenames[str(upload_id)] = name
+        await db.commit()
+
         job_id = await enqueue_or_http(
             "extract_upload",
             {
                 "user_id": str(user.id),
                 "upload_ids": upload_ids,
                 "filenames": filenames,
+                "reserved_units": reservation.amount,
+                "reserved_period_start": reservation.period_start.isoformat(),
+                "reserved_at": datetime.datetime.now(datetime.UTC).isoformat(),
                 "correlation_id": getattr(request.state, "correlation_id", None),
             },
         )
     except Exception:
         await _discard_staged(db, object_keys)
+        await units.release_reservation(
+            db,
+            user_id=user.id,
+            period_start=reservation.period_start,
+            amount=reservation.amount,
+        )
         raise
     await audit_record(
         db, "upload", user_id=user.id, target=job_id, ip=client_ip(request)
@@ -186,7 +210,7 @@ async def ingest_url(
     user: User = Depends(current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """SSRF-check the URL, gate on quota, and queue its fetch + extraction."""
+    """SSRF-check the URL, reserve its fetch cap, and queue fetch + extraction."""
     if not request.url.strip():
         raise _validation_error("url is required")
     try:
@@ -195,23 +219,35 @@ async def ingest_url(
         raise _validation_error(exc.detail) from exc
 
     # A URL's size is unknown until it is fetched: reserve the fetch cap as the
-    # bounded worst case, and one file slot.
-    await _enforce_quota(
+    # bounded worst case.
+    reservation = await _reserve_ingest(
         db,
-        user.id,
-        incoming_bytes=get_settings().extract_max_output_bytes,
-        incoming_files=1,
+        user=user,
+        estimate=max(1, units.units_for_chars(get_settings().extract_max_output_bytes)),
+        request=http_request,
     )
 
-    job_id = await enqueue_or_http(
-        "extract_upload",
-        {
-            "user_id": str(user.id),
-            "kind": "url",
-            "url": request.url,
-            "correlation_id": getattr(http_request.state, "correlation_id", None),
-        },
-    )
+    try:
+        job_id = await enqueue_or_http(
+            "extract_upload",
+            {
+                "user_id": str(user.id),
+                "kind": "url",
+                "url": request.url,
+                "reserved_units": reservation.amount,
+                "reserved_period_start": reservation.period_start.isoformat(),
+                "reserved_at": datetime.datetime.now(datetime.UTC).isoformat(),
+                "correlation_id": getattr(http_request.state, "correlation_id", None),
+            },
+        )
+    except Exception:
+        await units.release_reservation(
+            db,
+            user_id=user.id,
+            period_start=reservation.period_start,
+            amount=reservation.amount,
+        )
+        raise
     await audit_record(
         db, "upload", user_id=user.id, target=job_id, ip=client_ip(http_request)
     )
@@ -282,3 +318,37 @@ async def list_uploads(
             for upload, dataset_name in rows.all()
         ]
     }
+
+
+@router.delete("/uploads/{upload_id}", status_code=204)
+async def delete_upload_route(
+    upload_id: uuid.UUID,
+    request: Request,
+    user: User = Depends(current_user),
+    db: AsyncSession = Depends(get_db),
+) -> None:
+    """Delete one owned document — the row and (for a stored file) its object.
+
+    A missing row and a foreign row are both 404: existence is not leaked. A URL
+    upload keeps its source URL in ``object_key``, so only keys under the
+    caller's ``<user_id>/`` prefix reach S3.
+    """
+    row = await repository.get_upload_row(db, upload_id)
+    if row is None:
+        raise HTTPException(
+            status_code=404, detail={"code": "not_found", "message": "Not found."}
+        )
+    await require_owner(row.user_id, user)
+
+    object_key = row.object_key
+    await db.delete(row)
+    await db.commit()
+    if object_key.startswith(f"{user.id}/"):
+        await asyncio.to_thread(delete_upload, object_key)
+    await audit_record(
+        db,
+        "upload_delete",
+        user_id=user.id,
+        target=str(upload_id),
+        ip=client_ip(request),
+    )
