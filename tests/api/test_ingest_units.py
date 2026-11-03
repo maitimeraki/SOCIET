@@ -18,11 +18,13 @@ from src.api.errors import install_error_handlers
 from src.api.ingest_api import router as ingest_router
 from src.auth.deps import current_user
 from src.billing import units
+from src.billing.plans import get_plan
 from src.config.settings import get_settings
 from src.db.engine import get_session_factory
 from src.db.models import Job, Upload, User
 from src.ingest import repository, storage
 from src.jobs import queue as jobs_queue
+from src.jobs import tasks
 
 if sys.platform == "win32":
     # psycopg refuses async on the default ProactorEventLoop (see conftest).
@@ -79,13 +81,18 @@ def clean_queue():
     queue.empty()
 
 
-def _client(user_id: str | None, *, raise_app_exceptions: bool = True) -> AsyncClient:
+def _client(
+    user_id: str | None,
+    *,
+    raise_app_exceptions: bool = True,
+    plan_key: str = "free",
+) -> AsyncClient:
     app = FastAPI()
     install_error_handlers(app)
     app.include_router(ingest_router, prefix="/api/v1")
     if user_id is not None:
         app.dependency_overrides[current_user] = lambda: SimpleNamespace(
-            id=uuid.UUID(str(user_id)), plan_key="free"
+            id=uuid.UUID(str(user_id)), plan_key=plan_key
         )
     return AsyncClient(
         transport=ASGITransport(
@@ -210,6 +217,60 @@ async def test_url_with_exhausted_units_is_402(owner, monkeypatch):
     error = response.json()["error"]
     assert error["code"] == "payment_required"
     assert period_end.date().isoformat() in error["message"]
+
+
+@pytest.mark.asyncio
+async def test_free_plan_url_holds_the_whole_allowance_then_releases(
+    owner, s3, monkeypatch
+):
+    """R28: the raw 2,500-unit fetch cap is capped at the free plan's 1,000."""
+    monkeypatch.setattr("src.api.ingest_api.validate_url", lambda url: url)
+    free_units = get_plan("free").units
+    assert free_units < units.units_for_chars(get_settings().extract_max_output_bytes)
+
+    async with _client(owner, plan_key="free") as client:
+        response = await client.post(
+            "/api/v1/ingest/url", json={"url": "https://example.com/report"}
+        )
+
+    assert response.status_code == 202, response.text
+    job_id = response.json()["job_id"]
+    job = await _job(job_id)
+    assert job.reserved_units == free_units
+    assert job.reserved_period_start is not None
+
+    async def core(_job_id, _payload):
+        return None
+
+    monkeypatch.setitem(tasks.CORES, "extract_upload", core)
+    await tasks.execute(
+        "extract_upload",
+        job_id,
+        {
+            "user_id": owner,
+            "reserved_period_start": job.reserved_period_start.isoformat(),
+        },
+    )
+    assert await _balance(owner) == (0, 0)
+
+
+@pytest.mark.asyncio
+async def test_paid_plan_url_ceiling_is_the_fetch_cap(owner, s3, monkeypatch):
+    monkeypatch.setattr("src.api.ingest_api.validate_url", lambda url: url)
+    starter = get_plan("starter")
+    fetch_cap = units.units_for_chars(get_settings().extract_max_output_bytes)
+    assert fetch_cap == 2500
+    assert fetch_cap < starter.units
+
+    async with _client(owner, plan_key="starter") as client:
+        response = await client.post(
+            "/api/v1/ingest/url", json={"url": "https://example.com/report"}
+        )
+
+    assert response.status_code == 202, response.text
+    job = await _job(response.json()["job_id"])
+    assert job.reserved_units == fetch_cap
+    assert job.reserved_units <= starter.units
 
 
 @pytest.mark.asyncio

@@ -29,6 +29,7 @@ from src.audit import record as audit_record
 from src.auth.cookies import verify_csrf
 from src.auth.deps import current_user, require_owner
 from src.billing import units
+from src.billing.plans import get_plan
 from src.billing.units import Reservation
 from src.config.settings import get_settings
 from src.db.engine import get_db
@@ -219,11 +220,18 @@ async def ingest_url(
         raise _validation_error(exc.detail) from exc
 
     # A URL's size is unknown until it is fetched: reserve the fetch cap as the
-    # bounded worst case.
+    # bounded worst case, but never more than the plan's whole allowance — a
+    # free plan's 1,000 units is below the 2,500-unit cap, and holding it for
+    # the duration of one URL ingest (surplus released at job end) keeps free
+    # URL ingest reachable.
+    plan = get_plan(user.plan_key)
     reservation = await _reserve_ingest(
         db,
         user=user,
-        estimate=max(1, units.units_for_chars(get_settings().extract_max_output_bytes)),
+        estimate=min(
+            units.units_for_chars(get_settings().extract_max_output_bytes),
+            plan.units,
+        ),
         request=http_request,
     )
 
