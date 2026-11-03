@@ -271,6 +271,75 @@ async def test_generate_raises_when_metering_already_failed():
 
 
 @pytest.mark.asyncio
+async def test_billing_enabled_without_chain_never_falls_back(monkeypatch):
+    """No named chain under billing: never switch the privacy-policy subprocessor."""
+    monkeypatch.setattr(
+        llm_client, "get_settings", lambda: SimpleNamespace(billing_enabled=True)
+    )
+    monkeypatch.setattr(
+        LLMConfig, "fallback_chain", "ollama,openai,anthropic,huggingface"
+    )
+    monkeypatch.delenv("LLM_FALLBACK_CHAIN", raising=False)
+
+    with patch("src.llm.client.litellm.acompletion", new_callable=AsyncMock) as ac:
+        ac.side_effect = RuntimeError("boom")
+        with pytest.raises(RuntimeError, match="All LLM providers failed"):
+            await LLMClient().generate("sys", "usr", provider="openai")
+
+        assert ac.await_count == 1
+        assert ac.await_args.kwargs["model"].startswith("openai/")
+
+
+@pytest.mark.asyncio
+async def test_billing_enabled_with_explicit_chain_falls_back(monkeypatch):
+    monkeypatch.setattr(
+        llm_client, "get_settings", lambda: SimpleNamespace(billing_enabled=True)
+    )
+    monkeypatch.setattr(LLMConfig, "fallback_chain", "openai,ollama")
+    monkeypatch.setenv("LLM_FALLBACK_CHAIN", "openai,ollama")
+
+    with patch("src.llm.client.litellm.acompletion", new_callable=AsyncMock) as ac:
+        ac.side_effect = [RuntimeError("boom"), _resp("fallback ok")]
+        out = await LLMClient().generate("sys", "usr", provider="openai")
+
+        assert out == "fallback ok"
+        assert ac.await_count == 2
+        assert ac.await_args_list[1].kwargs["model"].startswith("ollama/")
+
+
+@pytest.mark.asyncio
+async def test_anthropic_system_message_carries_cache_control(monkeypatch):
+    monkeypatch.setattr(LLMConfig, "prompt_cache", True)
+
+    with patch("src.llm.client.litellm.acompletion", new_callable=AsyncMock) as ac:
+        ac.return_value = _resp("ok")
+        await LLMClient().generate("sys", "usr", provider="anthropic")
+
+        messages = ac.await_args.kwargs["messages"]
+        assert messages[0]["content"] == [
+            {
+                "type": "text",
+                "text": "sys",
+                "cache_control": {"type": "ephemeral"},
+            }
+        ]
+        assert messages[1] == {"role": "user", "content": "usr"}
+
+
+@pytest.mark.asyncio
+async def test_prompt_cache_off_sends_plain_system_string(monkeypatch):
+    monkeypatch.setattr(LLMConfig, "prompt_cache", False)
+
+    with patch("src.llm.client.litellm.acompletion", new_callable=AsyncMock) as ac:
+        ac.return_value = _resp("ok")
+        await LLMClient().generate("sys", "usr", provider="anthropic")
+
+        messages = ac.await_args.kwargs["messages"]
+        assert messages[0] == {"role": "system", "content": "sys"}
+        assert messages[1] == {"role": "user", "content": "usr"}
+
+
+@pytest.mark.asyncio
 async def test_generate_without_context_does_not_meter():
     with patch(
         "src.billing.metering.record_response", new_callable=AsyncMock

@@ -7,9 +7,10 @@ from src.llm.config_llm import LLMConfig
 @dataclass
 class GraphConfig:
     # Graph stages are the analysis tier — cheap but capable. Single source:
-    # LLMConfig (env: ANALYSIS_LLM_MODEL); .env is loaded there too.
-    discovery_model: str = LLMConfig.analysis_model
-    extraction_model: str = LLMConfig.analysis_model
+    # LLMConfig (env: EXTRACTION_LLM_MODEL, then ANALYSIS_LLM_MODEL); .env is
+    # loaded there too.
+    discovery_model: str = LLMConfig.extraction_model
+    extraction_model: str = LLMConfig.extraction_model
     # Explicit per-attempt bound for the extraction LLM call: a hung request
     # must fail inside the caller's window instead of riding the library default.
     extraction_timeout_seconds: int = int(

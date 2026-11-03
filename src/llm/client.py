@@ -4,7 +4,7 @@ Public surface unchanged for all callers:
     await llm.generate(system_prompt, user_prompt, provider=..., model=..., temperature=...) -> str
     async for token in llm.stream_generate(system_prompt, user_prompt, provider=..., model=...)
     llm.get_available_providers() -> dict
-Fallback chain: requested provider first, then ollama -> openai -> anthropic -> huggingface.
+Fallback chain: requested provider first, then the configured ``LLM_FALLBACK_CHAIN``.
 """
 
 import asyncio
@@ -18,6 +18,7 @@ from typing import AsyncGenerator, Optional
 import litellm
 
 from src.billing import metering
+from src.config.settings import get_settings
 from src.llm.config_llm import LLMConfig
 
 logger = logging.getLogger(__name__)
@@ -26,6 +27,34 @@ logger = logging.getLogger(__name__)
 LLM_ATTEMPT_TIMEOUT_SECONDS = 90  # per HTTP attempt
 LLM_NUM_RETRIES = 1  # litellm-level retries per fallback leg
 LLM_TOTAL_DEADLINE_SECONDS = 300  # the whole fallback chain, all legs together
+
+
+def _fallback_order() -> list[str]:
+    """Configured fallback providers.
+
+    Billing means the subprocessor is named in the privacy policy, so with
+    billing enabled and no explicit chain we never silently switch providers.
+    """
+    if not os.getenv("LLM_FALLBACK_CHAIN") and get_settings().billing_enabled:
+        return []
+    return [p.strip() for p in LLMConfig.fallback_chain.split(",") if p.strip()]
+
+
+def _messages(provider: str, system_prompt: str, user_prompt: str) -> list[dict]:
+    """System message shape for the serving provider (prompt caching, R22)."""
+    content = system_prompt
+    if provider == "anthropic" and getattr(LLMConfig, "prompt_cache", True):
+        content = [
+            {
+                "type": "text",
+                "text": system_prompt,
+                "cache_control": {"type": "ephemeral"},
+            }
+        ]
+    return [
+        {"role": "system", "content": content},
+        {"role": "user", "content": user_prompt},
+    ]
 
 
 class LLMClient:
@@ -41,8 +70,6 @@ class LLMClient:
         "sarvam",
         "minimax",
     ]
-    FALLBACK_ORDER = ["ollama", "openai", "anthropic", "huggingface"]
-
     @staticmethod
     def _model_str(provider: str, model: Optional[str]) -> str:
         if provider == "ollama":
@@ -105,7 +132,7 @@ class LLMClient:
                 f"Unknown provider: {provider}. Available: {self.PROVIDERS}"
             )
 
-        chain = [provider] + [p for p in self.FALLBACK_ORDER if p != provider]
+        chain = [provider] + [p for p in _fallback_order() if p != provider]
         errors: list[str] = []
         output_cap = (
             max_tokens
@@ -126,10 +153,7 @@ class LLMClient:
                         kwargs["num_predict"] = output_cap
                     response = await litellm.acompletion(
                         model=self._model_str(p, leg_model),
-                        messages=[
-                            {"role": "system", "content": system_prompt},
-                            {"role": "user", "content": user_prompt},
-                        ],
+                        messages=_messages(p, system_prompt, user_prompt),
                         temperature=0.7 if temperature is None else temperature,
                         timeout=LLM_ATTEMPT_TIMEOUT_SECONDS,
                         num_retries=LLM_NUM_RETRIES,
@@ -180,10 +204,7 @@ class LLMClient:
         try:
             response = await litellm.acompletion(
                 model=self._model_str(provider, model),
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_prompt},
-                ],
+                messages=_messages(provider, system_prompt, user_prompt),
                 temperature=0.7,
                 stream=True,
                 timeout=LLM_ATTEMPT_TIMEOUT_SECONDS,

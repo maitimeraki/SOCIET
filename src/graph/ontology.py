@@ -6,12 +6,17 @@ from typing import Any, Dict, List, get_args
 
 from llama_index.llms.openai_like import OpenAILike
 
+from src.graph.llm_metering import wrap_with_metering
 from src.graph.models_graph import (
     LocalOntology,
     ProcessedChunk,
     PropertyDefinition,
 )
 from src.llm.config_llm import LLMConfig
+from src.llm.extraction import (
+    assert_extraction_licensed,
+    resolve_extraction_settings,
+)
 from src.logging.setup_logging import setup_logging
 from src.utils.hydrate_ontology import hydrate_ontology
 
@@ -113,11 +118,12 @@ class OntologyDiscoveryStage:
         timeout: float = 60.0,
     ):
         conversation_session_id = str(uuid.uuid4())
+        settings = resolve_extraction_settings(model=model)
+        assert_extraction_licensed(settings)
         self.llm = OpenAILike(
-            model=model,
-            api_base=LLMConfig.nvidia_nim_base_url
-            or "https://integrate.api.nvidia.com/v1",
-            api_key=LLMConfig.nvidia_nim_api_key,
+            model=settings.model,
+            api_base=settings.base_url,
+            api_key=settings.api_key,
             is_chat_model=True,
             timeout=timeout,  # was 480 — must fit inside the caller's wait_for window
             max_retries=1,  # was llama-index default 3 × SDK default 3 (stacked)
@@ -127,6 +133,9 @@ class OntologyDiscoveryStage:
                 "seed": 42,  # Fixed seed for reproducibility
                 "extra_headers": {"x-opencode-session": conversation_session_id},
             },
+        )
+        wrap_with_metering(
+            self.llm, provider=settings.provider, model=settings.model
         )
 
     async def run(

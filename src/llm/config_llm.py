@@ -43,8 +43,35 @@ class LLMConfig:
     nvidia_nim_api_key: str = os.getenv("NVIDIA_NIM_API_KEY", "")
     nvidia_nim_base_url: str = os.getenv("NVIDIA_NIM_BASE_URL", "")
 
+    # OpenRouter (used by the configurable extraction provider)
+    openrouter_api_key: Optional[str] = os.getenv("OPENROUTER_API_KEY")
+
     # Default provider (user's favorite)
     default_llm_provider: str = os.getenv("DEFAULT_LLM_PROVIDER", "ollama")
+
+    # Extraction-tier provider (graph ingestion). Default stays NVIDIA NIM so
+    # dev behaviour is unchanged; production must escape the free trial catalog
+    # (see src/llm/extraction.py).
+    extraction_provider: str = os.getenv("EXTRACTION_PROVIDER", "nvidia_nim")
+    extraction_model: str = (
+        os.getenv("EXTRACTION_LLM_MODEL")
+        or os.getenv("ANALYSIS_LLM_MODEL", "claude-sonnet-5")
+    )
+    extraction_base_url: str = os.getenv("EXTRACTION_BASE_URL", "")
+    extraction_api_key: str = os.getenv("EXTRACTION_API_KEY", "")
+    extraction_trial_ack: bool = os.getenv("EXTRACTION_TRIAL_ACK", "").lower() in (
+        "1",
+        "true",
+        "yes",
+    )
+    fallback_chain: str = os.getenv(
+        "LLM_FALLBACK_CHAIN", "ollama,openai,anthropic,huggingface"
+    )
+    prompt_cache: bool = os.getenv("LLM_PROMPT_CACHE", "true").lower() not in (
+        "0",
+        "false",
+        "no",
+    )
 
     # Output cap applied when a caller does not name max_tokens.
     max_output_tokens: int = int(os.getenv("LLM_MAX_OUTPUT_TOKENS", "2048"))

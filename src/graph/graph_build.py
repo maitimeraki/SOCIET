@@ -12,9 +12,14 @@ from llama_index.llms.openai_like import OpenAILike
 from src.api.graph_stream import GraphDelta, publish
 from src.graph.config_graph import GraphConfig
 from src.graph.literals import coerce_value, is_literal_value
+from src.graph.llm_metering import wrap_with_metering
 from src.graph.models_graph import LocalOntology, ProcessedChunk
 from src.graph.vocabulary import promote, select_slice
 from src.llm.config_llm import LLMConfig
+from src.llm.extraction import (
+    assert_extraction_licensed,
+    resolve_extraction_settings,
+)
 from src.logging.setup_logging import setup_logging
 
 # Configure basic logging
@@ -431,11 +436,12 @@ class GraphExtractionStage:
     def __init__(self, config: GraphConfig):
         self.config = config
         conversation_session_id = str(uuid.uuid4())
+        settings = resolve_extraction_settings(model=self.config.extraction_model)
+        assert_extraction_licensed(settings)
         self.llm = OpenAILike(
-            model=self.config.extraction_model,
-            api_base=LLMConfig.nvidia_nim_base_url
-            or "https://integrate.api.nvidia.com/v1",
-            api_key=LLMConfig.nvidia_nim_api_key,
+            model=settings.model,
+            api_base=settings.base_url,
+            api_key=settings.api_key,
             temperature=0.7,
             is_chat_model=True,
             timeout=self.config.extraction_timeout_seconds,
@@ -444,6 +450,9 @@ class GraphExtractionStage:
                 "seed": 42,  # Fixed seed for reproducibility
                 "extra_headers": {"x-opencode-session": conversation_session_id},
             },
+        )
+        wrap_with_metering(
+            self.llm, provider=settings.provider, model=settings.model
         )
         self.embed_model = OllamaEmbedding(
             model_name=LLMConfig.embedding_model,
