@@ -622,6 +622,95 @@ def purge_retention(dry_run: bool = False) -> dict[str, int]:
     return asyncio.run(purge_retention_core(dry_run=dry_run))
 
 
+async def process_stripe_event_core(event_row_id: str) -> None:
+    """Apply one recorded Stripe event and leave its row processed or failed."""
+    from src.billing import webhook
+    from src.db.engine import get_session_factory
+    from src.db.models import WebhookEvent
+
+    key = uuid.UUID(str(event_row_id))
+    async with get_session_factory()() as db:
+        row = await db.get(WebhookEvent, key)
+        if row is None or row.status == "processed":
+            return
+        try:
+            await webhook.handle_event(db, row.payload)
+        except Exception as exc:
+            # The handler may have committed before raising; clear any broken
+            # transaction, then record the failure for the retry path.
+            await db.rollback()
+            row = await db.get(WebhookEvent, key)
+            if row is not None:
+                row.status = "failed"
+                row.error = str(exc)
+                await db.commit()
+            raise
+        row.status = "processed"
+        row.processed_at = datetime.datetime.now(datetime.UTC)
+        row.error = None
+        await db.commit()
+
+
+def process_stripe_event(event_row_id: str) -> None:
+    asyncio.run(process_stripe_event_core(event_row_id))
+
+
+async def reconcile_subscriptions_core() -> dict[str, int]:
+    """Re-fetch every mirrored subscription; one failure never aborts the sweep."""
+    from sqlalchemy import select
+
+    from src.billing import stripe_client, webhook
+    from src.db.engine import get_session_factory
+    from src.db.models import Subscription
+
+    counts = {"checked": 0, "updated": 0, "failed": 0}
+    async with get_session_factory()() as db:
+        subscription_ids = list(
+            (
+                await db.execute(
+                    select(Subscription.stripe_subscription_id).where(
+                        Subscription.stripe_subscription_id.is_not(None)
+                    )
+                )
+            ).scalars()
+        )
+        for subscription_id in subscription_ids:
+            counts["checked"] += 1
+            try:
+                remote = stripe_client.retrieve_subscription(subscription_id)
+                await webhook._sync_subscription(
+                    db, remote, triggering_event_id="reconcile"
+                )
+                counts["updated"] += 1
+            except Exception as exc:
+                logger.warning(
+                    "reconcile: subscription %s failed: %s", subscription_id, exc
+                )
+                counts["failed"] += 1
+                try:
+                    await db.rollback()
+                except Exception:
+                    pass
+    return counts
+
+
+def reconcile_subscriptions() -> dict[str, int]:
+    return asyncio.run(reconcile_subscriptions_core())
+
+
+async def release_expired_reservations_core() -> int:
+    from src.billing import units
+    from src.db.engine import get_session_factory
+
+    async with get_session_factory()() as db:
+        released = await units.release_expired_reservations(db)
+    return len(released)
+
+
+def release_expired_reservations() -> int:
+    return asyncio.run(release_expired_reservations_core())
+
+
 #: kind → async core. The tests swap a core out to drive the lifecycle without
 #: standing up Neo4j/LLM.
 CORES = {

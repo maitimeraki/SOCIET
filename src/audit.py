@@ -28,6 +28,7 @@ ACTIONS = frozenset(
         "run_cancel",
         "plan_denied",
         "plan_clamp",
+        "plan_change",
         "units_reserve",
         "units_denied",
         "units_release",

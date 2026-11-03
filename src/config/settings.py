@@ -106,6 +106,11 @@ class Settings(BaseSettings):
     stripe_webhook_secret: str | None = None
     stripe_price_starter: str | None = None
     stripe_price_studio: str | None = None
+    # Where Checkout/Portal send the browser back to (the SPA origin).
+    app_base_url: str = "http://localhost:5173"
+    stripe_webhook_tolerance_seconds: int = 300
+    billing_reconcile_cron: str = "17 * * * *"  # hourly at :17
+    billing_lease_sweep_cron: str = "*/10 * * * *"  # every 10 minutes
     legal_entity_name: str = ""
     legal_contact_email: str = "hello@societas.app"
 
