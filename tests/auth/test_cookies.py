@@ -74,12 +74,17 @@ def test_session_cookie_secure_flag_follows_settings(monkeypatch):
 def test_secure_cookie_defaults_true_in_prod(monkeypatch):
     # Unset COOKIE_SECURE: the Secure flag follows ENV — True in prod only.
     monkeypatch.delenv("COOKIE_SECURE", raising=False)
-    assert Settings(env="prod").cookie_secure is True
+    assert Settings(env="prod", email_api_key="test-key").cookie_secure is True
     assert Settings(env="dev").cookie_secure is False
 
 
 def test_explicit_cookie_secure_beats_the_prod_default():
-    assert Settings(env="prod", cookie_secure=False).cookie_secure is False
+    assert (
+        Settings(
+            env="prod", cookie_secure=False, email_api_key="test-key"
+        ).cookie_secure
+        is False
+    )
 
 
 def test_clear_session_cookie_expires_it():

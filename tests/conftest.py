@@ -14,6 +14,7 @@ import os
 os.environ.setdefault("RATE_LIMIT_LOGIN", "1000/minute")
 os.environ.setdefault("RATE_LIMIT_SIGNUP", "10000/hour")
 os.environ.setdefault("RATE_LIMIT_DEBATE_ENQUEUE", "10000/hour")
+os.environ.setdefault("RATE_LIMIT_EMAIL", "10000/hour")
 
 # Stage construction requires an extraction key; the tests mock every LLM call
 # and never dial NVIDIA. Local .env files provide one, CI does not, so a blank
@@ -30,9 +31,11 @@ if (
 ):
     os.environ["EXTRACTION_API_KEY"] = "test-extraction-key"
 
+import pytest
 import pytest_asyncio
 from sqlalchemy import delete
 
+from src.config.settings import get_settings
 from src.db.engine import get_engine, get_session_factory
 from src.db.models import User
 
@@ -46,6 +49,15 @@ async def _purge(session) -> None:
     await session.commit()
 
 
+@pytest.fixture(autouse=True)
+def _no_ambient_email_provider(monkeypatch):
+    """Never send real mail from a test: the default is the dev log sink."""
+    monkeypatch.delenv("EMAIL_API_KEY", raising=False)
+    get_settings.cache_clear()
+    yield
+    get_settings.cache_clear()
+
+
 @pytest_asyncio.fixture
 async def db():
     factory = get_session_factory()
@@ -55,6 +67,12 @@ async def db():
     async with factory() as session:
         await _purge(session)
     await get_engine().dispose()
+    # Signup now touches Redis (it sends a verification email); close the shared
+    # client in this test's loop so the next test never reuses a pool bound to a
+    # dead one.
+    from src.auth import service
+
+    await service.close_redis()
 
 
 @pytest_asyncio.fixture

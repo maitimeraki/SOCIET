@@ -108,6 +108,15 @@ class Settings(BaseSettings):
     stripe_price_studio: str | None = None
     # Where Checkout/Portal send the browser back to (the SPA origin).
     app_base_url: str = "http://localhost:5173"
+
+    # --- Transactional email (plan §7): a bare httpx POST, no framework. An
+    # empty key is the dev/staging log sink; prod refuses to boot without one.
+    email_api_url: str = "https://api.resend.com/emails"
+    email_api_key: str | None = None
+    email_from: str = "no-reply@societas.app"
+    email_verification_ttl_seconds: int = 86_400  # 24 h
+    password_reset_ttl_seconds: int = 3_600  # 1 h
+    rate_limit_email: str = "3/hour"
     stripe_webhook_tolerance_seconds: int = 300
     billing_reconcile_cron: str = "17 * * * *"  # hourly at :17
     billing_lease_sweep_cron: str = "*/10 * * * *"  # every 10 minutes
@@ -136,6 +145,9 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def _validate_billing(self) -> "Settings":
+        if self.env == "prod" and not self.email_api_key:
+            raise ValueError("EMAIL_API_KEY is required in production")
+
         if self.billing_enabled:
             for name in (
                 "stripe_secret_key",

@@ -69,7 +69,9 @@ def test_hash_password_is_not_plaintext_and_verifies():
 @pytest.mark.asyncio
 async def test_signup_normalizes_email_and_rejects_duplicates(db):
     raw_email = f"  Auth-Test-{uuid.uuid4().hex[:10]}@Example.COM "
-    user, session = await service.signup(db, raw_email, PASSWORD)
+    user, session = await service.signup(
+        db, raw_email, PASSWORD, accept_terms=True, age_confirmed=True
+    )
 
     assert user.email == raw_email.strip().lower()
     assert session.user_id == user.id
@@ -77,7 +79,13 @@ async def test_signup_normalizes_email_and_rejects_duplicates(db):
     assert service.verify_password(PASSWORD, user.password_hash)
 
     with pytest.raises(HTTPException) as excinfo:
-        await service.signup(db, raw_email.strip().upper(), PASSWORD)
+        await service.signup(
+            db,
+            raw_email.strip().upper(),
+            PASSWORD,
+            accept_terms=True,
+            age_confirmed=True,
+        )
     assert excinfo.value.status_code == 409
 
 
@@ -85,7 +93,9 @@ async def test_signup_normalizes_email_and_rejects_duplicates(db):
 @pytest.mark.asyncio
 async def test_signup_rejects_short_passwords(db):
     with pytest.raises(HTTPException) as excinfo:
-        await service.signup(db, _email(), "short")
+        await service.signup(
+            db, _email(), "short", accept_terms=True, age_confirmed=True
+        )
     assert excinfo.value.status_code == 422
 
 
@@ -93,7 +103,7 @@ async def test_signup_rejects_short_passwords(db):
 @pytest.mark.asyncio
 async def test_login_failures_are_indistinguishable(db):
     email = _email()
-    await service.signup(db, email, PASSWORD)
+    await service.signup(db, email, PASSWORD, accept_terms=True, age_confirmed=True)
 
     with pytest.raises(HTTPException) as wrong_password:
         await service.login(db, email, "wrong-password")
@@ -112,7 +122,9 @@ async def test_login_failures_are_indistinguishable(db):
 @pytest.mark.asyncio
 async def test_login_refuses_disabled_users(db):
     email = _email()
-    user, _ = await service.signup(db, email, PASSWORD)
+    user, _ = await service.signup(
+        db, email, PASSWORD, accept_terms=True, age_confirmed=True
+    )
     user.disabled_at = datetime.datetime.now(datetime.UTC)
     await db.commit()
 
@@ -125,7 +137,9 @@ async def test_login_refuses_disabled_users(db):
 @pytest.mark.asyncio
 async def test_login_rehashes_an_outdated_hash(db):
     email = _email()
-    user, _ = await service.signup(db, email, PASSWORD)
+    user, _ = await service.signup(
+        db, email, PASSWORD, accept_terms=True, age_confirmed=True
+    )
     weak = PasswordHasher(time_cost=1, memory_cost=8, parallelism=1).hash(PASSWORD)
     user.password_hash = weak
     await db.commit()
@@ -139,7 +153,9 @@ async def test_login_rehashes_an_outdated_hash(db):
 @requires_db
 @pytest.mark.asyncio
 async def test_logout_deletes_the_session_row(db):
-    _, session = await service.signup(db, _email(), PASSWORD)
+    _, session = await service.signup(
+        db, _email(), PASSWORD, accept_terms=True, age_confirmed=True
+    )
 
     await service.logout(db, session.id)
 
@@ -152,7 +168,9 @@ async def test_logout_deletes_the_session_row(db):
 @requires_db
 @pytest.mark.asyncio
 async def test_change_password_revokes_other_sessions_and_keeps_the_caller(db):
-    user, caller = await service.signup(db, _email(), PASSWORD)
+    user, caller = await service.signup(
+        db, _email(), PASSWORD, accept_terms=True, age_confirmed=True
+    )
     _, other = await service.login(db, user.email, PASSWORD)
 
     await service.change_password(
@@ -169,7 +187,9 @@ async def test_change_password_revokes_other_sessions_and_keeps_the_caller(db):
 @requires_db
 @pytest.mark.asyncio
 async def test_change_password_rejects_a_wrong_current_password(db):
-    user, caller = await service.signup(db, _email(), PASSWORD)
+    user, caller = await service.signup(
+        db, _email(), PASSWORD, accept_terms=True, age_confirmed=True
+    )
 
     with pytest.raises(HTTPException) as excinfo:
         await service.change_password(
@@ -187,7 +207,9 @@ async def test_change_password_rejects_a_wrong_current_password(db):
 @requires_db
 @pytest.mark.asyncio
 async def test_list_sessions_excludes_revoked_ones(db):
-    user, first = await service.signup(db, _email(), PASSWORD)
+    user, first = await service.signup(
+        db, _email(), PASSWORD, accept_terms=True, age_confirmed=True
+    )
     _, second = await service.login(db, user.email, PASSWORD)
 
     await service.revoke_session(db, second)

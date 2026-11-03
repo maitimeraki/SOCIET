@@ -1,15 +1,17 @@
 """Auth endpoints under /api/v1/auth (R3: these are the canonical paths)."""
 
 import datetime
+import logging
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from pydantic import BaseModel, EmailStr, Field
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.api.limits import limiter
 from src.audit import record as audit_record
-from src.auth import service
+from src.auth import reset, service, verify
 from src.auth.cookies import (
     clear_csrf_cookie,
     clear_session_cookie,
@@ -22,6 +24,8 @@ from src.billing.entitlements import resolve_entitlements
 from src.config.settings import get_settings
 from src.db.engine import get_db
 from src.db.models import User, UserSession
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(
     prefix="/api/v1/auth", tags=["auth"], dependencies=[Depends(verify_csrf)]
@@ -37,6 +41,21 @@ ws_ticket_router = APIRouter(
 class SignupRequest(BaseModel):
     email: EmailStr
     password: str = Field(min_length=service.MIN_PASSWORD_LENGTH)
+    accept_terms: bool
+    age_confirmed: bool
+
+
+class VerifyRequest(BaseModel):
+    token: str
+
+
+class ResetRequest(BaseModel):
+    email: EmailStr
+
+
+class ResetConfirmRequest(BaseModel):
+    token: str
+    new_password: str = Field(min_length=service.MIN_PASSWORD_LENGTH)
 
 
 class LoginRequest(BaseModel):
@@ -121,10 +140,94 @@ async def signup(
         body.password,
         user_agent=request.headers.get("user-agent"),
         ip=_client_ip(request),
+        accept_terms=body.accept_terms,
+        age_confirmed=body.age_confirmed,
     )
     set_session_cookie(response, session.id)
     set_csrf_cookie(response)
+    try:
+        await verify.send_verification_email(user)
+    except Exception:
+        # The account is real; a mail outage must not turn signup into a 500.
+        logger.warning("Verification email failed for user %s", user.id, exc_info=True)
     return UserOut.from_user(user)
+
+
+@router.post("/verify/send", status_code=204)
+@limiter.limit(lambda: get_settings().rate_limit_email)
+async def send_verification(
+    request: Request,
+    user: User = Depends(current_user),
+) -> None:
+    if user.email_verified_at is not None:
+        return
+    await verify.send_verification_email(user)
+
+
+@router.post("/verify", status_code=204)
+async def verify_email(
+    body: VerifyRequest,
+    db: AsyncSession = Depends(get_db),
+) -> None:
+    user_id = await verify.redeem_verification_token(body.token)
+    if user_id is None:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "code": "invalid_token",
+                "message": "This link is invalid or has expired.",
+            },
+        )
+    user = await db.get(User, user_id)
+    if user is None:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "code": "invalid_token",
+                "message": "This link is invalid or has expired.",
+            },
+        )
+    if user.email_verified_at is None:
+        user.email_verified_at = datetime.datetime.now(datetime.UTC)
+        await db.commit()
+
+
+@router.post("/reset/request", status_code=202)
+@limiter.limit(lambda: get_settings().rate_limit_email)
+async def request_password_reset(
+    body: ResetRequest,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Always 202: the response never reveals whether the email exists."""
+    user = (
+        await db.execute(
+            select(User).where(User.email == service.normalize_email(body.email))
+        )
+    ).scalar_one_or_none()
+    if user is not None and user.disabled_at is None:
+        try:
+            await reset.send_reset_email(user)
+        except Exception:
+            logger.warning("Reset email failed for user %s", user.id, exc_info=True)
+    return {"status": "accepted"}
+
+
+@router.post("/reset/confirm", status_code=204)
+async def confirm_password_reset(
+    body: ResetConfirmRequest,
+    db: AsyncSession = Depends(get_db),
+) -> None:
+    user_id = await reset.redeem_reset_token(body.token)
+    if user_id is None:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "code": "invalid_token",
+                "message": "This link is invalid or has expired.",
+            },
+        )
+    await reset.reset_password(db, user_id, body.new_password)
 
 
 @router.post("/login", response_model=UserOut)

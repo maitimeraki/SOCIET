@@ -23,6 +23,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.config.settings import get_settings
 from src.db.models import User, UserSession
+from src.legal import service as legal_service
 
 logger = logging.getLogger(__name__)
 
@@ -91,8 +92,19 @@ async def signup(
     *,
     user_agent: str | None = None,
     ip: str | None = None,
+    accept_terms: bool,
+    age_confirmed: bool,
 ) -> tuple[User, UserSession]:
-    """Create the account and its first session. 409 on a duplicate email."""
+    """Create the account, its consents, and its first session in one transaction.
+
+    409 on a duplicate email. No account exists without a recorded acceptance
+    of the current terms + privacy and an explicit 18+ attestation.
+    """
+    if not accept_terms or not age_confirmed:
+        raise HTTPException(
+            status_code=422,
+            detail="You must accept the terms and confirm you are 18 or older.",
+        )
     _validate_password(password)
     email = normalize_email(email)
 
@@ -105,7 +117,9 @@ async def signup(
         )
 
     user = User(
-        email=email, password_hash=await asyncio.to_thread(hash_password, password)
+        email=email,
+        password_hash=await asyncio.to_thread(hash_password, password),
+        age_confirmed_at=datetime.datetime.now(datetime.UTC),
     )
     db.add(user)
     try:
@@ -115,6 +129,15 @@ async def signup(
         raise HTTPException(
             status_code=409, detail="An account with this email already exists."
         ) from exc
+
+    try:
+        await legal_service.record_consents(
+            db, user_id=user.id, ip=ip, user_agent=user_agent, commit=False
+        )
+    except Exception:
+        # No account without recorded consent: drop the flushed row too.
+        await db.rollback()
+        raise
 
     session = _new_session(user.id, user_agent, ip)
     db.add(session)
@@ -223,7 +246,7 @@ async def revoke_session(db: AsyncSession, session: UserSession) -> None:
     await db.commit()
 
 
-def _get_redis() -> aioredis.Redis:
+def get_redis() -> aioredis.Redis:
     global _redis
     if _redis is None:
         _redis = aioredis.from_url(get_settings().redis_url, decode_responses=True)
@@ -244,13 +267,13 @@ async def issue_ws_ticket(user_id: uuid.UUID, ttl_seconds: int | None = None) ->
         ttl_seconds if ttl_seconds is not None else get_settings().ws_ticket_ttl_seconds
     )
     ticket = secrets.token_urlsafe(32)
-    await _get_redis().setex(f"ws_ticket:{ticket}", ttl, str(user_id))
+    await get_redis().setex(f"ws_ticket:{ticket}", ttl, str(user_id))
     return ticket
 
 
 async def redeem_ws_ticket(ticket: str) -> uuid.UUID | None:
     """Atomically consume a ticket (GETDEL). None when missing, expired, or reused."""
-    value = await _get_redis().getdel(f"ws_ticket:{ticket}")
+    value = await get_redis().getdel(f"ws_ticket:{ticket}")
     if value is None:
         return None
     try:

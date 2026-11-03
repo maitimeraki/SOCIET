@@ -13,9 +13,18 @@ CSRF_HEADER = "X-CSRF-Token"
 
 _STATE_CHANGING = frozenset({"POST", "PUT", "PATCH", "DELETE"})
 
-# Endpoints a client may call before it has any cookie (the signup/login entry
-# points). Every other state-changing request must double-submit.
-CSRF_EXEMPT_PATHS = frozenset({"/api/v1/auth/signup", "/api/v1/auth/login"})
+# Endpoints a client may call before it has any cookie: the signup/login entry
+# points and the token-bearing, pre-session lifecycle routes. Every other
+# state-changing request must double-submit.
+CSRF_EXEMPT_PATHS = frozenset(
+    {
+        "/api/v1/auth/signup",
+        "/api/v1/auth/login",
+        "/api/v1/auth/verify",
+        "/api/v1/auth/reset/request",
+        "/api/v1/auth/reset/confirm",
+    }
+)
 
 
 def _cookie_max_age() -> int:

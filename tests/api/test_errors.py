@@ -157,7 +157,11 @@ def test_security_headers_are_on_success_and_error_responses():
 def test_hsts_is_sent_outside_dev(monkeypatch):
     from src.api import middleware
 
-    monkeypatch.setattr(middleware, "get_settings", lambda: Settings(env="prod"))
+    monkeypatch.setattr(
+        middleware,
+        "get_settings",
+        lambda: Settings(env="prod", email_api_key="test-key"),
+    )
 
     response = _client().get("/ok")
 

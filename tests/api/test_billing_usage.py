@@ -44,7 +44,13 @@ def _email() -> str:
 
 async def _signup(client: AsyncClient) -> uuid.UUID:
     response = await client.post(
-        "/api/v1/auth/signup", json={"email": _email(), "password": PASSWORD}
+        "/api/v1/auth/signup",
+        json={
+            "email": _email(),
+            "password": PASSWORD,
+            "accept_terms": True,
+            "age_confirmed": True,
+        },
     )
     assert response.status_code == 201, response.text
     return uuid.UUID(response.json()["id"])

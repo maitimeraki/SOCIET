@@ -17,7 +17,12 @@ from src.auth import service
 from src.config.settings import get_settings
 from src.db.engine import get_db
 
-LOGIN = {"email": "rate-limit-test@example.com", "password": "hunter2hunter2"}
+LOGIN = {
+    "email": "rate-limit-test@example.com",
+    "password": "hunter2hunter2",
+    "accept_terms": True,
+    "age_confirmed": True,
+}
 
 
 def _capped_app() -> tuple[FastAPI, list]:

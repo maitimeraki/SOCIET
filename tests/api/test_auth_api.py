@@ -56,7 +56,13 @@ def _csrf(client: AsyncClient) -> dict:
 async def _signup(client: AsyncClient, email: str | None = None) -> str:
     email = email or _email()
     response = await client.post(
-        "/api/v1/auth/signup", json={"email": email, "password": PASSWORD}
+        "/api/v1/auth/signup",
+        json={
+            "email": email,
+            "password": PASSWORD,
+            "accept_terms": True,
+            "age_confirmed": True,
+        },
     )
     assert response.status_code == 201, response.text
     return email
@@ -98,6 +104,10 @@ def test_router_exposes_exactly_the_specified_paths():
         "/api/v1/auth/password",
         "/api/v1/auth/sessions",
         "/api/v1/auth/sessions/{session_id}",
+        "/api/v1/auth/verify",
+        "/api/v1/auth/verify/send",
+        "/api/v1/auth/reset/request",
+        "/api/v1/auth/reset/confirm",
     }
     methods = {route.path: route.methods for route in auth_router.routes}
     assert "POST" in methods["/api/v1/auth/signup"]
@@ -116,7 +126,13 @@ def test_router_exposes_exactly_the_specified_paths():
 async def test_signup_sets_session_and_csrf_cookies(db):
     async with _client() as client:
         response = await client.post(
-            "/api/v1/auth/signup", json={"email": _email(), "password": PASSWORD}
+            "/api/v1/auth/signup",
+            json={
+                "email": _email(),
+                "password": PASSWORD,
+                "accept_terms": True,
+                "age_confirmed": True,
+            },
         )
 
     assert response.status_code == 201
@@ -140,10 +156,22 @@ async def test_signup_validation_errors_are_422():
     # validated, so with no session factory the request 500s before the 422.
     async with _client() as client:
         short_password = await client.post(
-            "/api/v1/auth/signup", json={"email": _email(), "password": "short"}
+            "/api/v1/auth/signup",
+            json={
+                "email": _email(),
+                "password": "short",
+                "accept_terms": True,
+                "age_confirmed": True,
+            },
         )
         bad_email = await client.post(
-            "/api/v1/auth/signup", json={"email": "not-an-email", "password": PASSWORD}
+            "/api/v1/auth/signup",
+            json={
+                "email": "not-an-email",
+                "password": PASSWORD,
+                "accept_terms": True,
+                "age_confirmed": True,
+            },
         )
 
     assert short_password.status_code == 422
@@ -156,11 +184,23 @@ async def test_duplicate_signup_returns_409(db):
     email = _email()
     async with _client() as client:
         first = await client.post(
-            "/api/v1/auth/signup", json={"email": email, "password": PASSWORD}
+            "/api/v1/auth/signup",
+            json={
+                "email": email,
+                "password": PASSWORD,
+                "accept_terms": True,
+                "age_confirmed": True,
+            },
         )
     async with _client() as duplicate_client:
         second = await duplicate_client.post(
-            "/api/v1/auth/signup", json={"email": email.upper(), "password": PASSWORD}
+            "/api/v1/auth/signup",
+            json={
+                "email": email.upper(),
+                "password": PASSWORD,
+                "accept_terms": True,
+                "age_confirmed": True,
+            },
         )
 
     assert first.status_code == 201
