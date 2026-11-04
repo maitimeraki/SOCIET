@@ -1,15 +1,29 @@
-import { useState } from 'react'
+/* eslint-disable react-refresh/only-export-components -- the pure plan mapping is exported so the no-DOM suite can assert it without a renderer. */
+import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { ApiError, billingCheckout } from '../api/rest'
+import { ApiError, billingCheckout, billingPlans } from '../api/rest'
+import type { BillingPlan } from '../api/types'
 import { useAuthStore } from '../auth/authStore'
 import { buttonClasses, inlineLinkClasses } from '../components/ui/Button'
 import { LEGAL_LINKS } from '../config/legalLinks'
 
 /**
  * §7.9 The rate card. One metered pool, two plans, one custom door, and the rules under the
- * plans. Every figure is the §4 plan table (units only): the client invents no limit.
+ * plans. These constants are the initial/SSR fallback; once `/billing/plans` loads, the server's
+ * values replace them — the client invents no limit.
  */
-const PLANS = [
+export interface PlanCard {
+  key: 'starter' | 'studio'
+  name: string
+  for: string
+  amount: string
+  per: string
+  rows: [string, string][]
+  action: string
+  featured: boolean
+}
+
+export const PLANS: PlanCard[] = [
   {
     key: 'starter',
     name: 'Starter',
@@ -38,13 +52,39 @@ const PLANS = [
     action: 'Start with Studio',
     featured: true,
   },
-] as const
+]
 
-const ENTERPRISE_ROWS = [
+export const ENTERPRISE_ROWS: [string, string][] = [
   ['Units / month', 'Custom'],
   ['Panel size', '40'],
   ['Passes per decision', '4'],
-] as const
+]
+
+export function planRows(plan: BillingPlan): [string, string][] {
+  return [
+    ['Units / month', plan.units.toLocaleString('en-US')],
+    ['Panel size', String(plan.max_agents)],
+    ['Passes per decision', String(plan.max_rounds)],
+  ]
+}
+
+/** Map the server's rate card onto the fallback card layout (pure, so it is testable). */
+export function mergeServerPlans(rows: BillingPlan[]): {
+  plans: PlanCard[]
+  enterpriseRows: [string, string][]
+} {
+  const byKey = new Map(rows.map((row) => [row.key, row]))
+  return {
+    plans: PLANS.map((plan) => {
+      const server = byKey.get(plan.key)
+      return server ? { ...plan, amount: server.price_label, rows: planRows(server) } : plan
+    }),
+    enterpriseRows: (() => {
+      const enterprise = byKey.get('enterprise')
+      return enterprise ? planRows(enterprise) : ENTERPRISE_ROWS
+    })(),
+  }
+}
 
 const RULES = [
   ['One pool.', 'A unit is spent when the panel reads your material or argues a pass.'],
@@ -56,6 +96,25 @@ export default function PricingPage() {
   const user = useAuthStore((s) => s.user)
   const [buying, setBuying] = useState<'starter' | 'studio' | null>(null)
   const [checkoutError, setCheckoutError] = useState<string | null>(null)
+  const [plans, setPlans] = useState<PlanCard[]>(PLANS)
+  const [enterpriseRows, setEnterpriseRows] = useState<[string, string][]>(ENTERPRISE_ROWS)
+
+  useEffect(() => {
+    let active = true
+    billingPlans()
+      .then((rows) => {
+        if (!active) return
+        const merged = mergeServerPlans(rows)
+        setPlans(merged.plans)
+        setEnterpriseRows(merged.enterpriseRows)
+      })
+      .catch(() => {
+        // The fallback is already rendered; a rate-card fetch failure must not break the page.
+      })
+    return () => {
+      active = false
+    }
+  }, [])
 
   async function buy(plan: 'starter' | 'studio') {
     setCheckoutError(null)
@@ -112,7 +171,7 @@ export default function PricingPage() {
       </div>
 
       <div className="mx-auto grid w-[min(1100px,calc(100%-48px))] grid-cols-1 gap-5 sm:grid-cols-2">
-        {PLANS.map((plan) => (
+        {plans.map((plan) => (
           <article
             key={plan.name}
             className={`flex flex-col rounded-xl p-8 shadow-card ${plan.featured ? 'bg-[image:var(--gradient-marked)] shadow-sheet' : 'bg-paper'}`}
@@ -170,7 +229,7 @@ export default function PricingPage() {
             us the material and the question; we will propose the plan and the monthly price.
           </p>
           <ul className="mt-5 max-w-[36ch]">
-            {ENTERPRISE_ROWS.map(([label, value]) => (
+            {enterpriseRows.map(([label, value]) => (
               <li key={label} className="flex items-baseline justify-between gap-4 border-t border-hairline py-2.5 first:border-t-0">
                 <span className="font-ui text-body-sm text-ink-2">{label}</span>
                 <strong className="text-right font-mono text-mono font-medium text-ink">{value}</strong>

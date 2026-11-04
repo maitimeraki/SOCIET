@@ -42,8 +42,11 @@ ACTIONS = frozenset(
 
 
 def client_ip(request: Request) -> str | None:
-    """The caller's address, or None when the transport has no peer."""
-    return request.client.host if request.client else None
+    """The caller's address, resolved the same way the rate limiter buckets it."""
+    from src.api.client_ip import resolved_client_ip
+
+    peer = request.client.host if request.client else None
+    return resolved_client_ip(peer, request.headers.get("x-forwarded-for"))
 
 
 def _as_uuid(value: object) -> uuid.UUID | None:

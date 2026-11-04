@@ -1,4 +1,5 @@
 import asyncio
+import datetime
 import logging
 import os
 import sys
@@ -30,10 +31,12 @@ from src.api.config_api import (
     SimulationResponse,
     UserQuery,
 )
-from src.api.errors import error_response, install_error_handlers
+from src.api.errors import error_response, install_error_handlers, payment_required
 from src.api.limits import JSONBodySizeLimitMiddleware, install_rate_limiter
 from src.api.middleware import LoggingMiddleware, SecurityHeadersMiddleware
 from src.auth.cookies import verify_csrf
+from src.billing import units as billing_units
+from src.billing.entitlements import resolve_entitlements
 from src.auth.deps import current_user, require_owner
 from src.config.settings import get_settings
 from src.db.engine import get_db, get_engine
@@ -830,14 +833,62 @@ async def _register_corpus(
         await db.commit()
 
 
+async def _reserve_graph_job(db: AsyncSession, user: User):
+    """Hold a graph job's units at enqueue; an exhausted balance is a 402.
+
+    The estimate is capped at the plan's whole allowance (a free plan is below
+    the graph hold) — the worker re-checks the hold before spending and
+    settlement releases only what the job actually holds.
+    """
+    entitlements = await resolve_entitlements(db, user=user)
+    estimate = min(get_settings().graph_job_reserve_units, entitlements.plan.units)
+    try:
+        return await billing_units.reserve_units(
+            db, user_id=user.id, plan_key=user.plan_key, estimate=estimate
+        )
+    except billing_units.InsufficientUnits as exc:
+        raise payment_required(
+            f"Units used up. They reset on {exc.period_end.date().isoformat()}."
+        ) from exc
+
+
+def _reservation_fields(reservation) -> dict:
+    return {
+        "reserved_units": reservation.amount,
+        "reserved_period_start": reservation.period_start.isoformat(),
+        "reserved_at": datetime.datetime.now(datetime.UTC).isoformat(),
+    }
+
+
+async def _enqueue_reserved(
+    db: AsyncSession, user: User, reservation, kind: str, payload: dict
+) -> str:
+    """Enqueue a reserved graph job; release the hold when the enqueue refuses."""
+    try:
+        return await enqueue_or_http(kind, {**payload, **_reservation_fields(reservation)})
+    except Exception:
+        await billing_units.release_reservation(
+            db,
+            user_id=user.id,
+            period_start=reservation.period_start,
+            amount=reservation.amount,
+        )
+        raise
+
+
 @simulate_router.post("/ontology", status_code=status.HTTP_202_ACCEPTED)
 async def discover_ontology_async(
     dataset_id: str,
     documents: List[GlobalInputDocument],
     request: Request,
     user: User = Depends(current_user),
+    db: AsyncSession = Depends(get_db),
 ):
-    job_id = await enqueue_or_http(
+    reservation = await _reserve_graph_job(db, user)
+    job_id = await _enqueue_reserved(
+        db,
+        user,
+        reservation,
         "ontology",
         {
             "user_id": str(user.id),
@@ -870,7 +921,11 @@ async def build_graph_async(
     # exist before any run can point at it (runs.dataset_id is a foreign key).
     await _register_corpus(db, str(user.id), dataset_id, corpus_name)
 
-    job_id = await enqueue_or_http(
+    reservation = await _reserve_graph_job(db, user)
+    job_id = await _enqueue_reserved(
+        db,
+        user,
+        reservation,
         "build_graph",
         {
             "user_id": str(user.id),
@@ -908,8 +963,13 @@ async def normalize_graph(
     dataset_id: str,
     request: Request,
     user: User = Depends(current_user),
+    db: AsyncSession = Depends(get_db),
 ):
-    job_id = await enqueue_or_http(
+    reservation = await _reserve_graph_job(db, user)
+    job_id = await _enqueue_reserved(
+        db,
+        user,
+        reservation,
         "normalize_graph",
         {
             "user_id": str(user.id),

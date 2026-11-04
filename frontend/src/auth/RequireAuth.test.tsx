@@ -114,7 +114,12 @@ describe('bootstrapSession — the three outcomes', () => {
   it('a 401 is a real anon: the store clears so the guard redirects', async () => {
     vi.stubGlobal(
       'fetch',
-      vi.fn().mockResolvedValue(new Response(JSON.stringify({ detail: 'unauthorized' }), { status: 401 })),
+      vi.fn().mockResolvedValue(
+        new Response(
+          JSON.stringify({ error: { code: 'unauthorized', message: 'unauthorized', correlation_id: 'c1' } }),
+          { status: 401 },
+        ),
+      ),
     )
 
     await expect(bootstrapSession()).resolves.toBe('anon')

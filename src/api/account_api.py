@@ -9,11 +9,12 @@ Delete is the one irreversible operation, so it demands an explicit
 confirmation: the body must echo the account email.
 """
 
+import asyncio
 import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, EmailStr
-from sqlalchemy import update
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.api.jobs_api import enqueue_or_http
@@ -21,8 +22,9 @@ from src.audit import client_ip, record
 from src.auth.cookies import verify_csrf
 from src.auth.deps import current_user
 from src.auth.service import normalize_email
+from src.billing import stripe_client
 from src.db.engine import get_db
-from src.db.models import User, UserSession
+from src.db.models import Subscription, User, UserSession
 
 router = APIRouter(
     prefix="/api/v1/account",
@@ -80,6 +82,36 @@ async def delete_account(
                 "message": "This account is already being deleted.",
             },
         )
+
+    # A live subscription must be cancelled first: deleting the account does
+    # not stop Stripe billing it. A failed cancellation leaves the account
+    # enabled so the owner can retry (or use the Customer Portal).
+    subscription = (
+        await db.execute(
+            select(Subscription)
+            .where(
+                Subscription.user_id == user.id,
+                Subscription.status.in_(("active", "trialing", "past_due")),
+                Subscription.stripe_subscription_id.is_not(None),
+            )
+            .order_by(Subscription.created_at.desc())
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+    if subscription is not None:
+        try:
+            await asyncio.to_thread(
+                stripe_client.cancel_subscription,
+                subscription.stripe_subscription_id,
+            )
+        except Exception as exc:
+            raise HTTPException(
+                status_code=502,
+                detail={
+                    "code": "billing_cancel_failed",
+                    "message": "Cancel your plan before deleting the account.",
+                },
+            ) from exc
 
     await _disable_and_revoke(db, user)
     try:

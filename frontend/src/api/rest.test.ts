@@ -15,7 +15,15 @@ describe('rest client', () => {
   })
 
   it('throws ApiError carrying the server detail', async () => {
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({ detail: 'Unsupported file type (.xlsx)' }), { status: 415 })))
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(
+        new Response(
+          JSON.stringify({ error: { code: 'validation_error', message: 'Unsupported file type (.xlsx)', correlation_id: 'c1' } }),
+          { status: 415 },
+        ),
+      ),
+    )
     await expect(ingestFiles([new File(['x'], 'a.xlsx')])).rejects.toThrowError('Unsupported file type (.xlsx)')
   })
 
@@ -87,13 +95,40 @@ describe('rest client', () => {
     rest.registerUnauthorizedHandler(onUnauthorized)
     const fetchMock = vi
       .fn()
-      .mockResolvedValue(new Response(JSON.stringify({ detail: 'unauthorized' }), { status: 401 }))
+      .mockResolvedValue(
+        new Response(
+          JSON.stringify({ error: { code: 'unauthorized', message: 'unauthorized', correlation_id: 'c1' } }),
+          { status: 401 },
+        ),
+      )
     vi.stubGlobal('fetch', fetchMock)
 
     await expect(rest.authMe()).rejects.toBeInstanceOf(rest.ApiError)
 
     expect(onUnauthorized).toHaveBeenCalledTimes(1)
     expect(fetchMock).toHaveBeenCalledTimes(1) // no retry
+  })
+
+  it('reads the real error envelope, so a 402 shows the reset date not statusText', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            error: {
+              code: 'payment_required',
+              message: 'Units used up. They reset on 2026-12-01.',
+              correlation_id: 'c1',
+            },
+          }),
+          { status: 402 },
+        ),
+      ),
+    )
+
+    await expect(ingestFiles([new File(['x'], 'a.txt')])).rejects.toThrowError(
+      'Units used up. They reset on 2026-12-01.',
+    )
   })
 
   it('does not invoke the unauthorized handler on a non-401 error', async () => {
@@ -103,7 +138,12 @@ describe('rest client', () => {
     rest.registerUnauthorizedHandler(onUnauthorized)
     vi.stubGlobal(
       'fetch',
-      vi.fn().mockResolvedValue(new Response(JSON.stringify({ detail: 'boom' }), { status: 500 })),
+      vi.fn().mockResolvedValue(
+        new Response(
+          JSON.stringify({ error: { code: 'internal_error', message: 'boom', correlation_id: 'c1' } }),
+          { status: 500 },
+        ),
+      ),
     )
 
     await expect(rest.authMe()).rejects.toBeInstanceOf(rest.ApiError)

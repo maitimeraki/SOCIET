@@ -27,12 +27,27 @@ describe('authStore', () => {
     useAuthStore.getState().setUser(USER)
     vi.stubGlobal(
       'fetch',
-      vi.fn().mockResolvedValue(new Response(JSON.stringify({ detail: 'unauthorized' }), { status: 401 })),
+      vi.fn().mockResolvedValue(
+        new Response(
+          JSON.stringify({ error: { code: 'unauthorized', message: 'unauthorized', correlation_id: 'c1' } }),
+          { status: 401 },
+        ),
+      ),
     )
 
     await expect(authMe()).rejects.toThrow()
 
     expect(useAuthStore.getState().status).toBe('anon')
+  })
+
+  it('signin adopts the plan entitlements the server returns', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify(USER)))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await useAuthStore.getState().signin('a@b.c', 'password1')
+
+    expect(fetchMock.mock.calls[0][0]).toContain('/api/v1/auth/login')
+    expect(useAuthStore.getState().user?.entitlements).toEqual(USER.entitlements)
   })
 
   it('signout clears the store even when the server call fails', async () => {

@@ -105,6 +105,43 @@ async def _job_and_balance(
     return job, balance
 
 
+async def test_metering_scope_settles_into_the_reserved_period(owner):
+    """A job settles where it reserved, even if the subscription period rolled."""
+    prior = datetime.datetime(2026, 1, 2, tzinfo=datetime.UTC)
+    scope = await tasks._metering_scope(
+        "debate",
+        str(uuid.uuid4()),
+        {
+            "user_id": str(owner.id),
+            "reserved_period_start": prior.isoformat(),
+            "reserved_units": 60,
+        },
+    )
+    with scope as context:
+        assert context.period_start == prior
+
+
+async def test_graph_cores_refuse_without_a_reservation(owner, monkeypatch):
+    """Ontology/build/normalize re-check the hold before any work (C2b)."""
+    from src.api import api_server
+
+    run = AsyncMock()
+    monkeypatch.setattr(api_server, "run_graph_job", run)
+    monkeypatch.setattr(api_server, "run_normalize_job", run)
+    job_id, _ = await _write_job(owner, reserve=False)
+    payload = {"dataset_id": "ds-1", "documents": [], "ontology_job_id": None}
+
+    for core in (
+        tasks._ontology_core,
+        tasks._build_graph_core,
+        tasks._normalize_graph_core,
+    ):
+        with pytest.raises(RuntimeError, match="reservation missing"):
+            await core(job_id, payload)
+
+    run.assert_not_awaited()
+
+
 async def test_debate_core_refuses_without_a_reservation(owner):
     job_id, _ = await _write_job(owner, reserve=False)
 

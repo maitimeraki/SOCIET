@@ -115,6 +115,20 @@ def _client_ip(request: Request) -> str | None:
     return request.client.host if request.client else None
 
 
+async def _me_out(db: AsyncSession, user: User) -> MeOut:
+    """The one capability payload: signup, login and ``/me`` share it."""
+    entitlements = await resolve_entitlements(db, user=user)
+    return MeOut.from_user(
+        user,
+        entitlements=EntitlementOut(
+            max_agents=entitlements.plan.max_agents,
+            max_rounds=entitlements.plan.max_rounds,
+            units_remaining=entitlements.units_remaining,
+            period_end=entitlements.period_end,
+        ),
+    )
+
+
 def _session_out(row: UserSession) -> SessionOut:
     # INET columns come back as ipaddress objects, which are not JSON-serializable.
     return SessionOut(
@@ -126,14 +140,14 @@ def _session_out(row: UserSession) -> SessionOut:
     )
 
 
-@router.post("/signup", response_model=UserOut, status_code=201)
+@router.post("/signup", response_model=MeOut, status_code=201)
 @limiter.limit(lambda: get_settings().rate_limit_signup)
 async def signup(
     body: SignupRequest,
     request: Request,
     response: Response,
     db: AsyncSession = Depends(get_db),
-) -> UserOut:
+) -> MeOut:
     user, session = await service.signup(
         db,
         body.email,
@@ -150,7 +164,7 @@ async def signup(
     except Exception:
         # The account is real; a mail outage must not turn signup into a 500.
         logger.warning("Verification email failed for user %s", user.id, exc_info=True)
-    return UserOut.from_user(user)
+    return await _me_out(db, user)
 
 
 @router.post("/verify/send", status_code=204)
@@ -230,14 +244,14 @@ async def confirm_password_reset(
     await reset.reset_password(db, user_id, body.new_password)
 
 
-@router.post("/login", response_model=UserOut)
+@router.post("/login", response_model=MeOut)
 @limiter.limit(lambda: get_settings().rate_limit_login)
 async def login(
     body: LoginRequest,
     request: Request,
     response: Response,
     db: AsyncSession = Depends(get_db),
-) -> UserOut:
+) -> MeOut:
     user, session = await service.login(
         db,
         body.email,
@@ -248,7 +262,7 @@ async def login(
     set_session_cookie(response, session.id)
     set_csrf_cookie(response)
     await audit_record(db, "login", user_id=user.id, ip=_client_ip(request))
-    return UserOut.from_user(user)
+    return await _me_out(db, user)
 
 
 @router.post("/logout", status_code=204)
@@ -268,18 +282,12 @@ async def logout(
 
 @router.get("/me", response_model=MeOut)
 async def me(
-    user: User = Depends(current_user), db: AsyncSession = Depends(get_db)
+    response: Response,
+    user: User = Depends(current_user),
+    db: AsyncSession = Depends(get_db),
 ) -> MeOut:
-    entitlements = await resolve_entitlements(db, user=user)
-    return MeOut.from_user(
-        user,
-        entitlements=EntitlementOut(
-            max_agents=entitlements.plan.max_agents,
-            max_rounds=entitlements.plan.max_rounds,
-            units_remaining=entitlements.units_remaining,
-            period_end=entitlements.period_end,
-        ),
-    )
+    response.headers["Cache-Control"] = "private, no-store"
+    return await _me_out(db, user)
 
 
 @router.post("/password", status_code=204)

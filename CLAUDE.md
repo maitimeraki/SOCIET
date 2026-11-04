@@ -388,7 +388,53 @@ NEO4J_DATABASE=neo4j
 # REDIS (optional - caching and job queue)
 # =============================================================================
 REDIS_URL=redis://localhost:6379
+
+# =============================================================================
+# BILLING AND COMPLIANCE (docs/TECHNOLOGY_STACK.md §11)
+# =============================================================================
+# Billing stays off until the legal surface + Stripe are live; the free plan is
+# the complete entitlement while off. With BILLING_ENABLED=true the four Stripe
+# names below are required at boot.
+BILLING_ENABLED=false
+STRIPE_SECRET_KEY=sk-...
+STRIPE_WEBHOOK_SECRET=whsec-...
+STRIPE_PRICE_STARTER=price_...
+STRIPE_PRICE_STUDIO=price_...
+APP_BASE_URL=http://localhost:5173
+EMAIL_API_KEY=
+EMAIL_FROM=no-reply@societas.app
+LEGAL_ENTITY_NAME=
+LEGAL_CONTACT_EMAIL=hello@societas.app
+# Plan table overrides (units / caps / public price card).
+PLAN_FREE_UNITS=1000
+PLAN_STARTER_UNITS=8000
+PLAN_STUDIO_UNITS=16000
+PLAN_ENTERPRISE_UNITS=80000
+PLAN_STARTER_PRICE_USD=10
+PLAN_STUDIO_PRICE_USD=20
+PLAN_ENTERPRISE_PRICE_LABEL=Custom
+GRAPH_JOB_RESERVE_UNITS=2000
+
+# =============================================================================
+# EXTRACTION / EDGE
+# =============================================================================
+EXTRACTION_PROVIDER=nvidia_nim
+EXTRACTION_LLM_MODEL=
+EXTRACTION_BASE_URL=
+EXTRACTION_API_KEY=
+EXTRACTION_TRIAL_ACK=false
+LLM_PROMPT_CACHE=true
+FORWARDED_ALLOW_IPS=
+RATE_LIMIT_STORAGE_URI=
+GIT_SHA=dev
 ```
+
+### Database roles
+
+The runtime connects as the least-privilege `societas_app` role; apply
+`scripts/setup_db_roles.sql` for the base grants and `scripts/db_roles.sql` for
+the ledger split (append-only `usage_events` for the app; `societas_retention`
+owns the age-based deletes). Run retention as `societas_retention`.
 
 ### DebateConfig Defaults
 ```python

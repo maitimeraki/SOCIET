@@ -17,7 +17,16 @@ from sqlalchemy import delete, func, select
 
 from src.config.settings import get_settings
 from src.db.engine import get_session_factory
-from src.db.models import AuditLog, Job, Run, RunEvent, Upload, User
+from src.db.models import (
+    AuditLog,
+    Job,
+    LLMUsage,
+    Run,
+    RunEvent,
+    Upload,
+    User,
+    WebhookEvent,
+)
 from src.ingest import storage
 from src.jobs import tasks
 
@@ -86,6 +95,10 @@ async def _seed(owner_id: str) -> dict[str, uuid.UUID]:
         "old_url_upload": uuid.uuid4(),
         "old_audit": uuid.uuid4(),
         "new_audit": uuid.uuid4(),
+        "old_webhook": uuid.uuid4(),
+        "new_webhook": uuid.uuid4(),
+        "old_llm": uuid.uuid4(),
+        "new_llm": uuid.uuid4(),
     }
     factory = get_session_factory()
     async with factory() as session:
@@ -136,6 +149,25 @@ async def _seed(owner_id: str) -> dict[str, uuid.UUID]:
             )
         for audit_id, at in ((ids["old_audit"], old_audit), (ids["new_audit"], fresh)):
             session.add(AuditLog(id=audit_id, action="login", at=at))
+        for key, at in (("old_webhook", old_audit), ("new_webhook", fresh)):
+            session.add(
+                WebhookEvent(
+                    id=ids[key],
+                    provider_event_id=f"evt-{ids[key]}",
+                    event_type="customer.updated",
+                    payload_hash="h",
+                    received_at=at,
+                )
+            )
+        for key, at in (("old_llm", old_audit), ("new_llm", fresh)):
+            session.add(
+                LLMUsage(
+                    id=ids[key],
+                    call_id=str(ids[key]),
+                    source="debate",
+                    created_at=at,
+                )
+            )
         await session.commit()
 
     storage.put_upload(owner, ids["old_upload"], b"data")
@@ -170,6 +202,13 @@ async def _cleanup_audit(*audit_ids: uuid.UUID) -> None:
         await session.commit()
 
 
+async def _cleanup_rows(model, *keys: uuid.UUID) -> None:
+    factory = get_session_factory()
+    async with factory() as session:
+        await session.execute(delete(model).where(model.id.in_(keys)))
+        await session.commit()
+
+
 def _object_bytes(key: str) -> bytes:
     with storage.get_upload(key) as body:
         return body.read()
@@ -183,6 +222,8 @@ async def test_each_window_purges_its_old_rows_and_keeps_the_fresh_ones(owner, s
     assert counts["runs"] >= 1
     assert counts["raw_objects"] >= 1
     assert counts["audit"] >= 1
+    assert counts["webhook_events"] >= 1
+    assert counts["llm_usage"] >= 1
 
     # Runs older than the window are gone in full: run + job + event.
     assert not await _exists(Run, ids["old_run"])
@@ -206,7 +247,15 @@ async def test_each_window_purges_its_old_rows_and_keeps_the_fresh_ones(owner, s
     assert not await _exists(AuditLog, ids["old_audit"])
     assert await _exists(AuditLog, ids["new_audit"])
 
+    # Webhook payloads and LLM usage age out on the same runs window.
+    assert not await _exists(WebhookEvent, ids["old_webhook"])
+    assert await _exists(WebhookEvent, ids["new_webhook"])
+    assert not await _exists(LLMUsage, ids["old_llm"])
+    assert await _exists(LLMUsage, ids["new_llm"])
+
     await _cleanup_audit(ids["new_audit"])
+    await _cleanup_rows(WebhookEvent, ids["new_webhook"])
+    await _cleanup_rows(LLMUsage, ids["new_llm"])
 
 
 async def test_dry_run_counts_and_writes_nothing(owner, s3):
@@ -217,6 +266,8 @@ async def test_dry_run_counts_and_writes_nothing(owner, s3):
     assert counts["runs"] >= 1
     assert counts["raw_objects"] >= 1
     assert counts["audit"] >= 1
+    assert counts["webhook_events"] >= 1
+    assert counts["llm_usage"] >= 1
     # Nothing changed — rows and objects are all still here.
     assert await _exists(Run, ids["old_run"])
     assert await _exists(Job, ids["old_run"])
@@ -224,8 +275,14 @@ async def test_dry_run_counts_and_writes_nothing(owner, s3):
     assert await _exists(Upload, ids["old_upload"])
     assert _object_bytes(f"{owner}/{ids['old_upload']}") == b"data"
     assert await _exists(AuditLog, ids["old_audit"])
+    assert await _exists(WebhookEvent, ids["old_webhook"])
+    assert await _exists(LLMUsage, ids["old_llm"])
 
     await _cleanup_audit(ids["old_audit"], ids["new_audit"])
+    await _cleanup_rows(
+        WebhookEvent, ids["old_webhook"], ids["new_webhook"]
+    )
+    await _cleanup_rows(LLMUsage, ids["old_llm"], ids["new_llm"])
 
 
 async def test_the_script_dry_run_prints_json_and_writes_nothing(owner, s3):
@@ -244,5 +301,9 @@ async def test_the_script_dry_run_prints_json_and_writes_nothing(owner, s3):
     assert payload["dry_run"] is True
     assert payload["runs"] >= 1
     assert await _exists(Run, ids["old_run"])
+    assert await _exists(WebhookEvent, ids["old_webhook"])
+    assert await _exists(LLMUsage, ids["old_llm"])
 
     await _cleanup_audit(ids["old_audit"], ids["new_audit"])
+    await _cleanup_rows(WebhookEvent, ids["new_webhook"])
+    await _cleanup_rows(LLMUsage, ids["new_llm"])

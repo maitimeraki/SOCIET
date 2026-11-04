@@ -22,6 +22,11 @@ def billing_configured() -> bool:
     return bool(settings.billing_enabled and settings.stripe_secret_key)
 
 
+#: Every Stripe request is bounded: one retry and a 15 s per-attempt timeout,
+#: so a slow provider cannot pin a worker thread for minutes.
+STRIPE_TIMEOUT_SECONDS = 15
+
+
 def get_stripe():
     """The ``stripe`` module with its API key set (lazy import)."""
     settings = get_settings()
@@ -30,6 +35,7 @@ def get_stripe():
     import stripe
 
     stripe.api_key = settings.stripe_secret_key
+    stripe.max_network_retries = 1
     return stripe
 
 
@@ -40,13 +46,27 @@ def _as_dict(obj: Any) -> dict:
 
 
 def retrieve_subscription(subscription_id: str) -> dict:
-    return _as_dict(get_stripe().Subscription.retrieve(subscription_id))
+    return _as_dict(
+        get_stripe().Subscription.retrieve(
+            subscription_id, timeout=STRIPE_TIMEOUT_SECONDS
+        )
+    )
+
+
+def cancel_subscription(subscription_id: str) -> dict:
+    return _as_dict(
+        get_stripe().Subscription.delete(
+            subscription_id, timeout=STRIPE_TIMEOUT_SECONDS
+        )
+    )
 
 
 def create_customer(*, email: str, user_id: str) -> dict:
     return _as_dict(
         get_stripe().Customer.create(
-            email=email, metadata={"user_id": str(user_id)}
+            email=email,
+            metadata={"user_id": str(user_id)},
+            timeout=STRIPE_TIMEOUT_SECONDS,
         )
     )
 
@@ -73,6 +93,7 @@ def create_checkout_session(
             automatic_tax={"enabled": True},
             success_url=success_url,
             cancel_url=cancel_url,
+            timeout=STRIPE_TIMEOUT_SECONDS,
         )
     )
 
@@ -80,6 +101,8 @@ def create_checkout_session(
 def create_portal_session(*, customer_id: str, return_url: str) -> dict:
     return _as_dict(
         get_stripe().billing_portal.Session.create(
-            customer=customer_id, return_url=return_url
+            customer=customer_id,
+            return_url=return_url,
+            timeout=STRIPE_TIMEOUT_SECONDS,
         )
     )

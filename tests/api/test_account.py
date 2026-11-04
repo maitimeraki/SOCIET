@@ -14,7 +14,7 @@ import pytest
 import pytest_asyncio
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 
 from src.api import run_doc
 from src.api.account_api import router as account_router
@@ -22,7 +22,8 @@ from src.api.errors import install_error_handlers
 from src.api.jobs_api import router as jobs_router
 from src.auth.deps import current_user
 from src.db.engine import get_db, get_session_factory
-from src.db.models import Job, Run, Upload, User, UserSession
+from src.billing import stripe_client
+from src.db.models import Job, Run, Subscription, Upload, User, UserSession
 from src.ingest import repository, storage
 from src.jobs import queue as jobs_queue
 
@@ -175,6 +176,11 @@ async def test_delete_soft_disables_then_purges(owner, s3, inline_queue):
     async with factory() as fresh:
         row = await fresh.get(User, uuid.UUID(owner))
         assert row.disabled_at is not None  # soft delete landed
+        # The retained row is anonymised: no address, hash, age or paid plan.
+        assert row.email == f"deleted-{owner}@invalid"
+        assert row.password_hash == ""
+        assert row.age_confirmed_at is None
+        assert row.plan_key == "free"
 
     assert await _count(UserSession, owner) == 0
     assert await _count(Run, owner) == 0
@@ -183,6 +189,79 @@ async def test_delete_soft_disables_then_purges(owner, s3, inline_queue):
     with pytest.raises(Exception):
         storage.get_upload(f"{owner}/{seeded['upload_id']}")
     assert job_id  # the purge job ran under the id we were handed
+
+
+async def _add_subscription(owner_id: str, status: str = "active") -> None:
+    factory = get_session_factory()
+    async with factory() as session:
+        session.add(
+            Subscription(
+                user_id=uuid.UUID(owner_id),
+                stripe_customer_id="cus_test",
+                stripe_subscription_id="sub_test",
+                status=status,
+            )
+        )
+        await session.commit()
+
+
+async def _drop_subscriptions(owner_id: str) -> None:
+    factory = get_session_factory()
+    async with factory() as session:
+        await session.execute(
+            delete(Subscription).where(Subscription.user_id == uuid.UUID(owner_id))
+        )
+        await session.commit()
+
+
+async def test_an_active_subscription_is_cancelled_before_delete(
+    owner, s3, inline_queue, monkeypatch
+):
+    cancelled: list[str] = []
+    monkeypatch.setattr(
+        stripe_client,
+        "cancel_subscription",
+        lambda subscription_id: cancelled.append(subscription_id) or {},
+    )
+    await _add_subscription(owner)
+    client, session, user = await _authed_client(owner)
+    try:
+        response = await client.request(
+            "DELETE", "/api/v1/account", json={"confirm": user.email}
+        )
+        assert response.status_code == 202, response.text
+        await jobs_queue.drain_inline()
+    finally:
+        await client.aclose()
+        await session.close()
+        await _drop_subscriptions(owner)
+
+    assert cancelled == ["sub_test"]
+
+
+async def test_a_failed_cancellation_keeps_the_account_enabled(
+    owner, s3, inline_queue, monkeypatch
+):
+    def fail(_subscription_id):
+        raise RuntimeError("stripe is down")
+
+    monkeypatch.setattr(stripe_client, "cancel_subscription", fail)
+    await _add_subscription(owner)
+    client, session, user = await _authed_client(owner)
+    try:
+        response = await client.request(
+            "DELETE", "/api/v1/account", json={"confirm": user.email}
+        )
+    finally:
+        await client.aclose()
+        await session.close()
+        await _drop_subscriptions(owner)
+
+    assert response.status_code == 502, response.text
+    assert response.json()["error"]["code"] == "billing_cancel_failed"
+    factory = get_session_factory()
+    async with factory() as fresh:
+        assert (await fresh.get(User, uuid.UUID(owner))).disabled_at is None
 
 
 async def test_a_wrong_confirmation_is_a_400(owner, s3, inline_queue):

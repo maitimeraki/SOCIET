@@ -5,8 +5,6 @@ callables, so a test can override the env and ``get_settings.cache_clear()``
 without rebuilding the routes.
 """
 
-import ipaddress
-
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 from slowapi import Limiter
@@ -14,40 +12,17 @@ from slowapi.errors import RateLimitExceeded
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import HTTPConnection
 
+from src.api.client_ip import resolved_client_ip
 from src.api.errors import error_response
 from src.config.settings import get_settings
 
 
-def _is_trusted_peer(peer: str, allowed: list[str]) -> bool:
-    """Exact address, CIDR network, or ``*`` — non-IP peers fall back to exact."""
-    for entry in allowed:
-        if entry == "*" or entry == peer:
-            return True
-        try:
-            if ipaddress.ip_address(peer) in ipaddress.ip_network(entry, strict=False):
-                return True
-        except ValueError:
-            # Non-IP peer or non-network entry: exact matching above is all.
-            continue
-    return False
-
-
 def client_key(request: HTTPConnection) -> str:
-    """Bucket identity: the forwarded client IP only when our peer is trusted.
-
-    ``X-Forwarded-For`` is client-controlled; accepting it from any peer would
-    let a caller mint a fresh bucket per request. Trust is therefore opt-in via
-    ``FORWARDED_ALLOW_IPS`` — the proxy address, a network, or ``*``.
-
-    Assumption: the immediate trusted proxy appends (or overwrites) the client
-    IP, so we take the last hop. The leftmost entries are whatever a client
-    chose to send and must not be believed.
-    """
+    """Bucket identity: the trusted forwarded client IP, or the direct peer."""
     peer = request.client.host if request.client else ""
-    forwarded = request.headers.get("x-forwarded-for")
-    if forwarded and _is_trusted_peer(peer, get_settings().forwarded_allow_ips):
-        return forwarded.split(",")[-1].strip() or peer or "unknown"
-    return peer or "unknown"
+    return (
+        resolved_client_ip(peer, request.headers.get("x-forwarded-for")) or "unknown"
+    )
 
 
 def _storage_uri() -> str:

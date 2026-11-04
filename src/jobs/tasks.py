@@ -114,6 +114,7 @@ def _documents(payload: dict[str, Any]):
 async def _ontology_core(job_id: str, payload: dict[str, Any]) -> None:
     from src.api import api_server
 
+    await _assert_reservation(job_id)
     await api_server.run_graph_job(
         job_id, "ontology", payload["dataset_id"], _documents(payload)
     )
@@ -122,6 +123,7 @@ async def _ontology_core(job_id: str, payload: dict[str, Any]) -> None:
 async def _build_graph_core(job_id: str, payload: dict[str, Any]) -> None:
     from src.api import api_server
 
+    await _assert_reservation(job_id)
     await api_server.run_graph_job(
         job_id,
         "build_graph",
@@ -134,6 +136,7 @@ async def _build_graph_core(job_id: str, payload: dict[str, Any]) -> None:
 async def _normalize_graph_core(job_id: str, payload: dict[str, Any]) -> None:
     from src.api import api_server
 
+    await _assert_reservation(job_id)
     await api_server.run_normalize_job(job_id, payload["dataset_id"])
 
 
@@ -402,7 +405,7 @@ async def _account_delete_core(job_id: str, payload: dict[str, Any]) -> None:
     from sqlalchemy import delete, select
 
     from src.db.engine import get_session_factory
-    from src.db.models import Dataset, Job, Run, RunEvent, Upload, UserSession
+    from src.db.models import Dataset, Job, Run, RunEvent, Upload, User, UserSession
     from src.ingest import storage
 
     owner = uuid.UUID(str(payload["user_id"]))
@@ -430,6 +433,14 @@ async def _account_delete_core(job_id: str, payload: dict[str, Any]) -> None:
         await session.execute(delete(Upload).where(Upload.user_id == owner))
         await session.execute(delete(Dataset).where(Dataset.user_id == owner))
         await session.execute(delete(UserSession).where(UserSession.user_id == owner))
+        # The retained user row carries no personal data: keep the id so
+        # audit/ledger rows still resolve, but anonymise everything else.
+        retained = await session.get(User, owner)
+        if retained is not None:
+            retained.email = f"deleted-{owner}@invalid"
+            retained.password_hash = ""
+            retained.age_confirmed_at = None
+            retained.plan_key = "free"
         await session.commit()
 
     removed = await asyncio.to_thread(storage.delete_prefix, f"{owner}/")
@@ -544,6 +555,8 @@ async def purge_retention_core(dry_run: bool = False) -> dict[str, int]:
     * **runs** — fully delete runs older than the runs window, with their
       ``run_events`` and ``jobs`` rows (dependency order, no cascade relied on).
     * **audit** — trim ``audit_log`` rows older than the audit window.
+    * **webhook/LLM-usage** — trim ``webhook_events`` (``received_at``) and
+      ``llm_usage`` (``created_at``) to the runs window.
 
     ``dry_run`` counts and writes nothing — not the rows, not the objects.
     """
@@ -553,7 +566,15 @@ async def purge_retention_core(dry_run: bool = False) -> dict[str, int]:
 
     from src.config.settings import get_settings
     from src.db.engine import get_session_factory
-    from src.db.models import AuditLog, Job, Run, RunEvent, Upload
+    from src.db.models import (
+        AuditLog,
+        Job,
+        LLMUsage,
+        Run,
+        RunEvent,
+        Upload,
+        WebhookEvent,
+    )
     from src.ingest import storage
 
     settings = get_settings()
@@ -587,11 +608,27 @@ async def purge_retention_core(dry_run: bool = False) -> dict[str, int]:
                 .where(AuditLog.at < audit_cutoff)
             )
         ).scalar_one()
+        webhook_count = (
+            await session.execute(
+                select(func.count())
+                .select_from(WebhookEvent)
+                .where(WebhookEvent.received_at < runs_cutoff)
+            )
+        ).scalar_one()
+        llm_usage_count = (
+            await session.execute(
+                select(func.count())
+                .select_from(LLMUsage)
+                .where(LLMUsage.created_at < runs_cutoff)
+            )
+        ).scalar_one()
 
         counts = {
             "raw_objects": len(object_keys),
             "runs": len(run_ids),
             "audit": audit_count,
+            "webhook_events": webhook_count,
+            "llm_usage": llm_usage_count,
         }
         if dry_run:
             return counts
@@ -603,13 +640,20 @@ async def purge_retention_core(dry_run: bool = False) -> dict[str, int]:
             await session.execute(delete(Job).where(Job.run_id.in_(run_ids)))
             await session.execute(delete(Run).where(Run.id.in_(run_ids)))
         await session.execute(delete(AuditLog).where(AuditLog.at < audit_cutoff))
+        await session.execute(
+            delete(WebhookEvent).where(WebhookEvent.received_at < runs_cutoff)
+        )
+        await session.execute(delete(LLMUsage).where(LLMUsage.created_at < runs_cutoff))
         await session.commit()
 
     logger.info(
-        "retention purge: %d object(s), %d run(s), %d audit row(s)",
+        "retention purge: %d object(s), %d run(s), %d audit row(s), "
+        "%d webhook row(s), %d llm_usage row(s)",
         counts["raw_objects"],
         counts["runs"],
         counts["audit"],
+        counts["webhook_events"],
+        counts["llm_usage"],
     )
     return counts
 
@@ -795,8 +839,17 @@ async def _metering_scope(kind: str, job_id: str, payload: dict[str, Any]):
     from src.db.models import User
 
     user_id = uuid.UUID(str(owner))
+    # Settle into the period the job reserved in: that is the balance the
+    # enqueue checked. Only a legacy payload without the field re-resolves.
+    period_start = payload.get("reserved_period_start")
+    if isinstance(period_start, str):
+        period_start = datetime.datetime.fromisoformat(period_start)
+    if not isinstance(period_start, datetime.datetime):
+        period_start = None
+
     async with get_session_factory()() as db:
-        period_start, _ = await resolve_period(db, user_id)
+        if period_start is None:
+            period_start, _ = await resolve_period(db, user_id)
         plan_key = (
             await db.execute(select(User.plan_key).where(User.id == user_id))
         ).scalar_one_or_none()
@@ -875,7 +928,10 @@ async def execute(kind: str, job_id: str, payload: dict[str, Any]) -> None:
         # hold because RQ may retry it and the lease sweep is the backstop
         # (Task 2). An ingest extraction spends no LLM tokens and charges
         # nothing on failure (plan §8 item 8), so it releases on every exit.
-        release = kind == "extract_upload" or (kind == "debate" and status != "failed")
+        release = kind == "extract_upload" or (
+            kind in ("debate", "ontology", "build_graph", "normalize_graph")
+            and status != "failed"
+        )
         if release:
             try:
                 from src.audit import record as audit_record

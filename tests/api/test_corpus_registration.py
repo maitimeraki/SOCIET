@@ -7,6 +7,7 @@ registers the corpus with its owner and its name.
 """
 
 import asyncio
+import datetime
 import os
 import sys
 import uuid
@@ -62,6 +63,15 @@ async def client(accounts, monkeypatch):
     monkeypatch.setattr(
         api_server, "enqueue_or_http", AsyncMock(return_value="job-corpus-reg")
     )
+    # Corpus registration is this file's subject; the reservation itself is
+    # covered by tests/api/test_graph_reservation.py. A zero hold keeps two
+    # builds in one test from exhausting the free plan between them.
+    async def _no_reservation(_db, _user):
+        return SimpleNamespace(
+            amount=0, period_start=datetime.datetime.now(datetime.UTC)
+        )
+
+    monkeypatch.setattr(api_server, "_reserve_graph_job", _no_reservation)
     app = FastAPI()
     app.include_router(simulate_router, prefix="/api/v1")
     app.dependency_overrides[current_user] = lambda: SimpleNamespace(id=owner.id)

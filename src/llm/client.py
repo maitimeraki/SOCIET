@@ -202,12 +202,19 @@ class LLMClient:
         last_model = None
         last_hidden = None
         try:
+            # Ask OpenAI-compatible providers for the final usage chunk; the
+            # native Ollama API rejects the option, so it keeps the fallback
+            # (metering reads the last chunk when usage arrives).
+            stream_options = (
+                {} if provider == "ollama" else {"stream_options": {"include_usage": True}}
+            )
             response = await litellm.acompletion(
                 model=self._model_str(provider, model),
                 messages=_messages(provider, system_prompt, user_prompt),
                 temperature=0.7,
                 stream=True,
                 timeout=LLM_ATTEMPT_TIMEOUT_SECONDS,
+                **stream_options,
                 **self._call_kwargs(provider),
             )
             async for chunk in response:

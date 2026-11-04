@@ -30,6 +30,16 @@ export interface BillingUsage {
   billing_enabled: boolean
 }
 
+/** `GET /api/v1/billing/plans` — the public rate card (starter/studio/enterprise). */
+export interface BillingPlan {
+  key: string
+  price_usd: number | null
+  price_label: string
+  units: number
+  max_agents: number
+  max_rounds: number
+}
+
 /** `GET /api/v1/legal/documents` — one current version per slug, no content. */
 export interface LegalDocumentMeta {
   slug: string

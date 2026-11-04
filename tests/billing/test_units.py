@@ -214,7 +214,9 @@ async def test_settle_call_is_idempotent(session_factory):
         assert second is False
 
         async with factory() as db:
-            assert await get_balance(db, user_id, period_start) == (40, 60)
+            # No job id: the measured amount is recorded but no job's hold is
+            # released (C1 — a settlement may only consume its own job's hold).
+            assert await get_balance(db, user_id, period_start) == (40, 100)
             events = (
                 (
                     await db.execute(
@@ -392,7 +394,8 @@ async def test_void_event_restores_units_once(session_factory):
                 await db.execute(select(UsageEvent).where(UsageEvent.id == event_id))
             ).scalar_one()
             assert (event.status, event.reason) == ("void", "provider error")
-            assert await get_balance(db, user_id, period_start) == (0, 60)
+            # The void restores used; the unrelated period hold is untouched.
+            assert await get_balance(db, user_id, period_start) == (0, 100)
     finally:
         await _cleanup(factory, user_id)
 

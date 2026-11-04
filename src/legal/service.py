@@ -35,6 +35,19 @@ async def ensure_documents(
     rows: list[LegalDocument] = []
     for seed in registry.SEEDS:
         digest = registry.content_sha256(seed)
+        # Insert-or-ignore: two concurrent first reads of an empty table must
+        # not race a unique violation. The re-select below is the authority.
+        await db.execute(
+            pg_insert(LegalDocument)
+            .values(
+                slug=seed.slug,
+                version=seed.version,
+                effective_at=_effective_datetime(seed),
+                content_sha256=digest,
+                content=registry.read_raw(seed),
+            )
+            .on_conflict_do_nothing(index_elements=["slug", "version"])
+        )
         row = (
             await db.execute(
                 select(LegalDocument).where(
@@ -42,25 +55,13 @@ async def ensure_documents(
                     LegalDocument.version == seed.version,
                 )
             )
-        ).scalar_one_or_none()
+        ).scalar_one()
 
-        if row is not None:
-            if row.content_sha256 != digest:
-                raise RuntimeError(
-                    f"legal document {seed.slug} v{seed.version} changed "
-                    "without a version bump"
-                )
-            rows.append(row)
-            continue
-
-        row = LegalDocument(
-            slug=seed.slug,
-            version=seed.version,
-            effective_at=_effective_datetime(seed),
-            content_sha256=digest,
-            content=registry.read_raw(seed),
-        )
-        db.add(row)
+        if row.content_sha256 != digest:
+            raise RuntimeError(
+                f"legal document {seed.slug} v{seed.version} changed "
+                "without a version bump"
+            )
         rows.append(row)
 
     await db.flush()
@@ -80,8 +81,12 @@ async def current_documents(db: AsyncSession) -> list[LegalDocument]:
 
 
 async def get_document(db: AsyncSession, slug: str) -> tuple[LegalDocument, str] | None:
-    """The current row for ``slug`` and its rendered content, or None."""
-    await ensure_documents(db)
+    """The current row for ``slug`` and its rendered content, or None.
+
+    Commits the seed check so a read-only detail request does not leave the
+    insert transaction open (and re-insert on every request).
+    """
+    await ensure_documents(db, commit=True)
     row = (
         await db.execute(
             select(LegalDocument)

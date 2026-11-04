@@ -175,11 +175,23 @@ async def settle_call(
     consumes the same amount from it, so a later release (or the lease sweep)
     gives back only what the job never spent. The event insert decides the
     winner; the loser commits the no-op and touches no counter.
+
+    The period's ``units_reserved`` is shared by every in-flight job, so the
+    release is capped at *this* job's remaining hold — a sibling's hold is
+    never consumed by a settlement that overruns its own reservation.
     """
     if source not in SOURCES:
         raise ValueError(f"source must be one of {sorted(SOURCES)}")
     amount = _non_negative_int(amount, "amount")
     await ensure_period(db, user_id, period_start)
+
+    job_remaining: int | None = None
+    if job_id is not None:
+        job_remaining = (
+            await db.execute(
+                select(Job.reserved_units).where(Job.id == job_id).with_for_update()
+            )
+        ).scalar_one_or_none()
 
     inserted_id = (
         await db.execute(
@@ -204,6 +216,10 @@ async def settle_call(
         await db.commit()
         return False
 
+    release = 0
+    if job_id is not None:
+        release = min(amount, max(job_remaining or 0, 0))
+
     await db.execute(
         update(UsagePeriod)
         .where(
@@ -212,14 +228,14 @@ async def settle_call(
         )
         .values(
             units_used=UsagePeriod.units_used + amount,
-            units_reserved=func.greatest(UsagePeriod.units_reserved - amount, 0),
+            units_reserved=func.greatest(UsagePeriod.units_reserved - release, 0),
         )
     )
     if job_id is not None:
         await db.execute(
             update(Job)
             .where(Job.id == job_id)
-            .values(reserved_units=func.greatest(Job.reserved_units - amount, 0))
+            .values(reserved_units=func.greatest(Job.reserved_units - release, 0))
         )
     await db.commit()
     return True

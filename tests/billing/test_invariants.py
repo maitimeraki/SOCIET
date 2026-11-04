@@ -351,18 +351,20 @@ async def test_ingest_and_debate_share_one_unit_pool(session_factory):
         await _settle(factory, user_id, period_start, amount=5, source="ingest")
         await _settle(factory, user_id, period_start, amount=15, source="debate")
 
+        # These settlements carry no job id, so they record usage without
+        # releasing a hold (C1); the caller releases each job's full hold.
         async with factory() as db:
             await release_reservation(
                 db,
                 user_id=user_id,
                 period_start=period_start,
-                amount=ingest_hold.amount - 5,
+                amount=ingest_hold.amount,
             )
             await release_reservation(
                 db,
                 user_id=user_id,
                 period_start=period_start,
-                amount=debate_hold.amount - 15,
+                amount=debate_hold.amount,
             )
 
         used, reserved = await _assert_identity(factory, user_id, period_start)

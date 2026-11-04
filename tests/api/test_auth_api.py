@@ -137,9 +137,16 @@ async def test_signup_sets_session_and_csrf_cookies(db):
 
     assert response.status_code == 201
     body = response.json()
-    assert set(body) == {"id", "email", "role", "plan", "created_at"}
+    assert set(body) == {"id", "email", "role", "plan", "created_at", "entitlements"}
     assert body["role"] == "user"
     assert body["plan"] == "free"
+    assert set(body["entitlements"]) == {
+        "max_agents",
+        "max_rounds",
+        "units_remaining",
+        "period_end",
+    }
+    assert body["entitlements"]["units_remaining"] == 1000
     assert "argon2" not in response.text and PASSWORD not in response.text
 
     set_cookies = response.headers.get_list("set-cookie")
@@ -220,6 +227,9 @@ async def test_login_returns_the_user_and_cookies(db):
 
     assert response.status_code == 200
     assert response.json()["email"] == email
+    # Login carries the same capability payload as /me, so the client can render
+    # the plan caps without a second read.
+    assert response.json()["entitlements"] == me.json()["entitlements"]
     assert "argon2" not in response.text
     assert me.status_code == 200
     assert me.json()["email"] == email
@@ -233,6 +243,7 @@ async def test_me_carries_role_plan_and_entitlements(db):
         response = await client.get("/api/v1/auth/me")
 
     assert response.status_code == 200
+    assert response.headers["cache-control"] == "private, no-store"
     body = response.json()
     assert body["role"] == "user"
     assert body["plan"] == "free"

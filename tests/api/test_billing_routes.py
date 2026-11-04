@@ -105,6 +105,71 @@ async def _delete_subscriptions(db, user_id) -> None:
     await db.commit()
 
 
+@pytest.mark.asyncio
+async def test_plans_are_public_and_come_from_the_server_table():
+    async with _client() as client:
+        response = await client.get("/api/v1/billing/plans")
+
+    assert response.status_code == 200, response.text
+    rows = response.json()
+    assert [row["key"] for row in rows] == ["starter", "studio", "enterprise"]
+    starter = rows[0]
+    assert starter == {
+        "key": "starter",
+        "price_usd": 10,
+        "price_label": "$10",
+        "units": 8000,
+        "max_agents": 20,
+        "max_rounds": 4,
+    }
+    assert rows[2]["price_usd"] is None
+    assert rows[2]["price_label"] == "Custom"
+    assert "free" not in [row["key"] for row in rows]
+
+
+@requires_db
+@pytest.mark.asyncio
+async def test_checkout_calls_stripe_off_the_event_loop(db, billing_on, monkeypatch):
+    import src.api.billing_api as billing_api
+
+    threads: list[str] = []
+
+    async def recording_to_thread(func, /, *args, **kwargs):
+        threads.append(getattr(func, "__name__", str(func)))
+        return func(*args, **kwargs)
+
+    monkeypatch.setattr(billing_api.asyncio, "to_thread", recording_to_thread)
+    monkeypatch.setattr(
+        stripe.Customer,
+        "create",
+        lambda **kwargs: {"id": "cus_thread"},
+    )
+    monkeypatch.setattr(
+        stripe.checkout.Session,
+        "create",
+        lambda **kwargs: {"id": "cs_thread", "url": "https://checkout.test/x"},
+    )
+
+    user_id = None
+    try:
+        async with _client() as client:
+            user_id = await _signup(client)
+            response = await client.post(
+                "/api/v1/billing/checkout",
+                json={"plan": "starter"},
+                headers=_csrf(client),
+            )
+        assert response.status_code == 200, response.text
+        # Signup's argon2 hash also uses to_thread; the Stripe calls are the two under test.
+        assert [name for name in threads if name.startswith("create_")] == [
+            "create_customer",
+            "create_checkout_session",
+        ]
+    finally:
+        if user_id is not None:
+            await _delete_subscriptions(db, user_id)
+
+
 @requires_db
 @pytest.mark.asyncio
 async def test_checkout_and_portal_are_503_when_billing_is_disabled(db):

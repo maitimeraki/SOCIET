@@ -45,7 +45,13 @@ async def get_job(job_id: str, user: User = Depends(current_user)):
     await require_owner(doc.get("user_id"), user)
     result = doc.get("result")
     key = result.get("object_key") if isinstance(result, dict) else None
-    if key:
+    # Only an export's own zip is downloadable: never presign an arbitrary
+    # key a job doc happens to carry, and never another user's prefix.
+    if (
+        key
+        and doc.get("mode") == "account_export"
+        and key.startswith(f"exports/{user.id}/")
+    ):
         from src.config.settings import get_settings
         from src.ingest.storage import presigned_url
 

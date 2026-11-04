@@ -75,6 +75,22 @@ async def test_ensure_documents_inserts_four_rows_and_is_idempotent(db):
     assert total == 4
 
 
+async def test_concurrent_first_reads_do_not_raise(db):
+    """Two first requests race the seed insert; ON CONFLICT makes both succeed."""
+    from src.db.engine import get_session_factory
+
+    factory = get_session_factory()
+
+    async def _ensure():
+        async with factory() as session:
+            return await ensure_documents(session, commit=True)
+
+    first, second = await asyncio.gather(_ensure(), _ensure())
+
+    assert {row.id for row in first} == {row.id for row in second}
+    assert len(first) == len(registry.SEEDS) == len(second)
+
+
 async def test_changing_bytes_without_a_version_bump_raises(db, monkeypatch):
     await ensure_documents(db, commit=True)
     real_read = registry.read_raw

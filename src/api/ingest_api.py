@@ -48,7 +48,7 @@ router = APIRouter(tags=["ingest"], dependencies=[Depends(verify_csrf)])
 logger = logging.getLogger(__name__)
 
 MAX_FILES = 20
-MAX_BYTES = 20 * 1024 * 1024
+MAX_BYTES = 5 * 1024 * 1024
 
 
 class UrlRequest(BaseModel):
@@ -140,7 +140,7 @@ async def ingest_files(
                 status_code=413,
                 detail={
                     "code": "payload_too_large",
-                    "message": f"{name} is over 20 MB",
+                    "message": f"{name} is over 5 MB",
                 },
             )
         try:
@@ -156,6 +156,10 @@ async def ingest_files(
     estimate = sum(
         max(1, units.units_for_chars(min(len(data), cap))) for _, _, data in staged
     )
+    # Never hold more than the plan's whole allowance: a free plan's 1,000
+    # units is below a large batch's byte ceiling, and a hold above the plan
+    # could never succeed. The worker settles the measured characters.
+    estimate = max(1, min(estimate, get_plan(user.plan_key).units))
     reservation = await _reserve_ingest(
         db, user=user, estimate=estimate, request=request
     )

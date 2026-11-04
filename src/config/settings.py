@@ -138,6 +138,15 @@ class Settings(BaseSettings):
     plan_studio_units: int = 16_000
     plan_enterprise_units: int = 80_000
 
+    # Plan rate card — the public pricing surface and the server's one source.
+    plan_starter_price_usd: int = 10
+    plan_studio_price_usd: int = 20
+    plan_enterprise_price_label: str = "Custom"
+
+    # The unit hold a graph job takes at enqueue; the worker re-checks it before
+    # any LLM call and settlement releases only what the job actually holds.
+    graph_job_reserve_units: int = 2_000
+
     plan_free_max_agents: int = 10
     plan_starter_max_agents: int = 20
     plan_studio_max_agents: int = 20
@@ -185,6 +194,8 @@ class Settings(BaseSettings):
             raise ValueError("unit_cost_usd must be >= 0")
         if self.billing_reservation_lease_seconds <= 0:
             raise ValueError("billing_reservation_lease_seconds must be > 0")
+        if self.graph_job_reserve_units < 1:
+            raise ValueError("graph_job_reserve_units must be >= 1")
         return self
 
     @field_validator(

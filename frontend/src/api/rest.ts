@@ -1,4 +1,5 @@
 import type {
+  BillingPlan,
   BillingUsage,
   DebateConfig,
   DebateStartRequest,
@@ -115,8 +116,14 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     if (response.status === 401) unauthorizedHandler?.() // session gone — clear, never retry
     let detail = response.statusText
     try {
-      const body = (await response.json()) as { detail?: unknown }
-      if (body.detail !== undefined) detail = readDetail(body.detail)
+      const body = (await response.json()) as {
+        error?: { message?: unknown }
+        detail?: unknown
+      }
+      // The server's uniform envelope is `{error: {code, message, correlation_id}}`;
+      // `detail` is the older FastAPI shape and stays as a fallback.
+      if (typeof body.error?.message === 'string') detail = body.error.message
+      else if (body.detail !== undefined) detail = readDetail(body.detail)
     } catch {
       // Non-JSON error body: keep statusText.
     }
@@ -256,6 +263,9 @@ export const legalDocument = (slug: string) =>
   request<LegalDocument>(`/api/v1/legal/documents/${encodeURIComponent(slug)}`)
 
 export const billingUsage = () => request<BillingUsage>('/api/v1/billing/usage')
+
+/** The public rate card — the server's plan table, not client-invented figures. */
+export const billingPlans = () => request<BillingPlan[]>('/api/v1/billing/plans')
 
 export const billingCheckout = (plan: 'starter' | 'studio') =>
   request<{ url: string }>('/api/v1/billing/checkout', jsonInit('POST', { plan }))

@@ -1,6 +1,10 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it } from 'vitest'
 import { clampConfig, debateRequest, initialConfig } from './SocietyPage'
 import { DEBATE_CONFIG_DEFAULTS } from '../api/types'
+import type { User } from '../api/types'
+import { useAuthStore } from '../auth/authStore'
+
+afterEach(() => useAuthStore.getState().clear())
 
 // No jsdom / no testing-library in this repo (see AppErrorBoundary.test.tsx), and zustand serves its
 // *initial* state to `renderToStaticMarkup` — so the corpus name cannot be injected for a server
@@ -25,6 +29,30 @@ describe('the form starts inside the plan (§7.10)', () => {
       max_agents: 10,
       max_rounds: 3,
     })
+  })
+
+  it('a signup/login response carries its caps through the auth store into the form', () => {
+    const signup: User = {
+      id: 'u1',
+      email: 'a@b.c',
+      created_at: '2026-01-01T00:00:00Z',
+      role: 'user',
+      plan: 'free',
+      entitlements: {
+        max_agents: 10,
+        max_rounds: 3,
+        units_remaining: 1000,
+        period_end: '2026-12-01T00:00:00Z',
+      },
+    }
+
+    useAuthStore.getState().setUser(signup)
+    const config = initialConfig(useAuthStore.getState().user?.entitlements)
+
+    expect(config.max_agents).toBe(10)
+    expect(config.max_rounds).toBe(3)
+    expect(config.max_agents).not.toBe(DEBATE_CONFIG_DEFAULTS.max_agents)
+    expect(config.max_rounds).not.toBe(DEBATE_CONFIG_DEFAULTS.max_rounds)
   })
 
   it('keeps the absolute defaults when no plan cap is known', () => {

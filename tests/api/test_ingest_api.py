@@ -175,7 +175,7 @@ async def test_oversize_file_is_413(owner):
     async with _client(owner) as client:
         response = await client.post(
             "/api/v1/ingest/files",
-            files={"files": ("big.txt", b"a" * (20 * 1024 * 1024 + 1), "text/plain")},
+            files={"files": ("big.txt", b"a" * (5 * 1024 * 1024 + 1), "text/plain")},
         )
     assert response.status_code == 413, response.text
 
@@ -274,6 +274,33 @@ def _queue_and_burst() -> None:
     SimpleWorker([jobs_queue.get_queue()], connection=jobs_queue.get_redis()).work(
         burst=True
     )
+
+
+def test_a_large_free_plan_upload_holds_the_plan_not_a_402(s3, monkeypatch):
+    """A >2 MB file's byte ceiling exceeds the free plan; the hold is capped, not refused."""
+    monkeypatch.setenv("QUEUE_MODE", "rq")
+    from src.config.settings import get_settings
+    from src.db.models import Job
+
+    get_settings.cache_clear()
+    owner = _run(_make_owner())
+    try:
+        status, body = _post_files(
+            owner, "big.txt", b"a" * (2 * 1024 * 1024 + 1), "text/plain"
+        )
+        assert status == 202, body
+
+        async def _job():
+            factory = get_session_factory()
+            async with factory() as session:
+                return await session.get(Job, uuid.UUID(body["job_id"]))
+
+        job = _run(_job())
+        assert job.reserved_units == get_settings().plan_free_units
+    finally:
+        _run(_drop_owner(owner))
+        jobs_queue.get_queue().empty()
+        get_settings.cache_clear()
 
 
 def test_enqueue_stores_and_the_worker_extracts(s3, monkeypatch):

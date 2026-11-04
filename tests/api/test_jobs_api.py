@@ -202,6 +202,32 @@ async def test_cancelling_a_foreign_job_is_not_found(accounts):
     assert (await run_doc.read_job_doc(job_id))["status"] == "queued"
 
 
+async def test_reading_a_foreign_job_is_404_not_403(accounts):
+    _, other = accounts
+    job_id = await _graph_row(other)
+    async with _client(accounts[0]) as client:
+        response = await client.get(f"/api/v1/jobs/{job_id}")
+    assert response.status_code == 404, response.text
+
+
+async def test_reading_a_foreign_run_is_404_not_403(accounts):
+    _, other = accounts
+    run_id = await _run_row(other)
+    async with _client(accounts[0], debate=True) as client:
+        response = await client.get(f"/api/v1/simulate/debates/{run_id}")
+    assert response.status_code == 404, response.text
+
+
+async def test_the_debate_list_only_contains_the_callers_runs(accounts):
+    owner, other = accounts
+    mine = await _run_row(owner)
+    await _run_row(other)
+    async with _client(owner, debate=True) as client:
+        response = await client.get("/api/v1/simulate/debates")
+    assert response.status_code == 200, response.text
+    assert [item["run_id"] for item in response.json()["items"]] == [mine]
+
+
 async def test_cancelling_an_unknown_job_is_not_found(accounts):
     owner, _ = accounts
 

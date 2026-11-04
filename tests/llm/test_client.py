@@ -138,6 +138,32 @@ async def test_stream_generate_yields_deltas():
 
 
 @pytest.mark.asyncio
+async def test_stream_generate_asks_for_usage_on_non_ollama_providers():
+    with patch("src.llm.client.litellm.acompletion", new_callable=AsyncMock) as ac:
+        ac.return_value = _stream_of([_chunk("hi")])
+        _ = [
+            token
+            async for token in LLMClient().stream_generate(
+                "sys", "usr", provider="openai"
+            )
+        ]
+        assert ac.await_args.kwargs["stream_options"] == {"include_usage": True}
+
+
+@pytest.mark.asyncio
+async def test_stream_generate_omits_stream_options_for_ollama():
+    with patch("src.llm.client.litellm.acompletion", new_callable=AsyncMock) as ac:
+        ac.return_value = _stream_of([_chunk("hi")])
+        _ = [
+            token
+            async for token in LLMClient().stream_generate(
+                "sys", "usr", provider="ollama"
+            )
+        ]
+        assert "stream_options" not in ac.await_args.kwargs
+
+
+@pytest.mark.asyncio
 async def test_stream_generate_falls_back_to_generate_on_failure():
     with patch("src.llm.client.litellm.acompletion", new_callable=AsyncMock) as ac:
         ac.side_effect = [RuntimeError("stream boom"), _resp("fallback text")]

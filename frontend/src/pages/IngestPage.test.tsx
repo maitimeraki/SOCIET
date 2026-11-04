@@ -93,7 +93,7 @@ describe('the R17 ingest transport (202 → poll → documents)', () => {
   it('a 402 is a recoverable units-exhausted gate with the reset date, never retried', async () => {
     const fetchMock = vi.fn().mockResolvedValueOnce(
       json(
-        { detail: { code: 'payment_required', message: 'Units used up. They reset on 2026-12-01.' } },
+        { error: { code: 'payment_required', message: 'Units used up. They reset on 2026-12-01.', correlation_id: 'c1' } },
         { status: 402 },
       ),
     )
@@ -104,6 +104,28 @@ describe('the R17 ingest transport (202 → poll → documents)', () => {
       message: 'Units used up. They reset on 2026-12-01.',
     })
     expect(fetchMock).toHaveBeenCalledTimes(1) // no retry
+  })
+
+  it('a 429 job cap is retryable with its Retry-After, not a failed extraction', async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(
+      json(
+        {
+          error: {
+            code: 'job_limit_exceeded',
+            message: 'At most 3 jobs may be in flight at once.',
+            correlation_id: 'c1',
+          },
+        },
+        { status: 429, headers: { 'Retry-After': '30' } },
+      ),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    expect(await runUrlIngest('https://example.com')).toEqual({
+      kind: 'job_capped',
+      retryAfter: 30,
+    })
+    expect(fetchMock).toHaveBeenCalledTimes(1)
   })
 
   it('a URL fetch follows the same 202 → poll → documents path', async () => {

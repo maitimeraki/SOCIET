@@ -27,6 +27,9 @@ def wrap_with_metering(llm, *, provider: str, model: str) -> object:
             return
 
         async def wrapper(self, *args, **kwargs):
+            # Fail closed: if an earlier settlement failed, the job stops here
+            # before this call spends anything.
+            metering.check_metering()
             response = await original(*args, **kwargs)
             try:
                 await metering.record_llama_response(

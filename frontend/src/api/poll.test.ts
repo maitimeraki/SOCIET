@@ -39,7 +39,12 @@ describe('pollJob', () => {
   })
 
   it('rejects on ApiError without retrying — a rejected job id never gets better', async () => {
-    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ detail: 'job not found' }), { status: 404 }))
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({ error: { code: 'not_found', message: 'job not found', correlation_id: 'c1' } }),
+        { status: 404 },
+      ),
+    )
     vi.stubGlobal('fetch', fetchMock)
 
     await expect(pollJob('missing', () => {}, { intervalMs: 1 })).rejects.toBeInstanceOf(ApiError)

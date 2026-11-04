@@ -80,6 +80,9 @@ advance through our payment processor, Stripe.
   plan and paid features stop.
 - **Taxes.** Prices are exclusive of applicable taxes unless stated otherwise.
   You are responsible for any taxes that apply to your purchase.
+- **Deleting your account.** Cancel an active subscription before deleting your
+  account. Deletion is refused while a subscription is live, so you are not
+  billed for an account you can no longer access.
 
 ## 6. Quotas and metering
 

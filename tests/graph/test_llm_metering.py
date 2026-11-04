@@ -70,3 +70,27 @@ def test_object_without_methods_is_returned_unchanged():
     llm = SimpleNamespace()
 
     assert wrap_with_metering(llm, provider="ollama", model="m") is llm
+
+
+@pytest.mark.asyncio
+async def test_flagged_context_stops_the_call_before_it_spends():
+    """Fail closed: a prior settlement failure raises before the original call."""
+    import datetime
+    import uuid
+
+    from src.billing import metering
+
+    llm = _FakeLLM()
+    wrap_with_metering(llm, provider="nvidia_nim", model="m")
+
+    with metering.metering_scope(
+        user_id=uuid.uuid4(),
+        period_start=datetime.datetime.now(datetime.UTC),
+        source="ontology",
+    ) as context:
+        context.failed = True
+        context.failure_reason = "settlement failed"
+        with pytest.raises(metering.MeteringError):
+            await llm._achat("chat")
+
+    assert llm.calls == []

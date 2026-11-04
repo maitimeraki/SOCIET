@@ -76,6 +76,41 @@ class UrlOut(BaseModel):
     url: str
 
 
+class PlanOut(BaseModel):
+    key: str
+    price_usd: int | None
+    price_label: str
+    units: int
+    max_agents: int
+    max_rounds: int
+
+
+@router.get("/plans", response_model=list[PlanOut])
+async def plans() -> list[PlanOut]:
+    """The public rate card; the client renders these values, not its own."""
+    settings = get_settings()
+    rows: list[PlanOut] = []
+    for key in ("starter", "studio", "enterprise"):
+        plan = get_plan(key)
+        if key == "enterprise":
+            price_usd = None
+            price_label = settings.plan_enterprise_price_label
+        else:
+            price_usd = getattr(settings, f"plan_{key}_price_usd")
+            price_label = f"${price_usd}"
+        rows.append(
+            PlanOut(
+                key=key,
+                price_usd=price_usd,
+                price_label=price_label,
+                units=plan.units,
+                max_agents=plan.max_agents,
+                max_rounds=plan.max_rounds,
+            )
+        )
+    return rows
+
+
 @router.get("/usage", response_model=UsageOut)
 async def usage(
     response: Response,
@@ -114,7 +149,9 @@ async def _customer_for_user(
     if row is not None and row.stripe_customer_id:
         return row.stripe_customer_id
 
-    customer = stripe_client.create_customer(email=user.email, user_id=str(user.id))
+    customer = await asyncio.to_thread(
+        stripe_client.create_customer, email=user.email, user_id=str(user.id)
+    )
     customer_id = customer["id"]
     if row is None:
         db.add(
@@ -151,7 +188,8 @@ async def checkout(
     settings = get_settings()
     try:
         customer_id = await _customer_for_user(db, user)
-        session = stripe_client.create_checkout_session(
+        session = await asyncio.to_thread(
+            stripe_client.create_checkout_session,
             customer_id=customer_id,
             price_id=plan.stripe_price_id,
             user_id=str(user.id),
@@ -191,7 +229,8 @@ async def portal(
         )
 
     try:
-        session = stripe_client.create_portal_session(
+        session = await asyncio.to_thread(
+            stripe_client.create_portal_session,
             customer_id=row.stripe_customer_id,
             return_url=f"{get_settings().app_base_url}/account",
         )

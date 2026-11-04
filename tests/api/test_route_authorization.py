@@ -9,6 +9,12 @@ handshake with ``websocket_user``.
 The inventory is a source check, so a negative self-check (a throwaway app with
 one unguarded route) proves the helper actually fails when a guard is missing —
 it cannot pass by checking nothing.
+
+Guard-name detection only covers routes that take a path parameter (where
+``require_owner`` is visible in the dependency closure). Query/body-scoped
+resources are covered behaviorally instead: ``test_uploads_list.py`` (a foreign
+upload id cannot widen the scope) and ``test_jobs_api.py`` (foreign job/run ids
+are 404 and the debate list is caller-scoped).
 """
 
 import inspect
@@ -39,6 +45,8 @@ PUBLIC_PATHS = {
     "/api/v1/legal/documents/{slug}",
     # Signature-authenticated by Stripe; no session, no CSRF, no degraded gate.
     "/api/v1/billing/webhook",
+    # The public rate card; it reveals only published plan metadata.
+    "/api/v1/billing/plans",
     # Retired legacy stubs: always 501, read nothing, write nothing (R20).
     "/simulate",
     "/simulate/async",

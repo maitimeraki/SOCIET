@@ -56,6 +56,14 @@ export default function IngestPage() {
       setUnitsGate(outcome.message)
       return
     }
+    if (outcome.kind === 'job_capped') {
+      // Retryable: the batch never started; a slot frees when an in-flight job finishes.
+      for (const placeholder of placeholders) updateDoc(placeholder.document_id, { status: 'failed', error: 'too many jobs in flight — try again shortly' })
+      setUnitsGate(
+        `Too many jobs in flight — try again in ${outcome.retryAfter ?? 30} seconds.`,
+      )
+      return
+    }
     for (const placeholder of placeholders) updateDoc(placeholder.document_id, { status: 'failed', error: outcome.reason })
     setFailure(outcome.reason)
   }
@@ -86,6 +94,12 @@ export default function IngestPage() {
       }
       if (outcome.kind === 'units_exhausted') {
         setUnitsGate(outcome.message)
+        return
+      }
+      if (outcome.kind === 'job_capped') {
+        setUnitsGate(
+          `Too many jobs in flight — try again in ${outcome.retryAfter ?? 30} seconds.`,
+        )
         return
       }
       setFailure(outcome.reason)

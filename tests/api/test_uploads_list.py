@@ -124,6 +124,31 @@ async def test_scoped_to_the_owner(account, client):
         await session.commit()
 
 
+async def test_a_foreign_upload_id_query_cannot_widen_the_scope(account, client):
+    """The list is owner-scoped, so a query-supplied foreign id returns no row."""
+    factory = get_session_factory()
+    async with factory() as session:
+        other = User(
+            email=f"uploads-other-{uuid.uuid4().hex[:10]}@example.com",
+            password_hash="x",
+        )
+        session.add(other)
+        await session.commit()
+        other_id = str(other.id)
+    mine = await _add_upload(account.id, f"{account.id}/mine.pdf", read=True, name="mine.pdf")
+    theirs = await _add_upload(other_id, f"{other_id}/theirs.pdf", read=True)
+    try:
+        response = await client.get(
+            "/api/v1/uploads", params={"upload_ids": str(theirs.id)}
+        )
+        items = response.json()["items"]
+        assert [item["id"] for item in items] == [str(mine.id)]
+    finally:
+        async with factory() as session:
+            await session.execute(delete(User).where(User.id == uuid.UUID(other_id)))
+            await session.commit()
+
+
 async def test_limit_bounds(account, client):
     for index in range(3):
         await _add_upload(account.id, f"{account.id}/f{index}.pdf", read=True)

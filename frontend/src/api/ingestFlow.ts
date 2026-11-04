@@ -14,6 +14,7 @@ export type IngestOutcome =
   | { kind: 'documents'; documents: IngestedDocument[] }
   | { kind: 'failed'; reason: string }
   | { kind: 'units_exhausted'; message: string }
+  | { kind: 'job_capped'; retryAfter: number | null }
 
 function uploadIds(result: IngestJobResult | null | undefined): string[] {
   const ids = result?.upload_ids
@@ -41,6 +42,11 @@ async function attempt(
     // Its server message carries the reset date.
     if (error instanceof ApiError && error.status === 402) {
       return { kind: 'units_exhausted', message: error.detail }
+    }
+    // A 429 is the per-user job cap: the work did not start, and the same batch can be retried
+    // once a slot frees (`Retry-After` is an upper bound).
+    if (error instanceof ApiError && error.status === 429) {
+      return { kind: 'job_capped', retryAfter: error.retryAfter }
     }
     return { kind: 'failed', reason: error instanceof Error ? error.message : 'unknown error' }
   }

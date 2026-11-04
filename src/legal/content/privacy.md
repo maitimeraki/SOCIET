@@ -83,7 +83,10 @@ information about the safeguards that apply to a particular transfer.
 - **Audit records** are kept for 365 days.
 - **Account, session, consent, and billing records** are kept while your account
   is active, and for as long as needed to meet legal, tax, and accounting
-  obligations after it is deleted.
+  obligations after it is deleted. After deletion the account row itself is
+  kept in anonymised form: the email is replaced with a non-deliverable
+  `deleted-<id>@invalid` placeholder, the password and age confirmation are
+  cleared, and the plan is reset to free.
 
 Retention periods are enforced by scheduled purge jobs where the deployment has
 configured them; otherwise they are applied operationally by the operator.
@@ -107,6 +110,9 @@ link.
 **Delete.** You can delete your account from the account settings. Deletion
 disables the account immediately, revokes active sessions, and queues a purge
 of the account's data. Some records may be retained where the law requires it.
+If you have an active paid subscription, cancel it first: deletion is refused
+while a subscription is live, so you are not billed for an account you can no
+longer access.
 
 **Other requests.** Email {{legal_contact_email}}. We may need to verify your
 identity before acting on a request.

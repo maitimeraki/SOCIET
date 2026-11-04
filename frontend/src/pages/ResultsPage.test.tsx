@@ -135,7 +135,7 @@ describe('loadVerdicts', () => {
     vi.stubGlobal(
       'fetch',
       vi.fn(async (url: string) => {
-        if (url.includes('/r-bad')) return reply({ detail: 'not found' }, false, 404)
+        if (url.includes('/r-bad')) return reply({ error: { code: 'not_found', message: 'not found', correlation_id: 'c1' } }, false, 404)
         if (url.includes('/r-good')) return reply(good)
         return reply({
           items: [
@@ -169,7 +169,7 @@ describe('loadVerdicts', () => {
     vi.stubGlobal(
       'fetch',
       vi.fn(async (url: string) => {
-        if (url.includes('/debates/')) return reply({ detail: 'not found' }, false, 404)
+        if (url.includes('/debates/')) return reply({ error: { code: 'not_found', message: 'not found', correlation_id: 'c1' } }, false, 404)
         return reply({
           items: [
             run({ run_id: 'r-bad', verdict_confidence: 0.61 }),
