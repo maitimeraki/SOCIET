@@ -111,3 +111,39 @@ async def test_ontology_enqueue_holds_min_graph_reserve_and_plan(owner, client):
     assert job.reserved_units == expected
     assert job.reserved_period_start is not None
     assert job.reserved_at is not None
+
+
+async def test_ontology_enqueue_still_works_after_partial_use(owner, client):
+    """A free user who has settled any unit must still start a graph job.
+
+    The hold is capped at the *remaining* balance, not the plan total; capping
+    at the total would make ingest -> graph impossible on the free tier.
+    """
+    from src.billing import units
+
+    factory = get_session_factory()
+    async with factory() as session:
+        period_start, _ = await units.resolve_period(session, owner)
+        await units.settle_call(
+            session,
+            user_id=owner,
+            period_start=period_start,
+            source="ingest",
+            amount=200,
+            idempotency_key=uuid.uuid4().hex,
+        )
+
+    response = await client.post("/simulate/ontology?dataset_id=ds-1", json=[])
+
+    assert response.status_code == 202, response.text
+    job_id = response.json()["job_id"]
+    async with factory() as session:
+        job = await session.get(Job, uuid.UUID(job_id))
+    expected = max(
+        1,
+        min(
+            get_settings().graph_job_reserve_units,
+            get_plan("free").units - 200,
+        ),
+    )
+    assert job.reserved_units == expected

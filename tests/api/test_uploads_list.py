@@ -125,7 +125,7 @@ async def test_scoped_to_the_owner(account, client):
 
 
 async def test_a_foreign_upload_id_query_cannot_widen_the_scope(account, client):
-    """The list is owner-scoped, so a query-supplied foreign id returns no row."""
+    """A query-supplied foreign id is absent from the caller's document read."""
     factory = get_session_factory()
     async with factory() as session:
         other = User(
@@ -139,10 +139,11 @@ async def test_a_foreign_upload_id_query_cannot_widen_the_scope(account, client)
     theirs = await _add_upload(other_id, f"{other_id}/theirs.pdf", read=True)
     try:
         response = await client.get(
-            "/api/v1/uploads", params={"upload_ids": str(theirs.id)}
+            "/api/v1/ingest/documents",
+            params={"upload_ids": f"{mine.id},{theirs.id}"},
         )
-        items = response.json()["items"]
-        assert [item["id"] for item in items] == [str(mine.id)]
+        documents = response.json()["documents"]
+        assert [doc["upload_id"] for doc in documents] == [str(mine.id)]
     finally:
         async with factory() as session:
             await session.execute(delete(User).where(User.id == uuid.UUID(other_id)))

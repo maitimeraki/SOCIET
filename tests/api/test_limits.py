@@ -77,7 +77,7 @@ def test_json_body_within_the_cap_passes(small_json_cap):
 
 
 def test_multipart_uploads_keep_their_own_gate(small_json_cap):
-    """The cap is JSON-only: ingest keeps its 20 MB / 20-file multipart gate."""
+    """The cap is JSON-only: ingest keeps its 5 MB / 20-file multipart gate."""
     app, _ = _capped_app()
 
     response = TestClient(app).post(

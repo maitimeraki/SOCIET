@@ -45,10 +45,23 @@ GRANT UPDATE (status, reason) ON usage_events TO societas_app;
 REVOKE DELETE, TRUNCATE ON usage_periods FROM societas_app;
 GRANT SELECT, INSERT, UPDATE ON usage_periods TO societas_app;
 
+-- `setup_db_roles.sql` granted ALL on ALL TABLES; revoke the excess so this
+-- script's posture is true even after that bootstrap.
+REVOKE DELETE, TRUNCATE, UPDATE ON llm_usage FROM societas_app;
 GRANT SELECT, INSERT ON llm_usage TO societas_app;
+
+REVOKE DELETE, TRUNCATE ON webhook_events FROM societas_app;
 GRANT SELECT, INSERT ON webhook_events TO societas_app;
+-- The webhook processor marks an event processed/failed; no payload rewrite.
+GRANT UPDATE (status, processed_at, error) ON webhook_events TO societas_app;
+
+REVOKE DELETE, TRUNCATE ON subscriptions FROM societas_app;
 GRANT SELECT, INSERT, UPDATE ON subscriptions TO societas_app;
+
+REVOKE DELETE, TRUNCATE, UPDATE ON legal_documents FROM societas_app;
 GRANT SELECT, INSERT ON legal_documents TO societas_app;
+
+REVOKE DELETE, TRUNCATE, UPDATE ON user_consents FROM societas_app;
 GRANT SELECT, INSERT ON user_consents TO societas_app;
 
 -- --- retention role: age-based deletes only -------------------------------
@@ -61,4 +74,4 @@ GRANT SELECT, DELETE ON webhook_events TO societas_retention;
 ALTER DEFAULT PRIVILEGES IN SCHEMA public
   GRANT SELECT, INSERT ON TABLES TO societas_app;
 ALTER DEFAULT PRIVILEGES IN SCHEMA public
-  REVOKE DELETE ON TABLES FROM societas_app;
+  REVOKE DELETE, TRUNCATE, UPDATE ON TABLES FROM societas_app;

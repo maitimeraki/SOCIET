@@ -836,12 +836,17 @@ async def _register_corpus(
 async def _reserve_graph_job(db: AsyncSession, user: User):
     """Hold a graph job's units at enqueue; an exhausted balance is a 402.
 
-    The estimate is capped at the plan's whole allowance (a free plan is below
-    the graph hold) — the worker re-checks the hold before spending and
-    settlement releases only what the job actually holds.
+    The estimate is capped at the *remaining* balance, not the plan total: a
+    free user who has already settled any unit must still be able to start a
+    graph job. The worker re-checks the hold before spending and settlement
+    releases only what the job actually holds. A zero remaining balance still
+    fails the reservation (402) because the estimate has a floor of 1.
     """
     entitlements = await resolve_entitlements(db, user=user)
-    estimate = min(get_settings().graph_job_reserve_units, entitlements.plan.units)
+    estimate = max(
+        1,
+        min(get_settings().graph_job_reserve_units, entitlements.units_remaining),
+    )
     try:
         return await billing_units.reserve_units(
             db, user_id=user.id, plan_key=user.plan_key, estimate=estimate

@@ -30,7 +30,7 @@ export default function FileDrop({ onFiles, disabled = false }: { onFiles: (file
     >
       <UploadSimple size={20} className="text-ink-2" aria-hidden="true" />
       <span className="text-body text-ink">Drop files here, or browse</span>
-      <span className="text-micro text-ink-3">PDF, DOCX, MD, TXT · up to 20 MB each</span>
+      <span className="text-micro text-ink-3">PDF, DOCX, MD, TXT · up to 5 MB each</span>
       <input
         ref={input}
         type="file"
