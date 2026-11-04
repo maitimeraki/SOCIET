@@ -65,15 +65,19 @@ async def _reserve_ingest(
     db: AsyncSession, *, user, estimate: int, request
 ) -> Reservation:
     """Reserve the upload's byte ceiling; an exhausted balance is a 402."""
+    # `reserve_units` rolls back on refusal, which expires the session's ORM
+    # objects; capture the identity before the call so the 402 path can audit
+    # it without a lazy load on an async session.
+    user_id = user.id
     try:
         reservation = await units.reserve_units(
-            db, user_id=user.id, plan_key=user.plan_key, estimate=max(1, estimate)
+            db, user_id=user_id, plan_key=user.plan_key, estimate=max(1, estimate)
         )
     except units.InsufficientUnits as exc:
         await audit_record(
             db,
             "units_denied",
-            user_id=user.id,
+            user_id=user_id,
             ip=client_ip(request),
             meta={"estimate": estimate, "period_end": exc.period_end.isoformat()},
         )

@@ -28,7 +28,11 @@ router = APIRouter(
 )
 
 
-async def get_job_status(job_id: str, user: User):
+# The one status read: `/api/v1/jobs/{id}` and the legacy `/simulate/jobs/{id}`
+# twin (this router is mounted at both prefixes). The owner check lives in the
+# route itself so the route inventory can see it (Task 15).
+@router.get("/{job_id}")
+async def get_job(job_id: str, user: User = Depends(current_user)):
     """A job's status doc, owner-checked.
 
     An export job's result carries its object key; a short-lived download URL is
@@ -52,13 +56,6 @@ async def get_job_status(job_id: str, user: User):
         except Exception as exc:
             logger.warning("could not presign export %s: %s", key, exc)
     return doc
-
-
-# The v1-canonical status read: `/api/v1/jobs/{id}` (and the legacy
-# `/simulate/jobs/{id}` twin — `simulate_router` registers the same function).
-@router.get("/{job_id}")
-async def get_job(job_id: str, user: User = Depends(current_user)):
-    return await get_job_status(job_id, user)
 
 
 async def enqueue_or_http(kind: str, payload: dict) -> str:

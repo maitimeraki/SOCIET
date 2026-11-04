@@ -18,6 +18,7 @@ from fastapi import HTTPException
 from sqlalchemy import delete
 
 import src.api.api_server as api_server
+import src.api.jobs_api as jobs_api
 import src.api.run_doc as run_doc
 from src.api.api_server import _chunk_documents
 from src.db.engine import get_session_factory
@@ -497,7 +498,7 @@ async def test_get_job_is_404_for_an_unknown_job(job_owner):
     """No row, no answer: the read must 404 rather than raise, and never answer
     as if the doc existed (ownership cannot be established for it)."""
     with pytest.raises(HTTPException) as exc:
-        await api_server.get_job(
+        await jobs_api.get_job(
             str(uuid.uuid4()), user=SimpleNamespace(id=uuid.UUID(job_owner.id))
         )
 

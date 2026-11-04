@@ -265,7 +265,7 @@ from src.api.billing_api import router as billing_router
 from src.api.debate_api import router as debate_router
 from src.api.graph_stream_api import router as graph_stream_router
 from src.api.ingest_api import router as ingest_router
-from src.api.jobs_api import enqueue_or_http
+from src.api.jobs_api import enqueue_or_http, get_job as get_jobs_job
 from src.api.jobs_api import router as jobs_router
 from src.api.legal_api import router as legal_router
 from src.api.persona_api import router as persona_router
@@ -297,6 +297,9 @@ app.include_router(legal_router)
 simulate_router = APIRouter(
     prefix="/simulate", tags=["simulate"], dependencies=[Depends(verify_csrf)]
 )
+# `/simulate/jobs/{id}` and its `/api/v1` twin share the one owner-checked
+# handler (`jobs_api.get_job`); `jobs_api.router` covers the `/jobs/{id}` alias.
+simulate_router.add_api_route("/jobs/{job_id}", get_jobs_job, methods=["GET"])
 
 
 RUNS: Dict[str, Dict[str, Any]] = {}
@@ -882,15 +885,6 @@ async def build_graph_async(
         "status": "queued",
         "message": "Build graph job accepted.",
     }
-
-
-@simulate_router.get("/jobs/{job_id}")
-async def get_job(job_id: str, user: User = Depends(current_user)):
-    # The one status implementation lives in `jobs_api` (also mounted as
-    # `/api/v1/jobs/{id}`); this keeps the legacy `/simulate/jobs/{id}` twin.
-    from src.api.jobs_api import get_job_status
-
-    return await get_job_status(job_id, user)
 
 
 @app.post("/simulate/async", status_code=status.HTTP_202_ACCEPTED)
