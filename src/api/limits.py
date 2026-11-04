@@ -9,17 +9,44 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 from slowapi import Limiter
 from slowapi.errors import RateLimitExceeded
-from slowapi.util import get_remote_address
 from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.requests import HTTPConnection
 
 from src.api.errors import error_response
 from src.config.settings import get_settings
 
-# Process-local limits, keyed by client IP. A shared Redis store is the swap
-# for multi-replica deployments (plan §6).
-# key_style="endpoint": the bucket scope is the handler, not the path — so the
-# legacy and /api/v1 mounts of one route share a budget instead of doubling it.
-limiter = Limiter(key_func=get_remote_address, key_style="endpoint")
+
+def client_key(request: HTTPConnection) -> str:
+    """Bucket identity: the forwarded client IP only when our peer is trusted.
+
+    ``X-Forwarded-For`` is client-controlled; accepting it from any peer would
+    let a caller mint a fresh bucket per request. Trust is therefore opt-in via
+    ``FORWARDED_ALLOW_IPS`` — the proxy address, a network, or ``*``.
+    """
+    peer = request.client.host if request.client else ""
+    forwarded = request.headers.get("x-forwarded-for")
+    allowed = get_settings().forwarded_allow_ips
+    if forwarded and ("*" in allowed or peer in allowed):
+        return forwarded.split(",")[0].strip() or peer or "unknown"
+    return peer or "unknown"
+
+
+def _storage_uri() -> str:
+    settings = get_settings()
+    return settings.rate_limit_storage_uri or settings.redis_url
+
+
+def build_limiter(storage_uri: str | None = None) -> Limiter:
+    uri = storage_uri or _storage_uri()
+    # key_style="endpoint": the bucket scope is the handler, not the path — so
+    # the legacy and /api/v1 mounts of one route share a budget instead of
+    # doubling it.
+    return Limiter(key_func=client_key, key_style="endpoint", storage_uri=uri)
+
+
+# Redis-backed by default (shared across replicas); RATE_LIMIT_STORAGE_URI=
+# memory:// opts a single-process/test deployment out.
+limiter = build_limiter()
 
 
 class JSONBodySizeLimitMiddleware(BaseHTTPMiddleware):

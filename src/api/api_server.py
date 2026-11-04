@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import os
 import sys
 import time
 import uuid
@@ -156,6 +157,22 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     logger.info("Starting up API server...")
     app.state.degraded = False
     app.state.last_llm_probe_at = None
+
+    # Boot audit: a silently changed entitlement becomes visible in the logs.
+    # Imported lazily so this module's import order stays independent of billing.
+    from src.billing.plans import get_plans, plans_table_hash
+
+    logger.info(
+        "billing plans: enabled=%s hash=%s version=%s git=%s table=%s",
+        get_settings().billing_enabled,
+        plans_table_hash(),
+        app.version,
+        os.getenv("GIT_SHA", "unknown"),
+        {
+            key: (plan.units, plan.max_agents, plan.max_rounds)
+            for key, plan in sorted(get_plans().items())
+        },
+    )
 
     # 1a. Apply Neo4j schema bootstrap (idempotent).
     try:

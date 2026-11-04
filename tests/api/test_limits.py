@@ -2,19 +2,23 @@
 
 import uuid
 
+import pydantic
 import pytest
 from fastapi import Depends, FastAPI, HTTPException, UploadFile
 from fastapi.testclient import TestClient
+from starlette.requests import Request
 
 from src.api.auth_api import router as auth_router
 from src.api.errors import install_error_handlers
 from src.api.limits import (
     JSONBodySizeLimitMiddleware,
+    build_limiter,
+    client_key,
     install_rate_limiter,
     service_available,
 )
 from src.auth import service
-from src.config.settings import get_settings
+from src.config.settings import Settings, get_settings
 from src.db.engine import get_db
 
 LOGIN = {
@@ -144,6 +148,72 @@ def test_login_rate_limit_is_429_with_retry_after(monkeypatch):
     assert error["code"] == "rate_limited"
     assert uuid.UUID(error["correlation_id"])
     assert responses[2].headers["Retry-After"] == "60"
+
+
+def _request(peer: str | None, forwarded: str | None = None) -> Request:
+    headers = [] if forwarded is None else [(b"x-forwarded-for", forwarded.encode())]
+    scope = {
+        "type": "http",
+        "method": "GET",
+        "path": "/",
+        "headers": headers,
+        "client": (peer, 1234) if peer else None,
+    }
+    return Request(scope)
+
+
+def _allow_forwarded(monkeypatch, value: str) -> None:
+    monkeypatch.setenv("FORWARDED_ALLOW_IPS", value)
+    get_settings.cache_clear()
+
+
+def test_client_key_without_forwarded_header_uses_the_peer(monkeypatch):
+    _allow_forwarded(monkeypatch, "*")
+
+    assert client_key(_request("10.0.0.1")) == "10.0.0.1"
+
+
+def test_client_key_trusts_forwarded_header_from_an_allowed_peer(monkeypatch):
+    _allow_forwarded(monkeypatch, "10.0.0.1")
+
+    request = _request("10.0.0.1", "203.0.113.9, 10.0.0.1")
+
+    assert client_key(request) == "203.0.113.9"
+
+
+def test_client_key_ignores_forwarded_header_from_an_untrusted_peer(monkeypatch):
+    _allow_forwarded(monkeypatch, "192.0.2.1")
+
+    request = _request("10.0.0.1", "203.0.113.9")
+
+    assert client_key(request) == "10.0.0.1"
+
+
+def test_client_key_wildcard_trusts_any_peer(monkeypatch):
+    _allow_forwarded(monkeypatch, "*")
+
+    assert client_key(_request("10.0.0.1", "203.0.113.9")) == "203.0.113.9"
+
+
+def test_build_limiter_uses_the_given_or_default_storage(monkeypatch):
+    memory = build_limiter("memory://")
+
+    # An ambient RATE_LIMIT_STORAGE_URI (the documented test opt-out) would
+    # otherwise win over REDIS_URL.
+    monkeypatch.delenv("RATE_LIMIT_STORAGE_URI", raising=False)
+    monkeypatch.setenv("REDIS_URL", "redis://localhost:6379/0")
+    get_settings.cache_clear()
+    redis_backed = build_limiter()
+
+    assert memory._storage_uri == "memory://"
+    assert redis_backed._storage_uri == "redis://localhost:6379/0"
+
+
+def test_settings_are_immutable_after_construction():
+    settings = Settings()
+
+    with pytest.raises((pydantic.ValidationError, TypeError)):
+        settings.billing_enabled = True
 
 
 def test_signup_has_its_own_setting(monkeypatch):

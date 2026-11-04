@@ -14,6 +14,38 @@
 x-database-url: &database-url
   DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-societas}:${POSTGRES_PASSWORD:-societas_dev}@postgres:5432/${POSTGRES_DB:-societas}
 
+# Environment shared by api/worker. Kept as its own anchor so a service that
+# needs one extra variable (api: FORWARDED_ALLOW_IPS) can merge it without
+# re-declaring the whole block — a nested `environment:` key replaces the
+# inherited one rather than merging into it.
+x-app-environment: &app-environment
+  <<: *database-url
+  REDIS_URL: redis://redis:6379/0
+  NEO4J_URI: neo4j://neo4j:7687
+  NEO4J_USERNAME: neo4j
+  NEO4J_PASSWORD: ${NEO4J_PASSWORD:-societas_dev}
+  NEO4J_DATABASE: neo4j
+  ENV: ${ENV:-prod}
+  QUEUE_MODE: rq
+  # Observability (plan §10): the api serves /metrics and the worker serves its
+  # registry on METRICS_PORT (default 9100); both scrapeable over the compose
+  # network. Tracing/Sentry stay off until OTEL_EXPORTER_OTLP_ENDPOINT /
+  # SENTRY_DSN are supplied (secrets — set them in `.env`).
+  METRICS_ENABLED: ${METRICS_ENABLED:-true}
+  # In-network MinIO endpoint (the app default 127.0.0.1:9000 resolves inside
+  # the container). Credentials/bucket track the minio service's own vars.
+  S3_ENDPOINT_URL: http://minio:9000
+  S3_ACCESS_KEY: ${MINIO_ROOT_USER:-minioadmin}
+  S3_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-minioadmin}
+  S3_BUCKET: ${S3_BUCKET:-societas-uploads}
+  COOKIE_SECURE: ${COOKIE_SECURE:-true}
+  ALLOWED_HOSTS: ${ALLOWED_HOSTS:-localhost,127.0.0.1}
+  CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost}
+  # LLM provider keys (OPENAI_API_KEY, ANTHROPIC_API_KEY, NVIDIA_NIM_API_KEY,
+  # OLLAMA_BASE_URL, DEFAULT_LLM_PROVIDER, ANALYSIS_LLM_MODEL, …) are secrets
+  # or host-specific — set them in `.env`, which env_file injects. They are
+  # deliberately not interpolated here so nothing lands in compose config output.
+
 x-app-service: &app-service
   restart: unless-stopped
   depends_on:
@@ -36,32 +68,7 @@ x-app-service: &app-service
     - path: .env
       required: false
   environment:
-    <<: *database-url
-    REDIS_URL: redis://redis:6379/0
-    NEO4J_URI: neo4j://neo4j:7687
-    NEO4J_USERNAME: neo4j
-    NEO4J_PASSWORD: ${NEO4J_PASSWORD:-societas_dev}
-    NEO4J_DATABASE: neo4j
-    ENV: ${ENV:-prod}
-    QUEUE_MODE: rq
-    # Observability (plan §10): the api serves /metrics and the worker serves its
-    # registry on METRICS_PORT (default 9100); both scrapeable over the compose
-    # network. Tracing/Sentry stay off until OTEL_EXPORTER_OTLP_ENDPOINT /
-    # SENTRY_DSN are supplied (secrets — set them in `.env`).
-    METRICS_ENABLED: ${METRICS_ENABLED:-true}
-    # In-network MinIO endpoint (the app default 127.0.0.1:9000 resolves inside
-    # the container). Credentials/bucket track the minio service's own vars.
-    S3_ENDPOINT_URL: http://minio:9000
-    S3_ACCESS_KEY: ${MINIO_ROOT_USER:-minioadmin}
-    S3_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-minioadmin}
-    S3_BUCKET: ${S3_BUCKET:-societas-uploads}
-    COOKIE_SECURE: ${COOKIE_SECURE:-true}
-    ALLOWED_HOSTS: ${ALLOWED_HOSTS:-localhost,127.0.0.1}
-    CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost}
-    # LLM provider keys (OPENAI_API_KEY, ANTHROPIC_API_KEY, NVIDIA_NIM_API_KEY,
-    # OLLAMA_BASE_URL, DEFAULT_LLM_PROVIDER, ANALYSIS_LLM_MODEL, …) are secrets
-    # or host-specific — set them in `.env`, which env_file injects. They are
-    # deliberately not interpolated here so nothing lands in compose config output.
+    <<: *app-environment
 
 services:
   postgres:
@@ -172,6 +179,12 @@ services:
       target: api
     ports:
       - "${API_PORT:-8000}:8000"
+    environment:
+      <<: *app-environment
+      # X-Forwarded-For is trusted only from these peers (Caddy, typically).
+      # With "*" the api port must NOT be publicly exposed — only the proxy is
+      # the trust boundary; anyone reaching port 8000 directly could spoof it.
+      FORWARDED_ALLOW_IPS: ${FORWARDED_ALLOW_IPS:-*}
 
   worker:
     <<: *app-service

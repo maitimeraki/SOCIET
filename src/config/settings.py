@@ -9,10 +9,14 @@ from functools import lru_cache
 from typing import Annotated, Literal
 
 from pydantic import field_validator, model_validator
-from pydantic_settings import BaseSettings, NoDecode
+from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 
 class Settings(BaseSettings):
+    # Resolved once at construction and never mutated afterwards: a running
+    # process cannot silently change its own plan table or trust boundary.
+    model_config = SettingsConfigDict(frozen=True)
+
     env: Literal["dev", "staging", "prod"] = "dev"
     database_url: str | None = None
     redis_url: str = "redis://localhost:6379/0"
@@ -46,8 +50,14 @@ class Settings(BaseSettings):
         "127.0.0.1",
         "testserver",
     ]
+    # `X-Forwarded-For` is honored only when the direct peer is listed here
+    # (or the list contains "*"). Empty in dev: no proxy, no trust.
+    forwarded_allow_ips: Annotated[list[str], NoDecode] = []
     max_json_bytes: int = 1_048_576  # 1 MB, JSON bodies only
     llm_probe_timeout_seconds: int = 5  # budget for one readiness probe
+    # Empty -> REDIS_URL (shared buckets across replicas); "memory://" is the
+    # explicit single-process / test opt-out.
+    rate_limit_storage_uri: str = ""
     rate_limit_login: str = "5/minute"
     rate_limit_signup: str = "10/hour"
     rate_limit_debate_enqueue: str = "20/hour"
@@ -178,7 +188,11 @@ class Settings(BaseSettings):
         return self
 
     @field_validator(
-        "cors_allowed_origins", "allowed_hosts", "job_retry_intervals", mode="before"
+        "cors_allowed_origins",
+        "allowed_hosts",
+        "forwarded_allow_ips",
+        "job_retry_intervals",
+        mode="before",
     )
     @classmethod
     def _split_comma_separated(cls, value: object) -> object:

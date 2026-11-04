@@ -5,6 +5,8 @@ key resolves to the most restrictive plan (free); there is no unlimited branch
 (plan §4, ledger R13).
 """
 
+import hashlib
+import json
 from collections.abc import Mapping
 from dataclasses import dataclass
 from functools import lru_cache
@@ -71,6 +73,22 @@ def plan_for_price(price_id: str | None) -> Plan | None:
         if plan.stripe_price_id == price_id:
             return plan
     return None
+
+
+def plans_table_hash() -> str:
+    """Stable sha256 over the resolved plan table (audit / drift detection)."""
+    payload = {
+        key: {
+            "units": p.units,
+            "max_agents": p.max_agents,
+            "max_rounds": p.max_rounds,
+            "price": p.stripe_price_id,
+        }
+        for key, p in sorted(get_plans().items())
+    }
+    return hashlib.sha256(
+        json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
 
 
 def clear_plan_cache() -> None:
