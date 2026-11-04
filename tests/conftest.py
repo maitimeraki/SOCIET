@@ -15,6 +15,10 @@ os.environ.setdefault("RATE_LIMIT_LOGIN", "1000/minute")
 os.environ.setdefault("RATE_LIMIT_SIGNUP", "10000/hour")
 os.environ.setdefault("RATE_LIMIT_DEBATE_ENQUEUE", "10000/hour")
 os.environ.setdefault("RATE_LIMIT_EMAIL", "10000/hour")
+# Counters are Redis-backed by default; a bucket left by an earlier run would
+# make the login/signup limit tests non-idempotent. Tests use the documented
+# single-process store unless the runner explicitly asks for another.
+os.environ.setdefault("RATE_LIMIT_STORAGE_URI", "memory://")
 
 # Stage construction requires an extraction key; the tests mock every LLM call
 # and never dial NVIDIA. Local .env files provide one, CI does not, so a blank

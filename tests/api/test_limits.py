@@ -12,6 +12,7 @@ from src.api.auth_api import router as auth_router
 from src.api.errors import install_error_handlers
 from src.api.limits import (
     JSONBodySizeLimitMiddleware,
+    _storage_uri,
     build_limiter,
     client_key,
     install_rate_limiter,
@@ -176,9 +177,29 @@ def test_client_key_without_forwarded_header_uses_the_peer(monkeypatch):
 def test_client_key_trusts_forwarded_header_from_an_allowed_peer(monkeypatch):
     _allow_forwarded(monkeypatch, "10.0.0.1")
 
-    request = _request("10.0.0.1", "203.0.113.9, 10.0.0.1")
+    request = _request("10.0.0.1", "1.2.3.4, 203.0.113.9")
 
+    # The trusted proxy appended the real client; the leftmost value is spoofable.
     assert client_key(request) == "203.0.113.9"
+
+
+def test_client_key_matches_a_peer_inside_an_allowed_cidr(monkeypatch):
+    _allow_forwarded(monkeypatch, "10.0.0.0/8")
+
+    assert client_key(_request("10.1.2.3", "203.0.113.9")) == "203.0.113.9"
+
+
+def test_client_key_rejects_a_peer_outside_an_allowed_cidr(monkeypatch):
+    _allow_forwarded(monkeypatch, "192.168.0.0/16")
+
+    assert client_key(_request("10.1.2.3", "203.0.113.9")) == "10.1.2.3"
+
+
+def test_client_key_exact_matches_a_non_ip_peer(monkeypatch):
+    """TestClient's peer is the literal host "testclient", not an IP."""
+    _allow_forwarded(monkeypatch, "testclient")
+
+    assert client_key(_request("testclient", "203.0.113.9")) == "203.0.113.9"
 
 
 def test_client_key_ignores_forwarded_header_from_an_untrusted_peer(monkeypatch):
@@ -193,6 +214,14 @@ def test_client_key_wildcard_trusts_any_peer(monkeypatch):
     _allow_forwarded(monkeypatch, "*")
 
     assert client_key(_request("10.0.0.1", "203.0.113.9")) == "203.0.113.9"
+
+
+def test_storage_uri_prefers_the_explicit_setting_over_redis_url(monkeypatch):
+    monkeypatch.setenv("REDIS_URL", "redis://localhost:6379/0")
+    monkeypatch.setenv("RATE_LIMIT_STORAGE_URI", "memory://")
+    get_settings.cache_clear()
+
+    assert _storage_uri() == "memory://"
 
 
 def test_build_limiter_uses_the_given_or_default_storage(monkeypatch):

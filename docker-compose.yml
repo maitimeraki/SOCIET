@@ -178,7 +178,10 @@ services:
       context: .
       target: api
     ports:
-      - "${API_PORT:-8000}:8000"
+      # Loopback-only: a direct client must never reach api:8000 and spoof
+      # X-Forwarded-For. Caddy reaches it over the compose network; in
+      # production do not publish this port at all.
+      - "127.0.0.1:${API_PORT:-8000}:8000"
     environment:
       <<: *app-environment
       # X-Forwarded-For is trusted only from these peers (Caddy, typically).
