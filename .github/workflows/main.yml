@@ -133,7 +133,6 @@ jobs:
       NEO4J_USERNAME: neo4j
       NEO4J_PASSWORD: ci-placeholder
       NEO4J_DATABASE: neo4j
-      QUEUE_MODE: inline
       # Non-secret placeholder: tests mock every LLM call and never dial NVIDIA.
       # EXTRACTION_API_KEY is intentionally absent — it outranks this NIM key in
       # resolution, and the unchanged credential tests assert the NIM values.
