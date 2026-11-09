@@ -1,66 +1,77 @@
-name: CI
+name: CI/CD
 
-# Ordered, fail-fast pipeline: cheap checks gate the expensive ones, and every
-# job needs the one before it so the first failure stops the run.
-#   lint -> typecheck -> test -> frontend -> build -> deploy
-# `security` is deliberately outside that chain (see its comment).
+# Production pipeline.
+#   pull_request -> main : lint, typecheck, test, frontend, security run in
+#                          parallel; the images are built (not pushed) to prove
+#                          they build.
+#   push -> main / v* tag: same checks, then the images are pushed to the
+#                          PRIVATE GitHub Container Registry, then deploy.
+# `ci-ok` is the single required status check for branch protection.
 on:
   push:
     branches: [main]
     tags: ["v*"]
   pull_request:
+    branches: [main]
+  workflow_dispatch:
 
+# Least privilege by default; jobs that need more ask for it themselves.
+permissions:
+  contents: read
+
+# A newer run supersedes an older one for the same PR/branch, but a run on
+# main or a tag always finishes so a push is never half-published.
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' && github.ref_type != 'tag' }}
 
 env:
   PYTHON_VERSION: "3.11"
   NODE_VERSION: "24"
+  REGISTRY: ghcr.io
 
 jobs:
   # ---------------------------------------------------------------------------
-  # 1. lint — ruff (correctness + import order) and black (formatting).
-  #    The ruleset is intentionally narrow for this first pass; see the
-  #    [tool.ruff.lint] comment in pyproject.toml for what is deferred and why.
+  # lint — ruff (correctness + import order) and black (formatting), pinned to
+  # the versions in requirements-dev.txt so CI matches local runs.
   # ---------------------------------------------------------------------------
   lint:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ env.PYTHON_VERSION }}
-      - name: Install linters
-        run: python -m pip install --upgrade pip ruff black
+      - name: Install pinned linters
+        run: |
+          python -m pip install --upgrade pip
+          grep -E '^(ruff|black)==' requirements-dev.txt | xargs python -m pip install
       - name: ruff check
         run: ruff check .
       - name: black --check
         run: black --check .
 
   # ---------------------------------------------------------------------------
-  # 2. typecheck — mypy, SCOPED to the modules added by the production work.
-  #
-  #    Typing the whole pre-existing src/ tree is out of scope for this task
-  #    (controller ruling R25): the legacy modules predate typing and would
-  #    need semantic edits. `follow_imports = "silent"` in pyproject.toml keeps
-  #    the imported-but-unlisted legacy modules parsed yet un-reported, so
-  #    widening the path list below is all that is needed later.
+  # typecheck — mypy, scoped to the modules added by the production work
+  # (controller ruling R25); widen the path list as legacy modules are typed.
   # ---------------------------------------------------------------------------
   typecheck:
-    needs: lint
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ env.PYTHON_VERSION }}
-      - name: Install application + type-checker
+          cache: pip
+          cache-dependency-path: requirements.txt
+      - name: Install application + pinned type-checker
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-          pip install mypy
-      - name: mypy (new modules only — widen this list once legacy is triaged)
+          grep -E '^mypy==' requirements-dev.txt | xargs pip install
+      - name: mypy
         run: |
           mypy \
             src/config \
@@ -71,12 +82,12 @@ jobs:
             src/api/limits.py
 
   # ---------------------------------------------------------------------------
-  # 3. test — pytest against real Postgres / Redis / Neo4j service containers,
-  #    with the same migration step the deploy job runs.
+  # test — pytest against real Postgres / Redis / Neo4j service containers,
+  # with the same migration step the deploy job runs.
   # ---------------------------------------------------------------------------
   test:
-    needs: typecheck
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     services:
       postgres:
         image: postgres:16
@@ -126,6 +137,8 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: requirements.txt
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
@@ -139,11 +152,11 @@ jobs:
         run: python -m pytest -q
 
   # ---------------------------------------------------------------------------
-  # 4. frontend — type-check, unit tests, production build.
+  # frontend — lint, type-check, unit tests, production build.
   # ---------------------------------------------------------------------------
   frontend:
-    needs: test
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     defaults:
       run:
         working-directory: frontend
@@ -156,6 +169,8 @@ jobs:
           cache-dependency-path: frontend/package-lock.json
       - name: Install dependencies
         run: npm ci
+      - name: Lint
+        run: npm run lint
       - name: Type-check
         run: npx tsc --noEmit
       - name: Unit tests
@@ -164,12 +179,12 @@ jobs:
         run: npm run build
 
   # ---------------------------------------------------------------------------
-  # 5. security — dependency + static analysis. Non-blocking for now:
-  #    flip to blocking once legacy findings triaged.
+  # security — dependency + static analysis. Reported on every run but not
+  # blocking yet: flip `continue-on-error` once the legacy findings are triaged.
   # ---------------------------------------------------------------------------
   security:
-    needs: lint
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     continue-on-error: true
     steps:
       - uses: actions/checkout@v4
@@ -184,62 +199,102 @@ jobs:
         run: bandit -r src -ll
 
   # ---------------------------------------------------------------------------
-  # 6. build — both image targets. Push only on tags, and only when a registry
-  #    is actually configured (no registry is assumed here).
+  # images — build api + worker. Pushed only on main / v* tags, only after every
+  # check above is green, and only to the private registry. Each pushed image is
+  # then probed anonymously: if it can be pulled without credentials the job
+  # fails, so a public image can never go unnoticed.
   # ---------------------------------------------------------------------------
-  build:
-    needs: frontend
+  images:
+    needs: [lint, typecheck, test, frontend]
     runs-on: ubuntu-latest
-    # `secrets` is NOT an allowed context inside a step-level `if:` (the
-    # context-availability table lists github, needs, strategy, matrix, job,
-    # runner, env, vars, steps, inputs). Promoting the secret to a job-level
-    # env var makes it testable as `env.REGISTRY_USERNAME` below.
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [api, worker]
     env:
-      REGISTRY_USERNAME: ${{ secrets.REGISTRY_USERNAME }}
+      PUSH: ${{ github.event_name == 'push' }}
     steps:
       - uses: actions/checkout@v4
+      # Registry paths must be lowercase; github.repository is not.
+      - name: Resolve image name
+        run: echo "IMAGE=${REGISTRY}/${GITHUB_REPOSITORY,,}/societas-${{ matrix.target }}" >> "$GITHUB_ENV"
       - uses: docker/setup-buildx-action@v3
-      - name: Build api image
-        run: docker build --target api -t societas-api:${{ github.sha }} .
-      - name: Build worker image
-        run: docker build --target worker -t societas-worker:${{ github.sha }} .
-      # --- push (tags only, and only when configured) ------------------------
-      # Set the repository variable DOCKER_REGISTRY (e.g. ghcr.io/<owner>) plus
-      # secrets REGISTRY_USERNAME / REGISTRY_PASSWORD to enable this.
-      # Both gates test the job-level env copy of the secret — never
-      # `secrets.*` directly, which step-level `if:` cannot read.
-      - name: Log in to the container registry
-        if: >-
-          github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
-          && vars.DOCKER_REGISTRY != '' && env.REGISTRY_USERNAME != ''
+      - name: Log in to GHCR
+        if: env.PUSH == 'true'
         uses: docker/login-action@v3
         with:
-          registry: ${{ vars.DOCKER_REGISTRY }}
-          username: ${{ secrets.REGISTRY_USERNAME }}
-          password: ${{ secrets.REGISTRY_PASSWORD }}
-      - name: Tag and push
-        if: >-
-          github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
-          && vars.DOCKER_REGISTRY != '' && env.REGISTRY_USERNAME != ''
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Image metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.IMAGE }}
+          tags: |
+            type=sha,format=long
+            type=ref,event=branch
+            type=semver,pattern={{version}}
+      - name: Build${{ env.PUSH == 'true' && ' and push' || '' }}
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          target: ${{ matrix.target }}
+          push: ${{ env.PUSH == 'true' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha,scope=${{ matrix.target }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.target }}
+      - name: Assert the image is private
+        if: env.PUSH == 'true'
         run: |
-          for target in api worker; do
-            image="${{ vars.DOCKER_REGISTRY }}/${{ github.repository }}/societas-${target}"
-            docker tag "societas-${target}:${{ github.sha }}" "${image}:${GITHUB_REF_NAME}"
-            docker push "${image}:${GITHUB_REF_NAME}"
-          done
+          path="${IMAGE#${REGISTRY}/}"
+          token=$(curl -fsS "https://${REGISTRY}/token?scope=repository:${path}:pull" | jq -r .token)
+          code=$(curl -sS -o /dev/null -w '%{http_code}' \
+            -H "Authorization: Bearer ${token}" \
+            -H "Accept: application/vnd.oci.image.index.v1+json, application/vnd.docker.distribution.manifest.v2+json" \
+            "https://${REGISTRY}/v2/${path}/manifests/sha-${GITHUB_SHA}")
+          echo "anonymous manifest request: HTTP ${code}"
+          if [ "${code}" = "200" ]; then
+            echo "::error::${IMAGE} is publicly pullable. Set the package to Private (Package settings -> Danger Zone -> Change visibility)."
+            exit 1
+          fi
 
   # ---------------------------------------------------------------------------
-  # 7. deploy — stub, inert until a deploy target is configured (R6/R10 leave
-  #    the hosting choice open). Gated on the repository variable
-  #    DEPLOY_ENABLED == 'true', so an unconfigured repo skips the job entirely
-  #    and the pipeline still goes green.
+  # ci-ok — the one required check for branch protection. Fails if any job it
+  # depends on failed or was cancelled; `security` is advisory and excluded.
+  # ---------------------------------------------------------------------------
+  ci-ok:
+    if: always()
+    needs: [lint, typecheck, test, frontend, images]
+    runs-on: ubuntu-latest
+    steps:
+      - name: All required jobs passed
+        run: |
+          echo '${{ toJSON(needs) }}'
+          test "${{ contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') }}" = "false"
+
+  # ---------------------------------------------------------------------------
+  # deploy — main only, behind the `production` environment (add required
+  # reviewers there for a manual approval gate). Stays inert until the
+  # repository variable DEPLOY_ENABLED is 'true' and a host step is added.
+  # The images to roll out are the ones tagged sha-<github.sha> above.
   # ---------------------------------------------------------------------------
   deploy:
-    needs: build
+    needs: ci-ok
     if: >-
       github.event_name == 'push' && github.ref == 'refs/heads/main'
       && vars.DEPLOY_ENABLED == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: production
+    concurrency:
+      group: deploy-production
+      cancel-in-progress: false
     env:
       DATABASE_URL: ${{ secrets.DATABASE_URL }}
     steps:
@@ -247,15 +302,16 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: requirements.txt
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-      # -----------------------------------------------------------------------
-      # CONFIGURE THE DEPLOY TARGET HERE.
-      # Nothing below ships the image anywhere yet — add the host-specific step
-      # (ssh + docker compose pull/up, a PaaS CLI, a Kubernetes rollout, …) and
-      # the credentials it needs. Migrations run first, against secrets.DATABASE_URL.
-      # -----------------------------------------------------------------------
-      - name: Apply migrations to the deploy database
+      - name: Apply migrations to the production database
         run: python -m alembic upgrade head
+      # -----------------------------------------------------------------------
+      # CONFIGURE THE DEPLOY TARGET HERE (ssh + docker compose pull/up, ECS/Fly/
+      # Render CLI, kubectl rollout, ...) using the sha-${{ github.sha }} tags of
+      # the api and worker images. Nothing ships anywhere until this is added.
+      # -----------------------------------------------------------------------
