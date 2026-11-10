@@ -1,103 +1,196 @@
 @import "tailwindcss";
+/* The rule vocabulary enters through THE CSS ENTRY, not through `Rule.tsx`: a stylesheet imported
+   from a component module is emitted as its own chunk linked BEFORE this sheet, so its `components`
+   layer would be declared first — and low — and `base`'s reset would erase every hairline in the
+   built bundle. One entry, one layer order. */
+@import "./components/ui/rules.css";
 
 @theme {
-  /* §3.1 ink — structure only, never text */
-  --color-ink-1000: #100e09;
-  --color-ink-900: #181510;
-  --color-ink-800: #211d16;
-  --color-ink-700: #2c2720;
-  --color-ink-600: #3a342b;
+  /* ── §4.1 Light surfaces — the ground, the canvas, the edges. ───────────── */
+  --color-bone: #f4efe6;     /* the page ground */
+  --color-paper: #fffcf6;    /* sheets, cards, the reader, the verdict document */
+  --color-sand: #eae2d4;     /* quiet bands, table heads */
+  --color-hairline: #d8d0c2; /* decorative dividers only — never the sole boundary */
+  --color-rule: #8a806e;     /* the boundary of a record, a table row, a ruled list */
 
-  /* §3.2 parchment — text only, never fills */
-  --color-paper: #f2ebdd;
-  --color-paper-dim: #c9bfa9;
-  --color-paper-mute: #9a917e;
-  --color-paper-faint: #6e6757;
+  /* ── §4.2 Ink. There is no ink-4: no grey text below 4.5:1. ─────────────── */
+  --color-ink: #191814;      /* headings, primary text, the wordmark */
+  --color-ink-2: #443f36;    /* body copy, secondary headings */
+  --color-ink-3: #6b6457;    /* captions, metadata, labels */
+  --color-on-accent: #fffdf8; /* a label on an evergreen fill */
 
-  /* §3.3 verdigris accent — interactive/live only */
-  --color-accent: #43a98b;
-  --color-accent-strong: #4fb897;
-  --color-accent-dim: #2e7a64;
-  --color-accent-soft: rgba(67, 169, 139, 0.12);
+  /* ── §4.3 The one accent. Evergreen — calm, money, institutional. ─────── */
+  --color-accent: #1e4b38;
+  --color-accent-hover: #163a2b;
+  --color-accent-press: #102b20;
+  --color-accent-soft: #e3ebe4; /* a selected row, an active nav item */
 
-  /* §3.4 brass — annotations/warnings only */
-  --color-brass: #d9a741;
+  /* ── §4.4 Semantic status. Functional colours, never decoration. ───────── */
+  --color-ok: #1d6b3c;
+  --color-warn: #7a5a12;
+  --color-danger: #a32a22;
+  --color-caution: #8f3a1c;   /* "the case against" — text and rule only */
 
-  /* §3.5 stance — frozen canonical order POS → NEU → AMB → NEG */
-  --color-stance-pos: #7ca03f;
-  --color-stance-neu: #4e7cc0;
-  --color-stance-amb: #c4832f;
-  --color-stance-neg: #ae4a3d;
+  /* ── §4.5 The map surface — the one dark instrument in the product. ────── */
+  --color-map-ground: #0b1510;
+  --color-map-ground-2: #13251b;
+  --color-map-ink: #ede7da;
+  --color-map-ink-2: #a9b7aa;
+  --color-map-rule: #2a3d30;
+  --color-map-accent: #8fd3a8;
 
-  /* §3.6 status — reserved, icon+word always */
-  --color-good: #4c9f70;
-  --color-critical: #ce4f42;
+  /* ── §4.6 The four positions, in the frozen order. ─────────────────────── */
+  --color-pos-light: #1d7a48;
+  --color-neu-light: #5e665a;
+  --color-amb-light: #7a5a12;
+  --color-neg-light: #a33a22;
+  --color-pos: #6fcf97;       /* the map ground */
+  --color-neu: #b8c2b6;
+  --color-amb: #d8b05e;
+  --color-neg: #f08a72;
 
-  /* §4 typefaces */
-  --font-serif: "Newsreader Variable", Newsreader, Georgia, serif;
-  --font-sans: "Public Sans Variable", "Public Sans", system-ui, sans-serif;
-  --font-mono: "IBM Plex Mono", ui-monospace, monospace;
+  /* ── §8.7 The map's own layer colours. ─────────────────────────────────── */
+  --color-corpus: #8fd3a8;   /* the material — the map's mint */
+  --color-expert: #ede7da;   /* an expert — the map's paper */
 
-  /* §4.1 scale */
-  --text-display-xl: 44px;
-  --text-display-xl--line-height: 48px;
-  --text-display-xl--letter-spacing: -0.01em;
-  --text-display: 32px;
-  --text-display--line-height: 38px;
-  --text-display--letter-spacing: -0.01em;
-  --text-title: 24px;
-  --text-title--line-height: 30px;
-  --text-heading: 16px;
-  --text-heading--line-height: 22px;
+  /* ── §4.8 The gradient system. Exactly four, and no others. ────────────── */
+  /* 1 — the map light: the only visible ramp in the product. */
+  --gradient-map: radial-gradient(
+    60% 55% at 50% 38%,
+    var(--color-map-ground-2) 0%,
+    var(--color-map-ground) 72%
+  );
+  /* 2 — the first light: the top 160px of the marketing hero. */
+  --gradient-first-light: linear-gradient(to bottom, rgb(30 75 56 / 0.07), transparent);
+  /* 3 — the morning wash: the dashboard's content column, two offset pools. */
+  --gradient-morning: radial-gradient(880px 380px at 8% -8%, rgb(30 75 56 / 0.13), transparent 68%),
+    radial-gradient(760px 340px at 100% 0%, rgb(143 211 168 / 0.1), transparent 60%);
+  /* 4 — the marked wash: the one recommended plan, and the first stat tile. */
+  --gradient-marked: linear-gradient(165deg, var(--color-accent-soft) 0%, var(--color-paper) 58%);
+
+  /* ── §6.4 Elevation. Warm and diffused: paper, not glass. A surface declares
+        itself once — a card carries a shadow and no border; a record carries a
+        rule and no shadow. Never coloured. ──────────────────────────────── */
+  --shadow-card: 0 1px 2px rgb(25 24 20 / 0.05), 0 12px 32px rgb(25 24 20 / 0.07);
+  --shadow-sheet: 0 2px 4px rgb(25 24 20 / 0.05), 0 24px 64px rgb(25 24 20 / 0.12);
+  --shadow-map: 0 24px 80px rgb(11 21 16 / 0.28);
+  --shadow-overlay: 0 4px 10px rgb(25 24 20 / 0.07), 0 18px 44px rgb(25 24 20 / 0.17);
+  /* the accent rule the active tab draws — the one shadow that is not an elevation */
+  --shadow-accent-inset: inset 0 -2px 0 0 var(--color-accent);
+  /* the same accent band, on a nav strip turned on its side */
+  --shadow-accent-inset-left: inset -2px 0 0 0 var(--color-accent);
+
+  /* ── §5.1 The three faces. ─────────────────────────────────────────────── */
+  --font-display: "Fraunces Variable", Fraunces, Georgia, serif;
+  --font-ui: "Archivo Variable", Archivo, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono Variable", "JetBrains Mono", ui-monospace, monospace;
+
+  /* Archivo is the default face; Fraunces is never UI chrome. */
+  --default-font-family: var(--font-ui);
+
+  /* ── §5.2 The scale. Any figure that is a measurement is set in the mono,
+        tabular. ───────────────────────────────────────────────────────────── */
+  --text-hero: clamp(56px, 4.2vw + 24px, 104px); /* the marketing h1 only */
+  --text-hero--line-height: 0.98;
+  --text-hero--letter-spacing: -0.035em;
+  --text-hero--font-weight: 500;
+
+  --text-display: clamp(40px, 3vw + 16px, 64px); /* page titles, section h2 */
+  --text-display--line-height: 1.04;
+  --text-display--letter-spacing: -0.03em;
+  --text-display--font-weight: 500;
+
+  --text-title: 32px; /* the verdict's question, card titles */
+  --text-title--line-height: 38px;
+  --text-title--letter-spacing: -0.02em;
+  --text-title--font-weight: 500;
+
+  --text-heading: 24px; /* sub-headings, drawer titles */
+  --text-heading--line-height: 30px;
+  --text-heading--letter-spacing: -0.01em;
   --text-heading--font-weight: 600;
-  --text-body: 14px;
-  --text-body--line-height: 21px;
-  --text-body-lg: 15px;
-  --text-body-lg--line-height: 24px;
-  --text-label: 12px;
+
+  --text-subhead: 20px; /* the hero support, section leads */
+  --text-subhead--line-height: 30px;
+  --text-subhead--font-weight: 400;
+
+  --text-body: 16px; /* body copy, app prose */
+  --text-body--line-height: 26px;
+  --text-body--font-weight: 400;
+
+  --text-body-sm: 14px; /* UI copy, table cells */
+  --text-body-sm--line-height: 22px;
+  --text-body-sm--font-weight: 400;
+
+  --text-label: 12px; /* caps labels, eyebrows, table heads */
   --text-label--line-height: 16px;
-  --text-label--letter-spacing: 0.06em;
-  --text-label--font-weight: 500;
-  --text-micro: 11px;
-  --text-micro--line-height: 14px;
-  --text-mono: 12px;
-  --text-mono--line-height: 18px;
-  --text-mono-lg: 20px;
-  --text-mono-lg--line-height: 24px;
-  --text-mono-lg--font-weight: 500;
-  --text-numeral: 56px;
-  --text-numeral--line-height: 56px;
-  --text-numeral--letter-spacing: -0.02em;
+  --text-label--letter-spacing: 0.08em;
+  --text-label--font-weight: 600;
 
-  /* §5 shape */
-  --radius-sm: 4px;
-  --radius-md: 6px;
-  --radius-lg: 12px;
+  --text-micro: 11px; /* captions, timestamps, legal */
+  --text-micro--line-height: 16px;
+  --text-micro--letter-spacing: 0.02em;
+  --text-micro--font-weight: 400;
 
-  /* §5 motion — bare `transition-*` utilities run on the spec's curve */
-  --default-transition-timing-function: cubic-bezier(0.2, 0, 0, 1);
+  --text-mono: 13px; /* measurements, ids, table numbers */
+  --text-mono--line-height: 20px;
+  --text-mono--font-weight: 400;
+
+  --text-numeral: clamp(56px, 5vw, 80px); /* the confidence figure */
+  --text-numeral--line-height: 1;
+  --text-numeral--letter-spacing: -0.04em;
+  --text-numeral--font-weight: 500;
+
+  /* ── §5 Space, radius, elevation. Spacing is a single 4px-based scale (Tailwind's default
+        `--spacing`), so only the radii need naming. */
+  /* ── §6.3 Radius. Nothing is fully rounded except the live status pill. ─── */
+  --radius-xs: 6px;   /* chips, status pills, tiny controls */
+  --radius-sm: 8px;   /* inputs, small buttons */
+  --radius-md: 12px;  /* buttons, nav items, table containers */
+  --radius-lg: 16px;  /* cards, use-case rows, the reader sheet */
+  --radius-xl: 24px;  /* the verdict sheet, large panels, the evidence desk */
+
+  /* ── §6 Motion. One grammar, one easing curve for the whole product. */
+  --ease-standard: cubic-bezier(0.2, 0, 0, 1);
+  --default-transition-duration: 120ms; /* closes every bare `transition-colors` at 120ms — Tailwind's own default is 150ms */
+  --default-transition-timing-function: var(--ease-standard);
+  --duration-state: 120ms;  /* state change — hover, focus, press */
+  --duration-enter: 180ms;  /* enter — content appearing */
+  --duration-layout: 240ms; /* layout — panel and pane resize */
+  --duration-bloom: 560ms;  /* the bloom — a new map entry */
+  /* `duration-*` reads `--transition-duration-*`, not `--duration-*`; the alias is what makes the
+     tree's `duration-state` classes compile to the state token instead of emitting nothing. */
+  --transition-duration-state: var(--duration-state);
+  --transition-duration-layout: var(--duration-layout);
 }
 
 @layer base {
   html {
-    color-scheme: dark;
+    color-scheme: light;
   }
   body {
-    background: var(--color-ink-1000);
-    color: var(--color-paper);
-    font-family: var(--font-sans);
-    font-size: 14px;
-    line-height: 21px;
+    background: var(--color-bone);
+    color: var(--color-ink);
+    font-family: var(--font-ui);
+    font-size: var(--text-body);
+    line-height: var(--text-body--line-height);
     -webkit-font-smoothing: antialiased;
   }
+  /* §12 Focus — a 2px accent ring at 2px offset on the light ground (`map-ground` rebinds it to
+     --color-map-ink on the dark surface, where the accent falls short of 3:1). */
+  :root {
+    --focus-ring: var(--color-accent);
+  }
   :focus-visible {
-    outline: 2px solid var(--color-accent);
+    outline: 2px solid var(--focus-ring);
     outline-offset: 2px;
   }
   ::selection {
-    background: var(--color-accent-dim);
-    color: var(--color-paper);
+    background: var(--color-accent-soft);
+    color: var(--color-ink);
   }
+  /* §12 Motion is suppressed under `prefers-reduced-motion` — everything renders complete and
+     static, so the sheet is finished rather than blank. */
   @media (prefers-reduced-motion: reduce) {
     *,
     *::before,
@@ -105,8 +198,139 @@
       animation-duration: 0.01ms !important;
       animation-iteration-count: 1 !important;
       transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
     }
   }
+}
+
+/* ── §6.2 The four moves. The two that are animation-shaped, as keyframes + utilities — no JS. */
+
+/* §6.2 Enter — content fades and rises 8px, once. */
+@keyframes plot-enter {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* §6.2 Live — a new map entry blooms once (scale 0 → 1.28 → 1), then settles and never moves again. */
+@keyframes plot-bloom {
+  0% {
+    transform: scale(0);
+    opacity: 0;
+  }
+  60% {
+    transform: scale(1.28);
+    opacity: 1;
+  }
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
+@utility enter {
+  animation: plot-enter var(--duration-enter) var(--ease-standard) both;
+}
+
+@utility bloom {
+  animation: plot-bloom var(--duration-bloom) var(--ease-standard) both;
+}
+
+/* §6.2 Fix — the verdict's plotted point arrives once and settles. It is the product's single
+   "this is the finding" signal, so it fires once and never repeats. */
+@keyframes fix-settle {
+  from {
+    transform: scale(0);
+    opacity: 0;
+  }
+  60% {
+    transform: scale(1.4);
+    opacity: 1;
+  }
+  to {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
+@utility fix {
+  animation: fix-settle var(--duration-bloom) var(--ease-standard) both;
+}
+
+/* §6/§11 The registration mark — the corner tick a field shows when it takes focus. It is painted as
+   a background ON THE CONTROL ITSELF, not on a wrapper: an input/textarea/select is a replaced
+   element and cannot host a ::after, and any wrapper would register against the row rather than the
+   control — wrong for a w-24 number field in a grid cell, and absent entirely for a bare control
+   with no `Field` around it. Painted this way the mark lands on the control's own corner at any
+   width. It reads `--focus-ring`, not the accent directly, so it follows the ground it sits on. */
+@utility corner-tick {
+  background-image: linear-gradient(transparent, transparent), linear-gradient(transparent, transparent);
+  background-size: 7px 2px, 2px 7px;
+  background-position: top right, top right;
+  background-repeat: no-repeat;
+
+  &:focus,
+  &:focus-within {
+    background-image: linear-gradient(var(--focus-ring), var(--focus-ring)),
+      linear-gradient(var(--focus-ring), var(--focus-ring));
+  }
+}
+
+/* §8.2 Invalid — a monochrome danger rule at the left edge, never a red box. `Field` applies this to
+   the field entry whenever `error` is set. The margin it sits in is reserved unconditionally by
+   `Field` (`pl-2.5`), so the mark never moves the control — the rule appears, the layout does not.
+   The message itself stays Field's `role="alert"` line in ink; the hue is the mark, never the text.
+
+   The density is measured, not asserted: 2px of `--color-danger` in a 3px period composites to
+   #D06868 over the white sheet, which is 3.585:1 — clear of the 3:1 floor. At 1px in 3px the
+   composite was #E5ACAC and 1.941:1, under the floor. The stripe's own colour is 6.470:1. */
+@utility field-invalid {
+  position: relative;
+
+  &::before {
+    content: "";
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: 0;
+    width: 3px;
+    background: repeating-linear-gradient(-45deg, var(--color-danger) 0 2px, transparent 0 3px);
+  }
+}
+
+/* §2.3 The map surface — the ONE dark surface. Apply to the container: it paints the §3 map ramp,
+   rebinds `--focus-ring` to `--color-map-ink` (the only ring that clears 3:1 there, §12), and
+   inverts the light ink scale to the map tokens so descendants keep their text and rules legible on
+   the dark ground. */
+@utility plot-ground {
+  background: var(--gradient-map);
+  color: var(--color-map-ink);
+  --focus-ring: var(--color-map-ink);
+  --color-accent: var(--color-map-accent);
+  --color-ink: var(--color-map-ink);
+  --color-ink-2: var(--color-map-ink);
+  --color-ink-3: var(--color-map-ink-2);
+  /* the record rule on the map is the map's own rule — the same hairline the kit's dark tone draws */
+  --rule-color: var(--color-map-rule);
+}
+
+/* The accent-filled action. A flat evergreen fill, never a gradient (§4.8 rule 2).
+   The label is the on-accent ink; nothing on this surface is grey. */
+@utility action-fill {
+  background-color: var(--color-accent);
+  color: var(--color-on-accent);
+}
+
+/* The focus ring on an accent-filled control is the ink, not the accent: an accent ring on an
+   accent fill is the accent on the accent. The ring is drawn outside the control, on the page
+   ground, so ink reads against every ground the action sits on. */
+.action-fill:focus-visible {
+  outline-color: var(--color-ink);
 }
 
 @utility tnum {

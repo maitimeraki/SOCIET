@@ -4,9 +4,10 @@ The env names previously said ..._CHARS but held SentenceSplitter token budgets.
 GraphConfig now carries chars and derives tokens (chars // 4); the job must hand
 the splitter the token value, never the char value.
 """
-from unittest.mock import AsyncMock
+
 import sys
 import types
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -24,15 +25,19 @@ def test_config_derives_token_budget_from_char_budget():
 
 class _Discovery:
     async def run(self, documents, sample_size=1):
-        return LocalOntology.model_validate({
-            "metadata": {"ontology_id": "onto-chunk-units"},
-            "entity_types": [{
-                "type_name": "PERSON",
-                "description": "Person",
-                "properties": [{"name": "name", "description": "n"}],
-            }],
-            "relation_types": [],
-        })
+        return LocalOntology.model_validate(
+            {
+                "metadata": {"ontology_id": "onto-chunk-units"},
+                "entity_types": [
+                    {
+                        "type_name": "PERSON",
+                        "description": "Person",
+                        "properties": [{"name": "name", "description": "n"}],
+                    }
+                ],
+                "relation_types": [],
+            }
+        )
 
 
 @pytest.mark.asyncio
@@ -46,10 +51,16 @@ async def test_job_passes_token_budget_not_char_budget(monkeypatch):
         return ["One sentence about the migration plan."]
 
     monkeypatch.setattr(api_server, "split_text_sentences", split_spy)
-    monkeypatch.setattr(api_server, "OntologyDiscoveryStage", lambda **kwargs: _Discovery())
+    monkeypatch.setattr(
+        api_server, "OntologyDiscoveryStage", lambda **kwargs: _Discovery()
+    )
     monkeypatch.setattr(api_server, "_persist_run", AsyncMock())
     # Pin the char budget so the assertion is independent of the local .env.
-    monkeypatch.setattr(api_server, "GraphConfig", lambda: GraphConfig(chunk_size_chars=8000, chunk_overlap_chars=800))
+    monkeypatch.setattr(
+        api_server,
+        "GraphConfig",
+        lambda: GraphConfig(chunk_size_chars=8000, chunk_overlap_chars=800),
+    )
     # _execute_unified_job lazily imports GraphExtractionStage; stub it so this
     # chunk-budget test does not depend on the extraction module at all.
     stub = types.ModuleType("src.graph.graph_build")
@@ -58,9 +69,13 @@ async def test_job_passes_token_budget_not_char_budget(monkeypatch):
 
     job_id = "test-chunk-units"
     api_server.RUNS[job_id] = {"job_id": job_id, "result": None}
-    documents = [GlobalInputDocument(document_id="d1", source_type="text", text="ignored", metadata={})]
+    documents = [
+        GlobalInputDocument(
+            document_id="d1", source_type="text", text="ignored", metadata={}
+        )
+    ]
 
     await api_server._execute_unified_job(job_id, "ontology", "ds1", documents)
 
-    assert seen["chunk_size"] == 2000   # 8000 chars // 4, not 8000
+    assert seen["chunk_size"] == 2000  # 8000 chars // 4, not 8000
     assert seen["chunk_overlap"] == 200  # 800 chars // 4, not 800

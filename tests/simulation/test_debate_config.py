@@ -1,4 +1,5 @@
 import pytest
+
 from src.simulation.debate_config import DebateConfig
 
 
@@ -15,17 +16,25 @@ class TestDebateConfig:
         assert config.topology_score_threshold == 0.15
 
     def test_llm_concurrency_bounds(self):
-        with pytest.raises(ValueError, match="llm_concurrency must be between 1 and 32"):
+        with pytest.raises(
+            ValueError, match="llm_concurrency must be between 1 and 32"
+        ):
             DebateConfig(llm_concurrency=0)
-        with pytest.raises(ValueError, match="llm_concurrency must be between 1 and 32"):
+        with pytest.raises(
+            ValueError, match="llm_concurrency must be between 1 and 32"
+        ):
             DebateConfig(llm_concurrency=33)
         DebateConfig(llm_concurrency=1)
         DebateConfig(llm_concurrency=32)
 
     def test_topology_score_threshold_bounds(self):
-        with pytest.raises(ValueError, match="topology_score_threshold must be between 0.0 and 1.0"):
+        with pytest.raises(
+            ValueError, match="topology_score_threshold must be between 0.0 and 1.0"
+        ):
             DebateConfig(topology_score_threshold=-0.1)
-        with pytest.raises(ValueError, match="topology_score_threshold must be between 0.0 and 1.0"):
+        with pytest.raises(
+            ValueError, match="topology_score_threshold must be between 0.0 and 1.0"
+        ):
             DebateConfig(topology_score_threshold=1.1)
         DebateConfig(topology_score_threshold=0.0)
         DebateConfig(topology_score_threshold=1.0)
@@ -205,5 +214,7 @@ def test_s4_blend_fields_validated():
         DebateConfig(w1=1.1)
     with pytest.raises(ValueError, match="w2 must be between 0.0 and 1.0"):
         DebateConfig(w2=-0.1)
-    with pytest.raises(ValueError, match="selection_score_threshold must be between 0.0 and 1.0"):
+    with pytest.raises(
+        ValueError, match="selection_score_threshold must be between 0.0 and 1.0"
+    ):
         DebateConfig(selection_score_threshold=1.1)

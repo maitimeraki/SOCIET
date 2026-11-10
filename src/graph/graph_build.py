@@ -3,32 +3,43 @@ import logging
 import sys
 import uuid
 from typing import List, Optional
-from src.logging.setup_logging import setup_logging
+
 from llama_index.core.node_parser import SentenceSplitter
-from llama_index.llms.openai_like import OpenAILike
 from llama_index.embeddings.ollama import OllamaEmbedding
 from llama_index.graph_stores.neo4j import Neo4jPropertyGraphStore
-from src.graph.config_graph import GraphConfig
-from src.llm.config_llm import LLMConfig
-from src.graph.models_graph import ProcessedChunk, LocalOntology
-from src.graph.vocabulary import promote, select_slice
-from src.api.graph_stream import GraphDelta, publish
+from llama_index.llms.openai_like import OpenAILike
 
+from src.api.graph_stream import GraphDelta, publish
+from src.graph.config_graph import GraphConfig
+from src.graph.literals import coerce_value, is_literal_value
+from src.graph.llm_metering import wrap_with_metering
+from src.graph.models_graph import LocalOntology, ProcessedChunk
+from src.graph.vocabulary import promote, select_slice
+from src.llm.config_llm import LLMConfig
+from src.llm.extraction import (
+    assert_extraction_licensed,
+    resolve_extraction_settings,
+)
+from src.logging.setup_logging import setup_logging
 
 # Configure basic logging
 logging.basicConfig(
     level=logging.INFO,  # DEBUG, INFO, WARNING, ERROR, CRITICAL
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.StreamHandler(sys.stdout)  # Output to terminal
-    ]
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    handlers=[logging.StreamHandler(sys.stdout)],  # Output to terminal
 )
-logging.warning("This is a warning message. Check your configuration or code for potential issues.")
-logging.basicConfig(level=logging.ERROR, format="%(asctime)s - %(levelname)s - %(message)s")
+logging.warning(
+    "This is a warning message. Check your configuration or code for potential issues."
+)
+logging.basicConfig(
+    level=logging.ERROR, format="%(asctime)s - %(levelname)s - %(message)s"
+)
 
 # Create logger instance
 # logger = logging.getLogger(__name__)
-logger = setup_logging()  # Ensure logging is configured with handler clearing to prevent duplication
+logger = (
+    setup_logging()
+)  # Ensure logging is configured with handler clearing to prevent duplication
 
 # The ollama clients default to httpx `timeout=None` (unbounded) — a stuck
 # localhost embed call would wait forever. 60 s is a generous bound for it.
@@ -52,6 +63,39 @@ MATCH (d:Document {document_id: row.document_id, dataset_id: $dataset_id})
 MERGE (e)-[:DERIVED_FROM]->(d)
 """
 
+# The dynamic extractor's `extract_prompt`. Its `{...}` placeholders are exactly
+# the ones `DynamicLLMPathExtractor._apredict_with_props` supplies — `text`,
+# `max_knowledge_triplets`, `allowed_entity_types`, `allowed_relation_types`,
+# `allowed_entity_properties`, `allowed_relation_properties` — so `.format()`
+# never raises. The rules below are the prompt half of the literal guard; the
+# deterministic backstop lives in `src.graph.literals` (spec §6.3).
+_EXTRACTION_PROMPT = """Extract up to {max_knowledge_triplets} knowledge triplets from the given text. Each triplet should be in the form of (head, relation, tail) with their respective types and properties.
+---------------------
+INITIAL ONTOLOGY:
+Entity Types: {allowed_entity_types}
+Entity Properties: {allowed_entity_properties}
+Relation Types: {allowed_relation_types}
+Relation Properties: {allowed_relation_properties}
+
+Use these types as a starting point, but introduce new types if necessary based on the context.
+
+RULES:
+1. Emit ONLY real, referenceable entities (organizations, people, places, products, events, concepts).
+2. NEVER emit money, dates, quantities, percentages, or bare numbers as entities.
+3. Put those values in properties, using the declared slots (e.g. price, date, revenue).
+4. Use only the allowed entity and relation types.
+
+GUIDELINES:
+- Output in JSON format: [{{'head': '', 'head_type': '', 'head_props': {{...}}, 'relation': '', 'relation_props': {{...}}, 'tail': '', 'tail_type': '', 'tail_props': {{...}}}}]
+- Use the most complete form for entities (e.g., 'United States of America' instead of 'USA')
+- Keep entities concise (3-5 words max)
+- Break down complex phrases into multiple triplets
+- Ensure the knowledge graph is coherent and easily understandable
+---------------------
+Text: {text}
+Output:
+"""
+
 
 def _document_rows(dataset_id: str, documents: List[ProcessedChunk]) -> List[dict]:
     """One row per unique `parent_doc_id`: its dataset plus the deduped,
@@ -60,7 +104,11 @@ def _document_rows(dataset_id: str, documents: List[ProcessedChunk]) -> List[dic
     for d in documents:
         row = rows.setdefault(
             d.parent_doc_id,
-            {"document_id": d.parent_doc_id, "dataset_id": dataset_id, "domain_tags": []},
+            {
+                "document_id": d.parent_doc_id,
+                "dataset_id": dataset_id,
+                "domain_tags": [],
+            },
         )
         for tag in d.domain_tags or []:
             if tag not in row["domain_tags"]:
@@ -88,7 +136,12 @@ def _proposed_labels(extracted) -> tuple[List[str], List[str]]:
         metadata = getattr(node, "metadata", None) or {}
         for item in metadata.get(KG_NODES_KEY, []):
             label = getattr(item, "label", None)
-            if label and label.strip() and label != "entity" and label not in entity_labels:
+            if (
+                label
+                and label.strip()
+                and label != "entity"
+                and label not in entity_labels
+            ):
                 entity_labels.append(label)
         for item in metadata.get(KG_RELATIONS_KEY, []):
             label = getattr(item, "label", None)
@@ -97,14 +150,44 @@ def _proposed_labels(extracted) -> tuple[List[str], List[str]]:
     return entity_labels, relation_labels
 
 
+# The writers' bookkeeping — llama-index stamps chunk lineage onto every entity,
+# and the pipeline stamps the dataset/ontology id. Never a displayable fact.
+_LINEAGE_KEYS = frozenset(
+    {
+        "document_id",
+        "chunk_id",
+        "document_anchor",
+        "chunk_index",
+        "content_hash",
+        "dataset_id",
+        "ontology_id",
+    }
+)
+
+
+def _public_props(obj) -> dict:
+    """An entity/relation's display properties: its extraction facts, lineage stripped.
+
+    ONE definition for BOTH projections — the live delta and the reconnect
+    snapshot — so the stripped-key list lives in exactly one place. Accepts an
+    object carrying `.properties` (an `EntityNode`/`Relation`) or a bare props
+    dict (the snapshot's `properties(e)` projection).
+    """
+    props = obj if isinstance(obj, dict) else getattr(obj, "properties", None)
+    if not isinstance(props, dict):
+        return {}
+    return {key: value for key, value in props.items() if key not in _LINEAGE_KEYS}
+
+
 def _delta_payload(extracted) -> tuple[List[dict], List[dict]]:
     """The `(nodes, edges)` a chunk's extraction result contributes to a GraphDelta.
 
     Reads the SAME metadata bags `_proposed_labels` does — and, critically,
     BEFORE `index.insert_nodes` pops them (llama-index's `_insert_nodes` removes
-    `KG_NODES_KEY` / `KG_RELATIONS_KEY`). Node entries are `{id, label, type}`
-    (label = the entity's display name, type = its extracted type); edge entries
-    are `{source, target, label}`. Order-stable, de-duplicated by node id.
+    `KG_NODES_KEY` / `KG_RELATIONS_KEY`). Node entries are
+    `{id, label, type, kind, properties}` (label = the entity's display name,
+    type/kind = its extracted type, properties = its facts); edge entries are
+    `{source, target, label, properties}`. Order-stable, de-duplicated by node id.
     """
     from llama_index.core.graph_stores.types import KG_NODES_KEY, KG_RELATIONS_KEY
 
@@ -117,18 +200,197 @@ def _delta_payload(extracted) -> tuple[List[dict], List[dict]]:
             item_id = getattr(item, "id", None)
             if item_id and item_id not in seen:
                 seen.add(item_id)
-                nodes.append({
-                    "id": item_id,
-                    "label": getattr(item, "name", None) or item_id,
-                    "type": getattr(item, "label", None),
-                })
+                nodes.append(
+                    {
+                        "id": item_id,
+                        "label": getattr(item, "name", None) or item_id,
+                        "type": getattr(item, "label", None),
+                        "kind": getattr(item, "label", None),
+                        "properties": _public_props(item),
+                    }
+                )
         for rel in metadata.get(KG_RELATIONS_KEY, []):
-            edges.append({
-                "source": getattr(rel, "source_id", None),
-                "target": getattr(rel, "target_id", None),
-                "label": getattr(rel, "label", None),
-            })
+            edges.append(
+                {
+                    "source": getattr(rel, "source_id", None),
+                    "target": getattr(rel, "target_id", None),
+                    "label": getattr(rel, "label", None),
+                    "properties": _public_props(rel),
+                }
+            )
     return nodes, edges
+
+
+def _pick_slot(rel, relation_slots, kind: str) -> Optional[str]:
+    """The declared property name on this relation whose `value_type` is `kind`.
+
+    `relation_slots` is a `LocalOntology`'s `relation_types`. Returns `None` when
+    the relation's type declares no slot of that kind — the caller decides the
+    fallback, since a real→real edge needs a declared slot but an entity can also
+    take the relation's label as its slot name.
+    """
+    label = getattr(rel, "label", None)
+    for rel_def in relation_slots or []:
+        if getattr(rel_def, "type_name", None) == label:
+            for prop in rel_def.properties:
+                if prop.value_type == kind:
+                    return prop.name
+    return None
+
+
+def _attach_property(holder, slot: str, value) -> None:
+    """Set `holder.properties[slot] = value`, preserving the holder's others."""
+    holder.properties = {**(getattr(holder, "properties", None) or {}), slot: value}
+
+
+def _real_relation_target(relations, literal_id, entities, relation_slots, kind: str):
+    """The real→real relation the literal's value belongs to, else `None`.
+
+    This is the spec §13.2 case: the model leaked a value node, but the edge
+    between the two REAL entities it describes already declares the typed slot —
+    so the coerced value lands on that surviving edge
+    (`(Amazon)-[:ACQUIRED {price}]->(WholeFoods)`).
+
+    A leaked literal is often attached to ONE real entity
+    (`(WholeFoods)-[:PRICE]->(lit)`). When a chunk extracts two same-kind
+    literals (a deal price and a revenue), a plain first-match scan routes BOTH
+    to whichever real→real edge declares the slot first — one overwriting the
+    other. So prefer the real→real edge sharing the literal's own real
+    neighbour; fall back to the first matching real→real edge only when that
+    neighbour's edge declares no such slot.
+    """
+    neighbour = None
+    for rel in relations:
+        source = getattr(rel, "source_id", None)
+        target = getattr(rel, "target_id", None)
+        if literal_id not in (source, target):
+            continue
+        other = target if source == literal_id else source
+        if other in entities:
+            neighbour = other
+            break
+
+    if neighbour is not None:
+        for rel in relations:
+            source = getattr(rel, "source_id", None)
+            target = getattr(rel, "target_id", None)
+            if source not in entities or target not in entities:
+                continue
+            if neighbour not in (source, target):
+                continue
+            slot = _pick_slot(rel, relation_slots, kind)
+            if slot:
+                return rel, slot
+
+    for rel in relations:
+        source = getattr(rel, "source_id", None)
+        target = getattr(rel, "target_id", None)
+        if source not in entities or target not in entities:
+            continue
+        slot = _pick_slot(rel, relation_slots, kind)
+        if slot:
+            return rel, slot
+    return None
+
+
+def _neighbour_target(relations, literal_id, entities, relation_slots, kind: str):
+    """The real endpoint of the literal's incident relation, else `None`.
+
+    Slot precedence: the relation's declared matching slot, else the relation's
+    lowercased label, else the generic `"value"` — so the value still survives
+    on an entity (§13.1 "edge/entity property").
+    """
+    for rel in relations:
+        source = getattr(rel, "source_id", None)
+        target = getattr(rel, "target_id", None)
+        if literal_id not in (source, target):
+            continue
+        other = target if source == literal_id else source
+        entity = entities.get(other)
+        if entity is None:
+            continue
+        slot = (
+            _pick_slot(rel, relation_slots, kind)
+            or (getattr(rel, "label", None) or "").strip().lower()
+        )
+        return entity, slot or "value"
+    return None
+
+
+def _route_literals(nodes, relation_slots=None):
+    """Route each literal's coerced value onto a SURVIVING target, then drop the
+    literal node and any relation orphaned by the drop (spec §6.3, §13.1).
+
+    A literal ("$2.5 billion", "2018") that the extractor emitted as an
+    `EntityNode` is not a referenceable entity; its value belongs in the typed
+    property slot of the edge or entity it describes. The target is chosen so it
+    survives the drop:
+
+    1. a real→real relation declaring a slot of the coerced kind (§13.2); else
+    2. the real endpoint of the literal's incident relation, under that
+       relation's declared matching slot, else its lowercased label, else
+       `"value"`.
+
+    Runs on the harvested `metadata[KG_NODES_KEY]` / `metadata[KG_RELATIONS_KEY]`
+    bags before `_proposed_labels` / `_delta_payload` read them, so the dropped
+    literal never reaches the node list, the delta, or the proposed label set.
+    """
+    from llama_index.core.graph_stores.types import KG_NODES_KEY, KG_RELATIONS_KEY
+
+    attached, dropped = [], []
+    for node in nodes:
+        meta = getattr(node, "metadata", None) or {}
+        bag_nodes = meta.get(KG_NODES_KEY, [])
+        literals = {
+            getattr(i, "id", None): (getattr(i, "name", "") or "")
+            for i in bag_nodes
+            if is_literal_value(getattr(i, "name", "") or "")
+        }
+        if not literals:
+            continue
+        relations = meta.get(KG_RELATIONS_KEY, [])
+        entities = {
+            getattr(i, "id", None): i
+            for i in bag_nodes
+            if getattr(i, "id", None) not in literals
+        }
+        for node_id, value in literals.items():
+            kind, coerced = coerce_value(value)
+            target = _real_relation_target(
+                relations, node_id, entities, relation_slots, kind
+            )
+            if target is None:
+                target = _neighbour_target(
+                    relations, node_id, entities, relation_slots, kind
+                )
+            if target is None:
+                continue
+            holder, slot = target
+            _attach_property(holder, slot, coerced)
+            attached.append(
+                (
+                    getattr(holder, "label", None) or getattr(holder, "name", None),
+                    slot,
+                )
+            )
+        meta[KG_NODES_KEY] = [
+            i for i in bag_nodes if getattr(i, "id", None) not in literals
+        ]
+        meta[KG_RELATIONS_KEY] = [
+            r
+            for r in relations
+            if getattr(r, "source_id", None) not in literals
+            and getattr(r, "target_id", None) not in literals
+        ]
+        dropped.extend(literals.values())
+    if dropped:
+        logger.info(
+            "Routed %d literal slot(s) %s; dropped %d literal node(s)",
+            len(attached),
+            attached[:5],
+            len(dropped),
+        )
+    return nodes
 
 
 class _NoOpSplit:
@@ -168,25 +430,30 @@ def _refresh_schema_once(store: Neo4jPropertyGraphStore) -> None:
 
 class GraphExtractionStage:
     """Extracts entities and relationships from documents using LLMs and stores them in a Neo4j graph database.
-    This stage is responsible for taking raw text documents, applying the defined ontology schema to extract structured information."""
+    This stage is responsible for taking raw text documents, applying the defined ontology schema to extract structured information.
+    """
+
     def __init__(self, config: GraphConfig):
         self.config = config
         conversation_session_id = str(uuid.uuid4())
+        settings = resolve_extraction_settings(model=self.config.extraction_model)
+        assert_extraction_licensed(settings)
         self.llm = OpenAILike(
-                model=self.config.extraction_model,
-                api_base=LLMConfig.nvidia_nim_base_url or "https://integrate.api.nvidia.com/v1",
-                api_key=LLMConfig.nvidia_nim_api_key,
-                temperature=0.7,
-                is_chat_model=True,
-                timeout=self.config.extraction_timeout_seconds,
-                max_retries=1 , # a hung attempt must not stack retries on top of the timeout
-                additional_kwargs={
-                                "seed": 42, # Fixed seed for reproducibility
-                                "extra_headers":{
-                               "x-opencode-session": conversation_session_id
-                                }
-                            }
-            )
+            model=settings.model,
+            api_base=settings.base_url,
+            api_key=settings.api_key,
+            temperature=0.7,
+            is_chat_model=True,
+            timeout=self.config.extraction_timeout_seconds,
+            max_retries=1,  # a hung attempt must not stack retries on top of the timeout
+            additional_kwargs={
+                "seed": 42,  # Fixed seed for reproducibility
+                "extra_headers": {"x-opencode-session": conversation_session_id},
+            },
+        )
+        wrap_with_metering(
+            self.llm, provider=settings.provider, model=settings.model
+        )
         self.embed_model = OllamaEmbedding(
             model_name=LLMConfig.embedding_model,
             base_url=LLMConfig.ollama_base_url,
@@ -209,7 +476,7 @@ class GraphExtractionStage:
         # Instance-level (not module-level) so it binds to the loop that runs
         # THIS stage, and is shared across concurrent `run` calls for a stage.
         self._insert_lock = asyncio.Lock()
-        
+
     def close(self) -> None:
         """Close the graph store's driver. Idempotent — a second call is a no-op."""
         store = getattr(self, "graph_store", None)
@@ -256,11 +523,29 @@ class GraphExtractionStage:
         md["ontology_id"] = ontology.metadata.ontology_id
         # `_create_processed_chunk` carries the filename as `source_document`;
         # without the fallback every provenance link title is "Untitled Document".
-        md["title"] = md.get("title") or md.get("source_document") or "Untitled Document"
+        md["title"] = (
+            md.get("title") or md.get("source_document") or "Untitled Document"
+        )
         new_doc = Document(text=d.content, metadata=md)
 
-        new_doc.excluded_llm_metadata_keys = ["dataset_id", "ontology_id", "document_id", "chunk_id", "document_anchor", "content_hash", "chunk_index"]  # Exclude sensitive or non-informative metadata from LLM input
-        new_doc.excluded_embed_metadata_keys = ["dataset_id", "ontology_id", "document_id", "chunk_id", "document_anchor", "content_hash", "chunk_index"]  # Exclude from embedding metadata as well to prevent noise in vector representations
+        new_doc.excluded_llm_metadata_keys = [
+            "dataset_id",
+            "ontology_id",
+            "document_id",
+            "chunk_id",
+            "document_anchor",
+            "content_hash",
+            "chunk_index",
+        ]  # Exclude sensitive or non-informative metadata from LLM input
+        new_doc.excluded_embed_metadata_keys = [
+            "dataset_id",
+            "ontology_id",
+            "document_id",
+            "chunk_id",
+            "document_anchor",
+            "content_hash",
+            "chunk_index",
+        ]  # Exclude from embedding metadata as well to prevent noise in vector representations
         return new_doc
 
     async def _run_async(
@@ -271,6 +556,7 @@ class GraphExtractionStage:
         job_id: Optional[str] = None,
     ) -> int:
         import os
+
         os.environ["LLAMA_INDEX_DISABLE_ASYNC_EMBEDDINGS"] = "1"
         from llama_index.core import PropertyGraphIndex, Settings
 
@@ -279,7 +565,9 @@ class GraphExtractionStage:
         Settings.embed_model = self.embed_model
         Settings.node_parser = self.splitter
 
-        logger.info(f"Transforming ontology schema for dataset {dataset_id} into property-aware format.")
+        logger.info(
+            f"Transforming ontology schema for dataset {dataset_id} into property-aware format."
+        )
         try:
             logger.info(
                 f"Initializing extractors for dataset {dataset_id} with "
@@ -287,7 +575,9 @@ class GraphExtractionStage:
                 f"{ontology.relation_labels} relation schemas."
             )
 
-            pairs = [(d, self._to_llama_document(dataset_id, d, ontology)) for d in documents]
+            pairs = [
+                (d, self._to_llama_document(dataset_id, d, ontology)) for d in documents
+            ]
 
             # One empty index bound to the shared store. `kg_extractors=[_NoOpSplit()]`
             # (a TRUTHY no-op) is essential: `PropertyGraphIndex.__init__` does
@@ -332,10 +622,18 @@ class GraphExtractionStage:
                 attempts = max(1, self.config.extraction_chunk_retries + 1)
                 for attempt in range(attempts):
                     try:
-                        slice_ = select_slice(vocabulary, chunk.content, self.config.chunk_slice_size)
+                        slice_ = select_slice(
+                            vocabulary, chunk.content, self.config.chunk_slice_size
+                        )
                         extractors = self._build_extractors(slice_)
-                        nodes, entity_labels, relation_labels, delta_nodes, delta_edges = await asyncio.to_thread(
-                            self._extract_chunk, doc, extractors
+                        (
+                            nodes,
+                            entity_labels,
+                            relation_labels,
+                            delta_nodes,
+                            delta_edges,
+                        ) = await asyncio.to_thread(
+                            self._extract_chunk, doc, extractors, slice_.relation_types
                         )
                         # Serialise the store write: extraction is concurrent, but
                         # only one chunk writes the shared index at a time. The
@@ -350,33 +648,44 @@ class GraphExtractionStage:
                                 f"failed: {exc}. Retrying..."
                             )
                             await asyncio.sleep(
-                                self.config.extraction_chunk_retry_backoff_seconds * (2 ** attempt)
+                                self.config.extraction_chunk_retry_backoff_seconds
+                                * (2**attempt)
                             )
                         continue
                     # Synchronous read-modify-write: never split by an await.
-                    vocabulary, new_entities = promote(vocabulary, entity_labels, kind="entity")
-                    vocabulary, new_relations = promote(vocabulary, relation_labels, kind="relation")
+                    vocabulary, new_entities = promote(
+                        vocabulary, entity_labels, kind="entity"
+                    )
+                    vocabulary, new_relations = promote(
+                        vocabulary, relation_labels, kind="relation"
+                    )
                     state["done"] += 1
                     if job_id is not None:
-                        publish(job_id, GraphDelta(
-                            nodes=delta_nodes,
-                            edges=delta_edges,
-                            new_labels=new_entities + new_relations,
-                            chunk_id=chunk.chunk_id,
-                            progress=state["done"] / total if total else 0.0,
-                        ))
+                        publish(
+                            job_id,
+                            GraphDelta(
+                                nodes=delta_nodes,
+                                edges=delta_edges,
+                                new_labels=new_entities + new_relations,
+                                chunk_id=chunk.chunk_id,
+                                progress=state["done"] / total if total else 0.0,
+                            ),
+                        )
                     return True
                 logger.error(
                     f"Chunk {chunk.chunk_id} failed terminally after {attempts} attempts: {last_exc}"
                 )
                 if job_id is not None:
-                    publish(job_id, GraphDelta(
-                        chunk_id=chunk.chunk_id,
-                        # A non-empty message is load-bearing: `if delta.error:` in
-                        # the WS route treats "" as an ordinary delta. A bare
-                        # `RuntimeError()` would otherwise be emitted as a `delta`.
-                        error=f"{type(last_exc).__name__}: {last_exc}",
-                    ))
+                    publish(
+                        job_id,
+                        GraphDelta(
+                            chunk_id=chunk.chunk_id,
+                            # A non-empty message is load-bearing: `if delta.error:` in
+                            # the WS route treats "" as an ordinary delta. A bare
+                            # `RuntimeError()` would otherwise be emitted as a `delta`.
+                            error=f"{type(last_exc).__name__}: {last_exc}",
+                        ),
+                    )
                 return False
 
             # Sliding window: `chunk_parallelism` chunk-tasks in flight at all
@@ -433,7 +742,7 @@ class GraphExtractionStage:
             logger.error(f"Error during graph extraction for dataset {dataset_id}: {e}")
             raise
 
-    def _extract_chunk(self, doc, extractors):
+    def _extract_chunk(self, doc, extractors, relation_slots=None):
         """Extract ONE chunk exactly once and harvest its delta + proposed labels.
 
         Runs off the event loop (the path extractors call `asyncio.run`
@@ -448,10 +757,15 @@ class GraphExtractionStage:
         is exactly `for transform in extractors: nodes = transform(nodes)` — no
         cache is configured, so this direct loop is the same work with one fewer
         import (and it keeps the seam stubbable in tests).
+
+        `relation_slots` is the chunk slice's `relation_types`; literal nodes are
+        routed into those declared slots (falling back to `"value"`) and removed
+        before the labels and delta are harvested.
         """
         nodes = [doc]
         for extractor in extractors:
             nodes = list(extractor(nodes))
+        _route_literals(nodes, relation_slots)
         entity_labels, relation_labels = _proposed_labels(nodes)
         delta_nodes, delta_edges = _delta_payload(nodes)
         return nodes, entity_labels, relation_labels, delta_nodes, delta_edges
@@ -463,27 +777,27 @@ class GraphExtractionStage:
         `ontology` is handed in, so a per-chunk slice (Task 7's sliding window)
         builds its own extractors from a smaller vocabulary: `_run_async` calls
         this once PER CHUNK with that chunk's slice.
+
+        Only two extractors remain: the triple-only `SimpleLLMPathExtractor` is
+        retired because its schema-free prompt was the source of value nodes
+        ("$2.5 billion", "2018") — `_EXTRACTION_PROMPT` plus the literal guard
+        in `_extract_chunk` replaces it.
         """
         from llama_index.core.indices.property_graph import (
-            SimpleLLMPathExtractor,
             DynamicLLMPathExtractor,
             ImplicitPathExtractor,
         )
+
         # num_workers=1: llama-index runs a call's chunks through
         # run_jobs(jobs, workers=num_workers), so sync mode fans out for
         # real. The outer semaphore (GraphConfig.ontology_max_concurrency,
         # one slot per document) is the single concurrency lever: aggregate
         # in-flight extraction calls = GRAPH_ONTOLOGY_MAX_CONCURRENCY ×
         # num_workers. Raise num_workers only alongside cutting the semaphore.
-        # Simple extractor - basic triple extraction without schema constraints(Simple extractor captures additional relationships the dynamic one might miss)
-        simple_extractor = SimpleLLMPathExtractor(
-            llm=self.llm,
-            max_paths_per_chunk=self.config.extraction_max_triplets_per_chunk,
-            num_workers=1,
-        )
         # Dynamic extractor - schema-guided but flexible(Dynamic extractor captures labeled entities/relations following your schema)
         dynamic_extractor = DynamicLLMPathExtractor(
             llm=self.llm,
+            extract_prompt=_EXTRACTION_PROMPT,
             allowed_entity_types=ontology.entity_labels,
             allowed_relation_types=ontology.relation_labels,
             allowed_entity_props=ontology.entity_props,
@@ -493,13 +807,17 @@ class GraphExtractionStage:
         )
         # Implicit extractor - from node relationships(Implicit extractor adds structural relationships between nodes that LLMs don't generate)
         implicit_extractor = ImplicitPathExtractor()
-        return (simple_extractor, dynamic_extractor, implicit_extractor)
+        return (dynamic_extractor, implicit_extractor)
 
-    def _write_documents(self, dataset_id: str, documents: List[ProcessedChunk]) -> None:
+    def _write_documents(
+        self, dataset_id: str, documents: List[ProcessedChunk]
+    ) -> None:
         """MERGE one Document node per unique source document. Sync — called off the loop."""
         rows = _document_rows(dataset_id, documents)
         if rows:
-            self.graph_store.structured_query(_MERGE_DOCUMENTS, param_map={"docs": rows})
+            self.graph_store.structured_query(
+                _MERGE_DOCUMENTS, param_map={"docs": rows}
+            )
 
     def _link_concepts_to_documents(self, index, dataset_id: str) -> None:
         """MERGE `(concept)-[:DERIVED_FROM]->(Document)` for every stored chunk
@@ -547,6 +865,7 @@ def extract_graph(
         if loop.is_running():
             # If loop is already running, create a new task
             import concurrent.futures
+
             with concurrent.futures.ThreadPoolExecutor() as executor:
                 future = executor.submit(
                     asyncio.run, stage.run(dataset_id, chunks, ontology)

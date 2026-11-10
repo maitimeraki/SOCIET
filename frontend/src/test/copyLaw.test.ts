@@ -1,0 +1,74 @@
+import { describe, expect, it } from 'vitest'
+import { BANNED_TERMS, BANNED_WORD, copyLawApplies, isLegalPath, renderedText } from './copyLaw'
+
+// The guard sees the text BETWEEN tags AND the four customer-visible attribute values. A prior bug
+// replaced each whole tag, so a banned word in aria-label/title/placeholder/alt was invisible.
+describe('renderedText — the guard reads what the customer reads', () => {
+  const banned = (markup: string) => BANNED_WORD.test(renderedText(markup))
+
+  it('catches a banned word in aria-label', () => {
+    expect(banned('<button aria-label="remove this agent">x</button>')).toBe(true)
+  })
+
+  it('catches a banned word in title', () => {
+    expect(banned('<span title="the graph view">x</span>')).toBe(true)
+  })
+
+  it('catches a banned word in placeholder', () => {
+    expect(banned('<input placeholder="describe your job" />')).toBe(true)
+  })
+
+  it('catches a banned word in alt', () => {
+    expect(banned('<img alt="a node diagram" />')).toBe(true)
+  })
+
+  it('reads the text content between tags too', () => {
+    expect(banned('<p>The round closed.</p>')).toBe(true)
+  })
+
+  it('ignores identifiers — className="rounded-md" must not trip the round stem', () => {
+    expect(banned('<div className="rounded-md bg-bone">ok</div>')).toBe(false)
+  })
+
+  it('ignores data-* identifiers', () => {
+    expect(banned('<div data-node-id="n1" data-round="2">ok</div>')).toBe(false)
+  })
+
+  it('reads single-quoted attribute values', () => {
+    expect(banned("<button aria-label='remove this agent'>x</button>")).toBe(true)
+  })
+})
+
+describe('the legal-route exemption', () => {
+  it('exempts the legal routes only, and every other surface keeps the law', () => {
+    expect(isLegalPath('/legal/privacy')).toBe(true)
+    expect(isLegalPath('/privacy')).toBe(true)
+    expect(isLegalPath('/legal')).toBe(true)
+    expect(isLegalPath('/pricing')).toBe(false)
+    expect(copyLawApplies('/pricing')).toBe(true)
+    expect(copyLawApplies('/terms')).toBe(false)
+  })
+})
+
+describe('the marketing-cliché list', () => {
+  it.each([
+    'AI-powered',
+    'seamless',
+    'elevate',
+    'unlock',
+    'revolutionize',
+    'supercharge',
+    '10x',
+    'next-gen',
+    'game-changing',
+    'trusted by',
+    'industry-leading',
+    'cutting-edge',
+    'empower',
+    'leverage',
+    'synergy',
+    'best-in-class',
+  ])('catches %s', (phrase) => {
+    expect(BANNED_TERMS.test(phrase)).toBe(true)
+  })
+})

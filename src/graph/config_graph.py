@@ -3,15 +3,19 @@ from dataclasses import dataclass
 
 from src.llm.config_llm import LLMConfig
 
+
 @dataclass
 class GraphConfig:
     # Graph stages are the analysis tier — cheap but capable. Single source:
-    # LLMConfig (env: ANALYSIS_LLM_MODEL); .env is loaded there too.
-    discovery_model: str = LLMConfig.analysis_model
-    extraction_model: str = LLMConfig.analysis_model
+    # LLMConfig (env: EXTRACTION_LLM_MODEL, then ANALYSIS_LLM_MODEL); .env is
+    # loaded there too.
+    discovery_model: str = LLMConfig.extraction_model
+    extraction_model: str = LLMConfig.extraction_model
     # Explicit per-attempt bound for the extraction LLM call: a hung request
     # must fail inside the caller's window instead of riding the library default.
-    extraction_timeout_seconds: int = int(os.getenv("GRAPH_EXTRACTION_TIMEOUT_SECONDS", "300"))
+    extraction_timeout_seconds: int = int(
+        os.getenv("GRAPH_EXTRACTION_TIMEOUT_SECONDS", "300")
+    )
     temperature: float = float(os.getenv("GRAPH_TEMPERATURE", "0.0"))
     discovery_sample_size: int = int(os.getenv("GRAPH_DISCOVERY_SAMPLE_SIZE", "12"))
     # One vocabulary per dataset: a single discovery call over a spread sample,
@@ -31,7 +35,9 @@ class GraphConfig:
     # times (total attempts = extraction_chunk_retries + 1, exponential backoff
     # between them) before it is SKIPPED — logged, published as an error frame,
     # and the window refilled. A run is fatal only when EVERY chunk failed.
-    extraction_chunk_retries: int = int(os.getenv("GRAPH_EXTRACTION_CHUNK_RETRIES", "2"))
+    extraction_chunk_retries: int = int(
+        os.getenv("GRAPH_EXTRACTION_CHUNK_RETRIES", "2")
+    )
     extraction_chunk_retry_backoff_seconds: float = float(
         os.getenv("GRAPH_EXTRACTION_CHUNK_RETRY_BACKOFF_SECONDS", "1.0")
     )
@@ -45,8 +51,12 @@ class GraphConfig:
     # would need per-label occurrence counting, which the extraction loop does
     # not keep — the field documents the policy, it does not gate `promote`.
     promotion_min_chunks: int = int(os.getenv("GRAPH_PROMOTION_MIN_CHUNKS", "1"))
-    discovery_timeout_seconds: int = int(os.getenv("GRAPH_DISCOVERY_TIMEOUT_SECONDS", "90"))
-    discovery_retry_attempts: int = int(os.getenv("GRAPH_DISCOVERY_RETRY_ATTEMPTS", "3"))
+    discovery_timeout_seconds: int = int(
+        os.getenv("GRAPH_DISCOVERY_TIMEOUT_SECONDS", "90")
+    )
+    discovery_retry_attempts: int = int(
+        os.getenv("GRAPH_DISCOVERY_RETRY_ATTEMPTS", "3")
+    )
     discovery_retry_backoff_seconds: float = float(
         os.getenv("GRAPH_DISCOVERY_RETRY_BACKOFF_SECONDS", "1.0")
     )
@@ -68,9 +78,27 @@ class GraphConfig:
     # Aggregate in-flight extraction LLM calls = this × each extractor's
     # num_workers (pinned to 1 in graph_build.py — raise one only by lowering
     # the other).
-    ontology_max_concurrency: int = int(os.getenv("GRAPH_ONTOLOGY_MAX_CONCURRENCY", "8"))
+    ontology_max_concurrency: int = int(
+        os.getenv("GRAPH_ONTOLOGY_MAX_CONCURRENCY", "8")
+    )
 
-    neo4j_uri: str = os.getenv("NEO4J_URI", "bolt://localhost:7687")
-    neo4j_username: str = os.getenv("NEO4J_USERNAME", "neo4j")
-    neo4j_password: str = os.getenv("NEO4J_PASSWORD", "password")
-    neo4j_database: str = os.getenv("NEO4J_DATABASE", "neo4j")
+    # Neo4j connection — the single source is the environment (.env, loaded by
+    # config_llm on import). No hardcoded fallback: a missing value fails loudly
+    # at construction instead of silently dialing a wrong local default.
+    neo4j_uri: str = os.getenv("NEO4J_URI", "")
+    neo4j_username: str = os.getenv("NEO4J_USERNAME", "")
+    neo4j_password: str = os.getenv("NEO4J_PASSWORD", "")
+    neo4j_database: str = os.getenv("NEO4J_DATABASE", "")
+
+    def __post_init__(self) -> None:
+        missing = [
+            name
+            for name in ("neo4j_uri", "neo4j_username", "neo4j_password", "neo4j_database")
+            if not getattr(self, name)
+        ]
+        if missing:
+            raise ValueError(
+                "Neo4j configuration missing from environment: "
+                + ", ".join(missing)
+                + ". Set NEO4J_URI / NEO4J_USERNAME / NEO4J_PASSWORD / NEO4J_DATABASE (see .env)."
+            )

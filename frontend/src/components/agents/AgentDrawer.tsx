@@ -1,7 +1,9 @@
 import type { AgentProfile } from '../../run/events'
 import Drawer from '../ui/Drawer'
-import StanceChip from '../common/StanceChip'
-import MeterBar from './MeterBar'
+import Label from '../ui/Label'
+import PositionMark from '../ui/PositionMark'
+import Emphasis from '../common/Emphasis'
+import Meter from '../ui/Meter'
 import ProvenanceList from './ProvenanceList'
 
 export default function AgentDrawer({
@@ -20,31 +22,31 @@ export default function AgentDrawer({
     <Drawer open={open} onClose={onClose} title={profile.identity.name}>
       <div className="space-y-6">
         <div className="flex items-center gap-3">
-          <StanceChip stance={profile.stance} />
-          <span className="text-body text-paper-dim">{profile.identity.archetype}</span>
+          <PositionMark position={profile.stance} ground="light" />
+          <span className="text-body text-ink-2">{profile.identity.archetype}</span>
         </div>
-        <p className="max-w-[60ch] text-body text-paper-dim">{profile.bio}</p>
-        <p className="max-w-[60ch] whitespace-pre-wrap text-body-lg text-paper">{profile.detailed_perspective}</p>
+        <p className="max-w-[60ch] text-body text-ink-2">{profile.bio}</p>
+        <Emphasis text={profile.detailed_perspective} className="max-w-[60ch] whitespace-pre-wrap text-body text-ink" />
 
         <section>
-          <h3 className="mb-2 text-label uppercase text-paper-mute">Confidence breakdown</h3>
+          <Label as="h3" className="mb-2">Confidence breakdown</Label>
           <div className="space-y-2">
-            <MeterBar label="src" value={breakdown.source_breadth} max={breakdownMax} display={String(breakdown.source_breadth)} />
-            <MeterBar label="nnd" value={breakdown.node_density} max={breakdownMax} display={String(breakdown.node_density)} />
-            <MeterBar label="rlc" value={breakdown.relationship_connectivity} display={breakdown.relationship_connectivity.toFixed(2)} />
+            <Meter label="src" value={breakdown.source_breadth} max={breakdownMax} display={String(breakdown.source_breadth)} />
+            <Meter label="nnd" value={breakdown.node_density} max={breakdownMax} display={String(breakdown.node_density)} />
+            <Meter label="rlc" value={breakdown.relationship_connectivity} display={breakdown.relationship_connectivity.toFixed(2)} />
           </div>
         </section>
 
         <section>
-          <h3 className="mb-2 text-label uppercase text-paper-mute">Provenance</h3>
+          <Label as="h3" className="mb-2">Provenance</Label>
           <ProvenanceList links={profile.summary_provenance ?? []} />
         </section>
 
         {profile.graph_snapshot && (
           <section>
-            <h3 className="mb-2 text-label uppercase text-paper-mute">Graph snapshot</h3>
-            <p className="tnum font-mono text-mono text-paper-dim">
-              {profile.graph_snapshot.dataset_id} · {profile.graph_snapshot.chunk_count} chunks ·{' '}
+            <Label as="h3" className="mb-2">Map snapshot</Label>
+            <p className="tnum font-mono text-mono text-ink-2">
+              {profile.graph_snapshot.dataset_id} · {profile.graph_snapshot.chunk_count} sections ·{' '}
               {profile.graph_snapshot.version_hash.slice(0, 8)}
             </p>
           </section>

@@ -1,13 +1,14 @@
-from typing import Any, Dict, List, Optional, Literal, Tuple, Union
-from pydantic import BaseModel, Field 
-from datetime import datetime
-from pydantic import  HttpUrl
-from pydantic import model_validator
-import uuid
 import enum
+import uuid
+from datetime import datetime
+from typing import Any, Dict, List, Literal, Optional, Tuple, Union
+
+from pydantic import BaseModel, Field, HttpUrl, model_validator
+
 
 def id_generate() -> str:
     return str(uuid.uuid4())
+
 
 class SourceType(str, enum.Enum):
     TEXT = "text"
@@ -20,31 +21,38 @@ class SourceType(str, enum.Enum):
 # This is the raw input document that gets ingested into the system, before any processing or
 class GlobalInputDocument(BaseModel):
     # Identity
-    project_id: str = Field(default_factory=lambda: str(uuid.uuid4()), description="Simulations are usually project-specific")
-    document_id: str = Field(default_factory=lambda: str(uuid.uuid4()), description="Unique identifier for the document, used for traceability and deduplication")
-    
+    project_id: str = Field(
+        default_factory=lambda: str(uuid.uuid4()),
+        description="Simulations are usually project-specific",
+    )
+    document_id: str = Field(
+        default_factory=lambda: str(uuid.uuid4()),
+        description="Unique identifier for the document, used for traceability and deduplication",
+    )
+
     # Ingestion Metadata
     source_type: SourceType = Field(..., description="Nature of the input source")
     source_path: Optional[Union[HttpUrl, str]] = None  # URL or File Path
     mime_type: Optional[str] = None  # e.g., 'application/pdf', 'text/csv'
-    
+
     # The Payload
     # 'text' remains for raw strings, but 'raw_blob' can store bytes for files
-    text: Optional[str] = None 
-    raw_content: Optional[bytes] = None 
-    
+    text: Optional[str] = None
+    raw_content: Optional[bytes] = None
+
     # Contextual Metadata
     title: Optional[str] = None
     metadata: Dict[str, Any] = Field(default_factory=dict)
-    
+
     # Versioning/Audit (Important for Future Prediction)
     timestamp: datetime = Field(default_factory=datetime.utcnow)
-    
+
     @model_validator(mode="before")
     def check_payload(cls, values):
-        if not values.get('text') and not values.get('raw_content'):
+        if not values.get("text") and not values.get("raw_content"):
             raise ValueError("Must provide either text or raw_content")
         return values
+
 
 # -------- - Processed Chunk Schema ----------
 # Each chunk is a node in the graph, with explicit properties for content, context, position
@@ -52,26 +60,27 @@ class ProcessedChunk(BaseModel):
     # --- 1. IDENTITY & TRACEABILITY (Top-Level for Fast Neo4j Indexing) ---
     chunk_id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     parent_doc_id: str  # Move back to top-level!
-    chunk_index: int    # Move back to top-level!
-    content_hash: str   # To avoid re-processing identical chunks
-    
+    chunk_index: int  # Move back to top-level!
+    content_hash: str  # To avoid re-processing identical chunks
+
     # --- 2. CONTENT LAYERS ---
-    content: str        
-    summary_context: str # Local anchor
+    content: str
+    summary_context: str  # Local anchor
     # global_summary: str  # Global anchor (Document-level context)
-    
+
     # --- 3. STRUCTURAL HIERARCHY ---
-    breadcrumb: str     
+    breadcrumb: str
     header_level: int = 0
-    
+
     # --- 4. AGENTIC PERSONA METADATA ---
-    domain_tags: List[str] 
-    expertise_level: str   # e.g., "Strategic", "Technical"
-    
+    domain_tags: List[str]
+    expertise_level: str  # e.g., "Strategic", "Technical"
+
     # --- 5. DYNAMIC EXTRA METADATA ---
     # Only put "un-searchable" or "extra" info here
     metadata: Dict[str, Any] = Field(default_factory=dict)
-    
+
+
 # Entity properties are explicit and typed, with constraints and indexing flags.
 # Relation properties are first-class, not just edge labels.
 # Identity and merge behavior are encoded in ontology, enabling stable normalization.
@@ -88,6 +97,7 @@ class PropertyConstraint(BaseModel):
     allowed_values: List[str] = Field(default_factory=list)
     max_length: Optional[int] = None
 
+
 # Defines a single attribute of an entity or relation
 class PropertyDefinition(BaseModel):
     name: str
@@ -102,7 +112,11 @@ class PropertyDefinition(BaseModel):
         "json",
         "enum",
         "uri",
-        "email"
+        "email",
+        "money",
+        "quantity",
+        "percentage",
+        "number",
     ] = "string"
     description: str = ""
     required: bool = False
@@ -120,17 +134,21 @@ class PropertyDefinition(BaseModel):
 class IdentityRule(BaseModel):
     # Which properties uniquely identify an entity in graph merge/upsert
     strategy: Literal["exact_name", "composite_key", "external_id", "hybrid"] = "hybrid"
-    key_properties: List[str] = Field(default_factory=list)   # e.g. ["name", "country"]
+    key_properties: List[str] = Field(default_factory=list)  # e.g. ["name", "country"]
     normalize_name: bool = True
     allow_fuzzy_match: bool = True
     fuzzy_threshold: float = 0.92
 
+
 # Controls how conflicting data is resolved when merging entities
 class MergePolicy(BaseModel):
     # How conflicting property values are resolved
-    conflict_resolution: Literal["most_recent", "highest_confidence", "majority_vote", "keep_all"] = "highest_confidence"
+    conflict_resolution: Literal[
+        "most_recent", "highest_confidence", "majority_vote", "keep_all"
+    ] = "highest_confidence"
     alias_property: str = "aliases"
     keep_source_provenance: bool = True
+
 
 #  Serves as a blueprint for creating and validating entity nodes in your graph.
 class EntityTypeDefinition(BaseModel):
@@ -140,7 +158,9 @@ class EntityTypeDefinition(BaseModel):
     properties: List[PropertyDefinition] = Field(default_factory=list)
     identity: IdentityRule = Field(default_factory=IdentityRule)
     merge_policy: MergePolicy = Field(default_factory=MergePolicy)
-    required_relations: List[str] = Field(default_factory=list)   # relation type names expected for this entity
+    required_relations: List[str] = Field(
+        default_factory=list
+    )  # relation type names expected for this entity
 
 
 # ---------- Relation Type Schema ----------
@@ -148,6 +168,7 @@ class EntityTypeDefinition(BaseModel):
 class CardinalityRule(BaseModel):
     source: Literal["1", "N"] = "N"
     target: Literal["1", "N"] = "N"
+
 
 # Defines logical properties of relationships, which can inform inference and querying (e.g. if A DEPENDS_ON B, then B is a prerequisite for A)
 class RelationSemantics(BaseModel):
@@ -191,17 +212,26 @@ class LocalOntology(BaseModel):
     relation_types: List[RelationTypeDefinition] = Field(default_factory=list)
     # global_constraints: Dict[str, Any] = Field(default_factory=dict)
 
-    # property decorator -> It allows you to treat a class method like a regular data attribute 
+    # property decorator -> It allows you to treat a class method like a regular data attribute
     @property
     def entity_labels(self) -> List[str]:
-        return [ent.type_name for ent in self.entity_types if ent.type_name and ent.type_name.strip()]
+        return [
+            ent.type_name
+            for ent in self.entity_types
+            if ent.type_name and ent.type_name.strip()
+        ]
+
     @property
     def relation_labels(self) -> List[str]:
-        return [rel.type_name for rel in self.relation_types if rel.type_name and rel.type_name.strip()]
+        return [
+            rel.type_name
+            for rel in self.relation_types
+            if rel.type_name and rel.type_name.strip()
+        ]
 
     # -- Entity properties with name and description for each entity type, formatted as (ENTITY_property, Description) e.g. ("MICROSERVICE_version", "Software version of the Microservice") --
     @property
-    def entity_props(self)->List[Tuple[str,str]]:
+    def entity_props(self) -> List[Tuple[str, str]]:
         entity_props = []
         for ent in self.entity_types:
             for p in ent.properties:
@@ -209,12 +239,12 @@ class LocalOntology(BaseModel):
                 # Example: ("MICROSERVICE_version", "Software version of the Microservice")
                 namespaced_name = f"{ent.type_name}_{p.name}"
                 entity_props.append((namespaced_name, p.description))
-                
+
         return entity_props
-    
+
     # -- Relation properties with name and description for each relation type, formatted as (RELATION_property, Description) e.g. ("DEPENDS_ON_since", "Date since the dependency exists") --
     @property
-    def relation_props(self)->List[Tuple[str,str]]:
+    def relation_props(self) -> List[Tuple[str, str]]:
         relation_props = []
         for rel in self.relation_types:
             for p in rel.properties:
@@ -222,24 +252,27 @@ class LocalOntology(BaseModel):
                 # Example: ("DEPENDS_ON_since", "Date since the dependency exists")
                 namespaced_name = f"{rel.type_name}_{p.name}"
                 relation_props.append((namespaced_name, p.description))
-                
+
         return relation_props
+
     # A dictionary mapping entity types to valid relation types (e.g., {"Person": ["Works_At"]}).
     # format: { "Source": ["Allowed_Rel1", "Allowed_Rel2"] }
     @property
-    def validation_schema(self)->Dict[str, Any]:
+    def validation_schema(self) -> Dict[str, Any]:
         val_schema = {
             ent.type_name: [
-                rel.type_name for rel in self.relation_types 
+                rel.type_name
+                for rel in self.relation_types
                 if ent.type_name in rel.source_entity_types
-            ] for ent in self.entity_types
+            ]
+            for ent in self.entity_types
         }
         return val_schema
-        
+
     def to_public_view(self) -> PublicOntologyView:
         return PublicOntologyView(
             entity_types=[ent.type_name for ent in self.entity_types],
-            relation_types=[rel.type_name for rel in self.relation_types]
+            relation_types=[rel.type_name for rel in self.relation_types],
         )
 
     @classmethod
@@ -256,16 +289,24 @@ class LocalOntology(BaseModel):
                     entities[ent.type_name] = ent.model_copy(deep=True)
                 else:
                     known = {p.name for p in current.properties}
-                    current.properties.extend(p for p in ent.properties if p.name not in known)
+                    current.properties.extend(
+                        p for p in ent.properties if p.name not in known
+                    )
             for rel in onto.relation_types:
                 current = relations.get(rel.type_name)
                 if current is None:
                     relations[rel.type_name] = rel.model_copy(deep=True)
                 else:
                     known = {p.name for p in current.properties}
-                    current.properties.extend(p for p in rel.properties if p.name not in known)
+                    current.properties.extend(
+                        p for p in rel.properties if p.name not in known
+                    )
         metadata = next(
             (o.metadata for o in ontologies if o.entity_types or o.relation_types),
             OntologyMetadata(),
         )
-        return cls(metadata=metadata, entity_types=list(entities.values()), relation_types=list(relations.values()))
+        return cls(
+            metadata=metadata,
+            entity_types=list(entities.values()),
+            relation_types=list(relations.values()),
+        )

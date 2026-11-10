@@ -36,21 +36,24 @@ Delivery: the payload surface is the **job-result record** (`GET /simulate/{job_
 cluster breakdown, supporting/opposing entities — §12.3 item 5) and
 deliberately omits `intent`/`selection`.
 """
+
 import hashlib
+import json
 import logging
 from dataclasses import asdict, dataclass, field
-from typing import Callable, Awaitable, Any, List, Optional
+from typing import Any, Awaitable, Callable, List, Optional
 
+from src.billing.metering import MeteringError
 from src.persona.agent import Agent, Stance
+from src.simulation.debate_config import DebateConfig
+from src.simulation.llm_batch import BatchedLLMRunner
+from src.simulation.pair_turn import CommPair, RoundResult
 from src.simulation.profile_synthesizer import ProfileSynthesizer
 from src.simulation.relevance_matrix import SelectionRow
-from src.simulation.topology import CommunicationTopology
-from src.simulation.llm_batch import BatchedLLMRunner
 from src.simulation.round_runner import RoundRunner
-from src.simulation.verdict import VerdictSynthesizer
 from src.simulation.society_memory import SocietyMemory, SocietySnapshot
-from src.simulation.debate_config import DebateConfig
-from src.simulation.pair_turn import CommPair, RoundResult
+from src.simulation.topology import CommunicationTopology
+from src.simulation.verdict import VerdictSynthesizer
 from src.utils.queryIntend import QueryIntent
 
 logger = logging.getLogger(__name__)
@@ -76,9 +79,18 @@ class SocietyNotDebatableError(RuntimeError):
         self.warnings: list[str] = list(warnings) if warnings else []
 
 
+class DebateCancelled(RuntimeError):
+    """The owner cancelled the run — a terminal `cancelled`, not a failure.
+
+    Raised from the round loop when the job's ``cancel_check`` reports the flag;
+    the job boundary maps it to the cancelled row instead of marking it failed.
+    """
+
+
 @dataclass
 class OrchestratedDebateResult:
     """Result from orchestrated debate."""
+
     converged: bool
     verdict: str
     final_stances: dict[str, str]
@@ -100,6 +112,14 @@ class OrchestratedDebateResult:
     #: Per-claim traceability (claim → provenance links), JSON-safe. Additive;
     #: None when no claim carried reachable provenance.
     provenance_by_claim: Optional[dict[str, list]] = None
+    #: Query-grounded answer markdown written by verdict synthesis (falls back
+    #: to `verdict`/summary when no LLM client or parse failure). Additive.
+    narrative: str = ""
+    #: "ok" when `narrative` is the LLM answer; "fallback" when it degraded to
+    #: the summary. Additive — lets the client tell the two apart.
+    narrative_status: str = "ok"
+    dissenting_views: list = field(default_factory=list)
+    evidence: list = field(default_factory=list)
 
 
 class DebateOrchestrator:
@@ -136,6 +156,8 @@ class DebateOrchestrator:
         intent: Optional[QueryIntent] = None,
         on_stage: Optional[StageEmitter] = None,
         distill: bool = False,
+        context: Optional[dict] = None,
+        cancel_check: Optional[Callable[[], bool]] = None,
     ) -> OrchestratedDebateResult:
         """
         Run the full debate pipeline with WebSocket streaming.
@@ -155,6 +177,16 @@ class DebateOrchestrator:
         `distill` is the S5 gate (decided by the job boundary from the
         simulation depth, D3): when True, profile synthesis makes ONE batched
         persona-distillation call for the whole selection set.
+
+        `context` is the optional user-supplied scenario context (a JSON-safe
+        dict); it is serialized into the verdict prompt so the answer weighs the
+        user's own constraints, not only the agents' arguments.
+
+        `cancel_check` is the owner's cancel flag, read at each round boundary
+        (and so between the LLM batches those rounds run). ``None`` — the
+        default — never cancels, so existing callers are unaffected; a True
+        reading raises `DebateCancelled`, which the job boundary records as the
+        run's terminal `cancelled` state.
         """
         warnings: list[str] = []
         all_turns: list = []
@@ -163,11 +195,18 @@ class DebateOrchestrator:
         stage_index = await self._emit_stage(on_stage, 0, "intake", query=query)
 
         async def _emit_selection(rows: list[SelectionRow]) -> None:
-            await ws_broadcast({"type": "selection", "rows": [asdict(row) for row in rows]})
+            await ws_broadcast(
+                {"type": "selection", "rows": [asdict(row) for row in rows]}
+            )
 
         async def _emit_profile(profile: Agent, index: int, total: int) -> None:
             await ws_broadcast(
-                {"type": "agent", "profile": profile.model_dump(mode="json"), "index": index, "total": total}
+                {
+                    "type": "agent",
+                    "profile": profile.model_dump(mode="json"),
+                    "index": index,
+                    "total": total,
+                }
             )
 
         # Step 1: Synthesize profiles from graph (S4 selection consumes the intent)
@@ -184,7 +223,9 @@ class DebateOrchestrator:
             on_selection=_emit_selection,
             on_profile=_emit_profile,
         )
-        stage_index = await self._emit_stage(on_stage, stage_index, "synthesis", agents=len(profiles))
+        stage_index = await self._emit_stage(
+            on_stage, stage_index, "synthesis", agents=len(profiles)
+        )
 
         if len(profiles) < 2:
             raise SocietyNotDebatableError(
@@ -196,32 +237,50 @@ class DebateOrchestrator:
 
         # Step 2: Run debate rounds
         rounds: list[RoundResult] = []
-        rounds_failed = 0  # rounds whose execution raised (vs. ran and produced no pairs)
-        round_runner = RoundRunner(_llm=self._llm_runner, ws_broadcast=ws_broadcast, intent=intent)
+        rounds_failed = (
+            0  # rounds whose execution raised (vs. ran and produced no pairs)
+        )
+        round_runner = RoundRunner(
+            _llm=self._llm_runner, ws_broadcast=ws_broadcast, intent=intent
+        )
         debate_history: list[dict[str, Any]] = []
         snapshot = None  # graph-side society state, read at the start of rounds >= 2
         query_hash = hashlib.sha256(query.encode("utf-8")).hexdigest()[:16]
 
         for round_num in range(1, config.max_rounds + 1):
+            # Outside the try: a cancelled run is terminal, not a round failure
+            # to be collected into `warnings` and continued past.
+            if cancel_check is not None and cancel_check():
+                raise DebateCancelled(f"debate cancelled after {len(rounds)} round(s)")
             try:
                 warnings_before = len(warnings)
 
                 pairs = await self._topology.compute_round_pairs(
-                    profiles=profiles, dataset_id=dataset_id, round_num=round_num, config=config,
+                    profiles=profiles,
+                    dataset_id=dataset_id,
+                    round_num=round_num,
+                    config=config,
                 )
                 if not pairs:
                     warnings.append(f"Round {round_num}: No pairs computed")
                     # Bootstrap: a roster too small to pair must still be able
                     # to grow, or the society deadlocks before its first round.
                     await self._maybe_activate(
-                        profiles=profiles, dataset_id=dataset_id, query=query,
-                        query_hash=query_hash, round_num=round_num, config=config,
-                        warnings=warnings, ws_broadcast=ws_broadcast,
+                        profiles=profiles,
+                        dataset_id=dataset_id,
+                        query=query,
+                        query_hash=query_hash,
+                        round_num=round_num,
+                        config=config,
+                        warnings=warnings,
+                        ws_broadcast=ws_broadcast,
                     )
                     continue
 
                 if round_num > 1:
-                    speaking = sorted({name for p in pairs for name in (p.agent_a, p.agent_b)})
+                    speaking = sorted(
+                        {name for p in pairs for name in (p.agent_a, p.agent_b)}
+                    )
                     try:
                         snapshot = await self._society_memory.read_snapshot(
                             dataset_id=dataset_id,
@@ -231,40 +290,59 @@ class DebateOrchestrator:
                             speakers=speaking,
                         )
                     except Exception as exc:
-                        warnings.append(f"Round {round_num}: society snapshot read failed: {exc}")
+                        warnings.append(
+                            f"Round {round_num}: society snapshot read failed: {exc}"
+                        )
                         snapshot = None
 
                 if snapshot is not None:
                     share = self._weighted_share(rounds, profiles)
                     if share:
-                        snapshot.consensus = {"stance": share[0], "weight_share": share[1]}
+                        snapshot.consensus = {
+                            "stance": share[0],
+                            "weight_share": share[1],
+                        }
 
                 if round_num > 1:
                     snapshot = await self._with_self_history(
-                        snapshot, pairs=pairs, dataset_id=dataset_id,
-                        query_hash=query_hash, round_num=round_num, warnings=warnings,
+                        snapshot,
+                        pairs=pairs,
+                        dataset_id=dataset_id,
+                        query_hash=query_hash,
+                        round_num=round_num,
+                        warnings=warnings,
                     )
 
                 round_result = await round_runner.execute_round(
-                    profiles=profiles, pairs=pairs, round_num=round_num,
-                    query=query, history=debate_history, society=snapshot,
+                    profiles=profiles,
+                    pairs=pairs,
+                    round_num=round_num,
+                    query=query,
+                    history=debate_history,
+                    society=snapshot,
                     max_opinions=config.snapshot_top_k,
                 )
                 rounds.append(round_result)
                 stage_index = await self._emit_stage(
-                    on_stage, stage_index, "round", round=round_num,
-                    pairs=len(round_result.pairs), turns=len(round_result.turns),
+                    on_stage,
+                    stage_index,
+                    "round",
+                    round=round_num,
+                    pairs=len(round_result.pairs),
+                    turns=len(round_result.turns),
                 )
 
                 for turn in round_result.turns:
-                    debate_history.append({
-                        "agent_name": turn.agent_name,
-                        "agent_id": turn.agent_id,
-                        "content": turn.content,
-                        "stance": turn.stance,
-                        "confidence": turn.confidence,
-                        "round": round_num,
-                    })
+                    debate_history.append(
+                        {
+                            "agent_name": turn.agent_name,
+                            "agent_id": turn.agent_id,
+                            "content": turn.content,
+                            "stance": turn.stance,
+                            "confidence": turn.confidence,
+                            "round": round_num,
+                        }
+                    )
                     all_turns.append(turn)
 
                 share = self._weighted_share([round_result], profiles)
@@ -274,32 +352,40 @@ class DebateOrchestrator:
                         "stance": share[0],
                         "weight_share": round(share[1], 4),
                         "threshold": config.convergence_threshold,
-                        "weights": {key: round(value, 4) for key, value in weights.items()},
+                        "weights": {
+                            key: round(value, 4) for key, value in weights.items()
+                        },
                     }
                     if share and weights
                     else None
                 )
-                await ws_broadcast({
-                    "type": "round",
-                    "round": round_num,
-                    "pairs": [
-                        {"agent_a": p.agent_a, "agent_b": p.agent_b, "shared_entities": p.shared_entities}
-                        for p in round_result.pairs
-                    ],
-                    "turns": [
-                        {
-                            "agent_id": t.agent_id,
-                            "agent_name": t.agent_name,
-                            "content": t.content,
-                            "stance": t.stance,
-                            "confidence": t.confidence,
-                            "references": t.references,
-                        }
-                        for t in round_result.turns
-                    ],
-                    "consensus": consensus,
-                    "warnings": list(warnings[warnings_before:]),
-                })
+                await ws_broadcast(
+                    {
+                        "type": "round",
+                        "round": round_num,
+                        "pairs": [
+                            {
+                                "agent_a": p.agent_a,
+                                "agent_b": p.agent_b,
+                                "shared_entities": p.shared_entities,
+                            }
+                            for p in round_result.pairs
+                        ],
+                        "turns": [
+                            {
+                                "agent_id": t.agent_id,
+                                "agent_name": t.agent_name,
+                                "content": t.content,
+                                "stance": t.stance,
+                                "confidence": t.confidence,
+                                "references": t.references,
+                            }
+                            for t in round_result.turns
+                        ],
+                        "consensus": consensus,
+                        "warnings": list(warnings[warnings_before:]),
+                    }
+                )
 
                 # Commit this round to the graph (idempotent; failure-isolated)
                 try:
@@ -310,20 +396,31 @@ class DebateOrchestrator:
                         profile_map={p.identity.name: p for p in profiles},
                     )
                     if receipt.get("failed"):
-                        warnings.append(f"Round {round_num}: commit failed: {receipt.get('error')}")
+                        warnings.append(
+                            f"Round {round_num}: commit failed: {receipt.get('error')}"
+                        )
                     await ws_broadcast({"type": "commit", **receipt})
                 except Exception as exc:
                     warnings.append(f"Round {round_num}: commit failed: {exc}")
 
                 await self._maybe_activate(
-                    profiles=profiles, dataset_id=dataset_id, query=query,
-                    query_hash=query_hash, round_num=round_num, config=config,
-                    warnings=warnings, ws_broadcast=ws_broadcast,
+                    profiles=profiles,
+                    dataset_id=dataset_id,
+                    query=query,
+                    query_hash=query_hash,
+                    round_num=round_num,
+                    config=config,
+                    warnings=warnings,
+                    ws_broadcast=ws_broadcast,
                 )
 
                 if self._check_convergence(rounds, profiles, config=config):
                     break
 
+            except MeteringError:
+                # A metering failure is not a round failure to absorb — the
+                # job must stop before its next LLM call (R9).
+                raise
             except Exception as exc:
                 rounds_failed += 1
                 warnings.append(f"Round {round_num} failed: {exc}")
@@ -350,15 +447,23 @@ class DebateOrchestrator:
         converged = self._check_convergence(rounds, profiles, config=config)
         share = self._weighted_share(rounds[-2:], profiles)
         stage_index = await self._emit_stage(
-            on_stage, stage_index, "convergence",
-            converged=converged, rounds_executed=len(rounds),
+            on_stage,
+            stage_index,
+            "convergence",
+            converged=converged,
+            rounds_executed=len(rounds),
             share=round(share[1], 4) if share else None,
             threshold=config.convergence_threshold,
         )
 
         # Step 3: Synthesize verdict (async path -- no asyncio.run collision)
         verdict = await self._verdict_synthesizer.asynthesize(
-            rounds=rounds, profiles=profiles, llm_client=llm_client
+            rounds=rounds,
+            profiles=profiles,
+            llm_client=llm_client,
+            query=query,
+            scenario=json.dumps(context) if context else "",
+            run_id=dataset_id,
         )
         cluster_details = None
         if verdict is not None and verdict.cluster_details:
@@ -373,8 +478,11 @@ class DebateOrchestrator:
                 for claim, links in verdict.provenance_by_claim.items()
             }
         await self._emit_stage(
-            on_stage, stage_index, "verdict",
-            converged=converged, rounds_executed=len(rounds),
+            on_stage,
+            stage_index,
+            "verdict",
+            converged=converged,
+            rounds_executed=len(rounds),
         )
 
         # Step 4: Collect final stances
@@ -402,6 +510,10 @@ class DebateOrchestrator:
             weight_share=verdict.weight_share if verdict else None,
             contested=verdict.contested if verdict else None,
             provenance_by_claim=provenance_by_claim,
+            narrative=verdict.narrative if verdict else "",
+            narrative_status=verdict.narrative_status if verdict else "ok",
+            dissenting_views=verdict.dissenting_views if verdict else [],
+            evidence=verdict.evidence if verdict else [],
         )
 
     async def _maybe_activate(
@@ -432,7 +544,9 @@ class DebateOrchestrator:
                 dataset_id=dataset_id,
                 query_hash=query_hash,
                 last_round=round_num,
-                max_new=min(config.max_new_agents_per_round, config.max_agents - len(profiles)),
+                max_new=min(
+                    config.max_new_agents_per_round, config.max_agents - len(profiles)
+                ),
             )
             if candidates:
                 new_profiles = await self._profile_synthesizer.synthesize_from_names(
@@ -449,12 +563,14 @@ class DebateOrchestrator:
                 # event and no warning — nothing was activated.
                 if new_profiles:
                     profiles.extend(new_profiles)
-                    await ws_broadcast({
-                        "type": "activation",
-                        "round": round_num,
-                        "agents": [p.identity.name for p in new_profiles],
-                        "reasons": {c.agent_name: c.reason for c in candidates},
-                    })
+                    await ws_broadcast(
+                        {
+                            "type": "activation",
+                            "round": round_num,
+                            "agents": [p.identity.name for p in new_profiles],
+                            "reasons": {c.agent_name: c.reason for c in candidates},
+                        }
+                    )
                     warnings.append(
                         f"Round {round_num}: activated {len(new_profiles)} agents: "
                         + ", ".join(p.identity.name for p in new_profiles)
@@ -484,8 +600,10 @@ class DebateOrchestrator:
         for name in speaking:
             try:
                 rows = await self._society_memory.read_self_history(
-                    dataset_id=dataset_id, query_hash=query_hash,
-                    agent_name=name, through_round=round_num,
+                    dataset_id=dataset_id,
+                    query_hash=query_hash,
+                    agent_name=name,
+                    through_round=round_num,
                 )
             except Exception as exc:
                 warnings.append(
@@ -517,17 +635,26 @@ class DebateOrchestrator:
         try:
             await on_stage({"type": "stage", "stage": stage, "index": index, **fields})
         except Exception as exc:
-            logger.warning("stage event %r (index %d) not delivered: %s", stage, index, exc)
+            logger.warning(
+                "stage event %r (index %d) not delivered: %s", stage, index, exc
+            )
         return index + 1
 
-    def _weighted_share(self, rounds: list[RoundResult], profiles: List[Agent]) -> Optional[tuple[str, float]]:
+    def _weighted_share(
+        self, rounds: list[RoundResult], profiles: List[Agent]
+    ) -> Optional[tuple[str, float]]:
         """(dominant stance, weight share) via CIOR weights. None when no turns."""
         clusters: dict[Stance, list] = {
-            Stance.POSITIVE: [], Stance.NEGATIVE: [], Stance.NEUTRAL: [], Stance.AMBIVALENT: [],
+            Stance.POSITIVE: [],
+            Stance.NEGATIVE: [],
+            Stance.NEUTRAL: [],
+            Stance.AMBIVALENT: [],
         }
         for turn in (t for rnd in rounds for t in rnd.turns):
             try:
-                stance = Stance(turn.stance) if isinstance(turn.stance, str) else turn.stance
+                stance = (
+                    Stance(turn.stance) if isinstance(turn.stance, str) else turn.stance
+                )
                 clusters[stance].append(turn)
             except ValueError:
                 clusters[Stance.NEUTRAL].append(turn)
@@ -545,24 +672,38 @@ class DebateOrchestrator:
             return None
         dominant = max(weights, key=lambda s: weights[s])
         share_val = max(weights.values()) / total
-        return (dominant.value if hasattr(dominant, "value") else str(dominant), share_val)
+        return (
+            dominant.value if hasattr(dominant, "value") else str(dominant),
+            share_val,
+        )
 
-    def _round_weight_shares(self, round_result: RoundResult, profiles: List[Agent]) -> Optional[dict[str, float]]:
+    def _round_weight_shares(
+        self, round_result: RoundResult, profiles: List[Agent]
+    ) -> Optional[dict[str, float]]:
         """Normalized CIOR weight share per stance for one round (sums to 1). None when no turns."""
         clusters: dict[Stance, list] = {
-            Stance.POSITIVE: [], Stance.NEGATIVE: [], Stance.NEUTRAL: [], Stance.AMBIVALENT: [],
+            Stance.POSITIVE: [],
+            Stance.NEGATIVE: [],
+            Stance.NEUTRAL: [],
+            Stance.AMBIVALENT: [],
         }
         for turn in round_result.turns:
             try:
-                stance = Stance(turn.stance) if isinstance(turn.stance, str) else turn.stance
+                stance = (
+                    Stance(turn.stance) if isinstance(turn.stance, str) else turn.stance
+                )
                 clusters[stance].append(turn)
             except ValueError:
                 clusters[Stance.NEUTRAL].append(turn)
         if not profiles:
-            weights: dict[Stance, float] = {stance: float(len(turns)) for stance, turns in clusters.items()}
+            weights: dict[Stance, float] = {
+                stance: float(len(turns)) for stance, turns in clusters.items()
+            }
         else:
             profile_map = {p.identity.name: p for p in profiles}
-            weights = dict(self._verdict_synthesizer._calibrate_cior(clusters, profile_map))
+            weights = dict(
+                self._verdict_synthesizer._calibrate_cior(clusters, profile_map)
+            )
         total = sum(weights.values())
         if total <= 0:
             return None

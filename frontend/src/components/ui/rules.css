@@ -1,0 +1,74 @@
+/*
+ * The rule vocabulary — §14.1 of `docs/FRONTEND_PRODUCTION_PLAN.md`.
+ *
+ * The rule is a border on the content itself, not a divider element: one hairline, on the thing
+ * it separates, in the rule token.
+ *
+ * The colour comes from `--rule-color`, so one hairline serves both grounds: the light surfaces
+ * leave it unset and it falls back to the light rule token, and a dark ground — the map's own
+ * surface — binds the map's rule instead. The dark band binds it the same way, so the light rule
+ * disappears into the map.
+ */
+
+@layer components {
+  .rule-t {
+    border-top: 1px solid var(--rule-color, var(--color-rule));
+  }
+
+  .rule-b {
+    border-bottom: 1px solid var(--rule-color, var(--color-rule));
+  }
+
+  .rule-y {
+    border-block: 1px solid var(--rule-color, var(--color-rule));
+  }
+
+  /* The column hairline — the auth layout's two columns are separated by one rule, not a band. */
+  .rule-l {
+    border-left: 1px solid var(--rule-color, var(--color-rule));
+  }
+
+  .rule-r {
+    border-right: 1px solid var(--rule-color, var(--color-rule));
+  }
+
+  .divide-rule > * + * {
+    border-top: 1px solid var(--rule-color, var(--color-rule));
+  }
+
+  /* The dark tone — the map's own rule, named by the caller. */
+  .rule-dark {
+    --rule-color: var(--color-map-rule);
+  }
+
+  /* The decorative tone — a hairline for a divider between things that are not records. */
+  .rule-hair {
+    --rule-color: var(--color-hairline);
+  }
+
+  /* On the dark band the rule is the map's own rule — the light one disappears into the map. */
+  .band--dark {
+    --rule-color: var(--color-map-rule);
+  }
+
+  /* §8.9 Loading — a 1.2s shimmer between sand and its lit step. No spinner. */
+  .skeleton-shimmer {
+    background-image: linear-gradient(
+      90deg,
+      var(--color-sand) 25%,
+      #f3ede2 50%,
+      var(--color-sand) 75%
+    );
+    background-size: 200% 100%;
+    animation: quiet-shimmer 1.2s linear infinite;
+  }
+}
+
+@keyframes quiet-shimmer {
+  from {
+    background-position: 200% 0;
+  }
+  to {
+    background-position: -200% 0;
+  }
+}

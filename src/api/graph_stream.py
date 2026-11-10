@@ -8,6 +8,7 @@ enough. Re-subscribing after close() starts a fresh stream: close() clears the
 job's entries, so a reconnect simply sees nothing published before it
 re-subscribed.
 """
+
 import asyncio
 from dataclasses import dataclass, field
 from typing import AsyncIterator, Optional
@@ -22,8 +23,13 @@ class GraphDelta:
     turns into an `{"type": "error", ...}` frame instead of a `delta` frame.
     It defaults to `None`, so error-free constructions are unchanged.
     """
-    nodes: list[dict] = field(default_factory=list)   # each {id, label, type}
-    edges: list[dict] = field(default_factory=list)   # each {source, target, label}
+
+    nodes: list[dict] = field(
+        default_factory=list
+    )  # each {id, label, type, kind, properties}
+    edges: list[dict] = field(
+        default_factory=list
+    )  # each {source, target, label, properties}
     new_labels: list[str] = field(default_factory=list)
     chunk_id: str = ""
     progress: float = 0.0

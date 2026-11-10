@@ -1,0 +1,344 @@
+name: CI/CD
+
+# Production pipeline.
+#   pull_request -> main : lint, typecheck, test, frontend, security and an
+#                          image build run in parallel; nothing is pushed.
+#   push -> main / v* tag: same checks, then `publish` pushes the images to the
+#                          PRIVATE GitHub Container Registry, then deploy.
+# `ci-ok` is the single required status check for branch protection.
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+# Least privilege by default; jobs that need more ask for it themselves.
+permissions:
+  contents: read
+
+# A newer run supersedes an older one for the same PR/branch, but a run on
+# main or a tag always finishes so a push is never half-published.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' && github.ref_type != 'tag' }}
+
+env:
+  PYTHON_VERSION: "3.11"
+  NODE_VERSION: "24"
+  REGISTRY: ghcr.io
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # lint — ruff (correctness + import order) and black (formatting), pinned to
+  # the versions in requirements-dev.txt so CI matches local runs.
+  # ---------------------------------------------------------------------------
+  lint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - name: Install pinned linters
+        run: |
+          python -m pip install --upgrade pip
+          grep -E '^(ruff|black)==' requirements-dev.txt | xargs python -m pip install
+      - name: ruff check
+        run: ruff check .
+      - name: black --check
+        run: black --check .
+
+  # ---------------------------------------------------------------------------
+  # typecheck — mypy, scoped to the modules added by the production work
+  # (controller ruling R25); widen the path list as legacy modules are typed.
+  # ---------------------------------------------------------------------------
+  typecheck:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: requirements.txt
+      - name: Install application (pinned) + type-checker
+        run: |
+          python -m pip install --upgrade pip
+          grep -E '^[A-Za-z0-9._-]+==' requirements-dev.txt | grep -vE '^llama-' > "$RUNNER_TEMP/constraints.txt"
+          pip install -r requirements.txt -c "$RUNNER_TEMP/constraints.txt"
+          pip install mypy -c "$RUNNER_TEMP/constraints.txt"
+      - name: mypy
+        run: |
+          mypy \
+            src/config \
+            src/db \
+            src/auth \
+            src/jobs \
+            src/api/errors.py \
+            src/api/limits.py
+
+  # ---------------------------------------------------------------------------
+  # test — pytest against real Postgres / Redis / Neo4j service containers,
+  # with the same migration step the deploy job runs.
+  # ---------------------------------------------------------------------------
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: societas
+          POSTGRES_PASSWORD: societas
+          POSTGRES_DB: societas
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U societas"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+      redis:
+        image: redis:7
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+      neo4j:
+        image: neo4j:5
+        env:
+          # Auth disabled: the container only lives for this job.
+          NEO4J_AUTH: none
+        ports:
+          - 7687:7687
+        options: >-
+          --health-cmd "wget --no-verbose --tries=1 --spider localhost:7474 || exit 1"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql+psycopg://societas:societas@localhost:5432/societas
+      REDIS_URL: redis://localhost:6379/0
+      NEO4J_URI: bolt://localhost:7687
+      # The app refuses to build a Neo4j config without all four values. The
+      # container runs with auth disabled, so these are placeholders it ignores.
+      NEO4J_USERNAME: neo4j
+      NEO4J_PASSWORD: ci-placeholder
+      NEO4J_DATABASE: neo4j
+      # Non-secret placeholder: tests mock every LLM call and never dial NVIDIA.
+      # EXTRACTION_API_KEY is intentionally absent — it outranks this NIM key in
+      # resolution, and the unchanged credential tests assert the NIM values.
+      NVIDIA_NIM_API_KEY: test-nim-key
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: requirements.txt
+      # requirements.txt is unpinned, so a bare install drifts to whatever is
+      # newest (FastAPI/Starlette/SQLAlchemy/redis majors have already broken the
+      # suite). Constrain every install to the known-good versions frozen in
+      # requirements-dev.txt (llama-index-* excluded: that freeze pins llama-index and
+      # llama-index-core to versions that cannot be installed together).
+      - name: Install dependencies (pinned)
+        run: |
+          python -m pip install --upgrade pip
+          grep -E '^[A-Za-z0-9._-]+==' requirements-dev.txt | grep -vE '^llama-' > "$RUNNER_TEMP/constraints.txt"
+          pip install -r requirements.txt -c "$RUNNER_TEMP/constraints.txt"
+          # Test-only: the S3/account/ingest/retention suites import moto. It is
+          # not a runtime dep, so it lives here rather than in requirements.txt.
+          pip install "moto[s3]" -c "$RUNNER_TEMP/constraints.txt"
+      - name: Apply migrations
+        run: python -m alembic upgrade head
+      - name: pytest
+        run: python -m pytest -q
+
+  # ---------------------------------------------------------------------------
+  # frontend — lint, type-check, unit tests, production build.
+  # ---------------------------------------------------------------------------
+  frontend:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install dependencies
+        run: npm ci
+      - name: Lint
+        run: npm run lint
+      - name: Type-check
+        run: npx tsc --noEmit
+      - name: Unit tests
+        run: npm run test
+      - name: Build
+        run: npm run build
+
+  # ---------------------------------------------------------------------------
+  # security — dependency + static analysis. Reported on every run but not
+  # blocking yet: flip `continue-on-error` once the legacy findings are triaged.
+  # ---------------------------------------------------------------------------
+  security:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - name: Install scanners
+        run: python -m pip install --upgrade pip pip-audit bandit
+      - name: pip-audit (known-vulnerable dependencies)
+        run: pip-audit -r requirements.txt
+      - name: bandit (static analysis, medium severity and up)
+        run: bandit -r src -ll
+
+  # ---------------------------------------------------------------------------
+  # images — prove both images build. Runs in parallel with the checks on every
+  # event and never pushes, so a broken Dockerfile shows up on the PR.
+  # ---------------------------------------------------------------------------
+  images:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [api, worker]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - name: Build ${{ matrix.target }}
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          target: ${{ matrix.target }}
+          push: false
+          cache-from: type=gha,scope=${{ matrix.target }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.target }}
+
+  # ---------------------------------------------------------------------------
+  # publish — push events only (main / v* tags), and only after every check and
+  # the build are green. Images go to the PRIVATE registry (GHCR), tagged with
+  # the commit sha. Each pushed image is then probed anonymously: if it can be
+  # pulled without credentials the job fails, so a public image never goes
+  # unnoticed.
+  # ---------------------------------------------------------------------------
+  publish:
+    if: github.event_name == 'push'
+    needs: [lint, typecheck, test, frontend, images]
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [api, worker]
+    steps:
+      - uses: actions/checkout@v4
+      # Registry paths must be lowercase; github.repository is not.
+      - name: Resolve image name
+        run: echo "IMAGE=${REGISTRY}/${GITHUB_REPOSITORY,,}/societas-${{ matrix.target }}" >> "$GITHUB_ENV"
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Image metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.IMAGE }}
+          tags: |
+            type=sha,format=long
+            type=ref,event=branch
+            type=semver,pattern={{version}}
+      - name: Build and push ${{ matrix.target }}
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          target: ${{ matrix.target }}
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha,scope=${{ matrix.target }}
+      - name: Assert the image is private
+        run: |
+          path="${IMAGE#${REGISTRY}/}"
+          token=$(curl -fsS "https://${REGISTRY}/token?scope=repository:${path}:pull" | jq -r .token)
+          code=$(curl -sS -o /dev/null -w '%{http_code}'             -H "Authorization: Bearer ${token}"             -H "Accept: application/vnd.oci.image.index.v1+json, application/vnd.docker.distribution.manifest.v2+json"             "https://${REGISTRY}/v2/${path}/manifests/sha-${GITHUB_SHA}")
+          echo "anonymous manifest request: HTTP ${code}"
+          if [ "${code}" = "200" ]; then
+            echo "::error::${IMAGE} is publicly pullable. Set the package to Private (Package settings -> Danger Zone -> Change visibility)."
+            exit 1
+          fi
+
+  # ---------------------------------------------------------------------------
+  # ci-ok — the one required check for branch protection. Fails if any job it
+  # depends on failed or was cancelled; `security` is advisory and excluded.
+  # ---------------------------------------------------------------------------
+  ci-ok:
+    if: always()
+    needs: [lint, typecheck, test, frontend, images, publish]
+    runs-on: ubuntu-latest
+    steps:
+      - name: All required jobs passed
+        run: |
+          echo '${{ toJSON(needs) }}'
+          test "${{ contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') }}" = "false"
+
+  # ---------------------------------------------------------------------------
+  # deploy — main only, behind the `production` environment (add required
+  # reviewers there for a manual approval gate). Stays inert until the
+  # repository variable DEPLOY_ENABLED is 'true' and a host step is added.
+  # The images to roll out are the ones tagged sha-<github.sha> above.
+  # ---------------------------------------------------------------------------
+  deploy:
+    needs: ci-ok
+    if: >-
+      github.event_name == 'push' && github.ref == 'refs/heads/main'
+      && vars.DEPLOY_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: production
+    concurrency:
+      group: deploy-production
+      cancel-in-progress: false
+    env:
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: requirements.txt
+      - name: Install dependencies (pinned)
+        run: |
+          python -m pip install --upgrade pip
+          grep -E '^[A-Za-z0-9._-]+==' requirements-dev.txt | grep -vE '^llama-' > "$RUNNER_TEMP/constraints.txt"
+          pip install -r requirements.txt -c "$RUNNER_TEMP/constraints.txt"
+      - name: Apply migrations to the production database
+        run: python -m alembic upgrade head
+      # -----------------------------------------------------------------------
+      # CONFIGURE THE DEPLOY TARGET HERE (ssh + docker compose pull/up, ECS/Fly/
+      # Render CLI, kubectl rollout, ...) using the sha-${{ github.sha }} tags of
+      # the api and worker images. Nothing ships anywhere until this is added.
+      # -----------------------------------------------------------------------

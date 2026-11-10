@@ -1,6 +1,6 @@
 import type { DebateConfig } from '../api/types'
 import { parsePairId } from './events'
-import type { AgentProfile, ClusterSummary, ConsensusInfo, PairInfo, QueryIntent, RunEvent, SelectionRow, Stance, TurnInfo } from './events'
+import type { AgentProfile, ClusterSummary, ConsensusInfo, DissentingView, EvidenceItem, PairInfo, QueryIntent, RunEvent, SelectionRow, Stance, TurnInfo, WrittenLink, WrittenNode } from './events'
 
 export interface StageEntry {
   stage: string
@@ -21,6 +21,10 @@ export interface RunCommit {
   opinions: number
   edges: number
   failed: boolean
+  /** The entries the transaction wrote, retained verbatim so the map recomposes from state (D7). */
+  writtenNodes: WrittenNode[]
+  /** The connections the transaction wrote, retained verbatim. */
+  writtenLinks: WrittenLink[]
 }
 
 export interface RunActivation {
@@ -32,6 +36,11 @@ export interface RunActivation {
 export interface RunVerdict {
   converged: boolean
   summary: string
+  narrative: string
+  /** "ok" | "fallback" — "fallback" means the narrative degraded to `summary` (§17.3). */
+  narrativeStatus: string
+  dissentingViews: DissentingView[]
+  evidence: EvidenceItem[]
   confidence: number | null
   clusters: Record<Stance, ClusterSummary> | null
   finalStances: Record<string, string>
@@ -60,6 +69,12 @@ export interface RunState {
   warnings: string[]
   error: string | null
   lastIndex: number
+  /**
+   * Monotonic count of applied events. A cheap primitive invalidation key for derived views — the map
+   * composer rebuilds against `version`, so a frame that folds a burst of events rebuilds the map once
+   * (the store `set`s the folded run once per frame), not once per event.
+   */
+  version: number
 }
 
 export const initialState: RunState = {
@@ -81,10 +96,11 @@ export const initialState: RunState = {
   warnings: [],
   error: null,
   lastIndex: -1,
+  version: 0,
 }
 
 /** Pure and total — unknown events are warnings, never crashes (forward-compatible with backend additions). */
-export function applyEvent(state: RunState, event: RunEvent, now: number): RunState {
+function reduceEvent(state: RunState, event: RunEvent, now: number): RunState {
   const base = state.status === 'queued' && event.type !== 'ping' && event.type !== 'ack' ? { ...state, status: 'running' as const } : state
 
   switch (event.type) {
@@ -120,8 +136,18 @@ export function applyEvent(state: RunState, event: RunEvent, now: number): RunSt
     case 'commit':
       return {
         ...base,
-        commits: [...base.commits, { round: event.round, opinions: event.opinions, edges: event.edges, failed: event.failed ?? false }],
-        warnings: event.failed ? [...base.warnings, `Round ${event.round}: commit failed: ${event.error ?? 'unknown error'}`] : base.warnings,
+        commits: [
+          ...base.commits,
+          {
+            round: event.round,
+            opinions: event.opinions,
+            edges: event.edges,
+            failed: event.failed ?? false,
+            writtenNodes: event.written_nodes ?? [],
+            writtenLinks: event.written_links ?? [],
+          },
+        ],
+        warnings: event.failed ? [...base.warnings, `Pass ${event.round}: commit failed: ${event.error ?? 'unknown error'}`] : base.warnings,
       }
     case 'activation':
       return { ...base, activations: [...base.activations, { round: event.round, agents: event.agents, reasons: event.reasons }] }
@@ -132,6 +158,10 @@ export function applyEvent(state: RunState, event: RunEvent, now: number): RunSt
         verdict: {
           converged: event.converged,
           summary: event.verdict,
+          narrative: event.narrative ?? '',
+          narrativeStatus: event.narrative_status ?? 'ok',
+          dissentingViews: event.dissenting_views ?? [],
+          evidence: event.evidence ?? [],
           confidence: event.confidence_score ?? null,
           clusters: event.cluster_details ?? null,
           finalStances: event.final_stances ?? {},
@@ -151,6 +181,14 @@ export function applyEvent(state: RunState, event: RunEvent, now: number): RunSt
       return { ...base, warnings: [...base.warnings, `Unhandled event type: ${String(unknown.type)}`] }
     }
   }
+}
+
+/**
+ * The only way state ever advances. Stamps the monotonic `version` — one bump per applied event, so a
+ * fold over N events lands on `initial.version + N` however it is batched (§11.2).
+ */
+export function applyEvent(state: RunState, event: RunEvent, now: number): RunState {
+  return { ...reduceEvent(state, event, now), version: state.version + 1 }
 }
 
 /** The only way state is ever built — live WS fold and reopened run docs go through the same path (§11.2). */

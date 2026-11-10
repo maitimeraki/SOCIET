@@ -1,4 +1,6 @@
+import { useEffect, useRef } from 'react'
 import { CheckCircle, XCircle } from '@phosphor-icons/react'
+import { ruleClasses } from '../ui/Rule'
 
 export type RailStageState = 'pending' | 'running' | 'done' | 'failed'
 
@@ -18,36 +20,55 @@ export default function StageRail({
   activeKey?: string
   onSelect?: (key: string) => void
 }) {
+  const rail = useRef<HTMLElement>(null)
+
+  // The rail scrolls inside its own row at 390; the current step must be visible without the customer
+  // discovering the scroll. The step change is the motion, so the scroll is instant — not smooth.
+  useEffect(() => {
+    rail.current
+      ?.querySelector('[aria-current="step"]')
+      ?.scrollIntoView({ block: 'nearest', inline: 'center', behavior: 'auto' })
+  }, [activeKey])
+
   return (
-    <nav aria-label="Run stages" className="flex flex-wrap items-center gap-x-3 gap-y-2 border-b border-ink-700 pb-3">
+    <nav
+      ref={rail}
+      aria-label="Run stages"
+      // A scroll container that only a pointer can reveal is not reachable by keyboard; focusing the
+      // rail lets the arrow keys scroll it.
+      tabIndex={0}
+      className={`flex flex-nowrap items-center gap-x-3 overflow-x-auto ${ruleClasses('bottom')} pb-3`}
+    >
       {stages.map((stage, index) => {
         const glyph =
           stage.state === 'done' ? (
-            <CheckCircle size={16} className="text-good" aria-hidden="true" />
+            // Settled is ink, not a stance hue — --color-pos-light is the POSITIVE legend's green and
+            // means "a station argued for the proposal", never "this stage finished" (§3.1, §7).
+            <CheckCircle size={16} className="text-ink-2" aria-hidden="true" />
           ) : stage.state === 'running' ? (
             <span aria-hidden="true" className="h-2.5 w-2.5 animate-pulse rounded-full bg-accent" />
           ) : stage.state === 'failed' ? (
-            <XCircle size={16} className="text-critical" aria-hidden="true" />
+            <XCircle size={16} className="text-danger" aria-hidden="true" />
           ) : (
-            <span aria-hidden="true" className="h-2.5 w-2.5 rounded-full border border-paper-faint" />
+            <span aria-hidden="true" className="h-2.5 w-2.5 rounded-full border border-ink-3" />
           )
         const current = stage.key === activeKey
         const inner = (
-          <span className={`inline-flex items-center gap-2 ${current ? 'text-paper' : 'text-paper-dim'}`}>
+          <span className={`inline-flex items-center gap-2 whitespace-nowrap ${current ? 'text-ink' : 'text-ink-2'}`}>
             {glyph}
             <span className="text-label uppercase">{stage.label}</span>
-            {stage.note && <span className="tnum font-mono text-micro text-paper-mute">{stage.note}</span>}
+            {stage.note && <span className="tnum font-mono text-micro text-ink-3">{stage.note}</span>}
           </span>
         )
         return (
-          <div key={stage.key} className="flex items-center gap-3">
-            {index > 0 && <span aria-hidden="true" className="h-px w-4 bg-ink-600" />}
+          <div key={stage.key} className="flex shrink-0 items-center gap-3">
+            {index > 0 && <span aria-hidden="true" className="h-px w-4 bg-rule" />}
             {onSelect ? (
               <button
                 type="button"
                 aria-current={current ? 'step' : undefined}
                 onClick={() => onSelect(stage.key)}
-                className="rounded-[4px] px-1 py-0.5 transition-colors hover:bg-ink-800"
+                className="rounded-xs px-1 py-0.5 transition-colors duration-state hover:bg-sand"
               >
                 {inner}
               </button>

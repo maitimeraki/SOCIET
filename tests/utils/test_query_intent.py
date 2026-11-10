@@ -2,6 +2,7 @@
 
 The LiteLLM client is stubbed here — no test in this file touches a provider.
 """
+
 import inspect
 import json
 
@@ -12,15 +13,17 @@ from src.utils import queryIntend as qi
 
 QUERY = "Should the company expand into the European market?"
 
-LLM_JSON = json.dumps({
-    "core_question": "Should the company expand into Europe?",
-    "domain_tags": ["economic", "legal"],
-    "direct_keywords": ["expansion", "Europe"],
-    "latent_sectors": ["logistics"],
-    "entity_frame": ["European Union"],
-    "search_perspectives": ["Economic", "Legal"],
-    "stance_axis": "support = favouring European expansion",
-})
+LLM_JSON = json.dumps(
+    {
+        "core_question": "Should the company expand into Europe?",
+        "domain_tags": ["economic", "legal"],
+        "direct_keywords": ["expansion", "Europe"],
+        "latent_sectors": ["logistics"],
+        "entity_frame": ["European Union"],
+        "search_perspectives": ["Economic", "Legal"],
+        "stance_axis": "support = favouring European expansion",
+    }
+)
 
 INTENT_FIELDS = {
     "core_question",
@@ -44,14 +47,18 @@ class StubClient:
         self.error = error
         self.calls: list[dict] = []
 
-    async def generate(self, system_prompt, user_prompt, provider=None, model=None, temperature=None):
-        self.calls.append({
-            "system_prompt": system_prompt,
-            "user_prompt": user_prompt,
-            "provider": provider,
-            "model": model,
-            "temperature": temperature,
-        })
+    async def generate(
+        self, system_prompt, user_prompt, provider=None, model=None, temperature=None
+    ):
+        self.calls.append(
+            {
+                "system_prompt": system_prompt,
+                "user_prompt": user_prompt,
+                "provider": provider,
+                "model": model,
+                "temperature": temperature,
+            }
+        )
         if self.error:
             raise self.error
         return self.reply
@@ -98,7 +105,9 @@ async def test_expand_user_query_parses_json_wrapped_in_fences():
 async def test_llm_failure_returns_deterministic_fallback(caplog):
     stub = StubClient(error=RuntimeError("provider down"))
 
-    intent = await _extractor(stub).expand_user_query(QUERY, selected_domains=["legal", "economic"])
+    intent = await _extractor(stub).expand_user_query(
+        QUERY, selected_domains=["legal", "economic"]
+    )
 
     assert intent.core_question == QUERY
     assert intent.domain_tags == ["legal", "economic"]
@@ -173,7 +182,9 @@ def test_model_default_is_the_analysis_tier(monkeypatch):
 async def test_expand_user_query_sends_the_analysis_model_by_default():
     stub = StubClient(reply=LLM_JSON)
 
-    intent = await qi.QueryIntend(provider="openai", client=stub).expand_user_query(QUERY)
+    intent = await qi.QueryIntend(provider="openai", client=stub).expand_user_query(
+        QUERY
+    )
 
     assert stub.calls[0]["model"] == LLMConfig.analysis_model
     assert intent.llm_model == LLMConfig.analysis_model

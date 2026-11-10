@@ -5,8 +5,6 @@ import { startGraphBuild, startOntology } from '../api/rest'
 import { pollJob } from '../api/poll'
 import type { GraphJobResult, JobStatus } from '../api/types'
 import { useDraftStore } from '../wizard/draftStore'
-import StageRail from '../components/common/StageRail'
-import GraphCanvas from '../components/graph/GraphCanvas'
 import StageLine from '../components/graph/StageLine'
 import ProgressBar from '../components/graph/ProgressBar'
 import SchemaCard from '../components/graph/SchemaCard'
@@ -14,14 +12,14 @@ import RelationTable from '../components/graph/RelationTable'
 import StatRow from '../components/graph/StatRow'
 import JobError from '../components/graph/JobError'
 import Button from '../components/ui/Button'
+import { ruleClasses } from '../components/ui/Rule'
 import { fmtInt } from '../utils/format'
 
 type Phase = 'ontology' | 'build' | 'done' | 'failed'
 
-export default function GraphPage() {
+export default function GraphPage({ onFailureChange }: { onFailureChange?: (failed: boolean) => void }) {
   const navigate = useNavigate()
   const datasetId = useDraftStore((s) => s.datasetId)
-  const graphJobId = useDraftStore((s) => s.graphJobId)
   const setJobs = useDraftStore((s) => s.setJobs)
   const setGraphSummary = useDraftStore((s) => s.setGraphSummary)
   const [phase, setPhase] = useState<Phase>('ontology')
@@ -36,6 +34,12 @@ export default function GraphPage() {
     if (job.result) setResult(job.result)
   }, [])
 
+  // Report the failure up so the workspace rail shows a failed stage rather than a pulse that would
+  // contradict this body's JobError. The phase machine stays here; only the boolean leaves.
+  useEffect(() => {
+    onFailureChange?.(phase === 'failed')
+  }, [phase, onFailureChange])
+
   const run = useCallback(async () => {
     const draft = useDraftStore.getState()
     const readyDocs = draft.docs.filter((doc) => doc.status === 'ready')
@@ -49,7 +53,10 @@ export default function GraphPage() {
         setJobs({ ontologyJobId: ontologyId })
       }
       const ontologyJob = await pollJob(ontologyId, applyTick, pollOptions)
-      if (ontologyJob.status === 'failed') {
+      // R42: `poll.ts` now treats `cancelled` as terminal, so a cancelled job must fail this branch —
+      // testing only for `failed` would let it fall through as a success. Graph jobs settle at
+      // `completed` (src/jobs/tasks.py), never the debate's `complete`.
+      if (ontologyJob.status !== 'completed') {
         setPhase('failed')
         setError(ontologyJob.error ?? 'unknown error')
         return
@@ -58,12 +65,12 @@ export default function GraphPage() {
       let buildId = useDraftStore.getState().graphJobId
       setPhase('build') // before the if: a resumed build (stored job id) must also leave the ontology phase
       if (!buildId) {
-        const started = await startGraphBuild(draft.datasetId!, readyDocs, ontologyId)
+        const started = await startGraphBuild(draft.datasetId!, readyDocs, draft.corpusName, ontologyId)
         buildId = started.job_id
         setJobs({ graphJobId: buildId })
       }
       const buildJob = await pollJob(buildId, applyTick, pollOptions)
-      if (buildJob.status === 'failed') {
+      if (buildJob.status !== 'completed') {
         setPhase('failed')
         setError(buildJob.error ?? 'unknown error')
         return
@@ -89,16 +96,15 @@ export default function GraphPage() {
   useEffect(() => {
     const draft = useDraftStore.getState()
     const readyCount = draft.docs.filter((doc) => doc.status === 'ready').length
-    if (!datasetId || readyCount === 0) {
-      navigate('/new/ingest', { state: { note: "Your session's documents expired — add them again." } })
-      return
-    }
+    // No corpus to build from: do not boot. The workspace's guard returns to the first step with the
+    // note IngestPage renders, so this page no longer redirects (it is a step, not a host).
+    if (!datasetId || readyCount === 0) return
     if (bootRef.current) return // StrictMode double-invoke guard
     bootRef.current = true
     // eslint-disable-next-line react-hooks/set-state-in-effect -- boot guard: run() owns the phase machine and must start synchronously once per mount
     void run()
     // No abort on unmount: the job continues server-side; the persisted job ids resume it on return (§7.3).
-  }, [datasetId, navigate, run])
+  }, [datasetId, run])
 
   const rerun = () => {
     setJobs({ ontologyJobId: null, graphJobId: null })
@@ -109,45 +115,40 @@ export default function GraphPage() {
     void run()
   }
 
-  const railStages = [
-    { key: 'ingest', label: 'Ingest', state: 'done' as const },
-    { key: 'graph', label: 'Graph', state: phase === 'done' ? ('done' as const) : phase === 'failed' ? ('failed' as const) : ('running' as const) },
-    { key: 'question', label: 'Question', state: 'pending' as const },
-  ]
-
   const completed = result?.chunks_completed ?? 0
   const total = result?.chunks_total ?? 0
 
   return (
-    <div className="mx-auto max-w-[760px] space-y-8">
-      <StageRail stages={railStages} />
+    <div className="space-y-6">
       <div>
-        <p className="text-label uppercase text-paper-mute">Step 2 · Graph</p>
-        <h1 className="mt-2 font-serif text-display text-paper">Grow the knowledge graph</h1>
+        <p className="font-ui text-label uppercase tracking-[0.09em] text-ink-3">The map</p>
+        <h1 className="mt-3 font-display text-display font-medium tracking-[-0.03em] text-ink">Grow the map</h1>
+        <p className="mt-3 max-w-[60ch] font-ui text-body text-ink-2">
+          Your material becomes one map the panel argues from.
+        </p>
       </div>
 
       {reconnecting && (
-        <p className="rounded-[4px] border border-brass/40 px-3 py-2 text-micro text-brass">
-          Can't reach the server. The job continues on the server — we'll reconnect.
+        <p className="rounded-xs border border-warn/40 px-3 py-2 text-micro text-ink">
+          Can't reach the server. The work continues on the server — we'll reconnect.
         </p>
       )}
 
       {phase !== 'done' && phase !== 'failed' && (
-        <div className="space-y-4 rounded-[6px] border border-ink-700 bg-ink-900 p-5">
+        <div className={`space-y-4 ${ruleClasses('top')} pt-5`}>
           <StageLine
-            label="Discovering the ontology"
+            label="Finding the kinds of things in your material"
             state={phase === 'ontology' ? 'active' : 'done'}
-            helper="Discovery takes about a minute per ten documents."
+            helper="Reading takes about a minute per ten documents."
           />
-          <StageLine label="Extracting entities and relations" state={phase === 'build' ? 'active' : 'pending'} />
+          <StageLine label="Finding the entries and connections" state={phase === 'build' ? 'active' : 'pending'} />
           {phase === 'build' && (
             <div className="space-y-4">
-              <ProgressBar value={progress} label={`${fmtInt(completed)} / ${fmtInt(total)} chunks`} />
-              <p className="tnum font-mono text-mono text-paper-dim">
-                graph so far · {fmtInt(result?.entity_types.length ?? 0)} entity types · {fmtInt(result?.relation_types.length ?? 0)} relation types
+              <ProgressBar value={progress} label={`${fmtInt(completed)} / ${fmtInt(total)} sections`} />
+              <p className="tnum font-mono text-mono text-ink-2">
+                map so far · {fmtInt(result?.entity_types.length ?? 0)} entry types · {fmtInt(result?.relation_types.length ?? 0)} connection types
               </p>
-              <p className="text-micro text-paper-mute">Each chunk is written as it finishes — the graph grows while the build runs.</p>
-              {datasetId && graphJobId && <GraphCanvas datasetId={datasetId} jobId={graphJobId} />}
+              <p className="font-ui text-micro text-ink-3">Each section is written as it finishes — the map grows while the build runs.</p>
             </div>
           )}
         </div>
@@ -155,29 +156,27 @@ export default function GraphPage() {
 
       {result && (result.entity_types.length > 0 || result.relation_types.length > 0) && (
         <div className="grid grid-cols-2 gap-4">
-          <SchemaCard title="The ontology it discovered" names={result.entity_types} />
+          <SchemaCard title="Kinds found" names={result.entity_types} />
           <RelationTable names={result.relation_types} />
         </div>
       )}
 
       {phase === 'done' && (
         <div className="space-y-6">
-          {/* The build is over, so the canvas unmounts from the build block above; re-mount it here
-              so the finished graph stays on screen. The stream reconnects to the completed job and
-              reads one full snapshot, which now carries every DERIVED_FROM-linked entity. */}
-          {datasetId && graphJobId && <GraphCanvas datasetId={datasetId} jobId={graphJobId} />}
+          {/* The finished map lives in the workspace's map pane, which stays mounted across the whole
+              lifecycle — this surface no longer renders a canvas of its own (D14: one map). */}
           <div>
-            <p className="text-heading text-paper">Graph built</p>
+            <h2 className="font-display text-heading font-medium tracking-[-0.01em] text-ink">The map is built</h2>
             <StatRow
               items={[
-                { label: 'Chunks', value: fmtInt(result?.chunks_total ?? 0) },
+                { label: 'Sections', value: fmtInt(result?.chunks_total ?? 0) },
                 { label: 'Documents', value: fmtInt(result?.docs_built ?? 0) },
-                { label: 'Entity types', value: fmtInt(result?.entity_types.length ?? 0) },
-                { label: 'Relation types', value: fmtInt(result?.relation_types.length ?? 0) },
+                { label: 'Entry types', value: fmtInt(result?.entity_types.length ?? 0) },
+                { label: 'Connection types', value: fmtInt(result?.relation_types.length ?? 0) },
               ]}
             />
           </div>
-          <Button variant="primary" onClick={() => navigate('/new/society')}>
+          <Button variant="primary" className="w-full sm:w-auto" onClick={() => navigate('/new/society')}>
             Set the question
             <ArrowRight size={16} aria-hidden="true" />
           </Button>

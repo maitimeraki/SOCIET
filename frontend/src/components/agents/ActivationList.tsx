@@ -7,9 +7,9 @@ export default function ActivationList({ activations }: { activations: RunActiva
     <ul className="space-y-2">
       {activations.flatMap((activation) =>
         activation.agents.map((agent) => (
-          <li key={`${activation.round}-${agent}`} className="flex items-center gap-2 text-body text-paper-dim">
+          <li key={`${activation.round}-${agent}`} className="flex items-center gap-2 text-body text-ink-2">
             <Lightning size={14} className="text-accent" aria-hidden="true" />
-            {agent} — joined round {activation.round + 1}
+            {agent} — joined at pass {activation.round + 1}
             {activation.reasons[agent] ? ` — ${activation.reasons[agent]}` : ''}
           </li>
         )),

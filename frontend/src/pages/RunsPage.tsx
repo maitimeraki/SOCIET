@@ -1,75 +1,240 @@
-import { useEffect, useMemo, useState } from 'react'
-import { listRuns } from '../api/rest'
-import type { RunSummary } from '../api/types'
-import RunTable from '../components/common/RunTable'
-import EmptyState from '../components/ui/EmptyState'
-import Input from '../components/ui/Input'
-import Select from '../components/ui/Select'
+import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
+import { listRunsPage } from '../api/rest'
+import type { RunSummary } from '../api/types'
+import { buttonClasses } from '../components/ui/Button'
+import EmptyState from '../components/ui/EmptyState'
+import ErrorState from '../components/ui/ErrorState'
+import Skeleton from '../components/ui/Skeleton'
+import { StateChip } from '../components/ui/Chip'
+import PositionMark from '../components/ui/PositionMark'
+import { PAGE_SIZE } from './pageSize'
+import { fmtDay } from '../utils/format'
 
-type StatusFilter = 'all' | 'complete' | 'running' | 'failed' | 'interrupted'
+export interface RunsPageViewProps {
+  runs: RunSummary[]
+  loading: boolean
+  failed: boolean
+  failDetail?: string
+  hasMore: boolean
+  loadingMore: boolean
+  onLoadMore: () => void
+  onRetry: () => void
+}
+
+export interface MonthGroup {
+  label: string
+  runs: RunSummary[]
+}
+
+/** The runs under their month, newest month first — the month label is a sticky caps label. */
+// eslint-disable-next-line react-refresh/only-export-components -- groupByMonth is the tested grouping rule
+export function groupByMonth(runs: RunSummary[]): MonthGroup[] {
+  const groups = new Map<string, RunSummary[]>()
+  for (const run of runs) {
+    const key = run.created_at.slice(0, 7)
+    const list = groups.get(key)
+    if (list) list.push(run)
+    else groups.set(key, [run])
+  }
+  return [...groups.entries()]
+    .sort(([a], [b]) => b.localeCompare(a))
+    .map(([key, list]) => ({
+      label: new Date(`${key}-01T00:00:00Z`).toLocaleDateString('en-GB', {
+        month: 'long',
+        year: 'numeric',
+        timeZone: 'UTC',
+      }),
+      runs: list,
+    }))
+}
+
+/** §7.5 — the filed outcome: position mark + word, then the share as a measurement. */
+function Outcome({ run }: { run: RunSummary }) {
+  if (!run.verdict_stance) {
+    return <span className="font-mono text-micro text-ink-3">—</span>
+  }
+  return (
+    <span className="flex w-full items-center gap-2 md:w-auto">
+      <PositionMark position={run.verdict_stance} size="sm" ground="light" />
+      <span className="font-mono text-micro text-ink-3">
+        {run.verdict_confidence === null ? '—' : run.verdict_confidence.toFixed(2)}
+      </span>
+    </span>
+  )
+}
+
+export function RunsPageView({
+  runs,
+  loading,
+  failed,
+  failDetail,
+  hasMore,
+  loadingMore,
+  onLoadMore,
+  onRetry,
+}: RunsPageViewProps) {
+  const groups = groupByMonth(runs)
+
+  return (
+    <div>
+      <header className="flex flex-wrap items-end justify-between gap-4 border-b border-rule pb-6">
+        <div>
+          <p className="font-ui text-label uppercase tracking-[0.09em] text-ink-3">Runs</p>
+          <h1 className="font-display text-display font-medium tracking-[-0.03em] text-ink">Your decisions</h1>
+          <p className="mt-2 max-w-[60ch] font-ui text-body-sm text-ink-2">Every question you have put to a panel.</p>
+        </div>
+        <Link to="/new" className={buttonClasses('primary', 48, 'min-h-11')}>
+          New decision
+        </Link>
+      </header>
+
+      {failed && runs.length === 0 ? (
+        <div className="mt-6">
+          <ErrorState
+            title="Couldn't reach the server"
+            detail={failDetail || 'Your decisions load when the server is back.'}
+            onRetry={onRetry}
+            retryLabel="Try again"
+          />
+        </div>
+      ) : loading ? (
+        <div className="mt-6 space-y-2">
+          {[0, 1, 2, 3, 4, 5].map((index) => (
+            <Skeleton key={index} className="h-[52px] w-full" />
+          ))}
+        </div>
+      ) : runs.length === 0 ? (
+        <div className="mt-6">
+          <EmptyState
+            line="No decisions yet. Ask the first one."
+            action={
+              <Link to="/new" className={buttonClasses('primary', 40, 'min-h-11')}>
+                Start a decision
+              </Link>
+            }
+          />
+        </div>
+      ) : (
+        <div className="mt-4">
+          {groups.map((group) => (
+            <section key={group.label}>
+              <h2 className="sticky top-0 z-10 border-b border-rule bg-bone py-2 font-ui text-label uppercase tracking-[0.09em] text-ink-3">
+                {group.label}
+              </h2>
+              <ul>
+                {group.runs.map((entry) => (
+                  <li key={entry.run_id}>
+                    <Link
+                      to={`/runs/${entry.run_id}`}
+                      className="group flex flex-wrap items-center gap-x-4 gap-y-1 border-b border-rule py-3 hover:bg-accent-soft focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent lg:grid lg:grid-cols-[minmax(0,1fr)_6.5rem_3.5rem_6.5rem_7rem] xl:grid-cols-[minmax(0,1fr)_7rem_4rem_7.5rem_8rem_2.5rem]"
+                    >
+                      <span className="w-full min-w-0 font-ui text-body text-ink lg:w-auto">{entry.query}</span>
+                      <span>
+                        <StateChip state={entry.status} />
+                      </span>
+                      <span className="font-mono text-mono text-ink-3">pass {entry.rounds_executed}</span>
+                      <span className="font-mono text-mono text-ink-3">{fmtDay(entry.created_at)}</span>
+                      <Outcome run={entry} />
+                      <span
+                        aria-hidden="true"
+                        className="ml-auto hidden font-mono text-micro text-ink-3 underline underline-offset-4 opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100 xl:block"
+                      >
+                        Open
+                      </span>
+                    </Link>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          ))}
+        </div>
+      )}
+
+      {failed && runs.length > 0 && (
+        <div role="alert" className="mt-4 flex flex-wrap items-center justify-center gap-3">
+          <span className="font-ui text-body-sm text-ink-2">Couldn't load more.</span>
+          <button type="button" onClick={onLoadMore} className={buttonClasses('secondary', 40, 'min-h-11')}>
+            Try again
+          </button>
+        </div>
+      )}
+
+      {hasMore && !failed && (
+        <div className="mt-4 flex justify-center">
+          <button
+            type="button"
+            onClick={onLoadMore}
+            disabled={loadingMore}
+            className={buttonClasses('ghost', 40, 'min-h-11')}
+          >
+            {loadingMore ? 'Loading…' : 'Load more'}
+          </button>
+        </div>
+      )}
+    </div>
+  )
+}
 
 export default function RunsPage() {
   const [runs, setRuns] = useState<RunSummary[]>([])
+  const [cursor, setCursor] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
+  const [loadingMore, setLoadingMore] = useState(false)
   const [failed, setFailed] = useState(false)
-  const [status, setStatus] = useState<StatusFilter>('all')
-  const [text, setText] = useState('')
+  const [attempt, setAttempt] = useState(0)
 
   useEffect(() => {
-    listRuns()
-      .then(setRuns)
-      .catch(() => setFailed(true))
-      .finally(() => setLoading(false))
-  }, [])
-
-  const filtered = useMemo(
-    () =>
-      runs.filter((run) => {
-        const statusOk =
-          status === 'all' ||
-          (status === 'running' ? run.status === 'running' || run.status === 'queued' : run.status === status)
-        const textOk = text.trim().length === 0 || run.query.toLowerCase().includes(text.trim().toLowerCase())
-        return statusOk && textOk
-      }),
-    [runs, status, text],
-  )
+    let cancelled = false
+    listRunsPage({ limit: PAGE_SIZE })
+      .then((page) => {
+        if (cancelled) return
+        setRuns(page.items)
+        setCursor(page.next_cursor)
+        setFailed(false)
+      })
+      .catch(() => {
+        if (cancelled) return
+        // The server's raw text is not customer copy — the view's curated fallback renders instead.
+        setFailed(true)
+        setRuns([])
+        setCursor(null)
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [attempt])
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-baseline justify-between">
-        <h1 className="font-serif text-display text-paper">Runs</h1>
-        <Link to="/new/ingest" className="text-body text-accent hover:text-accent-strong">
-          Convene a society →
-        </Link>
-      </div>
-
-      <div className="flex items-center gap-3">
-        <Select value={status} onChange={(event) => setStatus(event.target.value as StatusFilter)} aria-label="Filter by status">
-          <option value="all">All statuses</option>
-          <option value="complete">Complete</option>
-          <option value="running">Running</option>
-          <option value="failed">Failed</option>
-          <option value="interrupted">Interrupted</option>
-        </Select>
-        <Input
-          value={text}
-          onChange={(event) => setText(event.target.value)}
-          placeholder="Filter by question"
-          aria-label="Filter by question"
-          className="max-w-[320px]"
-        />
-      </div>
-
-      {loading ? (
-        <RunTable runs={[]} loading />
-      ) : failed ? (
-        <p className="text-body text-paper-dim">Couldn't reach the server — the run history loads when it's back.</p>
-      ) : filtered.length === 0 ? (
-        <EmptyState line={runs.length === 0 ? 'No runs yet. Convene your first society →' : 'No runs match this filter.'} />
-      ) : (
-        <RunTable runs={filtered} />
-      )}
-    </div>
+    <RunsPageView
+      runs={runs}
+      loading={loading}
+      failed={failed}
+      hasMore={cursor !== null}
+      loadingMore={loadingMore}
+      onRetry={() => {
+        setLoading(true)
+        setFailed(false)
+        setAttempt((value) => value + 1)
+      }}
+      onLoadMore={async () => {
+        if (!cursor) return
+        setLoadingMore(true)
+        try {
+          const page = await listRunsPage({ limit: PAGE_SIZE, cursor })
+          setRuns((previous) => [...previous, ...page.items])
+          setCursor(page.next_cursor)
+          setFailed(false)
+        } catch {
+          // A failed second page is the same recoverable failure as a failed first one.
+          setFailed(true)
+        } finally {
+          setLoadingMore(false)
+        }
+      }}
+    />
   )
 }

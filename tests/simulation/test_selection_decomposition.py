@@ -25,8 +25,10 @@ Reverting the `triplet_source_id` read in the one adapter (`_evidence_row`)
 makes the anchor assertions here fail; the numbers-hold assertion is
 deliberately read-set-independent.
 """
-import pytest
+
 from unittest.mock import AsyncMock, MagicMock
+
+import pytest
 
 from src.persona.models_persona import PersonaIdentity
 from src.simulation.debate_config import DebateConfig
@@ -34,7 +36,9 @@ from src.simulation.profile_synthesizer import ProfileSynthesizer
 from src.simulation.relevance_matrix import SelectionCandidate, rank_candidates
 from src.utils.queryIntend import QueryIntent
 
-_INTENT = QueryIntent(direct_keywords=["carbon", "tax"], latent_sectors=[], search_perspectives=[])
+_INTENT = QueryIntent(
+    direct_keywords=["carbon", "tax"], latent_sectors=[], search_perspectives=[]
+)
 _CONFIG = DebateConfig()
 
 # The semantic text is a property of the candidate, not of its evidence shape.
@@ -63,13 +67,21 @@ def _production_evidence() -> dict[str, list]:
     """
     return {
         "Carbon Analyst": [
-            _Entity(id="e-1", name="Carbon Analyst", score=2.0,
-                    properties={"triplet_source_id": "node-7"}),
+            _Entity(
+                id="e-1",
+                name="Carbon Analyst",
+                score=2.0,
+                properties={"triplet_source_id": "node-7"},
+            ),
             {"total_relevance": 0.5, "evidence_nodes": ["Peer Sector"]},
         ],
         "Grid Engineer": [
-            _Entity(id="e-2", name="Grid Engineer", score=1.0,
-                    properties={"triplet_source_id": "node-9"}),
+            _Entity(
+                id="e-2",
+                name="Grid Engineer",
+                score=1.0,
+                properties={"triplet_source_id": "node-9"},
+            ),
         ],
     }
 
@@ -87,11 +99,18 @@ def _retired_evidence() -> dict[str, list]:
         rows = []
         for item in evidence:
             if isinstance(item, _Entity):
-                rows.append(_Entity(
-                    id=item.id, name=item.name, score=item.relevance_score,
-                    properties={k: v for k, v in item.properties.items()
-                                if k != "triplet_source_id"},
-                ))
+                rows.append(
+                    _Entity(
+                        id=item.id,
+                        name=item.name,
+                        score=item.relevance_score,
+                        properties={
+                            k: v
+                            for k, v in item.properties.items()
+                            if k != "triplet_source_id"
+                        },
+                    )
+                )
             else:
                 rows.append(dict(item))
         out[name] = rows
@@ -111,12 +130,16 @@ def _by_name(rows) -> dict:
 
 
 def _anchor_keys(anchors) -> set:
-    return {(anchor["kind"], anchor.get("id"), anchor.get("name")) for anchor in anchors}
+    return {
+        (anchor["kind"], anchor.get("id"), anchor.get("name")) for anchor in anchors
+    }
 
 
 def test_numbers_hold_across_the_retired_and_shipped_read_sets():
     """The Document model moved the evidence, not the scores."""
-    before, after = _by_name(_run(_retired_evidence())), _by_name(_run(_production_evidence()))
+    before, after = _by_name(_run(_retired_evidence())), _by_name(
+        _run(_production_evidence())
+    )
 
     assert list(before) == list(after) == ["Carbon Analyst", "Grid Engineer"]
     for name in before:
@@ -128,19 +151,23 @@ def test_numbers_hold_across_the_retired_and_shipped_read_sets():
     assert after["Carbon Analyst"].density == pytest.approx(1.0)
     assert after["Grid Engineer"].density == pytest.approx(0.4)
     for row in after.values():
-        assert row.blended == pytest.approx(_CONFIG.w1 * row.semantic + _CONFIG.w2 * row.density)
+        assert row.blended == pytest.approx(
+            _CONFIG.w1 * row.semantic + _CONFIG.w2 * row.density
+        )
 
 
 def test_the_shipped_adapter_gained_the_triplet_source_id_read():
     """Same rows, same chunk nodes — the anchors now arrive via `triplet_source_id`."""
-    before, after = _by_name(_run(_retired_evidence())), _by_name(_run(_production_evidence()))
+    before, after = _by_name(_run(_retired_evidence())), _by_name(
+        _run(_production_evidence())
+    )
 
     for name in before:
         assert _anchor_keys(before[name].anchors) < _anchor_keys(after[name].anchors)
 
     assert after["Carbon Analyst"].anchors == (
         {"kind": "node", "id": "e-1", "name": "Carbon Analyst"},
-        {"kind": "chunk", "id": "node-7"},        # .properties["triplet_source_id"]
+        {"kind": "chunk", "id": "node-7"},  # .properties["triplet_source_id"]
         {"kind": "node", "name": "Peer Sector"},  # the mapping row's evidence node
     )
     assert after["Grid Engineer"].anchors == (
@@ -160,35 +187,61 @@ def test_document_anchor_reads_are_tolerant_not_a_production_shape():
     sector row carries it today. The adapter must still surface one if a row
     ever does — that is all this pins.
     """
-    entity = _Entity(id="e-9", name="Tolerant", score=1.0,
-                     properties={"triplet_source_id": "node-9", "document_anchor": "doc-9"})
+    entity = _Entity(
+        id="e-9",
+        name="Tolerant",
+        score=1.0,
+        properties={"triplet_source_id": "node-9", "document_anchor": "doc-9"},
+    )
     rows = rank_candidates(
-        [SelectionCandidate(name="Tolerant", text="t", evidence=[entity])], _INTENT, _CONFIG,
+        [SelectionCandidate(name="Tolerant", text="t", evidence=[entity])],
+        _INTENT,
+        _CONFIG,
     )
     assert {"kind": "document", "id": "doc-9"} in rows[0].anchors
 
     # the mapping-row half of the same tolerant read
-    sector = {"total_relevance": 1.0, "evidence_nodes": ["S"], "document_ids": ["doc-10"]}
+    sector = {
+        "total_relevance": 1.0,
+        "evidence_nodes": ["S"],
+        "document_ids": ["doc-10"],
+    }
     rows = rank_candidates(
-        [SelectionCandidate(name="S", text="t", evidence=[sector])], _INTENT, _CONFIG,
+        [SelectionCandidate(name="S", text="t", evidence=[sector])],
+        _INTENT,
+        _CONFIG,
     )
     assert {"kind": "document", "id": "doc-10"} in rows[0].anchors
 
 
 def _production_entities() -> list:
     return [
-        _Entity(id="e-1", name="Carbon Analyst", score=2.0,
-                properties={"triplet_source_id": "node-7"}),
-        _Entity(id="e-2", name="Grid Engineer", score=1.0,
-                properties={"triplet_source_id": "node-9"}),
+        _Entity(
+            id="e-1",
+            name="Carbon Analyst",
+            score=2.0,
+            properties={"triplet_source_id": "node-7"},
+        ),
+        _Entity(
+            id="e-2",
+            name="Grid Engineer",
+            score=1.0,
+            properties={"triplet_source_id": "node-9"},
+        ),
     ]
 
 
 def _synth(entities) -> ProfileSynthesizer:
     """A synthesizer stub in the shape of tests/simulation/test_profile_synthesizer.py."""
+
     async def build_profile(**kwargs):
-        return MagicMock(identity=PersonaIdentity(
-            name=kwargs["agent_name"], archetype="Analyst", communication_style="factual"))
+        return MagicMock(
+            identity=PersonaIdentity(
+                name=kwargs["agent_name"],
+                archetype="Analyst",
+                communication_style="factual",
+            )
+        )
 
     repo = MagicMock()
     repo.fetch_nodes_by_names = AsyncMock(return_value={})
@@ -206,12 +259,18 @@ async def test_selection_rows_flow_through_synthesize_with_the_document_model_an
     rows: list = []
 
     profiles = await _synth(_production_entities()).synthesize(
-        query="Should we tax carbon?", dataset_id="ds", max_agents=2,
-        intent=_INTENT, config=_CONFIG, selection_rows=rows,
+        query="Should we tax carbon?",
+        dataset_id="ds",
+        max_agents=2,
+        intent=_INTENT,
+        config=_CONFIG,
+        selection_rows=rows,
     )
 
     assert [row.name for row in rows] == ["Carbon Analyst", "Grid Engineer"]
     assert [p.identity.name for p in profiles] == ["Carbon Analyst", "Grid Engineer"]
     top = rows[0]
     assert {"kind": "chunk", "id": "node-7"} in top.anchors
-    assert top.blended == pytest.approx(_CONFIG.w1 * top.semantic + _CONFIG.w2 * top.density)
+    assert top.blended == pytest.approx(
+        _CONFIG.w1 * top.semantic + _CONFIG.w2 * top.density
+    )

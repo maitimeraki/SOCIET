@@ -5,13 +5,14 @@ many society opinions render, a dominant speaker's own lines must not crowd othe
 out of the pool, and a `[directly connected to you]` marker must only reflect a
 connection valid for this debate (this dataset + this query_hash).
 """
+
 import os
 import uuid
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 import pytest_asyncio
 from dotenv import load_dotenv
-from unittest.mock import AsyncMock, MagicMock, patch
 
 from src.persona.agent import (
     Agent,
@@ -22,6 +23,7 @@ from src.persona.agent import (
     PersonaIdentity,
     Stance,
 )
+from src.persona.repository import PersonaRepository
 from src.simulation.debate_config import DebateConfig
 from src.simulation.llm_batch import BatchedLLMRunner
 from src.simulation.orchestrator import DebateOrchestrator
@@ -31,7 +33,6 @@ from src.simulation.round_runner import RoundRunner, _build_user_prompt
 from src.simulation.society_memory import SocietyMemory, SocietySnapshot
 from src.simulation.topology import CommunicationTopology
 from src.simulation.verdict import VerdictSynthesizer
-from src.persona.repository import PersonaRepository
 
 load_dotenv()
 
@@ -75,24 +76,40 @@ def _mem(rows):
 
 
 def _opinion(agent, weight, summary, round_no=1, entities=None):
-    return {"agent": agent, "round_no": round_no, "stance": "POSITIVE",
-            "confidence": 0.8, "weight": weight, "summary": summary,
-            "entities": entities or []}
+    return {
+        "agent": agent,
+        "round_no": round_no,
+        "stance": "POSITIVE",
+        "confidence": 0.8,
+        "weight": weight,
+        "summary": summary,
+        "entities": entities or [],
+    }
 
 
 def _entry(agent, weight, summary, round_no=1):
-    return {"agent": agent, "round": round_no, "stance": "POSITIVE",
-            "confidence": 0.8, "weight": weight, "summary": summary}
+    return {
+        "agent": agent,
+        "round": round_no,
+        "stance": "POSITIVE",
+        "confidence": 0.8,
+        "weight": weight,
+        "summary": summary,
+    }
 
 
 def _agent(name: str) -> Agent:
     return Agent(
         agent_id=uuid.uuid4(),
-        identity=PersonaIdentity(name=name, archetype="Expert", communication_style="Formal"),
+        identity=PersonaIdentity(
+            name=name, archetype="Expert", communication_style="Formal"
+        ),
         discovery_type=DiscoveryType.INTENT_DRIVEN,
         expertise_level=ExpertiseLevel.TECHNICAL,
-        bio=f"{name} bio", detailed_perspective=f"{name} perspective",
-        domain_tags=["d"], confidence=0.7,
+        bio=f"{name} bio",
+        detailed_perspective=f"{name} perspective",
+        domain_tags=["d"],
+        confidence=0.7,
         confidence_breakdown=ConfidenceBreakdown(
             source_breadth=1, node_density=1, relationship_connectivity=0.5
         ),
@@ -109,6 +126,7 @@ def _society_block_lines(prompt: str) -> list[str]:
 # ------------------------------------------------------------------
 # Step 1/2 — the configured count controls the render at the real call site
 # ------------------------------------------------------------------
+
 
 def test_user_prompt_renders_configured_snapshot_count():
     """The society block is capped by the count the caller passes, not a fixed 6."""
@@ -136,7 +154,11 @@ async def test_execute_round_threads_max_opinions_into_every_prompt():
     await rr.execute_round(
         [_agent("Alice"), _agent("Bob")],
         [CommPair(agent_a="Alice", agent_b="Bob", shared_entities=[])],
-        round_num=2, query="Q?", history=[], society=snap, max_opinions=2,
+        round_num=2,
+        query="Q?",
+        history=[],
+        society=snap,
+        max_opinions=2,
     )
 
     assert len(mock_llm.generate.call_args_list) == 2
@@ -151,14 +173,20 @@ def _orchestrator(sm) -> DebateOrchestrator:
     topo.compute_round_pairs.return_value = [CommPair(agent_a="Alice", agent_b="Bob")]
     verdict = MagicMock(spec=VerdictSynthesizer)
     verdict.asynthesize.return_value = DebateVerdict(
-        overall_stance=Stance.POSITIVE, confidence_score=0.9,
-        supporting_entities=[], opposing_entities=[], summary="v",
-        cluster_details={}, rounds_executed=1,
+        overall_stance=Stance.POSITIVE,
+        confidence_score=0.9,
+        supporting_entities=[],
+        opposing_entities=[],
+        summary="v",
+        cluster_details={},
+        rounds_executed=1,
     )
     return DebateOrchestrator(
-        profile_synthesizer=synth, topology=topo,
+        profile_synthesizer=synth,
+        topology=topo,
         llm_runner=MagicMock(spec=BatchedLLMRunner),
-        verdict_synthesizer=verdict, society_memory=sm,
+        verdict_synthesizer=verdict,
+        society_memory=sm,
     )
 
 
@@ -166,7 +194,12 @@ def _orchestrator(sm) -> DebateOrchestrator:
 async def test_orchestrator_threads_config_snapshot_top_k_to_the_runner():
     """The configured count actually flows from config.snapshot_top_k into the runner."""
     sm = AsyncMock(spec=SocietyMemory)
-    sm.commit_round.return_value = {"round": 1, "opinions": 2, "edges": 1, "failed": False}
+    sm.commit_round.return_value = {
+        "round": 1,
+        "opinions": 2,
+        "edges": 1,
+        "failed": False,
+    }
     orch = _orchestrator(sm)
 
     seen: list = []
@@ -180,7 +213,12 @@ async def test_orchestrator_threads_config_snapshot_top_k_to_the_runner():
 
         rr.execute_round = AsyncMock(side_effect=execute_round)
         rr_cls.return_value = rr
-        await orch.run("q", "ds1", DebateConfig(max_agents=5, max_rounds=2, snapshot_top_k=7), AsyncMock())
+        await orch.run(
+            "q",
+            "ds1",
+            DebateConfig(max_agents=5, max_rounds=2, snapshot_top_k=7),
+            AsyncMock(),
+        )
 
     assert seen and all(value == 7 for value in seen)
 
@@ -188,6 +226,7 @@ async def test_orchestrator_threads_config_snapshot_top_k_to_the_runner():
 # ------------------------------------------------------------------
 # Step 3/4 — a dominant speaker's own lines cannot crowd out others
 # ------------------------------------------------------------------
+
 
 @pytest.mark.asyncio
 async def test_read_snapshot_excludes_the_speaker_so_others_still_render():
@@ -201,7 +240,7 @@ async def test_read_snapshot_excludes_the_speaker_so_others_still_render():
     )
 
     op_q, params = session.calls[0]
-    assert "o.agent_name <> $speaker" in op_q   # the read excludes the speaker
+    assert "o.agent_name <> $speaker" in op_q  # the read excludes the speaker
     assert params["speaker"] == "Alice"
     assert [e["agent"] for e in snap.entries_by_speaker["Alice"]] == ["Bob"]
     assert "bob line" in snap.to_prompt(speaker="Alice", opponent="Bob")
@@ -210,6 +249,7 @@ async def test_read_snapshot_excludes_the_speaker_so_others_still_render():
 # ------------------------------------------------------------------
 # Step 5/6 — the connection marker is scoped to this run
 # ------------------------------------------------------------------
+
 
 @pytest.mark.asyncio
 async def test_neighbor_read_scopes_opposes_to_this_run():
@@ -231,6 +271,7 @@ async def test_neighbor_read_scopes_opposes_to_this_run():
 # ------------------------------------------------------------------
 # Step 7 — degradation: empty snapshot, no connections
 # ------------------------------------------------------------------
+
 
 def test_empty_snapshot_renders_empty_string():
     assert SocietySnapshot(round=1).to_prompt(speaker="Alice", opponent="Bob") == ""
@@ -256,22 +297,28 @@ def test_connected_neighbour_renders_marker():
         entries=[_entry("Bob", 0.5, "bob line")],
         neighbor_map={"Alice": ["Bob"]},
     )
-    assert "[directly connected to you]" in snap.to_prompt(speaker="Alice", opponent="Bob")
+    assert "[directly connected to you]" in snap.to_prompt(
+        speaker="Alice", opponent="Bob"
+    )
 
 
 # ------------------------------------------------------------------
 # Step 5/6 — live behavioural proof against the real graph
 # ------------------------------------------------------------------
 
+
 @pytest_asyncio.fixture
 async def live_memory():
-    uri = os.getenv("NEO4J_URI", "bolt://localhost:7687")
+    uri = os.getenv("NEO4J_URI", "neo4j://127.0.0.1:7687")
     user = os.getenv("NEO4J_USER", "neo4j")
     pwd = os.getenv("NEO4J_PASSWORD", "password")
     db = os.getenv("NEO4J_DATABASE", "neo4j")
 
     repo = PersonaRepository(
-        neo4j_uri=uri, neo4j_user=user, neo4j_password=pwd, neo4j_database=db,
+        neo4j_uri=uri,
+        neo4j_user=user,
+        neo4j_password=pwd,
+        neo4j_database=db,
     )
     try:
         async with repo._driver.session(database=db) as session:
@@ -318,7 +365,9 @@ async def test_marker_is_scoped_to_the_current_run_on_the_live_graph(live_memory
                     od.weight = 0.5, od.entities = []
                 MERGE (d)-[:STATED]->(od)
                 """,
-                ds=ds, q_new=q_new, q_old=q_old,
+                ds=ds,
+                q_new=q_new,
+                q_old=q_old,
             )
 
         # Current run: the OPPOSES edge is not corroborated (its REACTED_TO is q_old),
@@ -332,7 +381,7 @@ async def test_marker_is_scoped_to_the_current_run_on_the_live_graph(live_memory
         assert "[directly connected to you]" not in a_prompt  # no cross-run leak
 
         c_prompt = snap.to_prompt(speaker="itest-C", opponent="itest-D")
-        assert "[directly connected to you]" in c_prompt       # same-run REACTED_TO arm
+        assert "[directly connected to you]" in c_prompt  # same-run REACTED_TO arm
 
         # The other run sees its own edge and not the current run's.
         snap_old = await memory.read_snapshot(ds, q_old, through_round=1)
@@ -340,4 +389,6 @@ async def test_marker_is_scoped_to_the_current_run_on_the_live_graph(live_memory
         assert "itest-D" not in snap_old.neighbor_map.get("itest-C", [])
     finally:
         async with driver.session(database=db) as session:
-            await session.run("MATCH (n) WHERE n.dataset_id = $ds DETACH DELETE n", ds=ds)
+            await session.run(
+                "MATCH (n) WHERE n.dataset_id = $ds DETACH DELETE n", ds=ds
+            )

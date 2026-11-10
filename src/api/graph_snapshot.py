@@ -20,6 +20,7 @@ ALIAS_OF/SAME_AS) is out of scope.
 
 Read-only: issues no writes.
 """
+
 import asyncio
 
 from llama_index.graph_stores.neo4j import Neo4jPropertyGraphStore
@@ -34,15 +35,15 @@ _TYPE = "[l IN labels(e) WHERE NOT l IN ['__Entity__', '__Node__']][0]"
 
 _NODES = f"""
 MATCH (e:__Entity__)-[:DERIVED_FROM]->(:Document {{dataset_id: $dataset_id}})
-RETURN e.id AS id, e.name AS label, {_TYPE} AS type
+RETURN e.id AS id, e.name AS label, {_TYPE} AS type, properties(e) AS props
 ORDER BY id
 """
 
-_EDGES = f"""
+_EDGES = """
 MATCH (a:__Entity__)-[r]->(b:__Entity__)
-WHERE (a)-[:DERIVED_FROM]->(:Document {{dataset_id: $dataset_id}})
-  AND (b)-[:DERIVED_FROM]->(:Document {{dataset_id: $dataset_id}})
-RETURN a.id AS source, b.id AS target, type(r) AS label
+WHERE (a)-[:DERIVED_FROM]->(:Document {dataset_id: $dataset_id})
+  AND (b)-[:DERIVED_FROM]->(:Document {dataset_id: $dataset_id})
+RETURN a.id AS source, b.id AS target, type(r) AS label, properties(r) AS props
 ORDER BY source, target, label
 """
 
@@ -63,12 +64,35 @@ def _get_store() -> Neo4jPropertyGraphStore:
     return _STORE
 
 
-def _read(store: Neo4jPropertyGraphStore, dataset_id: str) -> tuple[list[dict], list[dict]]:
+def _read(
+    store: Neo4jPropertyGraphStore, dataset_id: str
+) -> tuple[list[dict], list[dict]]:
+    # Local import: the lineage-strip helper lives in the extraction module, and
+    # pulling its whole llama-index stack into this read-only module at import
+    # time would be a load-time cost for a key list.
+    from src.graph.graph_build import _public_props
+
     params = {"dataset_id": dataset_id}
     node_rows = store.structured_query(_NODES, param_map=params)
     edge_rows = store.structured_query(_EDGES, param_map=params)
-    nodes = [{"id": r["id"], "label": r["label"], "type": r["type"]} for r in node_rows]
-    edges = [{"source": r["source"], "target": r["target"], "label": r["label"]} for r in edge_rows]
+    nodes = [
+        {
+            "id": r["id"],
+            "label": r["label"],
+            "type": r["type"],
+            "properties": _public_props(r["props"]),
+        }
+        for r in node_rows
+    ]
+    edges = [
+        {
+            "source": r["source"],
+            "target": r["target"],
+            "label": r["label"],
+            "properties": _public_props(r["props"]),
+        }
+        for r in edge_rows
+    ]
     return nodes, edges
 
 

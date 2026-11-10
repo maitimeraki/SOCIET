@@ -5,6 +5,7 @@ prompt surfaces that turn's verbatim text (bounded) under a labelled block, so
 an agent rebuts the real claim instead of a strawman. Round 1 has no opponent
 turn, so the block is omitted entirely and the stance line is unchanged.
 """
+
 from src.persona.agent import Agent, DiscoveryType, PersonaIdentity
 from src.simulation.round_runner import OPPONENT_STATEMENT_CHARS, _build_user_prompt
 

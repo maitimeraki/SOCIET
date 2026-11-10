@@ -1,5 +1,58 @@
 import type { ConsensusInfo, RunEvent, Stance } from '../run/events'
 
+/** `GET /api/v1/auth/me` / login / signup response — the backend's `UserOut`. */
+export interface User {
+  id: string
+  email: string
+  created_at: string
+  role: 'user' | 'support' | 'admin'
+  plan: string
+  entitlements: {
+    max_agents: number
+    max_rounds: number
+    units_remaining: number
+    period_end: string
+  }
+}
+
+/** The authorization roles the API assigns; the client's guards are UX only. */
+export type Role = User['role']
+
+/** `GET /api/v1/billing/usage` — the server's only usage figures; the client invents none. */
+export interface BillingUsage {
+  plan: string
+  units_total: number
+  units_used: number
+  units_remaining: number
+  period_start: string
+  period_end: string
+  limits: { max_agents: number; max_rounds: number }
+  billing_enabled: boolean
+}
+
+/** `GET /api/v1/billing/plans` — the public rate card (starter/studio/enterprise). */
+export interface BillingPlan {
+  key: string
+  price_usd: number | null
+  price_label: string
+  units: number
+  max_agents: number
+  max_rounds: number
+}
+
+/** `GET /api/v1/legal/documents` — one current version per slug, no content. */
+export interface LegalDocumentMeta {
+  slug: string
+  version: string
+  effective_at: string
+  content_sha256: string
+}
+
+/** `GET /api/v1/legal/documents/{slug}` — the metadata plus the served statutory text. */
+export interface LegalDocument extends LegalDocumentMeta {
+  content: string
+}
+
 export interface IngestedDoc {
   document_id: string
   title: string
@@ -10,15 +63,30 @@ export interface IngestedDoc {
   pages?: number
 }
 
-export interface IngestFailure {
-  filename: string
-  status_code: number
-  detail: string
+/** `GET /api/v1/ingest/documents` — one upload's extracted payload; `upload_id` is the row id. */
+export interface IngestedDocument extends IngestedDoc {
+  upload_id: string
 }
 
-export interface IngestResponse {
-  documents: IngestedDoc[]
-  failures: IngestFailure[]
+/**
+ * `GET /api/v1/uploads` — one row per caller-owned upload, newest first. `read` is
+ * `extracted_text is not None`; `dataset_name` is null until the upload joins a corpus.
+ */
+export interface UploadRow {
+  id: string
+  name: string
+  bytes: number
+  mime: string
+  read: boolean
+  dataset_id: string | null
+  dataset_name: string | null
+  created_at: string
+}
+
+/** R17: `POST /api/v1/ingest/files|url` accept the batch and enqueue — extraction is a job. */
+export interface IngestAccepted {
+  job_id: string
+  status: string
 }
 
 export interface DebateConfig {
@@ -70,19 +138,29 @@ export interface GraphJobResult {
   relation_types: string[]
 }
 
-export interface JobStatus {
+/** The `extract_upload` job's result (R17) — the upload ids nested under `result`, not at the top. */
+export interface IngestJobResult {
+  upload_ids?: string[]
+}
+
+export interface JobStatus<TResult = GraphJobResult> {
   job_id: string
   mode?: string
-  status: 'queued' | 'running' | 'completed' | 'failed'
+  /** `run_doc.TERMINAL_STATUSES` is the truth: complete/completed/failed/cancelled all end a poll. */
+  status: 'queued' | 'running' | 'complete' | 'completed' | 'failed' | 'cancelled'
   stage: string
   progress: number
   error?: string | null
-  result?: GraphJobResult | null
+  result?: TResult | null
+  /** An export job's short-lived signed URL, minted at read time on the job doc itself. */
+  download_url?: string
 }
 
 export interface DebateStartRequest {
   graph_id: string
   query: string
+  /** The client's corpus name, for the run history list — null when no corpus existed (backend Task 1.4). */
+  corpus_label: string | null
   selected_domains: string[]
   simulation_depth: 'shallow' | 'standard' | 'deep'
   config: DebateConfig
@@ -99,11 +177,21 @@ export interface RunSummary {
   run_id: string
   created_at: string
   query: string
+  /** The client's corpus name at start; null when no corpus was named (backend `run_doc._summarize`). */
+  corpus_label: string | null
   dataset_id: string
-  status: 'queued' | 'running' | 'complete' | 'failed' | 'interrupted'
+  status: 'queued' | 'running' | 'complete' | 'completed' | 'failed' | 'interrupted' | 'cancelled'
   rounds_executed: number
   converged: boolean | null
   verdict_stance: Stance | null
+  /** The filed share — the dominant stance's weighted share. Null when no answer was filed. */
+  verdict_confidence: number | null
+}
+
+/** `GET /api/v1/simulate/debates` — keyset page (plan §6): `next_cursor` null at the end. */
+export interface RunListPage {
+  items: RunSummary[]
+  next_cursor: string | null
 }
 
 export interface RunDoc {

@@ -1,0 +1,49 @@
+/*
+ * The band vocabulary — §14.1 of `docs/FRONTEND_PRODUCTION_PLAN.md`.
+ *
+ * A band is a flat fill on a NAMED surface, and each tone means exactly one thing: the page, a
+ * step down from it, the mechanism (sky), the caution (warm), the answer (plum), or the work
+ * (the map's own dark surface). No hex lives here — every fill names the surface it is, so the
+ * homepage's plum band and the dashboard's plum band are one band.
+ *
+ * The class name follows the tone, and a band never fades: it is a flat fill, so the page has
+ * rhythm rather than wallpaper.
+ *
+ * These rules are UNSCOPED, so `.band--dark` also reaches the review demo at `/demo-home`; it is
+ * currently invisible there, because the demo's own scoped rules out-specify these with the same
+ * values.
+ */
+
+.band {
+  padding-block: 96px;
+}
+
+.band--dense {
+  padding-block: 64px;
+}
+
+.band--page {
+  background: var(--color-bone);
+}
+
+.band--band {
+  background: var(--color-sand);
+}
+
+.band--sky {
+  background: var(--color-sand);
+}
+
+.band--warm {
+  background: var(--color-sand);
+}
+
+.band--plum {
+  background: var(--color-paper);
+}
+
+/* Pine is a flat section surface, never the map's ramp: a gradient belongs to the map alone. */
+.band--dark {
+  background: var(--color-map-ground);
+  color: var(--color-map-ink);
+}

@@ -1,4 +1,5 @@
 """ProfileSynthesizer: Graph-backed agent profile synthesis from the required nodes."""
+
 import asyncio
 import inspect
 import logging
@@ -7,14 +8,15 @@ from collections import defaultdict
 from collections.abc import Awaitable, Callable, Mapping
 from typing import Any
 
-from src.persona.agent import Agent
-from src.persona.graph_context import GraphContext, EntityNode
+from src.persona.agent import SOURCE_EVIDENCE_MAX_SNIPPETS, Agent
+from src.persona.graph_context import EntityNode, GraphContext
 from src.persona.repository import PersonaRepository
 from src.simulation.debate_config import DebateConfig
 from src.simulation.relevance_matrix import (
     NoAgentsDerivableError,
     SelectionCandidate,
     SelectionRow,
+    cap_by_type,
     rank_candidates,
 )
 from src.utils.queryIntend import QueryIntent
@@ -84,15 +86,19 @@ class ProfileSynthesizer:
         required = await self._required_nodes(seeds, limit=search_limit)
         target = min(max_agents, int(math.sqrt(len(required)) * 4))
 
+        # Ground each persona in its node's 1-hop subgraph, not one bare node.
+        subgraph = await self._subgraph_by_seed(required, search_limit)
         candidates = [
             SelectionCandidate(
                 name=node.name,
-                text=self._candidate_text([node]),
-                evidence=[node],
+                text=self._candidate_text([node, *subgraph.get(node.id, [])]),
+                evidence=[node, *subgraph.get(node.id, [])],
             )
             for node in required
         ]
-        rows = rank_candidates(candidates, intent, config or DebateConfig(), warnings=warnings)
+        rows = rank_candidates(
+            candidates, intent, config or DebateConfig(), warnings=warnings
+        )
         if selection_rows is not None:
             selection_rows.extend(rows)
         # S9 visibility: expose the S4 decomposition the moment it exists, so the
@@ -103,13 +109,19 @@ class ProfileSynthesizer:
                 await on_selection(list(rows))
             except Exception as exc:
                 logger.warning("on_selection emitter failed: %s", exc)
-        # Pair each ranked row with its node evidence — positionally aligned with
-        # `required` (same comprehension), so a row consumes its evidence from a
+        # Pair each ranked row with its candidate's evidence — positionally aligned
+        # with `required` (same comprehension), so a row consumes its evidence from a
         # per-name bucket in rank order and two rows sharing a name both survive.
+        # The whole evidence list (node + subgraph) reaches the build and distillation.
         evidence_by_name: dict[str, list[list[EntityNode]]] = defaultdict(list)
-        for candidate, node in zip(candidates, required):
-            evidence_by_name[candidate.name].append([node])
-        top_rows = [(row, evidence_by_name[row.name].pop(0)) for row in rows[:target]]
+        for candidate in candidates:
+            evidence_by_name[candidate.name].append(list(candidate.evidence))
+        # S7: the seats go to the top rows across entity types, not the top rows
+        # of one type — `cap_by_type` owns that cut next to `rank_candidates`.
+        selected = cap_by_type(
+            rows, {node.name: node.label for node in required}, target
+        )
+        top_rows = [(row, evidence_by_name[row.name].pop(0)) for row in selected]
 
         # S5: ONE batched distillation call for the whole selection set — the S3
         # stance axis plus each row's anchors give every persona a question-aware
@@ -117,9 +129,32 @@ class ProfileSynthesizer:
         # failures fall back to the deterministic template and warn (never raise).
         distilled: dict[str, tuple[str, str]] = {}
         if distill:
+            # T3: the persona's OWN chunk text — the grounding the EVIDENCE block
+            # has been missing (entity nodes carry no `summary`). ONE call for the
+            # whole batch, keyed by chunk id so each persona gets its own snippets
+            # (R17). The fetch is deliberately uncapped in Cypher (R19): a global
+            # cap over this persona-ordered union would let a chunk-heavy persona
+            # starve the ones after it. `_own_source_snippets` caps each persona
+            # instead. A roster with no chunk refs issues no query at all.
+            batch_chunk_ids = list(
+                dict.fromkeys(
+                    chunk_id
+                    for _, evidence in top_rows
+                    for chunk_id in self._evidence_chunk_ids(evidence)
+                )
+            )
+            snippets_by_chunk = (
+                await self._repo.fetch_source_evidence_by_chunk(batch_chunk_ids)
+                if batch_chunk_ids
+                else {}
+            )
             distilled = await self._repo.distill_profiles(
                 personas=[
-                    self._distillation_entry(row, evidence)
+                    self._distillation_entry(
+                        row,
+                        evidence,
+                        self._own_source_snippets(evidence, snippets_by_chunk),
+                    )
                     for row, evidence in top_rows
                 ],
                 query=query,
@@ -152,14 +187,17 @@ class ProfileSynthesizer:
                     "name": agent_name,
                     **representative.properties,
                 }
+                # The entity's real type label is the build's archetype fallback;
+                # properties alone never carry it.
+                node = {**node, "label": representative.label}
 
                 # Calculate metrics using repo method
                 # For node-level synthesis, we construct synthetic sector_results
                 sector_results = self._build_sector_results(evidence)
 
-                max_relevance = max(
-                    e.relevance_score for e in evidence
-                ) if evidence else 1.0
+                max_relevance = (
+                    max(e.relevance_score for e in evidence) if evidence else 1.0
+                )
 
                 metrics = await self._repo.calculate_agent_metrics_and_context_for_llm(
                     agent_name=agent_name,
@@ -193,7 +231,9 @@ class ProfileSynthesizer:
                             await pending
                     except Exception as exc:
                         logger.warning(
-                            "provenance write failed for persona %r: %s", agent_name, exc,
+                            "provenance write failed for persona %r: %s",
+                            agent_name,
+                            exc,
                         )
                         if warnings is not None:
                             warnings.append(
@@ -213,7 +253,9 @@ class ProfileSynthesizer:
                             await pending
                     except Exception as exc:
                         logger.warning(
-                            "entity-link write failed for persona %r: %s", agent_name, exc,
+                            "entity-link write failed for persona %r: %s",
+                            agent_name,
+                            exc,
                         )
                         if warnings is not None:
                             warnings.append(
@@ -238,7 +280,9 @@ class ProfileSynthesizer:
         completed = 0
         completed_lock = asyncio.Lock()
 
-        async def _build_and_notify(row: SelectionRow, entity_evidence: list[EntityNode]) -> Agent | None:
+        async def _build_and_notify(
+            row: SelectionRow, entity_evidence: list[EntityNode]
+        ) -> Agent | None:
             nonlocal completed
             profile = await _build_profile(row.name, entity_evidence)
             if profile is not None and on_profile is not None:
@@ -248,12 +292,15 @@ class ProfileSynthesizer:
                 try:
                     await on_profile(profile, index, len(top_rows))
                 except Exception as exc:
-                    logger.warning("on_profile emitter failed for %r: %s", profile.identity.name, exc)
+                    logger.warning(
+                        "on_profile emitter failed for %r: %s",
+                        profile.identity.name,
+                        exc,
+                    )
             return profile
 
         tasks = [
-            _build_and_notify(row, entity_evidence)
-            for row, entity_evidence in top_rows
+            _build_and_notify(row, entity_evidence) for row, entity_evidence in top_rows
         ]
         results = await asyncio.gather(*tasks)
         profiles = [p for p in results if p is not None]
@@ -272,8 +319,11 @@ class ProfileSynthesizer:
         Activation path: candidates surfaced by topology are converted through
         the same repository pipeline as query-driven synthesis.
         Joiners are deliberately **not** distilled (no mid-loop LLM calls), so
-        they keep the template bio/perspective; they do get the same D2
-        provenance write as the initial roster when their node carries a
+        they keep the template bio/perspective. Their identity is still derived
+        from the graph rather than a hollow constant: `fetch_nodes_by_names`
+        carries the node's real type label, so the build applies the same Task 5
+        archetype/style/domain precedence the roster gets. They also get the
+        same D2 provenance write as the initial roster when their node carries a
         `triplet_source_id`, with the same log-and-continue tolerance.
         """
         if not names:
@@ -290,29 +340,45 @@ class ProfileSynthesizer:
                 if node is None:
                     # No graph node backs this name. Skipping beats fabricating a
                     # default-archetype/-stance/-cior Agent from the bare string.
-                    logger.warning("synthesize_from_names: %r has no graph node; skipped", name)
+                    logger.warning(
+                        "synthesize_from_names: %r has no graph node; skipped", name
+                    )
                     return None
                 relevance = max(0.05, min(1.0, relevant.get(name, 0.33)))
-                domain_tags = node.get("domain_tags") if isinstance(node, dict) else getattr(node, "domain_tags", []) or []
+                domain_tags = (
+                    node.get("domain_tags")
+                    if isinstance(node, dict)
+                    else getattr(node, "domain_tags", []) or []
+                )
                 first_tag = (domain_tags[0] if domain_tags else None) or "general"
-                sector_results = [{
-                    "domain_tag": first_tag,
-                    "total_relevance": relevance,
-                    "evidence_nodes": [name],
-                    "density": 1,
-                }]
+                sector_results = [
+                    {
+                        "domain_tag": first_tag,
+                        "total_relevance": relevance,
+                        "evidence_nodes": [name],
+                        "density": 1,
+                    }
+                ]
                 metrics = await self._repo.calculate_agent_metrics_and_context_for_llm(
-                    agent_name=name, node=node, sector_results=sector_results, max_relevance=1.0,
+                    agent_name=name,
+                    node=node,
+                    sector_results=sector_results,
+                    max_relevance=1.0,
                 )
 
                 # D2 on the activation path: write the joiner's real provenance
                 # edge BEFORE the build (which reads it), tolerantly — a failed
                 # write is logged and the profile still builds.
                 chunk_id = (
-                    node.get("triplet_source_id") if isinstance(node, dict)
+                    node.get("triplet_source_id")
+                    if isinstance(node, dict)
                     else getattr(node, "triplet_source_id", None)
                 )
-                chunk_ids = [chunk_id.strip()] if isinstance(chunk_id, str) and chunk_id.strip() else []
+                chunk_ids = (
+                    [chunk_id.strip()]
+                    if isinstance(chunk_id, str) and chunk_id.strip()
+                    else []
+                )
                 if chunk_ids:
                     try:
                         pending = self._repo.write_persona_provenance(
@@ -324,7 +390,9 @@ class ProfileSynthesizer:
                             await pending
                     except Exception as exc:
                         logger.warning(
-                            "provenance write failed for joiner %r: %s", name, exc,
+                            "provenance write failed for joiner %r: %s",
+                            name,
+                            exc,
                         )
 
                     # Same topology prerequisite as the initial roster: joiners
@@ -339,19 +407,50 @@ class ProfileSynthesizer:
                             await pending
                     except Exception as exc:
                         logger.warning(
-                            "entity-link write failed for joiner %r: %s", name, exc,
+                            "entity-link write failed for joiner %r: %s",
+                            name,
+                            exc,
                         )
 
                 return await self._repo.build_single_agent_profile_from_node(
-                    agent_name=name, node=node, user_query=query, dataset_id=dataset_id,
-                    agent_metrics=metrics, sector_results=sector_results, llm_output=None,
+                    agent_name=name,
+                    node=node,
+                    user_query=query,
+                    dataset_id=dataset_id,
+                    agent_metrics=metrics,
+                    sector_results=sector_results,
+                    llm_output=None,
                     chunk_node_ids=chunk_ids,
                 )
 
         results = await asyncio.gather(*(_build(n) for n in names))
         return [p for p in results if p is not None]
 
-    async def _required_nodes(self, seeds: list[EntityNode], limit: int) -> list[EntityNode]:
+    async def _subgraph_by_seed(
+        self, nodes: list[EntityNode], limit: int
+    ) -> dict[str, list[EntityNode]]:
+        """Each node's 1-hop entity neighbours, keyed by node id — ONE query for
+        the whole roster. A missing method, a raising fetch or a non-mapping
+        answer degrades to no neighbours — logged, never raised.
+        """
+        fetch = getattr(self._ctx, "find_connected_nodes_by_seed", None)
+        if not callable(fetch):
+            return {}
+        try:
+            grouped = fetch([node.id for node in nodes], limit=limit)
+            if inspect.iscoroutine(grouped):
+                grouped = await grouped
+        except Exception as exc:
+            logger.warning(
+                "subgraph fetch failed; grounding personas on their own nodes only: %s",
+                exc,
+            )
+            return {}
+        return grouped if isinstance(grouped, Mapping) else {}
+
+    async def _required_nodes(
+        self, seeds: list[EntityNode], limit: int
+    ) -> list[EntityNode]:
         """The roster's candidate nodes: the seeds plus their one-hop entity
         neighbours, deduped by (id, name). A missing method, a raising walk or
         a non-list answer degrade to the seeds alone — logged, never raised.
@@ -359,13 +458,17 @@ class ProfileSynthesizer:
         required = list(seeds)
         try:
             walk = getattr(self._ctx, "find_connected_nodes", None)
-            neighbours = walk([seed.id for seed in seeds], limit) if callable(walk) else []
+            neighbours = (
+                walk([seed.id for seed in seeds], limit) if callable(walk) else []
+            )
             if inspect.iscoroutine(neighbours):
                 neighbours = await neighbours
             if not isinstance(neighbours, (list, tuple)):
                 neighbours = []
         except Exception as exc:
-            logger.warning("node traversal failed; continuing with the seed nodes only: %s", exc)
+            logger.warning(
+                "node traversal failed; continuing with the seed nodes only: %s", exc
+            )
             neighbours = []
 
         seen = {(seed.id, seed.name) for seed in required}
@@ -376,16 +479,43 @@ class ProfileSynthesizer:
                 required.append(node)
         return required
 
-    def _distillation_entry(self, row: SelectionRow, evidence: list[EntityNode]) -> dict:
+    @staticmethod
+    def _own_source_snippets(
+        evidence: list[EntityNode], snippets_by_chunk: Mapping[str, list[str]]
+    ) -> list[str]:
+        """This persona's own snippets, in its evidence's chunk order, capped.
+
+        Reading only the chunks this persona's evidence names is what keeps one
+        persona's source text out of another's distillation.
+        """
+        if not isinstance(snippets_by_chunk, Mapping):
+            return []
+        return [
+            snippet
+            for chunk_id in ProfileSynthesizer._evidence_chunk_ids(evidence)
+            for snippet in (snippets_by_chunk.get(chunk_id) or [])
+        ][:SOURCE_EVIDENCE_MAX_SNIPPETS]
+
+    def _distillation_entry(
+        self,
+        row: SelectionRow,
+        evidence: list[EntityNode],
+        source_snippets: list[str] | None = None,
+    ) -> dict:
         """One persona's S5 distillation input: identity, the grounding synthesis
-        already holds (node properties, matched sectors, node summaries) and
-        the S4 provenance anchors of its selection row. No extra graph reads —
-        the entry is name-keyed by `row.name`, the same key profiles build under.
+        already holds (the persona's real source snippets, node properties,
+        matched sectors, node summaries) and the S4 provenance anchors of its
+        selection row. No extra graph reads — the entry is name-keyed by
+        `row.name`, the same key profiles build under.
         """
         representative = (
             max(evidence, key=lambda e: e.relevance_score) if evidence else None
         )
-        properties = getattr(representative, "properties", None) if representative is not None else None
+        properties = (
+            getattr(representative, "properties", None)
+            if representative is not None
+            else None
+        )
         summaries = [
             e.summary.strip()
             for e in evidence
@@ -395,7 +525,7 @@ class ProfileSynthesizer:
             "name": row.name,
             "node": dict(properties) if isinstance(properties, dict) else {},
             "sector_results": self._build_sector_results(evidence),
-            "evidence": summaries,
+            "evidence": list(source_snippets or []) + summaries,
             "anchors": [dict(anchor) for anchor in row.anchors],
         }
 
@@ -405,7 +535,9 @@ class ProfileSynthesizer:
         parts: list[str] = []
         for entity in entities:
             parts.append(str(getattr(entity, "name", "") or ""))
-            parts.extend(str(tag) for tag in (getattr(entity, "domain_tags", None) or []))
+            parts.extend(
+                str(tag) for tag in (getattr(entity, "domain_tags", None) or [])
+            )
             parts.append(str(getattr(entity, "summary", "") or ""))
         return " ".join(part for part in parts if part)
 

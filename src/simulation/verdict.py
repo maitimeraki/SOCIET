@@ -1,10 +1,14 @@
 """VerdictSynthesizer: cluster-weighted CIOR synthesis for debate verdicts."""
+
 from __future__ import annotations
 
 import logging
 from typing import TYPE_CHECKING, List
 
-from src.persona.agent import Agent, SYNTHETIC_PROVENANCE_PREFIX, Stance
+from pydantic import BaseModel
+
+from src.llm.config_llm import get_llm_config
+from src.persona.agent import SYNTHETIC_PROVENANCE_PREFIX, Agent, Stance
 from src.simulation.pair_turn import (
     AgentTurn,
     ClusterSummary,
@@ -17,14 +21,110 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-SUMMARY_MAX_CHARS = 600
-
-# Step 9: bound what the summary prompt may carry from the transcript.
-SUMMARY_TRANSCRIPT_MAX_TURNS = 20
-SUMMARY_TRANSCRIPT_MAX_CHARS = 8000
+# Step 9: bound the transcript the answer-writer prompt may carry. Bound the
+# input, never the answer — there is no character cap on the narrative itself.
+SUMMARY_TRANSCRIPT_MAX_TURNS = 40
+SUMMARY_TRANSCRIPT_MAX_CHARS = 16000
+# Each turn's private reasoning rides as a bounded subordinate line, so it
+# grounds the answer without blowing the transcript cap.
+SUMMARY_TURN_REASONING_CHARS = 400
 
 # Step 7: a dominant share below this is a near-tie, not a mandate.
 CONTESTED_THRESHOLD = 0.6
+
+# Bounded latency budget for the answer-writer: the first call plus two
+# retries, each asking more strictly for bare JSON. After this the narrative
+# falls back to `summary` — flagged on the verdict, never silent. The model and
+# token budget come from LLMConfig (verdict_model / verdict_max_tokens).
+VERDICT_MAX_ATTEMPTS = 3
+
+# Appended to the prompt on retries: the previous reply was not valid JSON, so
+# the format constraint is restated explicitly.
+VERDICT_JSON_REINFORCEMENT = (
+    "\n\nYour previous reply was not valid JSON. Reply with ONLY the JSON "
+    "object — no markdown fences, no prose before or after it."
+)
+
+VERDICT_SYSTEM = (
+    "You are the analyst who answers the user's question from the debate below. "
+    "Reply with ONLY a JSON object, no prose, with keys: answer, reasoning, "
+    "constraints_and_risks, dissenting_views (list of {stance, view}), "
+    "evidence (list of {entity, claim}), confidence. Ground every claim in the "
+    "transcript and the cited entities; do not invent facts."
+)
+
+
+class Verdict(BaseModel):
+    """Structured analyst answer, validated at the boundary (spec §8.1, §8.6)."""
+
+    answer: str
+    reasoning: str
+    constraints_and_risks: str
+    dissenting_views: list[dict] = []
+    evidence: list[dict] = []
+    confidence: float = 0.0
+
+
+def _extract_json_object(raw: str) -> str | None:
+    """Return the first balanced `{...}` object in `raw`, or None.
+
+    Tolerates markdown fences and prose before/after the object (both are
+    common from a small model) by locating the first `{` and matching braces.
+    String-aware, so a brace inside a JSON string never ends the match early.
+    """
+    text = raw or ""
+    start = text.find("{")
+    if start == -1:
+        return None
+    depth = 0
+    in_string = False
+    escaped = False
+    for i in range(start, len(text)):
+        ch = text[i]
+        if in_string:
+            if escaped:
+                escaped = False
+            elif ch == "\\":
+                escaped = True
+            elif ch == '"':
+                in_string = False
+            continue
+        if ch == '"':
+            in_string = True
+        elif ch == "{":
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+            if depth == 0:
+                return text[start : i + 1]
+    return None
+
+
+def _parse_verdict(raw: str) -> Verdict | None:
+    """Repair-then-validate: extract the JSON object, then validate it. None
+    when there is no parseable object or the answer came back empty."""
+    candidate = _extract_json_object(raw)
+    if candidate is None:
+        return None
+    try:
+        parsed = Verdict.model_validate_json(candidate)
+    except Exception:
+        return None
+    return parsed if parsed.answer.strip() else None
+
+
+def _to_markdown(v: Verdict) -> str:
+    """Assemble the narrative markdown from the structured verdict fields."""
+    parts = [
+        f"## Recommendation\n{v.answer}",
+        f"## Reasoning\n{v.reasoning}",
+    ]
+    if v.constraints_and_risks:
+        parts.append(f"## Constraints & Risks\n{v.constraints_and_risks}")
+    # Dissent is rendered by the frontend as a structured list (plan T6), not
+    # prose here — emitting it in markdown too showed it twice.
+    parts.append(f"## Confidence\n{v.confidence:.2f}")
+    return "\n\n".join(parts)
 
 
 class VerdictSynthesizer:
@@ -39,53 +139,111 @@ class VerdictSynthesizer:
         rounds: list[RoundResult],
         profiles: list[Agent],
         llm_client: "LLMClient | None" = None,
+        query: str = "",
+        scenario: str = "",
+        run_id: str = "",
     ) -> DebateVerdict:
-        """Async synthesis -- safe to call from any running event loop."""
+        """Async synthesis -- safe to call from any running event loop.
+
+        Always produces the deterministic template verdict; when a client is
+        given it additionally writes the query-grounded answer into
+        `narrative` (assembled from the structured `Verdict`). When the
+        answer-writer cannot produce parseable JSON after bounded retries + a
+        repair pass — or no client was given — the narrative degrades to
+        `summary` and `narrative_status` is set to `"fallback"` (flagged, and
+        logged with the run/query, never silent).
+        """
         verdict = self.synthesize(rounds=rounds, profiles=profiles, llm_client=None)
+        parsed = None
         if llm_client is not None:
-            llm_summary = await self._allm_summary(llm_client, verdict, rounds)
-            if llm_summary:
-                verdict.summary = llm_summary
+            parsed = await self._allm_verdict(
+                llm_client, verdict, rounds, query, scenario
+            )
+        if parsed is not None:
+            verdict.dissenting_views = parsed.dissenting_views
+            verdict.evidence = parsed.evidence
+            verdict.narrative = _to_markdown(parsed)
+            return verdict
+        verdict.narrative = verdict.summary
+        verdict.narrative_status = "fallback"
+        logger.warning(
+            "verdict narrative degraded to the summary (run=%s, query=%r): %s",
+            run_id or "(none)",
+            query[:120],
+            (
+                "no LLM client given"
+                if llm_client is None
+                else "answer-writer produced no parseable JSON after retries"
+            ),
+        )
         return verdict
 
-    async def _allm_summary(
+    async def _allm_verdict(
         self,
         llm_client: "LLMClient",
         verdict: DebateVerdict,
         rounds: list[RoundResult],
-    ) -> str | None:
-        """Async LLM summary -- no asyncio.run, no loop collision.
+        query: str,
+        scenario: str,
+    ) -> Verdict | None:
+        """Strict-JSON answer-writer -- no asyncio.run, no loop collision.
 
-        The prompt carries the bounded debate transcript, not just the
-        aggregates, so the summary is a synthesis of the argument rather than
-        a restatement of the turn count.
+        The prompt carries the query and the bounded transcript, not just the
+        aggregates, so the answer addresses the question from the argument.
+        Bounded retries (VERDICT_MAX_ATTEMPTS total calls): each retry restates
+        the bare-JSON constraint, and every reply goes through the repair pass in
+        `_parse_verdict`. Returns None only once every attempt has failed, so the
+        caller can flag the fallback.
         """
         transcript, turns_used = self._render_transcript(rounds)
-        contested_note = " (contested near-tie)" if verdict.contested else ""
-        system_prompt = (
-            "You are a neutral debate summarizer. Write a concise verdict "
-            "summary grounded ONLY in the debate transcript below. Reference "
-            "the actual arguments, not the turn counts. Keep it under 600 chars."
-        )
+        contested_note = " -- contested" if verdict.contested else ""
         user_prompt = (
-            f"Overall stance: {verdict.overall_stance.value}\n"
-            f"Dominant share of weight: {verdict.weight_share:.2f}{contested_note}\n"
-            f"Top supporting entities: {verdict.supporting_entities[:5]}\n"
-            f"Top opposing entities: {verdict.opposing_entities[:5]}\n\n"
-            f"Debate transcript (last {turns_used} turns):\n{transcript}"
+            f"QUESTION: {query or '(none)'}\n"
+            f"SCENARIO CONTEXT: {scenario or '(none)'}\n"
+            f"Overall stance: {verdict.overall_stance.value} "
+            f"(share {verdict.weight_share:.2f}{contested_note})\n"
+            f"Supporting entities: {verdict.supporting_entities[:10]}\n"
+            f"Opposing entities: {verdict.opposing_entities[:10]}\n\n"
+            f"DEBATE TRANSCRIPT (last {turns_used} turns):\n{transcript}"
         )
-        try:
-            raw = await llm_client.generate(
-                system_prompt=system_prompt,
-                user_prompt=user_prompt,
-                temperature=0.3,
+        cfg = get_llm_config()
+        from src.billing import metering
+
+        for attempt in range(1, VERDICT_MAX_ATTEMPTS + 1):
+            prompt = (
+                user_prompt
+                if attempt == 1
+                else user_prompt + VERDICT_JSON_REINFORCEMENT
             )
-        except Exception:
-            logger.exception("LLM summary generation failed; using template")
-            return None
-        if not raw:
-            return None
-        return raw.strip()[:SUMMARY_MAX_CHARS]
+            try:
+                with metering.source_scope("verdict"):
+                    raw = await llm_client.generate(
+                        system_prompt=VERDICT_SYSTEM,
+                        user_prompt=prompt,
+                        temperature=0.4,
+                        max_tokens=cfg.verdict_max_tokens,
+                        model=cfg.verdict_model,
+                    )
+            except metering.MeteringError:
+                # Accounting already failed: stop the job instead of retrying
+                # into a deterministic fallback verdict (R9).
+                raise
+            except Exception:
+                logger.exception(
+                    "verdict answer-writer attempt %d/%d raised",
+                    attempt,
+                    VERDICT_MAX_ATTEMPTS,
+                )
+                continue
+            parsed = _parse_verdict(raw)
+            if parsed is not None:
+                return parsed
+            logger.warning(
+                "verdict answer-writer attempt %d/%d returned no parseable JSON",
+                attempt,
+                VERDICT_MAX_ATTEMPTS,
+            )
+        return None
 
     @staticmethod
     def _render_transcript(rounds: list[RoundResult]) -> tuple[str, int]:
@@ -97,6 +255,10 @@ class VerdictSynthesizer:
         budget = SUMMARY_TRANSCRIPT_MAX_CHARS
         for turn in reversed(turns[-SUMMARY_TRANSCRIPT_MAX_TURNS:]):
             line = f"[{turn.stance}] {turn.agent_name}: {turn.content}"
+            if turn.reasoning:
+                line += (
+                    f"\n  (reasoning: {turn.reasoning[:SUMMARY_TURN_REASONING_CHARS]})"
+                )
             if len(line) > budget:
                 break
             lines.append(line)
@@ -177,7 +339,9 @@ class VerdictSynthesizer:
         provenance_by_claim: dict[str, list] = {}
         for turn in all_turns:
             try:
-                turn_stance = Stance(turn.stance) if isinstance(turn.stance, str) else turn.stance
+                turn_stance = (
+                    Stance(turn.stance) if isinstance(turn.stance, str) else turn.stance
+                )
             except ValueError:
                 turn_stance = Stance.NEUTRAL
             if turn_stance == overall_stance:
@@ -201,8 +365,12 @@ class VerdictSynthesizer:
         dominant_count = cluster_details.get(
             overall_stance,
             ClusterSummary(
-                stance=overall_stance, count=0, total_weight=0.0,
-                avg_confidence=0.0, avg_conviction=0.0, agents=[],
+                stance=overall_stance,
+                count=0,
+                total_weight=0.0,
+                avg_confidence=0.0,
+                avg_conviction=0.0,
+                agents=[],
             ),
         ).count
         dominant_pct = (dominant_count / len(all_turns) * 100) if all_turns else 0
@@ -225,7 +393,9 @@ class VerdictSynthesizer:
             contested=contested,
         )
 
-    def _cluster_opinions(self, turns: list[AgentTurn]) -> dict[Stance, list[AgentTurn]]:
+    def _cluster_opinions(
+        self, turns: list[AgentTurn]
+    ) -> dict[Stance, list[AgentTurn]]:
         clusters: dict[Stance, list[AgentTurn]] = {
             Stance.POSITIVE: [],
             Stance.NEGATIVE: [],
@@ -234,7 +404,9 @@ class VerdictSynthesizer:
         }
         for turn in turns:
             try:
-                stance = Stance(turn.stance) if isinstance(turn.stance, str) else turn.stance
+                stance = (
+                    Stance(turn.stance) if isinstance(turn.stance, str) else turn.stance
+                )
             except ValueError:
                 stance = Stance.NEUTRAL
             clusters[stance].append(turn)

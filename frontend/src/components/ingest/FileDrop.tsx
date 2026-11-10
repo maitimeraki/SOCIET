@@ -24,13 +24,13 @@ export default function FileDrop({ onFiles, disabled = false }: { onFiles: (file
       }}
       onDragLeave={() => setDragging(false)}
       onDrop={handleDrop}
-      className={`flex cursor-pointer flex-col items-center gap-2 rounded-[6px] border border-dashed px-6 py-10 text-center transition-colors ${
-        dragging ? 'border-accent bg-accent-soft' : 'border-ink-600 bg-ink-800 hover:border-ink-600'
+      className={`flex cursor-pointer flex-col items-center gap-2 border-y border-dashed px-6 py-10 text-center transition-colors duration-state focus-within:border-accent ${
+        dragging ? 'border-accent bg-accent-soft' : 'border-ink-3 hover:border-ink-3'
       } ${disabled ? 'cursor-not-allowed opacity-50' : ''}`}
     >
-      <UploadSimple size={20} className="text-paper-dim" aria-hidden="true" />
-      <span className="text-body text-paper">Drop files here, or browse</span>
-      <span className="text-micro text-paper-mute">PDF, DOCX, MD, TXT · up to 20 MB each</span>
+      <UploadSimple size={20} className="text-ink-2" aria-hidden="true" />
+      <span className="text-body text-ink">Drop files here, or browse</span>
+      <span className="text-micro text-ink-3">PDF, DOCX, MD, TXT · up to 5 MB each</span>
       <input
         ref={input}
         type="file"

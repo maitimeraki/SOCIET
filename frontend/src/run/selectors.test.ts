@@ -57,4 +57,15 @@ describe('selectors', () => {
     expect(view?.stance).toBe('POSITIVE')
     expect(view?.confidence).toBe(0.83)
   })
+  it('carries the narrative and structured dissent into the verdict view', () => {
+    const view = verdictView(full)
+    expect(view?.narrative).toContain('## Recommendation')
+    expect(view?.dissentingViews).toEqual([
+      { stance: 'NEGATIVE', view: 'Entry cost outweighs the single market.' },
+    ])
+    expect(view?.evidence?.[0]).toEqual({
+      entity: 'EU single market',
+      claim: 'Lowers per-unit distribution cost.',
+    })
+  })
 })

@@ -1,12 +1,14 @@
 """Chunk processing utilities for document ingestion."""
-import uuid
+
+import csv
 import hashlib
-from typing import Any, List, Optional
-from io import StringIO, BytesIO
+import json
+import uuid
+from io import StringIO
+from typing import Any, List
+
 from fastapi import UploadFile
 from llama_index.core.node_parser import SentenceSplitter
-import csv
-import json
 
 from src.graph.models_graph import ProcessedChunk
 
@@ -79,6 +81,7 @@ def _read_basic_pdf(content: bytes) -> str:
         text = content.decode("latin-1")
         # Extract text between BT and ET markers (basic PDF text extraction)
         import re
+
         text_parts = re.findall(r"BT(.*?)ET", text, re.DOTALL)
         result = []
         for part in text_parts:
@@ -130,7 +133,11 @@ def split_text_sentences(text: str, chunk_size: int, chunk_overlap: int) -> List
         return []
 
     splitter = SentenceSplitter(chunk_size=chunk_size, chunk_overlap=chunk_overlap)
-    return [chunk for chunk in (raw.strip() for raw in splitter.split_text(cleaned)) if chunk]
+    return [
+        chunk
+        for chunk in (raw.strip() for raw in splitter.split_text(cleaned))
+        if chunk
+    ]
 
 
 def process_documents(

@@ -174,7 +174,7 @@ python -m src.cli.bootstrap_neo4j        # Initialize Neo4j schema
 
 ### Run API
 ```bash
-uvicorn src.api.api_server:app --host 127.0.0.1 --port 8000
+uvicorn src.api.api_server:app --host 127.0.0.1 --port 8000 --reload
 # Docs: http://localhost:8000/docs
 ```
 
@@ -388,7 +388,53 @@ NEO4J_DATABASE=neo4j
 # REDIS (optional - caching and job queue)
 # =============================================================================
 REDIS_URL=redis://localhost:6379
+
+# =============================================================================
+# BILLING AND COMPLIANCE (docs/TECHNOLOGY_STACK.md §11)
+# =============================================================================
+# Billing stays off until the legal surface + Stripe are live; the free plan is
+# the complete entitlement while off. With BILLING_ENABLED=true the four Stripe
+# names below are required at boot.
+BILLING_ENABLED=false
+STRIPE_SECRET_KEY=sk-...
+STRIPE_WEBHOOK_SECRET=whsec-...
+STRIPE_PRICE_STARTER=price_...
+STRIPE_PRICE_STUDIO=price_...
+APP_BASE_URL=http://localhost:5173
+EMAIL_API_KEY=
+EMAIL_FROM=no-reply@societas.app
+LEGAL_ENTITY_NAME=
+LEGAL_CONTACT_EMAIL=hello@societas.app
+# Plan table overrides (units / caps / public price card).
+PLAN_FREE_UNITS=1000
+PLAN_STARTER_UNITS=8000
+PLAN_STUDIO_UNITS=16000
+PLAN_ENTERPRISE_UNITS=80000
+PLAN_STARTER_PRICE_USD=10
+PLAN_STUDIO_PRICE_USD=20
+PLAN_ENTERPRISE_PRICE_LABEL=Custom
+GRAPH_JOB_RESERVE_UNITS=2000
+
+# =============================================================================
+# EXTRACTION / EDGE
+# =============================================================================
+EXTRACTION_PROVIDER=nvidia_nim
+EXTRACTION_LLM_MODEL=
+EXTRACTION_BASE_URL=
+EXTRACTION_API_KEY=
+EXTRACTION_TRIAL_ACK=false
+LLM_PROMPT_CACHE=true
+FORWARDED_ALLOW_IPS=
+RATE_LIMIT_STORAGE_URI=
+GIT_SHA=dev
 ```
+
+### Database roles
+
+The runtime connects as the least-privilege `societas_app` role; apply
+`scripts/setup_db_roles.sql` for the base grants and `scripts/db_roles.sql` for
+the ledger split (append-only `usage_events` for the app; `societas_retention`
+owns the age-based deletes). Run retention as `societas_retention`.
 
 ### DebateConfig Defaults
 ```python
@@ -486,4 +532,4 @@ CRITICAL RULES:
 
 - `docs/TECHNOLOGY_STACK.md` - Production tech stack and architecture (source of truth)
 - `docs/ARCHITECTURE.md` - Detailed component documentation
-- `docs/DESIGN.md` - Frontend design specification ("The Chamber", draft pending approval; supersedes the retired "Neural Observatory" demo shell)
+- `docs/DESIGN_SPEC.md` - Frontend design authority: the built world (tokens, type, wireframes, motion, component language, copy law), rewritten from the shipped frontend; the "Survey" draft and the retired "Neural Observatory" shell are both superseded by this file.

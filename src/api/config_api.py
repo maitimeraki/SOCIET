@@ -1,6 +1,6 @@
-from pydantic import BaseModel, Field
-from typing import List, Dict, Optional, Literal
+from typing import Dict, List, Literal, Optional
 
+from pydantic import BaseModel, Field
 
 
 class DocumentContext(BaseModel):
@@ -14,12 +14,14 @@ class UserQuery(BaseModel):
     scenario: str  # "Should I expand my SaaS into Europe in 2025?"
     context: Dict = Field(default_factory=dict)  # User's company data, constraints
     simulation_depth: Literal["shallow", "standard", "deep"] = "standard"
-    required_perspectives: Optional[List[str]] = None  # ["legal", "cultural", "economic"]
+    required_perspectives: Optional[List[str]] = (
+        None  # ["legal", "cultural", "economic"]
+    )
     selected_domains: List[str] = Field(default_factory=list)
     documents: List[DocumentContext] = Field(default_factory=list)
     mode: Literal["sync", "async"] = "sync"
-    
-    
+
+
 class SimulationResponse(BaseModel):
     society_opinion: Dict
     dissenting_views: List[Dict]
@@ -64,20 +66,22 @@ class OntologyRunStatus(BaseModel):
     stage: str = "queued"
     error: Optional[str] = None
     result: Optional[OntologyResult] = None
-    
-    
-    
-    
+
+
 # ------- --------
 from typing import Literal, TypedDict
 
 JobMode = Literal["ontology", "build_graph"]
 
+
 class ChunkProgress(TypedDict):
     entity_types: List[str]
     relation_types: List[str]
     docs_built: int
-    ontology: Optional[dict]  # serialized LocalOntology; set only when this chunk ran discovery
+    ontology: Optional[
+        dict
+    ]  # serialized LocalOntology; set only when this chunk ran discovery
+
 
 class UnifiedJobResult(TypedDict):
     dataset_id: str

@@ -1,7 +1,10 @@
-from dataclasses import dataclass
-from typing import AsyncIterator, Any, Optional
 import asyncio
 import logging
+from dataclasses import dataclass
+from typing import Any, AsyncIterator, Optional
+
+from src.billing.metering import MeteringError
+from src.observability import LLM_CALLS, LLM_FAILURES
 
 logger = logging.getLogger(__name__)
 
@@ -30,6 +33,7 @@ class BatchedLLMRunner:
 
     async def _run_single(self, prompt: PairPrompt) -> PairResult:
         async with self._sem:
+            LLM_CALLS.inc()
             try:
                 response = await self._llm.generate(
                     system_prompt=prompt.system_prompt,
@@ -39,7 +43,12 @@ class BatchedLLMRunner:
                     temperature=prompt.temperature,
                 )
                 return PairResult(pair_id=prompt.pair_id, response=response, error=None)
+            except MeteringError:
+                # Accounting already failed: never degrade this into an empty
+                # turn — the job must stop (R9).
+                raise
             except Exception as exc:
+                LLM_FAILURES.inc()
                 logger.error(f"LLM call failed for pair {prompt.pair_id}: {exc}")
                 return PairResult(pair_id=prompt.pair_id, response="", error=str(exc))
 

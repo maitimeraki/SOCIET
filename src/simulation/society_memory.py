@@ -6,14 +6,15 @@ speaking. Idempotent: Opinion writes MERGE on (dataset_id, query_hash, round_no,
 agent_name); REACTED_TO reactions MERGE on (dataset_id, query_hash, round_no)
 between dataset-scoped Personas. Re-running any round is safe.
 """
+
 from __future__ import annotations
 
 import logging
 from collections import Counter
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, Dict, List, Optional
+from typing import TYPE_CHECKING, Dict, List, Optional
 
-from src.simulation.pair_turn import AgentTurn, CommPair, RoundResult
+from src.simulation.pair_turn import RoundResult
 
 if TYPE_CHECKING:
     from src.persona.agent import Agent
@@ -33,11 +34,23 @@ def _profile_float(profile, attr: str, default: float) -> float:
     value = getattr(profile, attr, None) if profile is not None else None
     return default if value is None else float(value)
 
+
+def _opinion_key(dataset_id: str, query_hash: str, opinion: dict) -> str:
+    """The Opinion MERGE's identity, read off the write params — never re-derived."""
+    return f"{dataset_id}:{query_hash}:{opinion['round_no']}:{opinion['agent_name']}"
+
+
+def _persona_key(dataset_id: str, agent_name: str) -> str:
+    """The Persona MERGE's identity, read off the write params — never re-derived."""
+    return f"{dataset_id}:{agent_name}"
+
+
 _OPINION_CYPHER = """
 UNWIND $opinions AS op
 MERGE (o:Opinion {dataset_id: $dataset_id, query_hash: $query_hash,
                   round_no: op.round_no, agent_name: op.agent_name})
-SET o.text = op.text, o.stance = op.stance, o.confidence = op.confidence,
+SET o.text = op.text, o.name = op.name, o.stance = op.stance,
+    o.confidence = op.confidence,
     o.conviction = op.conviction, o.cior = op.cior, o.weight = op.weight,
     o.entities = op.entities, o.ts = datetime()
 MERGE (p:Persona {name: op.agent_name, dataset_id: $dataset_id})
@@ -100,7 +113,8 @@ RETURN o.agent_name AS agent, o.round_no AS round_no, o.stance AS stance,
 def _opinion_entry(r: dict) -> dict:
     """Map one opinion row to the snapshot entry shape `to_prompt` renders."""
     return {
-        "agent": r["agent"], "round": r.get("round_no") or 0,
+        "agent": r["agent"],
+        "round": r.get("round_no") or 0,
         "stance": r.get("stance") or "NEUTRAL",
         "confidence": float(r.get("confidence") or 0.0),
         "weight": float(r.get("weight") or 0.0),
@@ -125,8 +139,9 @@ class SocietySnapshot:
     consensus: Optional[dict] = None
     version: str = ""
 
-    def to_prompt(self, speaker: str, opponent: str,
-                  max_opinions: int = 6, max_chars: int = 1300) -> str:
+    def to_prompt(
+        self, speaker: str, opponent: str, max_opinions: int = 6, max_chars: int = 1300
+    ) -> str:
         """Rendered SOCIETY STATE block; never includes the speaker's own lines."""
         entries = self.entries_by_speaker.get(speaker, self.entries)
         if not entries:
@@ -150,7 +165,9 @@ class SocietySnapshot:
             )
             picked += 1
         if self.buzz:
-            buzz_str = ", ".join(f"{b['entity']} ({b['mentions']})" for b in self.buzz[:3])
+            buzz_str = ", ".join(
+                f"{b['entity']} ({b['mentions']})" for b in self.buzz[:3]
+            )
             lines.append(f"Widely discussed entities: {buzz_str}")
         text = "\n".join(lines)
         if len(text) > max_chars:
@@ -168,7 +185,9 @@ class SocietySnapshot:
             return ""
         lines = [f"YOUR PRIOR POSITIONS (through round {self.round}):"]
         for e in sorted(mine, key=lambda x: x.get("round", 0)):
-            lines.append(f"- R{e.get('round', 0)} ({e.get('stance') or 'NEUTRAL'}): {e.get('summary') or ''}")
+            lines.append(
+                f"- R{e.get('round', 0)} ({e.get('stance') or 'NEUTRAL'}): {e.get('summary') or ''}"
+            )
         text = "\n".join(lines)
         if len(text) > max_chars:
             text = text[:max_chars].rsplit("\n", 1)[0]
@@ -236,45 +255,123 @@ class SocietyMemory:
                 for ref in t.references:
                     if ref not in entities:
                         entities.append(ref)
-            opinions.append({
-                "agent_name": agent_name,
-                "round_no": round_result.round_num,
-                "text": "\n\n".join(t.content for t in turns),
-                "stance": last.stance,
-                "confidence": last.confidence,
-                "conviction": conviction,
-                "cior": cior,
-                "weight": round(last.confidence * conviction * (1 + cior) / 2, 6),
-                "entities": entities[:8],
-            })
+            opinions.append(
+                {
+                    "agent_name": agent_name,
+                    "round_no": round_result.round_num,
+                    "name": f"{agent_name} · pass {round_result.round_num}",
+                    "text": "\n\n".join(t.content for t in turns),
+                    "stance": last.stance,
+                    "confidence": last.confidence,
+                    "conviction": conviction,
+                    "cior": cior,
+                    "weight": round(last.confidence * conviction * (1 + cior) / 2, 6),
+                    "entities": entities[:8],
+                }
+            )
 
-        receipt = {"round": round_result.round_num, "opinions": len(opinions),
-                   "edges": len(reactions), "failed": False}
+        mention_rows = [
+            {
+                "agent_name": o["agent_name"],
+                "round_no": o["round_no"],
+                "entities": o["entities"],
+            }
+            for o in opinions
+            if o["entities"]
+        ]
+
+        # The receipt must be what the transaction wrote, captured here from the
+        # same params the Cyphers receive — never re-queried or re-derived later.
+        written_nodes = [
+            {
+                "key": _opinion_key(dataset_id, query_hash, o),
+                "label": "Opinion",
+                "name": o["name"],
+            }
+            for o in opinions
+        ]
+        written_links = [
+            {
+                "from": _persona_key(dataset_id, o["agent_name"]),
+                "to": _opinion_key(dataset_id, query_hash, o),
+                "kind": "STATED",
+            }
+            for o in opinions
+        ]
+        written_links += [
+            {
+                "from": _persona_key(dataset_id, r["speaker_name"]),
+                "to": _persona_key(dataset_id, r["target_name"]),
+                "kind": "REACTED_TO",
+            }
+            for r in reactions
+        ]
+        written_links += [
+            {
+                "from": _opinion_key(dataset_id, query_hash, row),
+                "to": entity,
+                "kind": "MENTIONS",
+            }
+            for row in mention_rows
+            for entity in row["entities"]
+        ]
+
+        receipt = {
+            "round": round_result.round_num,
+            "opinions": len(opinions),
+            "edges": len(reactions),
+            "failed": False,
+            "written_nodes": written_nodes,
+            "written_links": written_links,
+        }
         if not opinions:
             return receipt
 
-        mention_rows = [{"agent_name": o["agent_name"], "round_no": o["round_no"],
-                         "entities": o["entities"]} for o in opinions if o["entities"]]
         try:
             async with self._driver.session(database=self._db) as session:
                 tx = await session.begin_transaction()
-                await tx.run(_OPINION_CYPHER, opinions=opinions,
-                             dataset_id=dataset_id, query_hash=query_hash)
-                await tx.run(_REACTION_CYPHER, reactions=reactions,
-                             dataset_id=dataset_id, query_hash=query_hash)
+                await tx.run(
+                    _OPINION_CYPHER,
+                    opinions=opinions,
+                    dataset_id=dataset_id,
+                    query_hash=query_hash,
+                )
+                await tx.run(
+                    _REACTION_CYPHER,
+                    reactions=reactions,
+                    dataset_id=dataset_id,
+                    query_hash=query_hash,
+                )
                 if mention_rows:
-                    await tx.run(_MENTIONS_CYPHER, rows=mention_rows,
-                                 dataset_id=dataset_id, query_hash=query_hash)
+                    await tx.run(
+                        _MENTIONS_CYPHER,
+                        rows=mention_rows,
+                        dataset_id=dataset_id,
+                        query_hash=query_hash,
+                    )
                 await tx.commit()
         except Exception as exc:
-            logger.exception("SocietyMemory: commit failed for round %s", round_result.round_num)
-            return {"round": round_result.round_num, "opinions": len(opinions),
-                    "edges": len(reactions), "failed": True, "error": str(exc)}
+            logger.exception(
+                "SocietyMemory: commit failed for round %s", round_result.round_num
+            )
+            return {
+                "round": round_result.round_num,
+                "opinions": len(opinions),
+                "edges": len(reactions),
+                "failed": True,
+                "error": str(exc),
+                # A failed write claims nothing: no nodes, no links.
+                "written_nodes": [],
+                "written_links": [],
+            }
         return receipt
 
     async def read_snapshot(
-        self, dataset_id: str, query_hash: str,
-        through_round: int, top_k: int = 8,
+        self,
+        dataset_id: str,
+        query_hash: str,
+        through_round: int,
+        top_k: int = 8,
         speakers: Optional[List[str]] = None,
     ) -> SocietySnapshot:
         """Read committed society state through a round. One bounded opinion query per
@@ -317,11 +414,16 @@ class SocietyMemory:
             if speakers:
                 all_rows: List[dict] = []
                 for speaker in speakers:
-                    s_rows = await (await session.run(
-                        _OPINION_READ_EXCLUDING_SPEAKER_CYPHER,
-                        dataset_id=dataset_id, query_hash=query_hash,
-                        through_round=through_round, cap=cap, speaker=speaker,
-                    )).data()
+                    s_rows = await (
+                        await session.run(
+                            _OPINION_READ_EXCLUDING_SPEAKER_CYPHER,
+                            dataset_id=dataset_id,
+                            query_hash=query_hash,
+                            through_round=through_round,
+                            cap=cap,
+                            speaker=speaker,
+                        )
+                    ).data()
                     entries_by_speaker[speaker] = [_opinion_entry(r) for r in s_rows]
                     all_rows.extend(s_rows)
                 seen: Dict[tuple, dict] = {}
@@ -329,23 +431,31 @@ class SocietyMemory:
                     seen[(r["agent"], r.get("round_no") or 0)] = r
                 rows = list(seen.values())
             else:
-                rows = await (await session.run(
-                    _OPINION_READ_CYPHER, dataset_id=dataset_id, query_hash=query_hash,
-                    through_round=through_round, cap=cap,
-                )).data()
-            n_rows = await (await session.run(
-                neighbor_q, dataset_id=dataset_id, query_hash=query_hash,
-            )).data()
+                rows = await (
+                    await session.run(
+                        _OPINION_READ_CYPHER,
+                        dataset_id=dataset_id,
+                        query_hash=query_hash,
+                        through_round=through_round,
+                        cap=cap,
+                    )
+                ).data()
+            n_rows = await (
+                await session.run(
+                    neighbor_q,
+                    dataset_id=dataset_id,
+                    query_hash=query_hash,
+                )
+            ).data()
 
         counts: Counter = Counter()
         for r in rows:
-            for ent in (r.get("entities") or []):
+            for ent in r.get("entities") or []:
                 counts[str(ent)] += 1
 
         entries = [_opinion_entry(r) for r in rows]
         neighbor_map = {r["src"]: list(r.get("neighbors") or []) for r in n_rows}
-        buzz = [{"entity": ent, "mentions": n}
-                for ent, n in counts.most_common(5)]
+        buzz = [{"entity": ent, "mentions": n} for ent, n in counts.most_common(5)]
         return SocietySnapshot(
             round=through_round,
             entries=entries,
@@ -356,7 +466,10 @@ class SocietyMemory:
         )
 
     async def read_self_history(
-        self, dataset_id: str, query_hash: str, agent_name: str,
+        self,
+        dataset_id: str,
+        query_hash: str,
+        agent_name: str,
         through_round: int,
     ) -> List[dict]:
         """The speaker's own committed opinions from strictly-prior rounds.
@@ -366,16 +479,24 @@ class SocietyMemory:
         (empty when the speaker has not spoken yet).
         """
         async with self._driver.session(database=self._db) as session:
-            rows = await (await session.run(
-                _SELF_HISTORY_CYPHER, dataset_id=dataset_id, query_hash=query_hash,
-                agent_name=agent_name, through_round=through_round,
-                summary_chars=SELF_HISTORY_SUMMARY_CHARS,
-            )).data()
+            rows = await (
+                await session.run(
+                    _SELF_HISTORY_CYPHER,
+                    dataset_id=dataset_id,
+                    query_hash=query_hash,
+                    agent_name=agent_name,
+                    through_round=through_round,
+                    summary_chars=SELF_HISTORY_SUMMARY_CHARS,
+                )
+            ).data()
         return sorted(
-            ({
-                "round": r.get("round_no") or 0,
-                "stance": r.get("stance") or "NEUTRAL",
-                "summary": (r.get("summary") or "")[:SELF_HISTORY_SUMMARY_CHARS],
-            } for r in rows),
+            (
+                {
+                    "round": r.get("round_no") or 0,
+                    "stance": r.get("stance") or "NEUTRAL",
+                    "summary": (r.get("summary") or "")[:SELF_HISTORY_SUMMARY_CHARS],
+                }
+                for r in rows
+            ),
             key=lambda e: e["round"],
         )

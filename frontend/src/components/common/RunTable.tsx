@@ -1,81 +1,70 @@
 import { Link } from 'react-router-dom'
-import { CheckCircle, Warning, XCircle } from '@phosphor-icons/react'
 import type { RunSummary } from '../../api/types'
-import { fmtDate } from '../../utils/format'
+import { fmtDate, truncateId } from '../../utils/format'
+import Card from '../ui/Card'
 import Skeleton from '../ui/Skeleton'
-import { asStance } from '../../run/events'
-import StanceChip from './StanceChip'
+import PositionMark from '../ui/PositionMark'
+import { StateChip } from '../ui/Chip'
 
-function OutcomeCell({ run }: { run: RunSummary }) {
-  if (run.status === 'failed')
-    return (
-      <span className="inline-flex items-center gap-1.5 text-critical">
-        <XCircle size={14} aria-hidden="true" /> failed
-      </span>
-    )
-  if (run.status === 'interrupted')
-    return (
-      <span className="inline-flex items-center gap-1.5 text-brass">
-        <Warning size={14} aria-hidden="true" /> interrupted
-      </span>
-    )
-  if (run.status === 'running' || run.status === 'queued')
-    return <span className="text-paper-mute">{run.status === 'running' ? 'deliberating…' : 'queued'}</span>
-  return (
-    <span className="inline-flex items-center gap-2">
-      {run.verdict_stance && <StanceChip stance={asStance(run.verdict_stance)} size="sm" />}
-      {run.converged ? (
-        <span className="inline-flex items-center gap-1 text-good">
-          <CheckCircle size={14} aria-hidden="true" /> converged
-        </span>
-      ) : (
-        <span className="text-paper-mute">plurality</span>
-      )}
-    </span>
-  )
-}
+/**
+ * §8.4 Decisions — a list of the decisions themselves, question first: the question is the heading
+ * and the whole card opens the run. Beneath it, one quiet line carries the outcome, the date, the
+ * passes completed, the corpus it drew from and the status.
+ *
+ * Field mapping against the live `GET /api/v1/simulate/debates` item (`run_doc._summarize`):
+ *   · when     → `created_at`
+ *   · question → `query`
+ *   · corpus   → `corpus_label`, falling back to the corpus id `dataset_id`; neither → an honest dash
+ *   · passes   → `rounds_executed`
+ *   · outcome  → `verdict_stance` (StanceChip: symbol + colour + word); absent → copy that matches status
+ *   · status   → `status` (StateChip)
+ * Every rendered field comes from the payload — nothing is derived to fill a field.
+ */
+const DASH = '—'
+
+const passes = (count: number): string => `${count} ${count === 1 ? 'pass' : 'passes'}`
 
 export default function RunTable({ runs, loading = false }: { runs: RunSummary[]; loading?: boolean }) {
   if (loading) {
     return (
       <div className="space-y-3 py-2">
         {[0, 1, 2].map((i) => (
-          <Skeleton key={i} className="h-9 w-full" />
+          <Skeleton key={i} className="h-20 w-full" />
         ))}
       </div>
     )
   }
   if (runs.length === 0) return null // callers own the empty state (§13)
+
+  // `dataset_id` can be null at runtime (`meta.get("dataset_id")`) even though the type says string.
+  const corpus = (run: RunSummary) =>
+    run.corpus_label ?? (run.dataset_id ? truncateId(run.dataset_id, 8, 4) : DASH)
+  const outcome = (run: RunSummary) => {
+    if (run.verdict_stance) return <PositionMark position={run.verdict_stance} ground="light" />
+    // No verdict, and the copy says WHY (§D7 honesty): a run still going has none yet; a run that has
+    // ENDED without one (failed, interrupted, complete with no clusters) is not "still running".
+    const stillGoing = run.status === 'running' || run.status === 'queued'
+    return <span className="text-ink-3">{stillGoing ? 'still running' : 'No outcome yet'}</span>
+  }
+
   return (
-    <div className="overflow-x-auto">
-      <table className="w-full border-collapse text-body">
-        <thead>
-          <tr className="text-label uppercase text-paper-mute">
-            <th className="py-2 pr-4 text-left font-medium">Question</th>
-            <th className="py-2 pr-4 text-left font-medium">Corpus</th>
-            <th className="tnum py-2 pr-4 text-right font-medium">Rounds</th>
-            <th className="py-2 pr-4 text-left font-medium">Outcome</th>
-            <th className="py-2 text-right font-medium">Created</th>
-          </tr>
-        </thead>
-        <tbody className="text-paper-dim">
-          {runs.map((run) => (
-            <tr key={run.run_id} className="border-t border-ink-700 transition-colors hover:bg-ink-800">
-              <td className="max-w-[360px] py-2.5 pr-4">
-                <Link to={`/runs/${run.run_id}`} className="block truncate text-paper hover:text-accent">
-                  {run.query}
-                </Link>
-              </td>
-              <td className="tnum py-2.5 pr-4 font-mono text-mono text-paper-mute">{run.dataset_id}</td>
-              <td className="tnum py-2.5 pr-4 text-right">{run.rounds_executed}</td>
-              <td className="py-2.5 pr-4">
-                <OutcomeCell run={run} />
-              </td>
-              <td className="tnum py-2.5 text-right font-mono text-mono text-paper-mute">{fmtDate(run.created_at)}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
+    <ul className="space-y-3">
+      {runs.map((run) => (
+        <li key={run.run_id}>
+          <Link to={`/runs/${run.run_id}`} className="block">
+            <Card hover>
+              <h3 className="text-body-sm font-semibold text-ink">{run.query}</h3>
+              <p className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-micro text-ink-3">
+                {outcome(run)}
+                <span className="tnum font-mono text-mono">{fmtDate(run.created_at)}</span>
+                <span className="tnum font-mono text-mono">{passes(run.rounds_executed)}</span>
+                <span className="font-mono text-mono">{corpus(run)}</span>
+                <StateChip state={run.status} />
+              </p>
+            </Card>
+          </Link>
+        </li>
+      ))}
+    </ul>
   )
 }

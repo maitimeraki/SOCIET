@@ -1,7 +1,8 @@
 """RoundRunner: dispatches pair prompts via BatchedLLMRunner and assembles RoundResult."""
+
 import re
 from dataclasses import dataclass
-from typing import Optional, Callable
+from typing import Callable, Optional
 
 from src.persona.agent import (
     SOURCE_EVIDENCE_MAX_SNIPPETS,
@@ -9,11 +10,16 @@ from src.persona.agent import (
     Agent,
 )
 from src.simulation.llm_batch import BatchedLLMRunner, PairPrompt
-from src.simulation.pair_turn import AgentTurn, RoundResult, CommPair
+from src.simulation.pair_turn import AgentTurn, CommPair, RoundResult
 from src.simulation.society_memory import SocietySnapshot
 from src.utils.queryIntend import QueryIntent
 
 OPPONENT_STATEMENT_CHARS = 600
+
+# Prompt budget for the persona's first-person voice. Rich enough to carry the
+# whole `detailed_perspective` the earlier Phase-2 tasks produce, but still a
+# hard bound so a runaway LLM value cannot blow the prompt.
+PERSONA_PERSPECTIVE_CHARS = 1500
 
 
 def _split_reasoning_answer(response: str) -> tuple[str, str]:
@@ -29,12 +35,15 @@ def _split_reasoning_answer(response: str) -> tuple[str, str]:
     match = re.search(r"^\s*ANSWER:\s*", response, flags=re.MULTILINE)
     if not match:
         return "", response.strip()
-    answer = response[match.end():].strip()
+    answer = response[match.end() :].strip()
     if not answer:
         return "", response.strip()
     reasoning = re.sub(
-        r"^\s*REASONING:\s*", "", response[:match.start()].strip(),
-        count=1, flags=re.IGNORECASE,
+        r"^\s*REASONING:\s*",
+        "",
+        response[: match.start()].strip(),
+        count=1,
+        flags=re.IGNORECASE,
     ).strip()
     return reasoning, answer
 
@@ -50,17 +59,30 @@ def _parse_response_stance(
     # Negative markers first: "disagree" contains "agree", and "do not agree" contains
     # "agree" too, so a positive-first test reads a disagreement as POSITIVE. `not agree`
     # catches the negated-affirmative phrasing a bare "disagree" misses.
-    if any(word in response_lower for word in
-           ["oppose", "disagree", "not agree", "reject", "against", "negative"]):
+    if any(
+        word in response_lower
+        for word in ["oppose", "disagree", "not agree", "reject", "against", "negative"]
+    ):
         stance = "NEGATIVE"
-    elif any(word in response_lower for word in ["support", "agree", "favor", "endorse", "positive"]):
+    elif any(
+        word in response_lower
+        for word in ["support", "agree", "favor", "endorse", "positive"]
+    ):
         stance = "POSITIVE"
-    elif any(word in response_lower for word in ["neutral", "balanced", "both", "neither"]):
+    elif any(
+        word in response_lower for word in ["neutral", "balanced", "both", "neither"]
+    ):
         stance = "NEUTRAL"
 
-    if any(word in response_lower for word in ["certain", "definitely", "clearly", "absolutely"]):
+    if any(
+        word in response_lower
+        for word in ["certain", "definitely", "clearly", "absolutely"]
+    ):
         confidence = min(1.0, confidence + 0.1)
-    elif any(word in response_lower for word in ["maybe", "perhaps", "uncertain", "might", "could"]):
+    elif any(
+        word in response_lower
+        for word in ["maybe", "perhaps", "uncertain", "might", "could"]
+    ):
         confidence = max(0.0, confidence - 0.1)
 
     return stance, confidence
@@ -98,7 +120,8 @@ def _evidence_block(agent: Agent) -> str:
     (no stray header).
     """
     snippets = [
-        _truncate_snippet(s) for s in agent.source_evidence[:SOURCE_EVIDENCE_MAX_SNIPPETS]
+        _truncate_snippet(s)
+        for s in agent.source_evidence[:SOURCE_EVIDENCE_MAX_SNIPPETS]
     ]
     snippets = [s for s in snippets if s]
     if not snippets:
@@ -107,7 +130,9 @@ def _evidence_block(agent: Agent) -> str:
     return f"YOUR SOURCE EVIDENCE (from the documents you were built from):\n{body}\n"
 
 
-def _build_system_prompt(agent: Agent, opponent: Agent, shared_entities: list[str]) -> str:
+def _build_system_prompt(
+    agent: Agent, opponent: Agent, shared_entities: list[str]
+) -> str:
     domains = ", ".join(agent.domain_tags[:3])
     shared = ", ".join(shared_entities[:3]) if shared_entities else "none"
     cb = agent.confidence_breakdown
@@ -119,8 +144,8 @@ def _build_system_prompt(agent: Agent, opponent: Agent, shared_entities: list[st
     return (
         f"You are {agent.identity.name}, an expert in {domains}.\n"
         f"Archetype: {agent.identity.archetype}. Communication style: {agent.identity.communication_style}.\n"
-        f"Your perspective: {agent.detailed_perspective[:500]}\n"
-        f"Bio: {agent.bio[:300]}\n"
+        f"Your perspective: {_truncate_snippet(agent.detailed_perspective, PERSONA_PERSPECTIVE_CHARS)}\n"
+        f"Role: {_truncate_snippet(agent.role_description)}\n"
         f"Stance on this topic: {agent.stance.value} (intensity {agent.intensity:.2f}).\n"
         f"Confidence breakdown: sources={cb.source_breadth}, nodes={cb.node_density}, connectivity={cb.relationship_connectivity:.2f}\n"
         f"Provenance: {provenance_summary}\n"
@@ -142,7 +167,9 @@ def _intent_context_block(intent: Optional[QueryIntent]) -> str:
     if intent.core_question:
         lines.append(f"Core question: {intent.core_question}")
     if intent.stance_axis:
-        lines.append(f'Stance axis (what "support" vs "oppose" means for this question): {intent.stance_axis}')
+        lines.append(
+            f'Stance axis (what "support" vs "oppose" means for this question): {intent.stance_axis}'
+        )
     return "INTENT CONTEXT:\n" + "\n".join(lines) if lines else ""
 
 
@@ -179,7 +206,8 @@ def _build_user_prompt(
     self_str = ""
     if society is not None:
         block = society.to_prompt(
-            speaker=agent.identity.name, opponent=opponent.identity.name,
+            speaker=agent.identity.name,
+            opponent=opponent.identity.name,
             max_opinions=max_opinions,
         )
         if block:
@@ -245,7 +273,15 @@ class RoundRunner:
             meta_a = {"pair": pair, "speaker": agent_a, "opponent": agent_b}
             prompt_a = PairPrompt(
                 system_prompt=_build_system_prompt(agent_a, agent_b, shared),
-                user_prompt=_build_user_prompt(agent_a, agent_b, query, history, society=society, intent=self.intent, max_opinions=max_opinions),
+                user_prompt=_build_user_prompt(
+                    agent_a,
+                    agent_b,
+                    query,
+                    history,
+                    society=society,
+                    intent=self.intent,
+                    max_opinions=max_opinions,
+                ),
                 pair_id=f"{dataset_id}:{pair.agent_a}:{pair.agent_b}",
             )
             prompts.append(prompt_a)
@@ -254,7 +290,15 @@ class RoundRunner:
             meta_b = {"pair": pair, "speaker": agent_b, "opponent": agent_a}
             prompt_b = PairPrompt(
                 system_prompt=_build_system_prompt(agent_b, agent_a, shared),
-                user_prompt=_build_user_prompt(agent_b, agent_a, query, history, society=society, intent=self.intent, max_opinions=max_opinions),
+                user_prompt=_build_user_prompt(
+                    agent_b,
+                    agent_a,
+                    query,
+                    history,
+                    society=society,
+                    intent=self.intent,
+                    max_opinions=max_opinions,
+                ),
                 pair_id=f"{dataset_id}:{pair.agent_b}:{pair.agent_a}",
             )
             prompts.append(prompt_b)
@@ -278,7 +322,7 @@ class RoundRunner:
             if meta is None or result.error:
                 continue
 
-            _, answer = _split_reasoning_answer(result.response)
+            reasoning, answer = _split_reasoning_answer(result.response)
 
             stance, confidence = _parse_response_stance(
                 answer,
@@ -291,12 +335,15 @@ class RoundRunner:
                 content=answer,
                 stance=stance,
                 confidence=confidence,
+                reasoning=reasoning,
                 references=_extract_references(
                     answer,
-                    list(dict.fromkeys(
-                        (meta["pair"].shared_entities or [])
-                        + [meta["opponent"].identity.name]
-                    )),
+                    list(
+                        dict.fromkeys(
+                            (meta["pair"].shared_entities or [])
+                            + [meta["opponent"].identity.name]
+                        )
+                    ),
                 ),
             )
             turns.append(turn)

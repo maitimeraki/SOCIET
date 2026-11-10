@@ -3,18 +3,54 @@
 Chunking is sentence-aware (shared owner: chunkProcessor.split_text_sentences);
 these assertions fail under the retired fixed character windows.
 """
+
 import asyncio
-import json
 import logging
+import os
+import sys
+import uuid
+from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
+import pytest_asyncio
+from fastapi import HTTPException
+from sqlalchemy import delete
 
 import src.api.api_server as api_server
+import src.api.jobs_api as jobs_api
+import src.api.run_doc as run_doc
 from src.api.api_server import _chunk_documents
+from src.db.engine import get_session_factory
+from src.db.models import User
 from src.graph.config_graph import GraphConfig
 from src.graph.models_graph import GlobalInputDocument, LocalOntology
 from src.graph.vocabulary import spread_indexes
+
+if sys.platform == "win32":
+    asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+
+requires_db = pytest.mark.skipif(
+    not os.getenv("DATABASE_URL"), reason="DATABASE_URL is not set"
+)
+
+
+@pytest_asyncio.fixture
+async def job_owner(db):
+    """An account for the row-backed job reads; deleting it cascades the rows."""
+    factory = get_session_factory()
+    async with factory() as session:
+        user = User(
+            email=f"run-truth-{uuid.uuid4().hex[:10]}@example.com",
+            password_hash="not-a-real-hash",
+        )
+        session.add(user)
+        await session.commit()
+        account = SimpleNamespace(id=str(user.id))
+    yield account
+    async with factory() as session:
+        await session.execute(delete(User).where(User.id == uuid.UUID(account.id)))
+        await session.commit()
 
 
 SENTENCES = [
@@ -26,7 +62,9 @@ CHUNK_SIZE = 64  # SentenceSplitter token budget
 OVERLAP = 32
 
 
-def _document(document_id: str, text: str, metadata: dict = None) -> GlobalInputDocument:
+def _document(
+    document_id: str, text: str, metadata: dict = None
+) -> GlobalInputDocument:
     return GlobalInputDocument(
         document_id=document_id,
         source_type="text",
@@ -54,15 +92,22 @@ async def test_chunks_are_sentence_aware_and_indexed_per_document():
         assert [c.chunk_index for c in group] == list(range(len(group)))
         # Sentence-aware: fixed character windows would cut chunks mid-sentence.
         for chunk in group[:-1]:
-            assert chunk.content.endswith("."), f"cut mid-sentence: ...{chunk.content[-40:]!r}"
+            assert chunk.content.endswith(
+                "."
+            ), f"cut mid-sentence: ...{chunk.content[-40:]!r}"
 
     assert {c.metadata["source_document"] for c in by_document["doc-a"]} == {"Doc A"}
-    assert {c.metadata["source_document"] for c in by_document["doc-b"]} == {"doc_b.txt"}
+    assert {c.metadata["source_document"] for c in by_document["doc-b"]} == {
+        "doc_b.txt"
+    }
 
 
 @pytest.mark.asyncio
 async def test_whitespace_only_text_produces_no_chunks():
-    documents = [_document("blank", "   \n\t "), _document("real", "One short sentence.")]
+    documents = [
+        _document("blank", "   \n\t "),
+        _document("real", "One short sentence."),
+    ]
 
     chunks = await _chunk_documents(documents, CHUNK_SIZE, OVERLAP)
 
@@ -73,7 +118,9 @@ async def test_whitespace_only_text_produces_no_chunks():
 
 @pytest.mark.asyncio
 async def test_missing_metadata_falls_back_to_unknown_source():
-    chunks = await _chunk_documents([_document("doc-c", "One short sentence.")], CHUNK_SIZE, OVERLAP)
+    chunks = await _chunk_documents(
+        [_document("doc-c", "One short sentence.")], CHUNK_SIZE, OVERLAP
+    )
 
     assert len(chunks) == 1
     assert chunks[0].chunk_index == 0
@@ -82,21 +129,27 @@ async def test_missing_metadata_falls_back_to_unknown_source():
 
 
 def _ontology(type_name: str) -> LocalOntology:
-    return LocalOntology.model_validate({
-        "metadata": {"ontology_id": f"onto-{type_name.lower()}"},
-        "entity_types": [{
-            "type_name": type_name,
-            "description": type_name,
-            "properties": [{"name": "name", "description": "n"}],
-        }],
-        "relation_types": [{
-            "type_name": "RELATED_TO",
-            "description": "generic",
-            "source_entity_types": [],
-            "target_entity_types": [],
-            "properties": [],
-        }],
-    })
+    return LocalOntology.model_validate(
+        {
+            "metadata": {"ontology_id": f"onto-{type_name.lower()}"},
+            "entity_types": [
+                {
+                    "type_name": type_name,
+                    "description": type_name,
+                    "properties": [{"name": "name", "description": "n"}],
+                }
+            ],
+            "relation_types": [
+                {
+                    "type_name": "RELATED_TO",
+                    "description": "generic",
+                    "source_entity_types": [],
+                    "target_entity_types": [],
+                    "properties": [],
+                }
+            ],
+        }
+    )
 
 
 class _CountingDiscovery:
@@ -122,16 +175,25 @@ class _FakeExtraction:
 def _docs() -> list[GlobalInputDocument]:
     # Sentence-rich and long: 2+ chunks per doc at the default 2000-token chunk size.
     return [
-        GlobalInputDocument(document_id=f"d{i}", source_type="text", text="alpha beta gamma delta. " * 800, metadata={})
+        GlobalInputDocument(
+            document_id=f"d{i}",
+            source_type="text",
+            text="alpha beta gamma delta. " * 800,
+            metadata={},
+        )
         for i in range(2)
     ]
 
 
 def _patch_build_pipeline(monkeypatch, discovery, extraction):
-    monkeypatch.setattr(api_server, "OntologyDiscoveryStage", lambda **kwargs: discovery)
+    monkeypatch.setattr(
+        api_server, "OntologyDiscoveryStage", lambda **kwargs: discovery
+    )
     # Extraction is imported lazily inside _execute_unified_job (api_server.py:262),
     # so patch it where that import resolves it from.
-    monkeypatch.setattr("src.graph.graph_build.GraphExtractionStage", lambda cfg: extraction)
+    monkeypatch.setattr(
+        "src.graph.graph_build.GraphExtractionStage", lambda cfg: extraction
+    )
     # Real normalization would hit Neo4j at the end of a build job.
     monkeypatch.setattr(api_server, "GraphNormalizationStage", lambda cfg: AsyncMock())
     monkeypatch.setattr(api_server, "_persist_run", AsyncMock())
@@ -148,7 +210,7 @@ async def test_ontology_job_runs_one_discovery_per_chunk_and_merges(monkeypatch)
 
     result = api_server.RUNS[job_id]["result"]
     assert result["chunks_total"] > 1
-    assert len(discovery.calls) == result["chunks_total"]   # exactly once per chunk
+    assert len(discovery.calls) == result["chunks_total"]  # exactly once per chunk
     assert all(n == 1 and s == 1 for _, n, s in discovery.calls)
     merged = LocalOntology.model_validate(result["ontology"])
     assert merged.entity_labels == result["entity_types"]  # union of per-chunk types
@@ -160,22 +222,32 @@ async def test_build_job_reuses_ontology_and_skips_discovery(monkeypatch):
     discovery = _CountingDiscovery()
     extraction = _FakeExtraction()
     _patch_build_pipeline(monkeypatch, discovery, extraction)
-    api_server.RUNS["onto-done"] = {
-        "job_id": "onto-done",
-        "status": "completed",
-        "result": {"ontology": _ontology("PERSON").model_dump()},
-    }
+
+    # The ontology job's stored schema, without a database: this test is about
+    # the reuse path, not the row read (covered in TestOntologyFromRun).
+    async def _stored_ontology(job_id):
+        return (
+            {"result": {"ontology": _ontology("PERSON").model_dump()}}
+            if job_id == "onto-done"
+            else None
+        )
+
+    monkeypatch.setattr(api_server.run_doc, "read_job_doc", _stored_ontology)
     job_id = "test-build-reuse"
     api_server.RUNS[job_id] = {"job_id": job_id, "result": None}
 
-    await api_server._execute_unified_job(job_id, "build_graph", "ds1", _docs(), ontology_job_id="onto-done")
+    await api_server._execute_unified_job(
+        job_id, "build_graph", "ds1", _docs(), ontology_job_id="onto-done"
+    )
 
     result = api_server.RUNS[job_id]["result"]
     assert discovery.calls == []
-    assert len(extraction.calls) == 2                        # one run per source document
-    assert all(n > 1 for n in extraction.calls)              # each run received the doc's chunks
-    assert result["docs_built"] == result["chunks_total"]    # 1 docstore node per chunk, summed
-    assert result["entity_types"] == ["PERSON"]               # the ontology job's schema
+    assert len(extraction.calls) == 2  # one run per source document
+    assert all(n > 1 for n in extraction.calls)  # each run received the doc's chunks
+    assert (
+        result["docs_built"] == result["chunks_total"]
+    )  # 1 docstore node per chunk, summed
+    assert result["entity_types"] == ["PERSON"]  # the ontology job's schema
 
 
 @pytest.mark.asyncio
@@ -190,7 +262,7 @@ async def test_build_extraction_runs_once_per_document(monkeypatch):
 
     result = api_server.RUNS[job_id]["result"]
     assert result["chunks_total"] > 2
-    assert len(extraction.calls) == 2                        # docs, not chunks
+    assert len(extraction.calls) == 2  # docs, not chunks
 
 
 @pytest.mark.asyncio
@@ -221,7 +293,7 @@ async def test_build_job_without_ontology_discovers_once_per_dataset(monkeypatch
     assert discovery.frames[0] == expected
     assert expected[0] == coord(full[0])
     assert expected[-1] == coord(full[-1])
-    assert len(extraction.calls) == 2                         # one run per document, not per chunk
+    assert len(extraction.calls) == 2  # one run per document, not per chunk
 
 
 class _ExplodingDiscovery:
@@ -242,7 +314,9 @@ async def test_build_job_discovery_failure_marks_job_failed(monkeypatch):
     monkeypatch.setattr(
         api_server,
         "GraphConfig",
-        lambda: GraphConfig(discovery_retry_attempts=1, discovery_retry_backoff_seconds=0.0),
+        lambda: GraphConfig(
+            discovery_retry_attempts=1, discovery_retry_backoff_seconds=0.0
+        ),
     )
     job_id = "test-build-discovery-fail"
     api_server.RUNS[job_id] = {"job_id": job_id, "status": "queued", "result": None}
@@ -276,51 +350,72 @@ async def test_build_job_retries_transient_discovery_failure(monkeypatch):
     monkeypatch.setattr(
         api_server,
         "GraphConfig",
-        lambda: GraphConfig(discovery_retry_attempts=2, discovery_retry_backoff_seconds=0.0),
+        lambda: GraphConfig(
+            discovery_retry_attempts=2, discovery_retry_backoff_seconds=0.0
+        ),
     )
     job_id = "test-build-retry"
     api_server.RUNS[job_id] = {"job_id": job_id, "status": "queued", "result": None}
 
     await api_server._execute_unified_job(job_id, "build_graph", "ds1", _docs())
 
-    assert discovery.calls == 2                               # one retry absorbed the blip
+    assert discovery.calls == 2  # one retry absorbed the blip
     assert api_server.RUNS[job_id]["status"] == "completed"
     assert len(extraction.calls) == 2
 
 
 class TestOntologyFromRun:
-    """The persisted-run read must never raise: a bad read falls back to discovery."""
+    """The persisted-run read goes to the rows and must never raise: a bad read
+    falls back to per-chunk discovery."""
 
+    @requires_db
     @pytest.mark.asyncio
-    async def test_valid_persisted_run_file_is_parsed(self, tmp_path, monkeypatch):
-        monkeypatch.setattr(api_server, "_RUNS_RUNTIME_DIR", tmp_path)
-        api_server.RUNS.pop("onto-on-disk", None)
-        run = {
-            "job_id": "onto-on-disk",
-            "status": "completed",
-            "result": {"ontology": _ontology("PERSON").model_dump()},
-        }
-        (tmp_path / "onto-on-disk.json").write_text(json.dumps(run), encoding="utf-8")
+    async def test_a_persisted_run_is_read_from_its_rows(self, job_owner):
+        job_id = str(uuid.uuid4())
+        await run_doc.write_job_doc(
+            {
+                "job_id": job_id,
+                "user_id": job_owner.id,
+                "mode": "ontology",
+                "status": "completed",
+                "progress": 1.0,
+                "stage": "completed",
+                "error": None,
+                "result": {"ontology": _ontology("PERSON").model_dump()},
+            }
+        )
 
-        ontology = await api_server._ontology_from_run("onto-on-disk")
+        ontology = await api_server._ontology_from_run(job_id)
 
         assert ontology is not None
         assert ontology.entity_labels == ["PERSON"]
 
+    @requires_db
     @pytest.mark.asyncio
-    async def test_corrupt_persisted_run_file_returns_none_and_warns(
-        self, tmp_path, monkeypatch, caplog
+    async def test_an_unknown_job_returns_none(self, job_owner):
+        assert await api_server._ontology_from_run(str(uuid.uuid4())) is None
+        assert await api_server._ontology_from_run(None) is None
+
+    @requires_db
+    @pytest.mark.asyncio
+    async def test_a_failing_read_returns_none_and_warns(
+        self, job_owner, monkeypatch, caplog
     ):
-        """A crash mid-`_persist_run` leaves invalid JSON; the read degrades, never raises."""
-        monkeypatch.setattr(api_server, "_RUNS_RUNTIME_DIR", tmp_path)
-        api_server.RUNS.pop("onto-corrupt", None)
-        (tmp_path / "onto-corrupt.json").write_text("{not json", encoding="utf-8")
+        """A raising read must not strand the build job "queued" forever — it
+        degrades to the per-chunk discovery path, with the failure logged."""
+        job_id = str(uuid.uuid4())
+
+        async def boom(_job_id):
+            raise RuntimeError("database is down")
+
+        monkeypatch.setattr(api_server.run_doc, "read_job_doc", boom)
 
         with caplog.at_level(logging.WARNING, logger=api_server.logger.name):
-            ontology = await api_server._ontology_from_run("onto-corrupt")
+            ontology = await api_server._ontology_from_run(job_id)
 
         assert ontology is None
-        assert "onto-corrupt" in caplog.text
+        assert job_id in caplog.text
+        assert "database is down" in caplog.text
 
 
 class _ExplodingExtractionInit:
@@ -339,7 +434,9 @@ async def test_stage_construction_failure_marks_job_failed_not_queued(monkeypatc
     monkeypatch.setattr(api_server, "OntologyDiscoveryStage", _CountingDiscovery)
     monkeypatch.setattr(api_server, "GraphNormalizationStage", lambda cfg: AsyncMock())
     monkeypatch.setattr(api_server, "_persist_run", AsyncMock())
-    monkeypatch.setattr("src.graph.graph_build.GraphExtractionStage", _ExplodingExtractionInit)
+    monkeypatch.setattr(
+        "src.graph.graph_build.GraphExtractionStage", _ExplodingExtractionInit
+    )
 
     job_id = "test-construction-fail"
     api_server.RUNS[job_id] = {"job_id": job_id, "status": "queued", "result": None}
@@ -378,9 +475,13 @@ async def test_raising_worker_cancels_its_siblings(monkeypatch):
     monkeypatch.setattr(api_server, "OntologyDiscoveryStage", _CountingDiscovery)
     monkeypatch.setattr(api_server, "GraphNormalizationStage", lambda cfg: AsyncMock())
     monkeypatch.setattr(api_server, "_persist_run", AsyncMock())
-    monkeypatch.setattr("src.graph.graph_build.GraphExtractionStage", lambda cfg: extraction)
+    monkeypatch.setattr(
+        "src.graph.graph_build.GraphExtractionStage", lambda cfg: extraction
+    )
     # Keep both document workers in flight together so the sibling is startable.
-    monkeypatch.setattr(api_server, "GraphConfig", lambda: GraphConfig(ontology_max_concurrency=8))
+    monkeypatch.setattr(
+        api_server, "GraphConfig", lambda: GraphConfig(ontology_max_concurrency=8)
+    )
 
     job_id = "test-worker-cancel"
     api_server.RUNS[job_id] = {"job_id": job_id, "status": "queued", "result": None}
@@ -391,16 +492,14 @@ async def test_raising_worker_cancels_its_siblings(monkeypatch):
     assert extraction.cancelled == ["d1"]  # the sibling was cancelled, not left writing
 
 
+@requires_db
 @pytest.mark.asyncio
-async def test_get_job_degrades_on_a_corrupt_runtime_file(tmp_path, monkeypatch):
-    """A crash mid-`_persist_run` leaves invalid JSON. The job read must degrade to
-    the same not-found shape `_job_state` and `_ontology_from_run` already use, not
-    raise out of the endpoint."""
-    monkeypatch.setattr(api_server, "_RUNS_RUNTIME_DIR", tmp_path)
-    api_server.RUNS.pop("job-corrupt", None)
-    (tmp_path / "job-corrupt.json").write_text("{not json", encoding="utf-8")
+async def test_get_job_is_404_for_an_unknown_job(job_owner):
+    """No row, no answer: the read must 404 rather than raise, and never answer
+    as if the doc existed (ownership cannot be established for it)."""
+    with pytest.raises(HTTPException) as exc:
+        await jobs_api.get_job(
+            str(uuid.uuid4()), user=SimpleNamespace(id=uuid.UUID(job_owner.id))
+        )
 
-    result = await api_server.get_job("job-corrupt")
-
-    assert result["status"] == "failed"
-    assert result["stage"] == "not_found"
+    assert exc.value.status_code == 404

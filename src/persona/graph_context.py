@@ -2,31 +2,37 @@
 
 Provides methods to retrieve relevant entities and their context from the Neo4j graph.
 """
+
 import asyncio
 import inspect
-from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, cast, LiteralString
-
-from neo4j import AsyncGraphDatabase
-from llama_index.embeddings.ollama import OllamaEmbedding
-from pydantic import BaseModel, Field
+from dataclasses import dataclass
+from typing import Any, Dict, List, LiteralString, Optional, cast
 from uuid import UUID, uuid4
+
+from llama_index.embeddings.ollama import OllamaEmbedding
+from neo4j import AsyncGraphDatabase
+from pydantic import BaseModel, Field
 
 from src.graph.config_graph import GraphConfig
 from src.graph.neo4j_bootstrap import ENTITY_EMBEDDINGS_INDEX
 from src.llm.config_llm import LLMConfig
 from src.persona.models_persona import ProvenanceLink
 
-
 # The ollama clients default to httpx `timeout=None` (unbounded) — a stuck
 # localhost embed call would wait forever. 60 s is a generous bound for it.
 _EMBED_TIMEOUT_SECONDS = 60
 
 
+# Store/base labels carried by every graph node — never the entity's real type.
+_BASE_LABELS = {"__Entity__", "__Node__", "Chunk", "Document"}
+
+
 # ---- Supporting Types ----
+
 
 class EntityNode(BaseModel):
     """A graph entity node with properties and relevance score."""
+
     id: str
     name: str
     label: str
@@ -39,12 +45,14 @@ class EntityNode(BaseModel):
 @dataclass
 class EntityContext:
     """Complete context for an entity: the entity itself, its neighbors, and provenance."""
+
     entity: EntityNode
     neighbors: List[EntityNode]
     provenance: List[ProvenanceLink]
 
 
 # ---- GraphContext ----
+
 
 class GraphContext:
     """Fetches relevant graph context for agent prompts.
@@ -91,6 +99,18 @@ class GraphContext:
             return dict(node)
         except Exception:
             return {}
+
+    @staticmethod
+    def _node_labels(node: Any, props: Dict[str, Any]) -> List[str]:
+        """The entity's real type label(s): the neo4j Node's `.labels` minus the
+        store/base labels, else `props["labels"]`, else ["Entity"]."""
+        raw = None
+        if hasattr(node, "labels"):
+            raw = list(node.labels)
+        elif isinstance(node, dict):
+            raw = node.get("labels")
+        labels = [str(l) for l in (raw or []) if str(l) not in _BASE_LABELS]
+        return labels or ["Entity"]
 
     async def _get_embedding(self, text: str) -> List[float]:
         """Get embedding for text using Ollama."""
@@ -140,18 +160,22 @@ class GraphContext:
         """One EntityNode from a Neo4j node — the single node-reading body the
         vector search and the neighbour walk both construct through."""
         props = self._node_props(node)
-        labels = list(node.keys()) if hasattr(node, "keys") else props.get("labels", ["Entity"])
+        labels = self._node_labels(node, props)
         return EntityNode(
             id=str(props.get("id", props.get("name", uuid4()))),
             name=str(props.get("name", "Unknown")),
-            label=labels[0] if labels else "Entity",
+            label=labels[0],
             properties=props,
             relevance_score=relevance_score,
-            summary=props.get("summary_context") or props.get("summary") or props.get("description"),
+            summary=props.get("summary_context")
+            or props.get("summary")
+            or props.get("description"),
             domain_tags=self._parse_tags(props.get("domain_tags")),
         )
 
-    async def find_connected_nodes(self, node_ids: List[str], limit: int = 25) -> List[EntityNode]:
+    async def find_connected_nodes(
+        self, node_ids: List[str], limit: int = 25
+    ) -> List[EntityNode]:
         """Entity nodes one relationship hop from the seed nodes.
 
         The roster-expansion walk for required-node derivation: seeds match by
@@ -188,6 +212,41 @@ class GraphContext:
             for row in rows
             if row.get("n") is not None
         ]
+
+    async def find_connected_nodes_by_seed(
+        self, node_ids: List[str], limit: int = 10
+    ) -> Dict[str, List[EntityNode]]:
+        """Per-seed 1-hop entity neighbours (entity↔entity only), keyed by seed id
+        AND seed name so a caller resolving either key finds its group. One query.
+        """
+        keys = [str(n) for n in node_ids if str(n or "").strip()]
+        if not keys:
+            return {}
+
+        cypher = """
+        MATCH (seed:__Entity__)-[r]-(n:__Entity__)
+        WHERE (seed.id IN $node_ids OR seed.name IN $node_ids)
+          AND NOT n:Chunk AND NOT (n.id IN $node_ids OR n.name IN $node_ids)
+        RETURN seed.id AS seed_id, seed.name AS seed_name, n, type(r) AS rel_type
+        LIMIT $limit
+        """
+        async with self._driver.session(database=self._db) as session:
+            result = await session.run(
+                cast(LiteralString, cypher),
+                node_ids=keys,
+                limit=limit * max(1, len(keys)),
+            )
+            rows = await result.data()
+
+        grouped: Dict[str, List[EntityNode]] = {}
+        for row in rows:
+            if row.get("n") is None:
+                continue
+            entity = self._entity_from_node(row.get("n"), 0.0)
+            for key in (row.get("seed_id"), row.get("seed_name")):
+                if key:
+                    grouped.setdefault(str(key), []).append(entity)
+        return grouped
 
     def _parse_tags(self, tags: Any) -> List[str]:
         """Parse domain_tags from various formats."""
@@ -242,7 +301,9 @@ class GraphContext:
             label=label,
             properties=props,
             relevance_score=1.0,
-            summary=props.get("summary_context") or props.get("summary") or props.get("description"),
+            summary=props.get("summary_context")
+            or props.get("summary")
+            or props.get("description"),
             domain_tags=self._parse_tags(props.get("domain_tags")),
         )
 
@@ -270,17 +331,23 @@ class GraphContext:
             if node is None:
                 continue
             props = self._node_props(node)
-            labels = list(node.keys()) if hasattr(node, "keys") else props.get("labels", ["Entity"])
+            labels = self._node_labels(node, props)
 
-            neighbors.append(EntityNode(
-                id=str(props.get("id", props.get("name", uuid4()))),
-                name=str(props.get("name", "Unknown")),
-                label=labels[0] if labels else "Entity",
-                properties={**props, "relation_type": row.get("rel_type", ""), "relation_summary": row.get("rel_summary", "")},
-                relevance_score=1.0,
-                summary=props.get("summary_context") or props.get("summary"),
-                domain_tags=self._parse_tags(props.get("domain_tags")),
-            ))
+            neighbors.append(
+                EntityNode(
+                    id=str(props.get("id", props.get("name", uuid4()))),
+                    name=str(props.get("name", "Unknown")),
+                    label=labels[0],
+                    properties={
+                        **props,
+                        "relation_type": row.get("rel_type", ""),
+                        "relation_summary": row.get("rel_summary", ""),
+                    },
+                    relevance_score=1.0,
+                    summary=props.get("summary_context") or props.get("summary"),
+                    domain_tags=self._parse_tags(props.get("domain_tags")),
+                )
+            )
 
         return neighbors
 
@@ -316,18 +383,22 @@ class GraphContext:
             chunk_id = row.get("chunk_id")
             if chunk_id:
                 try:
-                    chunk_uuid = UUID(chunk_id) if isinstance(chunk_id, str) else chunk_id
+                    chunk_uuid = (
+                        UUID(chunk_id) if isinstance(chunk_id, str) else chunk_id
+                    )
                 except (ValueError, TypeError):
                     chunk_uuid = uuid4()
             else:
                 chunk_uuid = uuid4()
 
-            provenance.append(ProvenanceLink(
-                doc_id=row.get("doc_id", ""),
-                title=row.get("title", "Unknown Source"),
-                breadcrumb=row.get("breadcrumb", ""),
-                chunk_id=chunk_uuid,
-            ))
+            provenance.append(
+                ProvenanceLink(
+                    doc_id=row.get("doc_id", ""),
+                    title=row.get("title", "Unknown Source"),
+                    breadcrumb=row.get("breadcrumb", ""),
+                    chunk_id=chunk_uuid,
+                )
+            )
 
         return provenance
 
@@ -366,7 +437,8 @@ class GraphContext:
 
         for row in rows:
             matched = {
-                value for value in (row.get("node_id"), row.get("node_name"))
+                value
+                for value in (row.get("node_id"), row.get("node_name"))
                 if value is not None
             } & by_key.keys()
             if not matched:
@@ -375,7 +447,9 @@ class GraphContext:
             chunk_id = row.get("chunk_id")
             if chunk_id:
                 try:
-                    chunk_uuid = UUID(chunk_id) if isinstance(chunk_id, str) else chunk_id
+                    chunk_uuid = (
+                        UUID(chunk_id) if isinstance(chunk_id, str) else chunk_id
+                    )
                 except (ValueError, TypeError):
                     chunk_uuid = uuid4()
             else:
@@ -394,6 +468,7 @@ class GraphContext:
 
 
 # ---- Factory ----
+
 
 def create_graph_context(config: Optional[GraphConfig] = None) -> GraphContext:
     """Create a GraphContext instance with optional config."""

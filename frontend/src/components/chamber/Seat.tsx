@@ -4,11 +4,12 @@ import type { AgentProfile, Stance } from '../../run/events'
 export const SEAT_W = 14
 export const SEAT_H = 10
 
+/** The floor is a light surface, so seats take the light-ground variants (all clear 3:1 on canvas). */
 const STANCE_VAR: Record<Stance, string> = {
-  POSITIVE: 'var(--color-stance-pos)',
-  NEUTRAL: 'var(--color-stance-neu)',
-  AMBIVALENT: 'var(--color-stance-amb)',
-  NEGATIVE: 'var(--color-stance-neg)',
+  POSITIVE: 'var(--color-pos-light)',
+  NEUTRAL: 'var(--color-neu-light)',
+  AMBIVALENT: 'var(--color-amb-light)',
+  NEGATIVE: 'var(--color-neg-light)',
 }
 
 export interface SeatSpec {
@@ -57,14 +58,14 @@ export default function Seat({ seat, tabIndex, onKeyNav }: { seat: SeatSpec; tab
       <title>{`${profile.identity.name} · ${profile.identity.archetype} · ${stance} · conf ${profile.confidence.toFixed(2)}`}</title>
       <rect
         aria-hidden="true"
-        className="opacity-0 transition-opacity duration-150 group-focus-visible:opacity-100"
+        className="opacity-0 transition-opacity duration-state group-focus-visible:opacity-100"
         x={x - SEAT_W / 2 - 2}
         y={y - SEAT_H / 2 - 2}
         width={SEAT_W + 4}
         height={SEAT_H + 4}
         rx={4}
         fill="none"
-        stroke="var(--color-accent)"
+        stroke="var(--focus-ring)"
         strokeWidth={1.5}
       />
       <rect
@@ -74,7 +75,7 @@ export default function Seat({ seat, tabIndex, onKeyNav }: { seat: SeatSpec; tab
         height={SEAT_H}
         rx={3}
         fill={fill}
-        stroke={seat.voice === 'spoke' ? 'var(--color-paper)' : STANCE_VAR[stance]}
+        stroke={seat.voice === 'spoke' ? 'var(--color-ink)' : STANCE_VAR[stance]}
         strokeWidth={seat.voice === 'spoke' ? 1 : 1.2}
       />
       {seat.pulsing && !reduced && (

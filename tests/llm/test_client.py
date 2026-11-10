@@ -1,20 +1,30 @@
 """Tests for the LiteLLM-backed LLMClient."""
+
 import asyncio
+import datetime
+import uuid
 from types import SimpleNamespace
-import pytest
 from unittest.mock import AsyncMock, patch
 
+import pytest
+
+from src.billing import metering
+from src.billing.metering import MeteringError
 from src.llm import client as llm_client
 from src.llm.client import LLMClient
 from src.llm.config_llm import LLMConfig
 
 
 def _resp(content: str):
-    return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content=content))])
+    return SimpleNamespace(
+        choices=[SimpleNamespace(message=SimpleNamespace(content=content))]
+    )
 
 
 def _chunk(content):
-    return SimpleNamespace(choices=[SimpleNamespace(delta=SimpleNamespace(content=content))])
+    return SimpleNamespace(
+        choices=[SimpleNamespace(delta=SimpleNamespace(content=content))]
+    )
 
 
 async def _stream_of(chunks):
@@ -39,7 +49,10 @@ async def test_generate_falls_back_on_provider_failure():
         out = await LLMClient().generate("sys", "usr", provider="openai")
         assert out == "fallback ok"
         assert ac.await_count == 2
-        chain_first, chain_second = ac.await_args_list[0].kwargs["model"], ac.await_args_list[1].kwargs["model"]
+        chain_first, chain_second = (
+            ac.await_args_list[0].kwargs["model"],
+            ac.await_args_list[1].kwargs["model"],
+        )
         assert chain_first.startswith("openai/") and chain_second.startswith("ollama/")
 
         # litellm's ollama/ provider appends /api/chat itself — a /v1 base 404s.
@@ -62,6 +75,28 @@ async def test_caller_model_not_leaked_to_fallback_legs():
 
 
 @pytest.mark.asyncio
+async def test_ollama_leg_drops_unsupported_params():
+    """The ollama leg forwards both max_tokens and num_predict — drop_params
+    lets litellm discard whichever it rejects instead of raising every call."""
+    with patch("src.llm.client.litellm.acompletion", new_callable=AsyncMock) as ac:
+        ac.return_value = _resp("ok")
+        await LLMClient().generate("sys", "usr", provider="ollama", max_tokens=128)
+
+        assert ac.await_args.kwargs["drop_params"] is True
+        assert ac.await_args.kwargs["num_predict"] == 128
+        assert ac.await_args.kwargs["max_tokens"] == 128
+
+
+@pytest.mark.asyncio
+async def test_non_ollama_legs_do_not_drop_params():
+    with patch("src.llm.client.litellm.acompletion", new_callable=AsyncMock) as ac:
+        ac.return_value = _resp("ok")
+        await LLMClient().generate("sys", "usr", provider="openai")
+
+        assert not ac.await_args.kwargs.get("drop_params")
+
+
+@pytest.mark.asyncio
 async def test_generate_defaults_to_configured_debate_model():
     """No model given: the configured debate-tier default is used."""
     with patch("src.llm.client.litellm.acompletion", new_callable=AsyncMock) as ac:
@@ -76,7 +111,12 @@ async def test_stream_generate_defaults_to_configured_debate_model():
     """Streaming honours the same debate-tier default as generate()."""
     with patch("src.llm.client.litellm.acompletion", new_callable=AsyncMock) as ac:
         ac.return_value = _stream_of([_chunk("hi")])
-        out = [token async for token in LLMClient().stream_generate("sys", "usr", provider="openai")]
+        out = [
+            token
+            async for token in LLMClient().stream_generate(
+                "sys", "usr", provider="openai"
+            )
+        ]
 
         assert out == ["hi"]
         assert ac.await_args.kwargs["model"] == f"openai/{LLMConfig.debate_model}"
@@ -87,22 +127,63 @@ async def test_stream_generate_yields_deltas():
     chunks = [_chunk("he"), _chunk(None), SimpleNamespace(choices=[]), _chunk("llo")]
     with patch("src.llm.client.litellm.acompletion", new_callable=AsyncMock) as ac:
         ac.return_value = _stream_of(chunks)
-        out = [token async for token in LLMClient().stream_generate("sys", "usr", provider="openai")]
+        out = [
+            token
+            async for token in LLMClient().stream_generate(
+                "sys", "usr", provider="openai"
+            )
+        ]
         assert out == ["he", "llo"]
         assert ac.await_args.kwargs["stream"] is True
+
+
+@pytest.mark.asyncio
+async def test_stream_generate_asks_for_usage_on_non_ollama_providers():
+    with patch("src.llm.client.litellm.acompletion", new_callable=AsyncMock) as ac:
+        ac.return_value = _stream_of([_chunk("hi")])
+        _ = [
+            token
+            async for token in LLMClient().stream_generate(
+                "sys", "usr", provider="openai"
+            )
+        ]
+        assert ac.await_args.kwargs["stream_options"] == {"include_usage": True}
+
+
+@pytest.mark.asyncio
+async def test_stream_generate_omits_stream_options_for_ollama():
+    with patch("src.llm.client.litellm.acompletion", new_callable=AsyncMock) as ac:
+        ac.return_value = _stream_of([_chunk("hi")])
+        _ = [
+            token
+            async for token in LLMClient().stream_generate(
+                "sys", "usr", provider="ollama"
+            )
+        ]
+        assert "stream_options" not in ac.await_args.kwargs
 
 
 @pytest.mark.asyncio
 async def test_stream_generate_falls_back_to_generate_on_failure():
     with patch("src.llm.client.litellm.acompletion", new_callable=AsyncMock) as ac:
         ac.side_effect = [RuntimeError("stream boom"), _resp("fallback text")]
-        out = [token async for token in LLMClient().stream_generate("sys", "usr", provider="openai")]
+        out = [
+            token
+            async for token in LLMClient().stream_generate(
+                "sys", "usr", provider="openai"
+            )
+        ]
         assert out == ["fallback text"]
         assert ac.await_count == 2
 
 
 def test_get_available_providers_lists_all_four():
-    assert set(LLMClient().get_available_providers()) == {"openai", "anthropic", "huggingface", "ollama"}
+    assert set(LLMClient().get_available_providers()) == {
+        "openai",
+        "anthropic",
+        "huggingface",
+        "ollama",
+    }
 
 
 @pytest.mark.asyncio
@@ -116,6 +197,7 @@ async def test_generate_raises_when_all_fail():
 def test_unknown_provider_rejected():
     with pytest.raises(ValueError, match="Unknown provider"):
         import asyncio
+
         asyncio.run(LLMClient().generate("s", "u", provider="nope"))
 
 
@@ -136,7 +218,12 @@ async def test_stream_generate_bounds_every_attempt():
     """The direct streaming call is bounded too — no unbounded network call remains."""
     with patch("src.llm.client.litellm.acompletion", new_callable=AsyncMock) as ac:
         ac.return_value = _stream_of([_chunk("hi")])
-        out = [token async for token in LLMClient().stream_generate("sys", "usr", provider="openai")]
+        out = [
+            token
+            async for token in LLMClient().stream_generate(
+                "sys", "usr", provider="openai"
+            )
+        ]
         assert out == ["hi"]
         assert ac.await_args.kwargs["timeout"] == llm_client.LLM_ATTEMPT_TIMEOUT_SECONDS
 
@@ -160,3 +247,132 @@ async def test_total_deadline_stops_fallback_chain(monkeypatch):
         )
     assert len(attempted) == 1
     assert attempted[0].startswith("openai/")
+
+
+@pytest.mark.asyncio
+async def test_generate_reports_the_serving_provider_and_model():
+    with metering.metering_scope(
+        user_id=uuid.uuid4(),
+        period_start=datetime.datetime.now(datetime.UTC),
+        source="debate",
+    ):
+        with patch(
+            "src.billing.metering.record_response", new_callable=AsyncMock
+        ) as record:
+            with patch(
+                "src.llm.client.litellm.acompletion", new_callable=AsyncMock
+            ) as ac:
+                ac.return_value = _resp("ok")
+                await LLMClient().generate(
+                    "sys", "usr", provider="openai", model="gpt-4o-mini"
+                )
+                ac.side_effect = [RuntimeError("boom"), _resp("fallback ok")]
+                await LLMClient().generate(
+                    "sys", "usr", provider="openai", model="gpt-4o-mini"
+                )
+
+        assert record.await_count == 2
+        first, second = record.await_args_list
+        assert first.kwargs["provider"] == "openai"
+        assert first.kwargs["fallback_model"] == "openai/gpt-4o-mini"
+        assert second.kwargs["provider"] == "ollama"
+        assert second.kwargs["fallback_model"].startswith("ollama/")
+
+
+@pytest.mark.asyncio
+async def test_generate_raises_when_metering_already_failed():
+    with metering.metering_scope(
+        user_id=uuid.uuid4(),
+        period_start=datetime.datetime.now(datetime.UTC),
+        source="debate",
+    ) as context:
+        context.failed = True
+        context.failure_reason = "balance exhausted"
+        with patch(
+            "src.llm.client.litellm.acompletion", new_callable=AsyncMock
+        ) as ac:
+            with pytest.raises(MeteringError):
+                await LLMClient().generate("sys", "usr", provider="openai")
+            ac.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_billing_enabled_without_chain_never_falls_back(monkeypatch):
+    """No named chain under billing: never switch the privacy-policy subprocessor."""
+    monkeypatch.setattr(
+        llm_client, "get_settings", lambda: SimpleNamespace(billing_enabled=True)
+    )
+    monkeypatch.setattr(
+        LLMConfig, "fallback_chain", "ollama,openai,anthropic,huggingface"
+    )
+    monkeypatch.delenv("LLM_FALLBACK_CHAIN", raising=False)
+
+    with patch("src.llm.client.litellm.acompletion", new_callable=AsyncMock) as ac:
+        ac.side_effect = RuntimeError("boom")
+        with pytest.raises(RuntimeError, match="All LLM providers failed"):
+            await LLMClient().generate("sys", "usr", provider="openai")
+
+        assert ac.await_count == 1
+        assert ac.await_args.kwargs["model"].startswith("openai/")
+
+
+@pytest.mark.asyncio
+async def test_billing_enabled_with_explicit_chain_falls_back(monkeypatch):
+    monkeypatch.setattr(
+        llm_client, "get_settings", lambda: SimpleNamespace(billing_enabled=True)
+    )
+    monkeypatch.setattr(LLMConfig, "fallback_chain", "openai,ollama")
+    monkeypatch.setenv("LLM_FALLBACK_CHAIN", "openai,ollama")
+
+    with patch("src.llm.client.litellm.acompletion", new_callable=AsyncMock) as ac:
+        ac.side_effect = [RuntimeError("boom"), _resp("fallback ok")]
+        out = await LLMClient().generate("sys", "usr", provider="openai")
+
+        assert out == "fallback ok"
+        assert ac.await_count == 2
+        assert ac.await_args_list[1].kwargs["model"].startswith("ollama/")
+
+
+@pytest.mark.asyncio
+async def test_anthropic_system_message_carries_cache_control(monkeypatch):
+    monkeypatch.setattr(LLMConfig, "prompt_cache", True)
+
+    with patch("src.llm.client.litellm.acompletion", new_callable=AsyncMock) as ac:
+        ac.return_value = _resp("ok")
+        await LLMClient().generate("sys", "usr", provider="anthropic")
+
+        messages = ac.await_args.kwargs["messages"]
+        assert messages[0]["content"] == [
+            {
+                "type": "text",
+                "text": "sys",
+                "cache_control": {"type": "ephemeral"},
+            }
+        ]
+        assert messages[1] == {"role": "user", "content": "usr"}
+
+
+@pytest.mark.asyncio
+async def test_prompt_cache_off_sends_plain_system_string(monkeypatch):
+    monkeypatch.setattr(LLMConfig, "prompt_cache", False)
+
+    with patch("src.llm.client.litellm.acompletion", new_callable=AsyncMock) as ac:
+        ac.return_value = _resp("ok")
+        await LLMClient().generate("sys", "usr", provider="anthropic")
+
+        messages = ac.await_args.kwargs["messages"]
+        assert messages[0] == {"role": "system", "content": "sys"}
+        assert messages[1] == {"role": "user", "content": "usr"}
+
+
+@pytest.mark.asyncio
+async def test_generate_without_context_does_not_meter():
+    with patch(
+        "src.billing.metering.record_response", new_callable=AsyncMock
+    ) as record:
+        with patch(
+            "src.llm.client.litellm.acompletion", new_callable=AsyncMock
+        ) as ac:
+            ac.return_value = _resp("ok")
+            await LLMClient().generate("sys", "usr", provider="openai")
+    record.assert_not_awaited()

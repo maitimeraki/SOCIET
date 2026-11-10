@@ -43,9 +43,42 @@ describe('reducer', () => {
     expect(state.verdict?.converged).toBe(true)
     expect(state.verdict?.clusters?.POSITIVE?.count).toBe(3)
   })
+  it('defaults the narrative and structured dissent when the complete event omits them', () => {
+    const state = applyEvent(
+      initialState,
+      { type: 'complete', converged: false, verdict: 'Fallback.', final_stances: {}, warnings: [], rounds_executed: 0 },
+      1,
+    )
+    expect(state.verdict?.narrative).toBe('')
+    expect(state.verdict?.dissentingViews).toEqual([])
+    expect(state.verdict?.evidence).toEqual([])
+  })
+  it('carries narrative_status off the complete event — fallback is the notice-bearing value (§17.3)', () => {
+    const fallback = applyEvent(
+      initialState,
+      { type: 'complete', converged: false, verdict: 'Aggregates only.', narrative_status: 'fallback', final_stances: {}, warnings: [], rounds_executed: 0 },
+      1,
+    )
+    expect(fallback.verdict?.narrativeStatus).toBe('fallback')
+    const ok = applyEvent(
+      initialState,
+      { type: 'complete', converged: true, verdict: 'Written.', final_stances: {}, warnings: [], rounds_executed: 1 },
+      1,
+    )
+    expect(ok.verdict?.narrativeStatus).toBe('ok')
+  })
   it('tolerates unknown event types as warnings', () => {
     const state = applyEvent(initialState, { type: 'future_thing' } as unknown as RunEvent, 1)
     expect(state.warnings).toContain('Unhandled event type: future_thing')
+  })
+  it('names a failed commit by its pass, never a banned word — the composed warning reaches the page (§13, F46)', () => {
+    const state = applyEvent(
+      initialState,
+      { type: 'commit', round: 2, opinions: 0, edges: 0, failed: true, error: 'connection reset' },
+      1,
+    )
+    expect(state.warnings[0]).toBe('Pass 2: commit failed: connection reset')
+    expect(state.warnings.join(' ')).not.toMatch(/\bround\b/i)
   })
   it('is deterministic — folding twice deep-equals (replay = live)', () => {
     expect(fold(RUN_SAMPLE, NOW)).toEqual(fold(RUN_SAMPLE, NOW))

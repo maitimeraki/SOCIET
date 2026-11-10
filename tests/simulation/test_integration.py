@@ -1,15 +1,18 @@
 """Integration tests: round → VerdictSynthesizer → SocietyMemory commit flow."""
-import pytest
-import asyncio
+
 from unittest.mock import AsyncMock, MagicMock
 
-from src.simulation.verdict import VerdictSynthesizer
-from src.simulation.society_memory import SocietyMemory
-from src.simulation.pair_turn import RoundResult, AgentTurn, CommPair
+import pytest
+
 from src.persona.agent import Stance
+from src.simulation.pair_turn import AgentTurn, CommPair, RoundResult
+from src.simulation.society_memory import SocietyMemory
+from src.simulation.verdict import VerdictSynthesizer
 
 
-def _make_turn(agent_id: str, agent_name: str, content: str, stance: str, confidence: float) -> AgentTurn:
+def _make_turn(
+    agent_id: str, agent_name: str, content: str, stance: str, confidence: float
+) -> AgentTurn:
     return AgentTurn(
         agent_id=agent_id,
         agent_name=agent_name,
@@ -33,7 +36,9 @@ class TestVerdictSynthesizerFromRound:
             _make_turn("a1", "Alice", "AI will help humanity", "POSITIVE", 0.9),
             _make_turn("a2", "Bob", "AI poses real risks", "NEGATIVE", 0.8),
             _make_turn("a3", "Carol", "I support AI development", "POSITIVE", 0.85),
-            _make_turn("a4", "Dave", "We should be cautious about AI", "NEGATIVE", 0.75),
+            _make_turn(
+                "a4", "Dave", "We should be cautious about AI", "NEGATIVE", 0.75
+            ),
             _make_turn("a5", "Eve", "AI has great potential", "POSITIVE", 0.9),
         ]
         pairs = [
@@ -142,12 +147,16 @@ class TestSocietyMemoryCommitsRound:
 
         service = SocietyMemory(mock_driver, "neo4j")
         receipt1 = await service.commit_round(
-            round_result=round1, dataset_id="multi-round",
-            query_hash="qh", profile_map={},
+            round_result=round1,
+            dataset_id="multi-round",
+            query_hash="qh",
+            profile_map={},
         )
         receipt2 = await service.commit_round(
-            round_result=round2, dataset_id="multi-round",
-            query_hash="qh", profile_map={},
+            round_result=round2,
+            dataset_id="multi-round",
+            query_hash="qh",
+            profile_map={},
         )
 
         # one session (and one committed transaction) per round

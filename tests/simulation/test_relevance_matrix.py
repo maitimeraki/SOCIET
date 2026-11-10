@@ -1,4 +1,5 @@
 """Tests for the S4 relevance matrix — the one scoring/blend both surfaces use."""
+
 import logging
 
 import pytest
@@ -8,6 +9,7 @@ from src.simulation.relevance_matrix import (
     SelectionCandidate,
     SelectionRow,
     blended_score,
+    cap_by_type,
     density_component,
     intent_terms,
     rank_candidates,
@@ -44,15 +46,21 @@ class _Entity:
 def _candidates():
     """One dense-but-irrelevant candidate and one lighter but on-topic candidate."""
     return [
-        SelectionCandidate(name="dense", text="quarterly logistics report", evidence=[_Node(2.0)]),
-        SelectionCandidate(name="on_topic", text="carbon tax policy", evidence=[_Node(1.0)]),
+        SelectionCandidate(
+            name="dense", text="quarterly logistics report", evidence=[_Node(2.0)]
+        ),
+        SelectionCandidate(
+            name="on_topic", text="carbon tax policy", evidence=[_Node(1.0)]
+        ),
     ]
 
 
 def test_density_component_sums_node_and_sector_evidence():
     """The single density entry point reads both surfaces' graph rows."""
     assert density_component([_Node(0.9), _Node(0.5)]) == pytest.approx(1.4)
-    assert density_component([{"total_relevance": 2.5, "density": 3}]) == pytest.approx(2.5)
+    assert density_component([{"total_relevance": 2.5, "density": 3}]) == pytest.approx(
+        2.5
+    )
     assert density_component([{"relevance_score": 0.25}]) == pytest.approx(0.25)
     assert density_component([]) == 0.0
     assert density_component([{"total_relevance": None}]) == 0.0
@@ -60,7 +68,9 @@ def test_density_component_sums_node_and_sector_evidence():
 
 def test_blended_score_is_the_documented_formula():
     config = DebateConfig()
-    assert blended_score(0.5, 0.25, config) == pytest.approx(config.w1 * 0.5 + config.w2 * 0.25)
+    assert blended_score(0.5, 0.25, config) == pytest.approx(
+        config.w1 * 0.5 + config.w2 * 0.25
+    )
 
 
 def test_semantic_component_scores_intent_term_coverage():
@@ -77,23 +87,34 @@ def test_semantic_component_scores_intent_term_coverage():
 
 
 def test_intent_terms_reads_the_intent_object_and_its_mapping_form():
-    intent = _intent(direct_keywords=["carbon"], entity_frame=["Acme"], domain_tags=["legal"])
+    intent = _intent(
+        direct_keywords=["carbon"], entity_frame=["Acme"], domain_tags=["legal"]
+    )
     assert intent_terms(intent) == ["carbon", "Acme", "legal"]
-    assert intent_terms({"direct_keywords": ["carbon"], "domain_tags": ["legal"]}) == ["carbon", "legal"]
+    assert intent_terms({"direct_keywords": ["carbon"], "domain_tags": ["legal"]}) == [
+        "carbon",
+        "legal",
+    ]
     assert intent_terms(None) == []
 
 
 def test_rows_carry_both_components_and_the_documented_blend():
     config = DebateConfig()
-    rows = rank_candidates(_candidates(), _intent(direct_keywords=["carbon", "tax"]), config)
+    rows = rank_candidates(
+        _candidates(), _intent(direct_keywords=["carbon", "tax"]), config
+    )
 
     by_name = {row.name: row for row in rows}
     assert by_name["dense"].semantic == 0.0
-    assert by_name["dense"].density == pytest.approx(1.0)  # normalized against the batch peak
+    assert by_name["dense"].density == pytest.approx(
+        1.0
+    )  # normalized against the batch peak
     assert by_name["on_topic"].semantic == 1.0
     assert by_name["on_topic"].density == pytest.approx(0.5)
     for row in rows:
-        assert row.blended == pytest.approx(config.w1 * row.semantic + config.w2 * row.density)
+        assert row.blended == pytest.approx(
+            config.w1 * row.semantic + config.w2 * row.density
+        )
 
     # the on-topic candidate clears the threshold and outranks the denser one
     assert [row.name for row in rows] == ["on_topic", "dense"]
@@ -102,8 +123,12 @@ def test_rows_carry_both_components_and_the_documented_blend():
 def test_two_intents_produce_two_different_orderings():
     """P2-T1: selection changes when the intent changes."""
     config = DebateConfig()
-    by_carbon = rank_candidates(_candidates(), _intent(direct_keywords=["carbon"]), config)
-    by_logistics = rank_candidates(_candidates(), _intent(direct_keywords=["logistics"]), config)
+    by_carbon = rank_candidates(
+        _candidates(), _intent(direct_keywords=["carbon"]), config
+    )
+    by_logistics = rank_candidates(
+        _candidates(), _intent(direct_keywords=["logistics"]), config
+    )
 
     assert [row.name for row in by_carbon] == ["on_topic", "dense"]
     assert [row.name for row in by_logistics] == ["dense", "on_topic"]
@@ -112,7 +137,9 @@ def test_two_intents_produce_two_different_orderings():
 def test_no_candidate_clears_the_threshold_falls_back_to_density_ordering(caplog):
     config = DebateConfig(selection_score_threshold=0.99)
     with caplog.at_level(logging.WARNING, logger=_MATRIX_LOGGER):
-        rows = rank_candidates(_candidates(), _intent(direct_keywords=["carbon", "tax"]), config)
+        rows = rank_candidates(
+            _candidates(), _intent(direct_keywords=["carbon", "tax"]), config
+        )
 
     assert [row.name for row in rows] == ["dense", "on_topic"]
     assert rows[0].blended < config.selection_score_threshold
@@ -141,15 +168,27 @@ def test_every_evidence_row_is_read_through_the_single_adapter(monkeypatch):
 
     monkeypatch.setattr(matrix, "_evidence_row", spy)
     candidates = [
-        SelectionCandidate(name="node_row", text="", evidence=[_Entity(id="id-a", name="Alpha", score=2.0)]),
-        SelectionCandidate(name="sector_row", text="", evidence=[{"total_relevance": 1.0, "evidence_nodes": ["Alice"]}]),
+        SelectionCandidate(
+            name="node_row",
+            text="",
+            evidence=[_Entity(id="id-a", name="Alpha", score=2.0)],
+        ),
+        SelectionCandidate(
+            name="sector_row",
+            text="",
+            evidence=[{"total_relevance": 1.0, "evidence_nodes": ["Alice"]}],
+        ),
     ]
     rows = matrix.rank_candidates(candidates, None, DebateConfig())
 
     assert all(item in seen for candidate in candidates for item in candidate.evidence)
     assert [row.density for row in rows] == [1.0, pytest.approx(0.5)]
 
-    monkeypatch.setattr(matrix, "_evidence_row", lambda item: (3.0, ({"kind": "node", "name": "patched"},)))
+    monkeypatch.setattr(
+        matrix,
+        "_evidence_row",
+        lambda item: (3.0, ({"kind": "node", "name": "patched"},)),
+    )
     rows = matrix.rank_candidates(candidates, None, DebateConfig())
 
     assert [row.density for row in rows] == [1.0, 1.0]
@@ -160,12 +199,21 @@ def test_rows_carry_deduped_stable_provenance_anchors():
     """P2-T4: anchors are the evidence's source node/chunk ids — deduped, ordered."""
     evidence = [
         _Entity(id="id-a", name="Alpha", score=2.0),
-        _Entity(id="id-a", name="Alpha", score=1.0),   # duplicate source node
+        _Entity(id="id-a", name="Alpha", score=1.0),  # duplicate source node
         _Entity(id=None, name="Nameless", score=0.5),  # no id in the data → name only
-        _Entity(id="id-b", name="Beta", score=0.1, properties={"chunk_id": "c-1", "chunk_ids": ["c-2", "c-2"]}),
+        _Entity(
+            id="id-b",
+            name="Beta",
+            score=0.1,
+            properties={"chunk_id": "c-1", "chunk_ids": ["c-2", "c-2"]},
+        ),
     ]
 
-    rows = rank_candidates([SelectionCandidate(name="cluster", text="", evidence=evidence)], None, DebateConfig())
+    rows = rank_candidates(
+        [SelectionCandidate(name="cluster", text="", evidence=evidence)],
+        None,
+        DebateConfig(),
+    )
 
     assert rows[0].anchors == (
         {"kind": "node", "id": "id-a", "name": "Alpha"},
@@ -176,12 +224,21 @@ def test_rows_carry_deduped_stable_provenance_anchors():
     )
     # additive default: direct constructions and evidence-free rows keep working
     assert SelectionRow(name="x", semantic=0.0, density=0.0, blended=0.0).anchors == ()
-    assert rank_candidates([SelectionCandidate(name="x", text="", evidence=[])], None, DebateConfig())[0].anchors == ()
+    assert (
+        rank_candidates(
+            [SelectionCandidate(name="x", text="", evidence=[])], None, DebateConfig()
+        )[0].anchors
+        == ()
+    )
 
     # the sector-row shape anchors its persona names (no inventing ids)
-    sector = [SelectionCandidate(
-        name="sector", text="", evidence=[{"total_relevance": 1.0, "evidence_nodes": ["Alice", "Bob"]}],
-    )]
+    sector = [
+        SelectionCandidate(
+            name="sector",
+            text="",
+            evidence=[{"total_relevance": 1.0, "evidence_nodes": ["Alice", "Bob"]}],
+        )
+    ]
     assert rank_candidates(sector, None, DebateConfig())[0].anchors == (
         {"kind": "node", "name": "Alice"},
         {"kind": "node", "name": "Bob"},
@@ -196,20 +253,41 @@ def test_zero_evidence_density_is_a_float():
 
 def test_string_evidence_nodes_is_one_name_not_per_character_anchors():
     """P2-B minor m4: a bare string is a single name, not a character fan-out."""
-    rows = rank_candidates([SelectionCandidate(
-        name="sector", text="", evidence=[{"total_relevance": 1.0, "evidence_nodes": "Alice"}],
-    )], None, DebateConfig())
+    rows = rank_candidates(
+        [
+            SelectionCandidate(
+                name="sector",
+                text="",
+                evidence=[{"total_relevance": 1.0, "evidence_nodes": "Alice"}],
+            )
+        ],
+        None,
+        DebateConfig(),
+    )
 
     assert rows[0].anchors == ({"kind": "node", "name": "Alice"},)
 
 
 def test_triplet_source_id_becomes_a_chunk_anchor_without_moving_density():
     """P4-T1: an entity's `triplet_source_id` is its chunk node id."""
-    rows = rank_candidates([SelectionCandidate(
-        name="node_row", text="",
-        evidence=[_Entity(id="e-1", name="Entity", score=2.0,
-                          properties={"triplet_source_id": "node-7"})],
-    )], None, DebateConfig())
+    rows = rank_candidates(
+        [
+            SelectionCandidate(
+                name="node_row",
+                text="",
+                evidence=[
+                    _Entity(
+                        id="e-1",
+                        name="Entity",
+                        score=2.0,
+                        properties={"triplet_source_id": "node-7"},
+                    )
+                ],
+            )
+        ],
+        None,
+        DebateConfig(),
+    )
 
     assert rows[0].density == pytest.approx(1.0)  # normalized batch peak, unchanged
     assert rows[0].anchors == (
@@ -221,14 +299,27 @@ def test_triplet_source_id_becomes_a_chunk_anchor_without_moving_density():
 def test_document_anchor_and_document_ids_become_document_anchors():
     """P4-T1: `document_anchor` / `document_ids` are tolerated on both row shapes."""
     evidence = [
-        _Entity(id="e-1", name="Entity", score=2.0, properties={
-            "triplet_source_id": "node-7",
+        _Entity(
+            id="e-1",
+            name="Entity",
+            score=2.0,
+            properties={
+                "triplet_source_id": "node-7",
+                "document_anchor": "doc-1",
+                "document_ids": ["doc-2", "doc-2"],
+            },
+        ),
+        {
+            "total_relevance": 1.0,
+            "evidence_nodes": ["Alice"],
             "document_anchor": "doc-1",
-            "document_ids": ["doc-2", "doc-2"],
-        }),
-        {"total_relevance": 1.0, "evidence_nodes": ["Alice"], "document_anchor": "doc-1"},
+        },
     ]
-    rows = rank_candidates([SelectionCandidate(name="row", text="", evidence=evidence)], None, DebateConfig())
+    rows = rank_candidates(
+        [SelectionCandidate(name="row", text="", evidence=evidence)],
+        None,
+        DebateConfig(),
+    )
 
     assert rows[0].anchors == (
         {"kind": "node", "id": "e-1", "name": "Entity"},
@@ -237,3 +328,46 @@ def test_document_anchor_and_document_ids_become_document_anchors():
         {"kind": "document", "id": "doc-2"},
         {"kind": "node", "name": "Alice"},
     )
+
+
+"""S7 diversity: the cap spreads a roster across entity types."""
+
+
+def _row(name: str, density: float) -> SelectionRow:
+    return SelectionRow(name=name, semantic=0.0, density=density, blended=density)
+
+
+def test_cap_by_type_trades_one_dominant_type_for_the_next():
+    """A third Company drops in favour of the top Regulator."""
+    rows = [_row("A", 0.9), _row("B", 0.8), _row("C", 0.7), _row("D", 0.6)]
+    types = {"A": "Company", "B": "Company", "C": "Company", "D": "Regulator"}
+
+    assert [r.name for r in cap_by_type(rows, types, target=3)] == ["A", "B", "D"]
+
+
+def test_cap_by_type_backfills_when_one_type_dominates():
+    """A mostly-one-type graph still returns `target` rows — score order, backfilled."""
+    rows = [_row(f"C{i}", 1.0 - i * 0.01) for i in range(5)]
+    types = {f"C{i}": "Company" for i in range(5)}
+
+    assert [r.name for r in cap_by_type(rows, types, target=3)] == ["C0", "C1", "C2"]
+
+
+def test_cap_by_type_never_empties_a_single_seat():
+    """`ceil(1/2) == 1`: a one-seat roster still seats its top row."""
+    rows = [_row("A", 0.9), _row("B", 0.8)]
+
+    assert [
+        r.name for r in cap_by_type(rows, {"A": "Company", "B": "Company"}, target=1)
+    ] == ["A"]
+
+
+def test_cap_by_type_keeps_every_row_when_under_target():
+    rows = [_row("A", 0.9), _row("B", 0.8)]
+
+    assert [
+        r.name for r in cap_by_type(rows, {"A": "Company", "B": "Regulator"}, target=5)
+    ] == [
+        "A",
+        "B",
+    ]

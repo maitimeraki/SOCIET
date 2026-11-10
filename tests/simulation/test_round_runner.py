@@ -1,27 +1,47 @@
 """Tests for RoundRunner."""
+
 import uuid
-import pytest
 from unittest.mock import AsyncMock
 
-from src.persona.agent import Agent, ConfidenceBreakdown, DiscoveryType, ExpertiseLevel, PersonaIdentity
+import pytest
+
+from src.persona.agent import (
+    Agent,
+    ConfidenceBreakdown,
+    DiscoveryType,
+    ExpertiseLevel,
+    PersonaIdentity,
+)
 from src.simulation.llm_batch import BatchedLLMRunner
-from src.simulation.round_runner import RoundRunner, _build_system_prompt, _build_user_prompt, _parse_response_stance
-from src.simulation.pair_turn import RoundResult, CommPair
+from src.simulation.pair_turn import CommPair, RoundResult
+from src.simulation.round_runner import (
+    PERSONA_PERSPECTIVE_CHARS,
+    RoundRunner,
+    _build_system_prompt,
+    _build_user_prompt,
+    _parse_response_stance,
+)
 from src.utils.queryIntend import QueryIntent
 
 
-def make_profile(name: str, domain_tags: list[str], perspective: str, confidence: float) -> tuple[uuid.UUID, Agent]:
+def make_profile(
+    name: str, domain_tags: list[str], perspective: str, confidence: float
+) -> tuple[uuid.UUID, Agent]:
     aid = uuid.uuid4()
     agent = Agent(
         agent_id=aid,
-        identity=PersonaIdentity(name=name, archetype="Expert", communication_style="Formal"),
+        identity=PersonaIdentity(
+            name=name, archetype="Expert", communication_style="Formal"
+        ),
         discovery_type=DiscoveryType.INTENT_DRIVEN,
         expertise_level=ExpertiseLevel.TECHNICAL,
         bio=f"{name} description",
         detailed_perspective=perspective,
         domain_tags=domain_tags,
         confidence=confidence,
-        confidence_breakdown=ConfidenceBreakdown(source_breadth=1, node_density=1, relationship_connectivity=0.5),
+        confidence_breakdown=ConfidenceBreakdown(
+            source_breadth=1, node_density=1, relationship_connectivity=0.5
+        ),
     )
     return aid, agent
 
@@ -34,40 +54,62 @@ def make_pair(name_a: str, name_b: str, shared: list[str]) -> CommPair:
 # _parse_response_stance
 # ------------------------------------------------------------------
 
+
 def test_parse_stance_positive():
     stance, _ = _parse_response_stance("I fully support this approach", "NEUTRAL", 0.5)
     assert stance == "POSITIVE"
 
 
 def test_parse_stance_negative():
-    stance, _ = _parse_response_stance("I oppose this decision strongly", "NEUTRAL", 0.5)
+    stance, _ = _parse_response_stance(
+        "I oppose this decision strongly", "NEUTRAL", 0.5
+    )
     assert stance == "NEGATIVE"
 
 
 def test_parse_stance_negative_markers_beat_positive_substrings():
     """`disagree` contains `agree`; a positive-first check reads disagreement as POSITIVE."""
-    assert _parse_response_stance("I disagree with Bob about carbon pricing.", "NEUTRAL", 0.5)[0] == "NEGATIVE"
-    assert _parse_response_stance("I do not agree with the proposal.", "NEUTRAL", 0.5)[0] == "NEGATIVE"
-    assert _parse_response_stance("I support this proposal.", "NEUTRAL", 0.5)[0] == "POSITIVE"
+    assert (
+        _parse_response_stance(
+            "I disagree with Bob about carbon pricing.", "NEUTRAL", 0.5
+        )[0]
+        == "NEGATIVE"
+    )
+    assert (
+        _parse_response_stance("I do not agree with the proposal.", "NEUTRAL", 0.5)[0]
+        == "NEGATIVE"
+    )
+    assert (
+        _parse_response_stance("I support this proposal.", "NEUTRAL", 0.5)[0]
+        == "POSITIVE"
+    )
 
 
 def test_parse_stance_neutral():
-    stance, _ = _parse_response_stance("This is a balanced view with both pros and cons", "POSITIVE", 0.5)
+    stance, _ = _parse_response_stance(
+        "This is a balanced view with both pros and cons", "POSITIVE", 0.5
+    )
     assert stance == "NEUTRAL"
 
 
 def test_parse_confidence_boost():
-    _, conf = _parse_response_stance("This is definitely the right choice", "POSITIVE", 0.5)
+    _, conf = _parse_response_stance(
+        "This is definitely the right choice", "POSITIVE", 0.5
+    )
     assert conf == 0.6
 
 
 def test_parse_confidence_deduct():
-    _, conf = _parse_response_stance("This might perhaps be the right choice", "POSITIVE", 0.5)
+    _, conf = _parse_response_stance(
+        "This might perhaps be the right choice", "POSITIVE", 0.5
+    )
     assert conf == 0.4
 
 
 def test_parse_confidence_capped():
-    _, conf = _parse_response_stance("This is absolutely, clearly, definitely the right choice", "POSITIVE", 0.95)
+    _, conf = _parse_response_stance(
+        "This is absolutely, clearly, definitely the right choice", "POSITIVE", 0.95
+    )
     assert conf == 1.0
 
 
@@ -75,9 +117,14 @@ def test_parse_confidence_capped():
 # Prompt builders
 # ------------------------------------------------------------------
 
+
 def test_system_prompt_uses_profile_fields():
-    _, alice = make_profile("Alice", ["economics", "finance"], "Markets self-correct efficiently.", 0.8)
-    _, bob = make_profile("Bob", ["environmental science"], "Externalities are not priced in.", 0.7)
+    _, alice = make_profile(
+        "Alice", ["economics", "finance"], "Markets self-correct efficiently.", 0.8
+    )
+    _, bob = make_profile(
+        "Bob", ["environmental science"], "Externalities are not priced in.", 0.7
+    )
     prompt = _build_system_prompt(alice, bob, ["carbon tax", "EPA"])
     assert "Alice" in prompt
     assert "economics" in prompt
@@ -85,10 +132,11 @@ def test_system_prompt_uses_profile_fields():
 
 
 def test_system_prompt_truncates_perspective():
-    _, alice = make_profile("Alice", ["x"], "x" * 1000, 0.8)
+    _, alice = make_profile("Alice", ["x"], "x" * 5000, 0.8)
     _, bob = make_profile("Bob", ["y"], "y", 0.7)
     prompt = _build_system_prompt(alice, bob, [])
-    assert len(prompt) < 1000 + 200
+    line = next(l for l in prompt.splitlines() if l.startswith("Your perspective: "))
+    assert len(line) - len("Your perspective: ") <= PERSONA_PERSPECTIVE_CHARS
 
 
 def test_user_prompt_includes_query():
@@ -118,6 +166,7 @@ def test_user_prompt_shows_opponent_name():
 # RoundRunner.execute_round
 # ------------------------------------------------------------------
 
+
 @pytest.mark.asyncio
 async def test_execute_round_returns_round_result():
     mock_llm = AsyncMock()
@@ -130,7 +179,9 @@ async def test_execute_round_returns_round_result():
     profiles = [alice, bob]
     pairs = [make_pair("Alice", "Bob", ["carbon"])]
 
-    result = await rr.execute_round(profiles, pairs, round_num=1, query="Tax carbon?", history=[])
+    result = await rr.execute_round(
+        profiles, pairs, round_num=1, query="Tax carbon?", history=[]
+    )
 
     assert isinstance(result, RoundResult)
     assert result.round_num == 1
@@ -144,17 +195,25 @@ async def test_execute_round_uses_profile_fields_in_prompts():
     runner = BatchedLLMRunner(mock_llm)
     rr = RoundRunner(runner)
 
-    aid_alice, alice = make_profile("Alice", ["AI safety"], "AI alignment is critical.", 0.9)
+    aid_alice, alice = make_profile(
+        "Alice", ["AI safety"], "AI alignment is critical.", 0.9
+    )
     aid_bob, bob = make_profile("Bob", ["economics"], "Economic growth first.", 0.6)
     profiles = [alice, bob]
     pairs = [make_pair("Alice", "Bob", ["regulation"])]
 
-    await rr.execute_round(profiles, pairs, round_num=1, query="Regulate AI?", history=[])
+    await rr.execute_round(
+        profiles, pairs, round_num=1, query="Regulate AI?", history=[]
+    )
 
     calls = mock_llm.generate.call_args_list
     assert len(calls) == 2
     for c in calls:
-        system = c.kwargs.get("system_prompt", c[1].get("system_prompt", "")) if hasattr(c, "kwargs") else ""
+        system = (
+            c.kwargs.get("system_prompt", c[1].get("system_prompt", ""))
+            if hasattr(c, "kwargs")
+            else ""
+        )
         assert "Alice" in system or "Bob" in system
 
 
@@ -203,16 +262,43 @@ async def test_execute_round_error_continues():
     profiles = [alice, bob]
     pairs = [make_pair("Alice", "Bob", [])]
 
-    result = await rr.execute_round(profiles, pairs, round_num=1, query="Topic?", history=[])
+    result = await rr.execute_round(
+        profiles, pairs, round_num=1, query="Topic?", history=[]
+    )
 
     assert isinstance(result, RoundResult)
     assert len(result.turns) >= 1
 
 
 @pytest.mark.asyncio
+async def test_execute_round_retains_reasoning():
+    mock_llm = AsyncMock()
+    mock_llm.generate = AsyncMock(
+        return_value="REASONING: Markets self-correct.\nANSWER: I support the proposal."
+    )
+    rr = RoundRunner(BatchedLLMRunner(mock_llm))
+
+    _, alice = make_profile("Alice", ["x"], "x", 0.8)
+    _, bob = make_profile("Bob", ["y"], "y", 0.7)
+    result = await rr.execute_round(
+        [alice, bob],
+        [make_pair("Alice", "Bob", [])],
+        round_num=1,
+        query="Q?",
+        history=[],
+    )
+
+    for turn in result.turns:
+        assert turn.reasoning == "Markets self-correct."
+        assert turn.content == "I support the proposal."
+
+
+@pytest.mark.asyncio
 async def test_execute_round_turn_contains_profile_data():
     mock_llm = AsyncMock()
-    mock_llm.generate = AsyncMock(return_value="I am certain this is the right approach.")
+    mock_llm.generate = AsyncMock(
+        return_value="I am certain this is the right approach."
+    )
     runner = BatchedLLMRunner(mock_llm)
     rr = RoundRunner(runner)
 
@@ -221,7 +307,9 @@ async def test_execute_round_turn_contains_profile_data():
     profiles = [alice, bob]
     pairs = [make_pair("Alice", "Bob", [])]
 
-    result = await rr.execute_round(profiles, pairs, round_num=1, query="Topic?", history=[])
+    result = await rr.execute_round(
+        profiles, pairs, round_num=1, query="Topic?", history=[]
+    )
 
     names = {t.agent_name for t in result.turns}
     assert names == {"Alice", "Bob"}
@@ -239,24 +327,34 @@ from src.simulation.round_runner import _extract_references
 
 
 def test_extract_references_matches_candidates_in_content():
-    refs = _extract_references("Carbon tax hurts the EPA budget", ["EPA", "carbon tax", "unrelated"])
+    refs = _extract_references(
+        "Carbon tax hurts the EPA budget", ["EPA", "carbon tax", "unrelated"]
+    )
     assert refs == ["EPA", "carbon tax"]
 
 
 def test_extract_references_caps_at_five():
-    refs = _extract_references(" ".join(f"n{i}" for i in range(10)), [f"n{i}" for i in range(10)])
+    refs = _extract_references(
+        " ".join(f"n{i}" for i in range(10)), [f"n{i}" for i in range(10)]
+    )
     assert len(refs) == 5
 
 
 @pytest.mark.asyncio
 async def test_execute_round_fills_references():
     mock_llm = AsyncMock()
-    mock_llm.generate = AsyncMock(return_value="I disagree with Bob about carbon pricing.")
+    mock_llm.generate = AsyncMock(
+        return_value="I disagree with Bob about carbon pricing."
+    )
     rr = RoundRunner(BatchedLLMRunner(mock_llm))
     _, alice = make_profile("Alice", ["x"], "x", 0.8)
     _, bob = make_profile("Bob", ["y"], "y", 0.7)
     result = await rr.execute_round(
-        [alice, bob], [make_pair("Alice", "Bob", ["carbon pricing"])], round_num=1, query="Q?", history=[]
+        [alice, bob],
+        [make_pair("Alice", "Bob", ["carbon pricing"])],
+        round_num=1,
+        query="Q?",
+        history=[],
     )
     alice_turn = next(t for t in result.turns if t.agent_name == "Alice")
     assert "Bob" in alice_turn.references
@@ -272,12 +370,33 @@ from src.simulation.society_memory import SocietySnapshot
 def test_user_prompt_renders_society_block_without_own_lines():
     _, alice = make_profile("Alice", ["x"], "x", 0.8)
     _, bob = make_profile("Bob", ["y"], "y", 0.7)
-    snap = SocietySnapshot(round=1, entries=[
-        {"agent": "Alice", "round": 1, "stance": "POSITIVE", "confidence": 0.9, "weight": 0.5, "summary": "own take"},
-        {"agent": "Carol", "round": 1, "stance": "NEGATIVE", "confidence": 0.8, "weight": 0.4, "summary": "carol take"},
-    ])
+    snap = SocietySnapshot(
+        round=1,
+        entries=[
+            {
+                "agent": "Alice",
+                "round": 1,
+                "stance": "POSITIVE",
+                "confidence": 0.9,
+                "weight": 0.5,
+                "summary": "own take",
+            },
+            {
+                "agent": "Carol",
+                "round": 1,
+                "stance": "NEGATIVE",
+                "confidence": 0.8,
+                "weight": 0.4,
+                "summary": "carol take",
+            },
+        ],
+    )
     prompt = _build_user_prompt(alice, bob, "Tax carbon?", [], society=snap)
-    assert "SOCIETY STATE" in prompt and "carol take" in prompt and "own take" not in prompt
+    assert (
+        "SOCIETY STATE" in prompt
+        and "carol take" in prompt
+        and "own take" not in prompt
+    )
 
 
 def test_user_prompt_shows_opponent_latest_stance_from_history():
@@ -295,11 +414,27 @@ async def test_execute_round_passes_society_into_prompts():
     rr = RoundRunner(BatchedLLMRunner(mock_llm))
     _, alice = make_profile("Alice", ["x"], "x", 0.8)
     _, bob = make_profile("Bob", ["y"], "y", 0.7)
-    snap = SocietySnapshot(round=1, entries=[
-        {"agent": "Carol", "round": 1, "stance": "POSITIVE", "confidence": 0.9, "weight": 0.5, "summary": "carol"},
-    ])
-    await rr.execute_round([alice, bob], [make_pair("Alice", "Bob", [])],
-                           round_num=2, query="Q?", history=[], society=snap)
+    snap = SocietySnapshot(
+        round=1,
+        entries=[
+            {
+                "agent": "Carol",
+                "round": 1,
+                "stance": "POSITIVE",
+                "confidence": 0.9,
+                "weight": 0.5,
+                "summary": "carol",
+            },
+        ],
+    )
+    await rr.execute_round(
+        [alice, bob],
+        [make_pair("Alice", "Bob", [])],
+        round_num=2,
+        query="Q?",
+        history=[],
+        society=snap,
+    )
     for c in mock_llm.generate.call_args_list:
         assert "SOCIETY STATE" in c.kwargs["user_prompt"]
 
@@ -308,8 +443,11 @@ async def test_execute_round_passes_society_into_prompts():
 # Intent context (S3)
 # ------------------------------------------------------------------
 
-def make_intent(core_question: str = "Should carbon emissions be taxed?",
-                stance_axis: str = "Support = backing a carbon tax; oppose = rejecting it.") -> QueryIntent:
+
+def make_intent(
+    core_question: str = "Should carbon emissions be taxed?",
+    stance_axis: str = "Support = backing a carbon tax; oppose = rejecting it.",
+) -> QueryIntent:
     return QueryIntent(
         direct_keywords=["carbon tax"],
         latent_sectors=["energy"],
@@ -345,7 +483,9 @@ def test_user_prompt_includes_partial_intent_block():
     _, alice = make_profile("Alice", ["x"], "x", 0.8)
     _, bob = make_profile("Bob", ["y"], "y", 0.7)
     # A fallback intent has the core question but no stance axis.
-    prompt = _build_user_prompt(alice, bob, "Tax carbon?", [], intent=make_intent(stance_axis=""))
+    prompt = _build_user_prompt(
+        alice, bob, "Tax carbon?", [], intent=make_intent(stance_axis="")
+    )
     assert "Core question: Should carbon emissions be taxed?" in prompt
     assert "Stance axis" not in prompt
 
@@ -357,8 +497,13 @@ async def test_execute_round_passes_intent_into_prompts():
     rr = RoundRunner(BatchedLLMRunner(mock_llm), intent=make_intent())
     _, alice = make_profile("Alice", ["x"], "x", 0.8)
     _, bob = make_profile("Bob", ["y"], "y", 0.7)
-    await rr.execute_round([alice, bob], [make_pair("Alice", "Bob", [])],
-                           round_num=1, query="Tax carbon?", history=[])
+    await rr.execute_round(
+        [alice, bob],
+        [make_pair("Alice", "Bob", [])],
+        round_num=1,
+        query="Tax carbon?",
+        history=[],
+    )
     assert len(mock_llm.generate.call_args_list) == 2
     for c in mock_llm.generate.call_args_list:
         assert "INTENT CONTEXT" in c.kwargs["user_prompt"]

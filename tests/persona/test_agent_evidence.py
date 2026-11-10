@@ -3,6 +3,7 @@
 The field grounds an agent's debate prompt in its own real source text. It is
 synthesis-time only — it must never be written into the graph.
 """
+
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -86,6 +87,63 @@ async def test_fetch_source_evidence_is_capped():
     out = await repo.fetch_source_evidence([f"c{i}" for i in range(len(rows))])
 
     assert len(out) == SOURCE_EVIDENCE_MAX_SNIPPETS
+
+
+@pytest.mark.asyncio
+async def test_fetch_by_chunk_groups_snippets_under_their_chunk_id():
+    """R17: the id rides the RETURN so a caller can attribute snippets."""
+    repo = _repo_returning(
+        [
+            {"chunk_id": "c1", "text": "first"},
+            {"chunk_id": "c1", "text": "second"},
+            {"chunk_id": "c2", "text": "third"},
+        ]
+    )
+
+    out = await repo.fetch_source_evidence_by_chunk(["c1", "c2"])
+
+    assert out == {"c1": ["first", "second"], "c2": ["third"]}
+
+
+@pytest.mark.asyncio
+async def test_fetch_by_chunk_skips_rows_missing_an_id_or_text():
+    repo = _repo_returning([{"chunk_id": "c1", "text": "only"}, {"chunk_id": "c2"}, {}])
+
+    assert await repo.fetch_source_evidence_by_chunk(["c1", "c2"]) == {"c1": ["only"]}
+
+
+@pytest.mark.asyncio
+async def test_fetch_by_chunk_leaves_capping_to_the_caller():
+    """R19: no global LIMIT — a chunk-heavy caller must not starve later chunks.
+
+    The per-persona cap lives in the synthesizer's bucketing, so the query
+    returns every referenced chunk's text and attribution stays complete.
+    """
+    ids = [f"c{i}" for i in range(12)]
+    repo = _repo_returning([{"chunk_id": cid, "text": f"t{cid}"} for cid in ids])
+
+    out = await repo.fetch_source_evidence_by_chunk(ids)
+
+    assert sorted(out) == sorted(ids)
+    session = repo._driver.session.return_value.__aenter__.return_value
+    assert "LIMIT" not in session.run.await_args.args[0].upper()
+
+
+@pytest.mark.asyncio
+async def test_fetch_by_chunk_empty_ids_makes_no_query():
+    repo = _repo_returning([])
+
+    assert await repo.fetch_source_evidence_by_chunk([]) == {}
+    repo._driver.session.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_fetch_by_chunk_swallows_a_driver_error():
+    """Evidence is an enrichment — a dead driver yields {} and a warning, never a raise."""
+    repo = _repo_returning([])
+    repo._driver.session.side_effect = RuntimeError("neo4j down")
+
+    assert await repo.fetch_source_evidence_by_chunk(["c1"]) == {}
 
 
 @pytest.mark.asyncio

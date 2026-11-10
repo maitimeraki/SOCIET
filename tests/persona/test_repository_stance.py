@@ -5,6 +5,7 @@ every synthesized agent collapsed to NEUTRAL with cior 0.0. These tests pin the
 deterministic derivation (from `OPPOSES`/`SUPPORTS` relation evidence) and the
 distilled-stance precedence that removes the collapse.
 """
+
 from unittest.mock import AsyncMock
 
 import pytest
@@ -34,7 +35,6 @@ async def _build(repo, distilled=None, **node) -> object:
         llm_output=None,
         distilled=distilled,
     )
-
 
 
 def test_opposes_evidence_derives_a_negative_stance():
@@ -95,7 +95,9 @@ def test_effective_stance_prefers_the_derivation_over_a_node_property():
 @pytest.mark.asyncio
 async def test_build_uses_the_graph_derivation_when_not_distilled():
     """Step 5: with no distilled stance, the node's OPPOSES evidence decides."""
-    agent = await _build(_repo(), None, name="Critic", domain_tags=["risk"], relations=["OPPOSES"])
+    agent = await _build(
+        _repo(), None, name="Critic", domain_tags=["risk"], relations=["OPPOSES"]
+    )
 
     assert agent.stance is Stance.NEGATIVE
     assert agent.cior < 0.0
@@ -106,10 +108,13 @@ async def test_build_reads_relation_evidence_from_the_metrics():
     """Live path: the node has no edges, but the metrics' recent memories do."""
     repo = _repo()
     agent = await repo.build_single_agent_profile_from_node(
-        agent_name="Champion", node={"name": "Champion", "domain_tags": ["growth"]},
-        user_query="q", dataset_id="ds",
+        agent_name="Champion",
+        node={"name": "Champion", "domain_tags": ["growth"]},
+        user_query="q",
+        dataset_id="ds",
         agent_metrics={"recent_memories": [{"relation_type": "SUPPORTS"}]},
-        sector_results=[], llm_output=None,
+        sector_results=[],
+        llm_output=None,
     )
 
     assert agent.stance is Stance.POSITIVE
@@ -122,7 +127,9 @@ async def test_distilled_stance_beats_the_graph_derivation():
     agent = await _build(
         _repo(),
         DistilledProfile("d", "p", Stance.POSITIVE, 0.9, 0.7),
-        name="Torn", domain_tags=["x"], relations=["OPPOSES"],
+        name="Torn",
+        domain_tags=["x"],
+        relations=["OPPOSES"],
     )
 
     assert agent.stance is Stance.POSITIVE
@@ -157,7 +164,10 @@ async def test_a_distilled_roster_is_not_uniformly_neutral_and_cior_varies():
         query="Should we expand?",
         stance_axis="Support = expand; oppose = stay.",
     )
-    roster = [await _build(repo, distilled[name], name=name, domain_tags=["strategy"]) for name in names]
+    roster = [
+        await _build(repo, distilled[name], name=name, domain_tags=["strategy"])
+        for name in names
+    ]
 
     stances = [agent.stance for agent in roster]
     assert stances != [Stance.NEUTRAL] * len(roster)
@@ -174,7 +184,9 @@ async def test_distill_falls_back_to_the_graph_derivation_when_the_stance_line_i
 
     out = await repo.distill_profiles(
         personas=[{"name": "X", "node": {"name": "X", "relations": ["OPPOSES"]}}],
-        query="q", stance_axis="Support = yes.", warnings=warnings,
+        query="q",
+        stance_axis="Support = yes.",
+        warnings=warnings,
     )
 
     assert out["X"].stance is Stance.NEGATIVE
@@ -186,10 +198,10 @@ async def test_distill_parses_the_stance_line_into_the_returned_value():
     repo = _repo(_SpyClient(_REPLY))
 
     out = await repo.distill_profiles(
-        personas=[{"name": "Optimist"}], query="q",
+        personas=[{"name": "Optimist"}],
+        query="q",
     )
 
     assert out["Optimist"].stance is Stance.POSITIVE
     assert out["Optimist"].conviction == pytest.approx(0.8)
     assert out["Optimist"].cior == pytest.approx(0.6)
-

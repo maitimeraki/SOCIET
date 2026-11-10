@@ -29,17 +29,21 @@ export function toast(kind: ToastKind, message: string) {
 }
 
 const ICON: Record<ToastKind, Icon> = { success: CheckCircle, error: WarningCircle, neutral: Info }
-const ICON_CLASS: Record<ToastKind, string> = { success: 'text-good', error: 'text-critical', neutral: 'text-paper-mute' }
 
 export function ToastHost() {
   const toasts = useToastStore((s) => s.toasts)
   return (
-    <div className="fixed bottom-6 right-6 z-[60] flex flex-col gap-2" aria-live="polite">
+    <div
+      className="fixed bottom-6 right-6 z-[60] flex flex-col gap-2 max-sm:left-1/2 max-sm:right-auto max-sm:-translate-x-1/2"
+      aria-live="polite"
+    >
       {toasts.map((t) => {
         const IconCmp = ICON[t.kind]
+        // An overlay, not a content card: ToastHost floats over arbitrary page content, so its
+        // surface is paper with one record rule — never a translucent panel.
         return (
-          <div key={t.id} className="flex items-center gap-2 rounded-[6px] border border-ink-600 bg-ink-800 px-4 py-3 text-body text-paper">
-            <IconCmp size={16} className={ICON_CLASS[t.kind]} aria-hidden="true" />
+          <div key={t.id} className="flex items-center gap-2 rounded-sm border border-rule bg-paper px-4 py-3 text-body-sm text-ink">
+            <IconCmp size={16} className="shrink-0" aria-hidden="true" />
             {t.message}
           </div>
         )

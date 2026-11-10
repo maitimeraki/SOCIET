@@ -1,11 +1,10 @@
 import { useState } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
-import { ArrowRight } from '@phosphor-icons/react'
-import { ingestFiles, ingestUrl } from '../api/rest'
+import { ArrowRight, Warning } from '@phosphor-icons/react'
+import { runFileIngest, runUrlIngest } from '../api/ingestFlow'
 import FileDrop from '../components/ingest/FileDrop'
 import DocCard from '../components/ingest/DocCard'
 import UrlFetchRow from '../components/ingest/UrlFetchRow'
-import StageRail from '../components/common/StageRail'
 import Button from '../components/ui/Button'
 import Input from '../components/ui/Input'
 import Field from '../components/ui/Field'
@@ -13,36 +12,60 @@ import { toast } from '../components/ui/Toast'
 import { useDraftStore } from '../wizard/draftStore'
 import type { DraftDoc } from '../wizard/draftStore'
 
+/** The exhausted unit balance is recoverable: a warn mark, ink words, and the server's reset date. */
+export function UnitsGate({ message }: { message: string }) {
+  return (
+    <div role="status" className="flex items-start gap-2 border-t border-warn/40 pt-3">
+      <Warning size={16} className="mt-0.5 shrink-0 text-warn" aria-hidden="true" />
+      <p className="text-body text-ink">{message}</p>
+    </div>
+  )
+}
+
 export default function IngestPage() {
   const navigate = useNavigate()
   const location = useLocation()
   const note = (location.state as { note?: string } | null)?.note
   const { corpusName, docs, setCorpusName, addDocs, updateDoc, removeDoc, setDatasetId } = useDraftStore()
   const [fetchingUrl, setFetchingUrl] = useState(false)
+  const [failure, setFailure] = useState<string | null>(null)
+  const [unitsGate, setUnitsGate] = useState<string | null>(null)
 
-  /** POST the files and reconcile the response onto the existing cards — consume-matched,
-   * so a duplicate-name batch updates each card exactly once. */
-  const ingest = async (placeholders: DraftDoc[], files: File[]) => {
-    try {
-      const response = await ingestFiles(files)
+  /** POST the batch, poll the extraction job, and reconcile the extracted payloads onto the existing
+   *  cards — consume-matched by title, so a duplicate-name batch updates each card exactly once. */
+  const submitFiles = async (placeholders: DraftDoc[], files: File[]) => {
+    setFailure(null)
+    setUnitsGate(null)
+    const outcome = await runFileIngest(files)
+    if (outcome.kind === 'documents') {
       const pending = [...placeholders]
-      for (const doc of response.documents) {
+      for (const doc of outcome.documents) {
         const index = pending.findIndex((placeholder) => placeholder.title === doc.title)
         if (index === -1) continue
         const [target] = pending.splice(index, 1)
         updateDoc(target.document_id, { ...doc, document_id: target.document_id, status: 'ready' })
       }
-      for (const failure of response.failures) {
-        const index = pending.findIndex((placeholder) => placeholder.title === failure.filename)
-        if (index === -1) continue
-        const [target] = pending.splice(index, 1)
-        updateDoc(target.document_id, { status: 'failed', error: failure.detail })
+      // A placeholder the job did not return is honestly marked, not left spinning.
+      for (const leftover of pending) {
+        updateDoc(leftover.document_id, { status: 'failed', error: 'the extractor returned no text for this file' })
       }
-    } catch (error) {
-      const reason = error instanceof Error ? error.message : 'unknown error'
-      for (const placeholder of placeholders) updateDoc(placeholder.document_id, { status: 'failed', error: reason })
-      toast('error', `Upload failed: ${reason}. Nothing was saved — try again.`)
+      return
     }
+    if (outcome.kind === 'units_exhausted') {
+      for (const placeholder of placeholders) updateDoc(placeholder.document_id, { status: 'failed', error: 'no units remaining' })
+      setUnitsGate(outcome.message)
+      return
+    }
+    if (outcome.kind === 'job_capped') {
+      // Retryable: the batch never started; a slot frees when an in-flight job finishes.
+      for (const placeholder of placeholders) updateDoc(placeholder.document_id, { status: 'failed', error: 'too many jobs in flight — try again shortly' })
+      setUnitsGate(
+        `Too many jobs in flight — try again in ${outcome.retryAfter ?? 30} seconds.`,
+      )
+      return
+    }
+    for (const placeholder of placeholders) updateDoc(placeholder.document_id, { status: 'failed', error: outcome.reason })
+    setFailure(outcome.reason)
   }
 
   const handleFiles = async (files: File[]) => {
@@ -56,16 +79,30 @@ export default function IngestPage() {
       file,
     }))
     addDocs(placeholders)
-    await ingest(placeholders, files)
+    await submitFiles(placeholders, files)
   }
 
   const handleUrl = async (url: string) => {
     setFetchingUrl(true)
+    setFailure(null)
+    setUnitsGate(null)
     try {
-      const { document } = await ingestUrl(url)
-      addDocs([{ ...document, status: 'ready' }])
-    } catch (error) {
-      toast('error', error instanceof Error ? error.message : 'Download failed')
+      const outcome = await runUrlIngest(url)
+      if (outcome.kind === 'documents') {
+        addDocs(outcome.documents.map((doc) => ({ ...doc, status: 'ready' as const })))
+        return
+      }
+      if (outcome.kind === 'units_exhausted') {
+        setUnitsGate(outcome.message)
+        return
+      }
+      if (outcome.kind === 'job_capped') {
+        setUnitsGate(
+          `Too many jobs in flight — try again in ${outcome.retryAfter ?? 30} seconds.`,
+        )
+        return
+      }
+      setFailure(outcome.reason)
     } finally {
       setFetchingUrl(false)
     }
@@ -77,7 +114,7 @@ export default function IngestPage() {
       return
     }
     updateDoc(doc.document_id, { status: 'extracting', error: undefined })
-    await ingest([doc], [doc.file])
+    await submitFiles([doc], [doc.file])
   }
 
   const readyCount = docs.filter((doc) => doc.status === 'ready').length
@@ -90,33 +127,40 @@ export default function IngestPage() {
   }
 
   return (
-    <div className="mx-auto max-w-[760px] space-y-8">
-      <StageRail
-        stages={[
-          { key: 'ingest', label: 'Ingest', state: 'running' },
-          { key: 'graph', label: 'Graph', state: 'pending' },
-          { key: 'question', label: 'Question', state: 'pending' },
-        ]}
-      />
+    <div className="space-y-6">
       <div>
-        <p className="text-label uppercase text-paper-mute">Step 1 · Ingest</p>
-        <h1 className="mt-2 font-serif text-display text-paper">Build the corpus</h1>
-        <p className="mt-3 max-w-[60ch] text-body text-paper-dim">
+        <p className="font-ui text-label uppercase tracking-[0.09em] text-ink-3">Your material</p>
+        <h1 className="mt-3 font-display text-display font-medium tracking-[-0.03em] text-ink">Add the material</h1>
+        <p className="mt-3 max-w-[60ch] font-ui text-body text-ink-2">
           Add the documents your experts would have read — PDFs, Word files, Markdown, plain text, or a web page.
         </p>
       </div>
 
       {note && (
-        <p className="rounded-[6px] border border-brass/40 bg-ink-800 px-4 py-3 text-body text-paper-dim">{note}</p>
+        <p className="border-t border-warn/40 pt-3 text-body text-ink-2">{note}</p>
+      )}
+
+      {/* R35: the mark may be the warn hue, the words are ink — an exhausted unit balance is a
+          distinct, recoverable state. The server message carries the reset date. */}
+      {unitsGate && <UnitsGate message={unitsGate} />}
+
+      {/* R46 m4: the failure surfaces *after* an action, so it is an assertive error — `role="alert"`
+          (the units banner is an informational, recoverable notice, so it stays `role="status"`). It is
+          the single announcement: the duplicate error toasts below were removed so the same string is
+          not read twice. */}
+      {failure && (
+        <div role="alert" className="border-t border-danger/40 pt-3">
+          <p className="text-body text-ink">Extraction failed: {failure}. Nothing was saved — try again.</p>
+        </div>
       )}
 
       <FileDrop onFiles={handleFiles} />
       <UrlFetchRow onFetch={handleUrl} busy={fetchingUrl} />
 
       <section className="space-y-3">
-        <h2 className="text-heading text-paper">Documents</h2>
+        <h2 className="font-display text-heading font-medium tracking-[-0.01em] text-ink">Documents</h2>
         {docs.length === 0 ? (
-          <p className="text-body text-paper-mute">Nothing yet. PDFs, Word files, Markdown, or text.</p>
+          <p className="text-body text-ink-3">Nothing yet. PDFs, Word files, Markdown, or text.</p>
         ) : (
           <div className="space-y-2">
             {docs.map((doc) => (
@@ -126,16 +170,16 @@ export default function IngestPage() {
         )}
       </section>
 
-      <div className="flex items-end justify-between gap-6">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between sm:gap-6">
         <Field label="Name this corpus">
           <Input value={corpusName} onChange={(event) => setCorpusName(event.target.value)} placeholder="Untitled corpus" />
         </Field>
-        <div className="text-right">
-          <Button variant="primary" disabled={!canContinue} onClick={buildGraph}>
-            Build the graph
+        <div className="sm:text-right">
+          <Button className="w-full sm:w-auto" variant="primary" disabled={!canContinue} onClick={buildGraph}>
+            Build the map
             <ArrowRight size={16} aria-hidden="true" />
           </Button>
-          {!canContinue && <p className="mt-2 text-micro text-paper-mute">Add at least one document to continue</p>}
+          {!canContinue && <p className="mt-2 text-micro text-ink-3">Add at least one document to continue</p>}
         </div>
       </div>
     </div>

@@ -13,7 +13,7 @@ export default function ActivationNote({
   return (
     <p className="flex items-center gap-2 text-micro text-accent">
       <Lightning size={14} aria-hidden="true" />
-      {agents.length} {agents.length === 1 ? 'voice' : 'voices'} joined for round {round + 1}
+      {agents.length} {agents.length === 1 ? 'voice' : 'voices'} joined for pass {round + 1}
       {reason ? ` — ${reason}` : ''}.
     </p>
   )

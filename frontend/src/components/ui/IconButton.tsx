@@ -11,7 +11,9 @@ export default function IconButton({
       {...rest}
       aria-label={label}
       title={label}
-      className={`inline-flex h-8 w-8 items-center justify-center rounded-[4px] text-paper-dim transition-colors hover:bg-ink-800 hover:text-paper ${className}`}
+      // §8.11 — a 44×44 control on the 8px corner: paper, one hairline. The tap target is the
+      // control's own size, so no phone override is needed.
+      className={`inline-flex h-11 w-11 items-center justify-center rounded-sm border border-hairline bg-paper text-ink-2 transition-colors duration-state hover:bg-sand hover:text-ink ${className}`}
     >
       {children}
     </button>

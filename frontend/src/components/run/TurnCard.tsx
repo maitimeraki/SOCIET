@@ -1,8 +1,10 @@
 import type { TurnInfo } from '../../run/events'
 import { asStance } from '../../run/events'
 import { fmtScore } from '../../utils/format'
-import StanceChip from '../common/StanceChip'
-import Tag from '../ui/Tag'
+import PositionMark from '../ui/PositionMark'
+import Emphasis from '../common/Emphasis'
+import Chip from '../ui/Chip'
+import { ruleClasses } from '../ui/Rule'
 
 export default function TurnCard({ turn, round }: { turn: TurnInfo; round: number }) {
   const references = turn.references ?? []
@@ -12,20 +14,20 @@ export default function TurnCard({ turn, round }: { turn: TurnInfo; round: numbe
   }, {})
   return (
     <article
-      aria-label={`Round ${round} — ${turn.agent_name}, ${turn.stance}`}
-      className="rounded-[6px] border border-ink-700 bg-ink-900 p-3"
+      aria-label={`Pass ${round} — ${turn.agent_name}, ${turn.stance}`}
+      className={`${ruleClasses('top')} pt-3`}
     >
       <header className="flex items-center gap-2">
-        <span className="text-body text-paper">{turn.agent_name}</span>
-        <StanceChip stance={asStance(turn.stance)} size="sm" />
-        <span className="tnum font-mono text-micro text-paper-mute">{fmtScore(turn.confidence)}</span>
+        <span className="text-body text-ink">{turn.agent_name}</span>
+        <PositionMark position={asStance(turn.stance)} size="sm" ground="light" />
+        <span className="tnum font-mono text-micro text-ink-3">{fmtScore(turn.confidence)}</span>
       </header>
-      <p className="mt-2 max-w-[66ch] select-text text-body-lg text-paper-dim">{turn.content}</p>
+      <Emphasis text={turn.content} className="mt-2 max-w-[66ch] select-text text-body text-ink-2" />
       {references.length > 0 && (
         <div className="mt-2 flex flex-wrap items-center gap-1">
-          <span className="text-micro text-paper-mute">cited:</span>
+          <span className="text-micro text-ink-3">cited:</span>
           {Object.entries(counts).map(([name, count]) => (
-            <Tag key={name}>{count > 1 ? `${name} ×${count}` : name}</Tag>
+            <Chip key={name}>{count > 1 ? `${name} ×${count}` : name}</Chip>
           ))}
         </div>
       )}

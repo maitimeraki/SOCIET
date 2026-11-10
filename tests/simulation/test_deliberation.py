@@ -5,10 +5,18 @@ ANSWER: section. Stance is parsed from the ANSWER only, never the reasoning --
 otherwise the verdict would read an agent's private thinking instead of its
 stated position. A response without the delimiter degrades to whole-text-as-answer.
 """
-import pytest
+
 from unittest.mock import AsyncMock
 
-from src.persona.agent import Agent, ConfidenceBreakdown, DiscoveryType, ExpertiseLevel, PersonaIdentity
+import pytest
+
+from src.persona.agent import (
+    Agent,
+    ConfidenceBreakdown,
+    DiscoveryType,
+    ExpertiseLevel,
+    PersonaIdentity,
+)
 from src.simulation.llm_batch import BatchedLLMRunner
 from src.simulation.pair_turn import CommPair
 from src.simulation.round_runner import (
@@ -27,20 +35,25 @@ DELIBERATION = (
 
 def _agent(name: str) -> Agent:
     return Agent(
-        identity=PersonaIdentity(name=name, archetype="Expert", communication_style="Formal"),
+        identity=PersonaIdentity(
+            name=name, archetype="Expert", communication_style="Formal"
+        ),
         discovery_type=DiscoveryType.INTENT_DRIVEN,
         expertise_level=ExpertiseLevel.TECHNICAL,
         bio=f"{name} bio",
         detailed_perspective=f"{name} perspective",
         domain_tags=["x"],
         confidence=0.6,
-        confidence_breakdown=ConfidenceBreakdown(source_breadth=1, node_density=1, relationship_connectivity=0.5),
+        confidence_breakdown=ConfidenceBreakdown(
+            source_breadth=1, node_density=1, relationship_connectivity=0.5
+        ),
     )
 
 
 # ------------------------------------------------------------------
 # Prompt instruction (Step 3)
 # ------------------------------------------------------------------
+
 
 def test_user_prompt_instructs_reason_then_answer():
     prompt = _build_user_prompt(_agent("Alice"), _agent("Bob"), "Expand to Europe?", [])
@@ -52,11 +65,15 @@ def test_user_prompt_instructs_reason_then_answer():
 # Splitter (Step 3)
 # ------------------------------------------------------------------
 
+
 def test_splitter_separates_reasoning_from_answer():
     reasoning, answer = _split_reasoning_answer(DELIBERATION)
     assert reasoning.startswith("Bob argues margins collapse")
     assert "REASONING:" not in reasoning
-    assert answer == "I support the proposal: scale economics outweigh the short-term margin dip."
+    assert (
+        answer
+        == "I support the proposal: scale economics outweigh the short-term margin dip."
+    )
     assert "ANSWER:" not in answer
 
 
@@ -103,10 +120,17 @@ def test_splitter_with_only_lowercase_answer_degrades_to_whole_text():
 # Stance from answer, not reasoning (Steps 2, 5)
 # ------------------------------------------------------------------
 
+
 def test_parse_response_stance_still_reads_markers():
     # Regression: markers parsed identically when handed the answer section.
-    assert _parse_response_stance("I support the proposal.", "NEUTRAL", 0.5)[0] == "POSITIVE"
-    assert _parse_response_stance("I oppose the proposal.", "NEUTRAL", 0.5)[0] == "NEGATIVE"
+    assert (
+        _parse_response_stance("I support the proposal.", "NEUTRAL", 0.5)[0]
+        == "POSITIVE"
+    )
+    assert (
+        _parse_response_stance("I oppose the proposal.", "NEUTRAL", 0.5)[0]
+        == "NEGATIVE"
+    )
 
 
 def test_parse_response_stance_ignores_reasoning_markers():
@@ -120,6 +144,7 @@ def test_parse_response_stance_ignores_reasoning_markers():
 # ------------------------------------------------------------------
 # End-to-end through execute_round (Definition of done)
 # ------------------------------------------------------------------
+
 
 @pytest.mark.asyncio
 async def test_execute_round_content_is_answer_and_stance_from_answer():
@@ -137,7 +162,10 @@ async def test_execute_round_content_is_answer_and_stance_from_answer():
     )
 
     alice_turn = next(t for t in result.turns if t.agent_name == "Alice")
-    assert alice_turn.content == "I support the proposal: scale economics outweigh the short-term margin dip."
+    assert (
+        alice_turn.content
+        == "I support the proposal: scale economics outweigh the short-term margin dip."
+    )
     assert "REASONING:" not in alice_turn.content
     assert alice_turn.stance == "POSITIVE"
 

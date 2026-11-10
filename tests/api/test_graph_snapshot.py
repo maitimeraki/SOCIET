@@ -6,6 +6,7 @@ stored entity and relation for the dataset, plus the dataset's full label set
 so the legend survives the refresh. No live Neo4j — `structured_query` is
 stubbed on a recorder store, as in tests/graph/test_document_model.py.
 """
+
 import pytest
 
 import src.api.graph_snapshot as graph_snapshot
@@ -25,10 +26,22 @@ class _FakeStore:
     def structured_query(self, query, param_map=None):
         self.calls.append((query, param_map or {}))
         if " AS source" in query:
-            return [{"source": "Person:Alice", "target": "Org:Acme", "label": "WORKS_AT"}]
+            return [
+                {
+                    "source": "Person:Alice",
+                    "target": "Org:Acme",
+                    "label": "WORKS_AT",
+                    "props": {"since": "2019", "document_id": "d1"},
+                }
+            ]
         return [
-            {"id": "Person:Alice", "label": "Alice", "type": "Person"},
-            {"id": "Org:Acme", "label": "Acme", "type": "Organization"},
+            {
+                "id": "Person:Alice",
+                "label": "Alice",
+                "type": "Person",
+                "props": {"role": "engineer", "chunk_id": "c1"},
+            },
+            {"id": "Org:Acme", "label": "Acme", "type": "Organization", "props": {}},
         ]
 
 
@@ -46,14 +59,46 @@ async def test_snapshot_returns_nodes_edges_and_the_full_label_set(store):
 
     assert isinstance(delta, GraphDelta)
     assert delta.nodes == [
-        {"id": "Person:Alice", "label": "Alice", "type": "Person"},
-        {"id": "Org:Acme", "label": "Acme", "type": "Organization"},
+        {
+            "id": "Person:Alice",
+            "label": "Alice",
+            "type": "Person",
+            "properties": {"role": "engineer"},
+        },
+        {"id": "Org:Acme", "label": "Acme", "type": "Organization", "properties": {}},
     ]
     assert delta.edges == [
-        {"source": "Person:Alice", "target": "Org:Acme", "label": "WORKS_AT"}
+        {
+            "source": "Person:Alice",
+            "target": "Org:Acme",
+            "label": "WORKS_AT",
+            "properties": {"since": "2019"},
+        }
     ]
     # EVERY distinct entity label — not just the first node's — so the legend rebuilds
     assert set(delta.new_labels) == {"Person", "Organization"}
+
+
+def test_read_returns_properties(monkeypatch):
+    """Task 7: the snapshot projection carries each entity/relation's display
+    properties, with the writers' lineage keys stripped (shared `_public_props`)."""
+    import src.api.graph_snapshot as gs
+
+    class _Store:
+        def structured_query(self, q, param_map=None):
+            if "RETURN e.id" in q:
+                return [
+                    {
+                        "id": "e1",
+                        "label": "Amazon",
+                        "type": "Company",
+                        "props": {"revenue": "$391B"},
+                    }
+                ]
+            return []
+
+    nodes, edges = gs._read(_Store(), "ds")
+    assert nodes[0]["properties"] == {"revenue": "$391B"}
 
 
 @pytest.mark.asyncio

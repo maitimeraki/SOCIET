@@ -1,8 +1,10 @@
 import { describe, expect, it, vi, afterEach } from 'vitest'
-import { NetworkError, health, ingestFiles } from './rest'
+import { NetworkError, authSignup, health, ingestFiles } from './rest'
 
 afterEach(() => {
   vi.unstubAllGlobals()
+  vi.unstubAllEnvs()
+  vi.resetModules()
 })
 
 describe('rest client', () => {
@@ -13,7 +15,15 @@ describe('rest client', () => {
   })
 
   it('throws ApiError carrying the server detail', async () => {
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({ detail: 'Unsupported file type (.xlsx)' }), { status: 415 })))
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(
+        new Response(
+          JSON.stringify({ error: { code: 'validation_error', message: 'Unsupported file type (.xlsx)', correlation_id: 'c1' } }),
+          { status: 415 },
+        ),
+      ),
+    )
     await expect(ingestFiles([new File(['x'], 'a.xlsx')])).rejects.toThrowError('Unsupported file type (.xlsx)')
   })
 
@@ -22,11 +32,159 @@ describe('rest client', () => {
     await expect(health()).rejects.toBeInstanceOf(NetworkError)
   })
 
+  it('sends the signup consent attestations the backend requires', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          id: 'u1',
+          email: 'a@b.c',
+          created_at: '2026-01-01T00:00:00Z',
+          role: 'user',
+          plan: 'free',
+          entitlements: { max_agents: 20, max_rounds: 4, units_remaining: 100, period_end: '2026-12-01T00:00:00Z' },
+        }),
+      ),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    await authSignup('a@b.c', 'password1', true, true)
+
+    expect(JSON.parse(String(fetchMock.mock.calls[0][1].body))).toEqual({
+      email: 'a@b.c',
+      password: 'password1',
+      accept_terms: true,
+      age_confirmed: true,
+    })
+  })
+
   it('sends files as multipart form data', async () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ documents: [], failures: [] })))
     vi.stubGlobal('fetch', fetchMock)
     await ingestFiles([new File(['hello'], 'notes.txt')])
     const body = fetchMock.mock.calls[0][1].body as FormData
     expect((body.get('files') as File).name).toBe('notes.txt')
+  })
+
+  it('short-circuits with a recoverable ConfigError when VITE_API_BASE is unset', async () => {
+    vi.stubEnv('VITE_API_BASE', undefined)
+    vi.resetModules()
+    const fetchMock = vi.fn()
+    vi.stubGlobal('fetch', fetchMock)
+
+    const rest = await import('./rest')
+
+    await expect(rest.health()).rejects.toBeInstanceOf(rest.ConfigError)
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  it('sends cookies on every request (credentials: include)', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(new Response(JSON.stringify({ status: 'healthy', version: '1', active_jobs: 0 })))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await health()
+
+    expect(fetchMock.mock.calls[0][1].credentials).toBe('include')
+  })
+
+  it('invokes the unauthorized handler on a 401 and does not retry', async () => {
+    vi.resetModules()
+    const rest = await import('./rest')
+    const onUnauthorized = vi.fn()
+    rest.registerUnauthorizedHandler(onUnauthorized)
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(
+        new Response(
+          JSON.stringify({ error: { code: 'unauthorized', message: 'unauthorized', correlation_id: 'c1' } }),
+          { status: 401 },
+        ),
+      )
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(rest.authMe()).rejects.toBeInstanceOf(rest.ApiError)
+
+    expect(onUnauthorized).toHaveBeenCalledTimes(1)
+    expect(fetchMock).toHaveBeenCalledTimes(1) // no retry
+  })
+
+  it('reads the real error envelope, so a 402 shows the reset date not statusText', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            error: {
+              code: 'payment_required',
+              message: 'Units used up. They reset on 2026-12-01.',
+              correlation_id: 'c1',
+            },
+          }),
+          { status: 402 },
+        ),
+      ),
+    )
+
+    await expect(ingestFiles([new File(['x'], 'a.txt')])).rejects.toThrowError(
+      'Units used up. They reset on 2026-12-01.',
+    )
+  })
+
+  it('does not invoke the unauthorized handler on a non-401 error', async () => {
+    vi.resetModules()
+    const rest = await import('./rest')
+    const onUnauthorized = vi.fn()
+    rest.registerUnauthorizedHandler(onUnauthorized)
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(
+        new Response(
+          JSON.stringify({ error: { code: 'internal_error', message: 'boom', correlation_id: 'c1' } }),
+          { status: 500 },
+        ),
+      ),
+    )
+
+    await expect(rest.authMe()).rejects.toBeInstanceOf(rest.ApiError)
+
+    expect(onUnauthorized).not.toHaveBeenCalled()
+  })
+})
+
+describe('CSRF double-submit header (R36)', () => {
+  const csrfHeader = (fetchMock: ReturnType<typeof vi.fn>) =>
+    (fetchMock.mock.calls[0][1].headers as Headers).get('X-CSRF-Token')
+
+  it('emits X-CSRF-Token on a state-changing request when the csrf cookie is present', async () => {
+    vi.stubGlobal('document', { cookie: 'theme=dark; csrf=tok-123' })
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ documents: [], failures: [] })))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await ingestFiles([new File(['x'], 'a.txt')])
+
+    expect(csrfHeader(fetchMock)).toBe('tok-123')
+  })
+
+  it('omits the header when the csrf cookie is absent (and never throws without document)', async () => {
+    // No `document` stub: the node-env suite has none, and the read must stay defensive.
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ documents: [], failures: [] })))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await ingestFiles([new File(['x'], 'a.txt')])
+
+    expect(csrfHeader(fetchMock)).toBeNull()
+  })
+
+  it('never emits the header on a GET, even with the cookie present', async () => {
+    vi.stubGlobal('document', { cookie: 'csrf=tok-123' })
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(new Response(JSON.stringify({ status: 'healthy', version: '1', active_jobs: 0 })))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await health()
+
+    expect(csrfHeader(fetchMock)).toBeNull()
   })
 })

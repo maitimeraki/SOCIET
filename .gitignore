@@ -9,6 +9,8 @@ __pycache__/
 .pytest_cache/
 *.log
 .env/
+.env.*
+!.env.sample
 *.sqlite3
 .qodo
 graphify-out/
@@ -21,7 +23,7 @@ plan.*
 docs/
 *.txt
 runtime/
-.claude/
 .serena/
 .superpowers/
 .gstack/
+.impeccable/

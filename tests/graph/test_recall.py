@@ -8,6 +8,7 @@ Three separate recall losses this file pins down:
   (c) both extractors carried a hardcoded cap (10 on the simple one, an
       unset library default on the dynamic one) instead of a configured value.
 """
+
 import sys
 from unittest.mock import MagicMock, patch
 
@@ -22,19 +23,22 @@ from src.utils.hydrate_ontology import hydrate_ontology
 # tests/graph/test_graph_build.py.
 @pytest.fixture(autouse=True)
 def mock_llama_index():
-    with patch.dict('sys.modules', {
-        'llama_index.core': MagicMock(),
-        'llama_index.llms': MagicMock(),
-        'llama_index.llms.openai_like': MagicMock(),
-        'llama_index.embeddings': MagicMock(),
-        'llama_index.embeddings.ollama': MagicMock(),
-        'llama_index.graph_stores': MagicMock(),
-        'llama_index.graph_stores.neo4j': MagicMock(),
-        'llama_index.core.node_parser': MagicMock(),
-        'llama_index.core.indices': MagicMock(),
-        'llama_index.core.indices.property_graph': MagicMock(),
-        'llama_index.core.settings': MagicMock(),
-    }):
+    with patch.dict(
+        "sys.modules",
+        {
+            "llama_index.core": MagicMock(),
+            "llama_index.llms": MagicMock(),
+            "llama_index.llms.openai_like": MagicMock(),
+            "llama_index.embeddings": MagicMock(),
+            "llama_index.embeddings.ollama": MagicMock(),
+            "llama_index.graph_stores": MagicMock(),
+            "llama_index.graph_stores.neo4j": MagicMock(),
+            "llama_index.core.node_parser": MagicMock(),
+            "llama_index.core.indices": MagicMock(),
+            "llama_index.core.indices.property_graph": MagicMock(),
+            "llama_index.core.settings": MagicMock(),
+        },
+    ):
         yield
 
 
@@ -52,7 +56,7 @@ class TestNoColonPropertiesSurvive:
         _structured_properties(data)
 
         assert data["entity_types"][0]["properties"] == [
-            {"name": "no colon here", "description": ""}
+            {"name": "no colon here", "value_type": "string", "description": ""}
         ]
 
     def test_relation_property_without_colon_survives(self):
@@ -66,7 +70,7 @@ class TestNoColonPropertiesSurvive:
         _structured_properties(data)
 
         assert data["relation_types"][0]["properties"] == [
-            {"name": "no colon here", "description": ""}
+            {"name": "no colon here", "value_type": "string", "description": ""}
         ]
 
     def test_colon_property_still_parsed(self):
@@ -81,7 +85,7 @@ class TestNoColonPropertiesSurvive:
         _structured_properties(data)
 
         assert data["entity_types"][0]["properties"] == [
-            {"name": "name", "description": "brief description"}
+            {"name": "name", "value_type": "string", "description": "brief description"}
         ]
 
 
@@ -108,20 +112,24 @@ class TestHydrateKeepsAllEntityTypes:
         assert rel["target_entity_types"] == ["Company", "Organization"]
 
 
-class TestExtractorCaps:
-    """Both extractors read their cap from GraphConfig, not a hardcoded literal."""
+class TestExtractorCap:
+    """The extractor reads its cap from GraphConfig, not a hardcoded literal."""
 
     def _stage(self):
         from src.graph.config_graph import GraphConfig
         from src.graph.graph_build import GraphExtractionStage
 
-        with patch('src.graph.graph_build.OpenAILike'), \
-             patch('src.graph.graph_build.OllamaEmbedding'), \
-             patch('src.graph.graph_build.Neo4jPropertyGraphStore'), \
-             patch('src.graph.graph_build.SentenceSplitter'):
+        with (
+            patch("src.graph.graph_build.OpenAILike"),
+            patch("src.graph.graph_build.OllamaEmbedding"),
+            patch("src.graph.graph_build.Neo4jPropertyGraphStore"),
+            patch("src.graph.graph_build.SentenceSplitter"),
+        ):
             return GraphExtractionStage(GraphConfig())
 
-    def test_both_extractors_use_configured_cap(self):
+    def test_dynamic_extractor_uses_configured_cap(self):
+        """Task 5 retired the triple-only extractor; the dynamic one keeps the
+        configured cap."""
         from src.graph.config_graph import GraphConfig
 
         stage = self._stage()
@@ -134,12 +142,10 @@ class TestExtractorCaps:
         stage._build_extractors(ontology)
 
         cap = GraphConfig().extraction_max_triplets_per_chunk
-        property_graph = sys.modules['llama_index.core.indices.property_graph']
+        property_graph = sys.modules["llama_index.core.indices.property_graph"]
         assert (
-            property_graph.SimpleLLMPathExtractor.call_args.kwargs["max_paths_per_chunk"]
-            == cap
-        )
-        assert (
-            property_graph.DynamicLLMPathExtractor.call_args.kwargs["max_triplets_per_chunk"]
+            property_graph.DynamicLLMPathExtractor.call_args.kwargs[
+                "max_triplets_per_chunk"
+            ]
             == cap
         )

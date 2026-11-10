@@ -1,14 +1,21 @@
-from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel
 from typing import List, Optional
 
+from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel
+
+from src.auth.cookies import verify_csrf
+from src.auth.deps import current_user
+from src.db.models import User
 from src.graph.config_graph import GraphConfig
+from src.logging.setup_logging import setup_logging
 from src.persona.agent import Agent
 from src.persona.repository import PersonaRepository
-from src.logging.setup_logging import setup_logging
 
-
-router = APIRouter(prefix="/api/personas", tags=["personas"])
+# Mounted twice by `api_server`: prefix "/api" keeps today's /api/personas/hatch
+# alias; "/api/v1" is the canonical surface (R15).
+router = APIRouter(
+    prefix="/personas", tags=["personas"], dependencies=[Depends(verify_csrf)]
+)
 logger = setup_logging()
 
 
@@ -18,7 +25,7 @@ class HatchRequest(BaseModel):
 
 
 @router.post("/hatch", response_model=List[dict])
-async def hatch_personas(req: HatchRequest):
+async def hatch_personas(req: HatchRequest, user: User = Depends(current_user)):
     """Hatch agents from a natural-language query.
 
     Returns the canonical Agent model (bio, stance, confidence, conviction,
@@ -43,6 +50,8 @@ async def hatch_personas(req: HatchRequest):
             max_agents=req.limit or 10,
         )
         # Pydantic v2 uses .model_dump(); v1 used .dict(). Support both.
-        return [a.model_dump() if hasattr(a, "model_dump") else a.dict() for a in agents]
+        return [
+            a.model_dump() if hasattr(a, "model_dump") else a.dict() for a in agents
+        ]
     finally:
         await repo.close()

@@ -2,7 +2,7 @@ import { useEffect, useRef } from 'react'
 import type { ReactNode, RefObject } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
 
-// eslint-disable-next-line react-refresh/only-export-components -- useModalA11y is shared by Drawer and Dialog
+// eslint-disable-next-line react-refresh/only-export-components -- useModalA11y is exported beside the component, for the surfaces that own their own modal
 export function useModalA11y(panel: RefObject<HTMLElement | null>, open: boolean, onClose: () => void) {
   // Latest-ref: callers pass inline closures, so keying the effect on onClose would
   // re-run it every parent render and steal focus back to the panel.
@@ -48,7 +48,7 @@ export default function Drawer({ open, onClose, title, children }: { open: boole
     <AnimatePresence>
       {open && (
         <motion.div
-          className="fixed inset-0 z-50 bg-ink-1000/60"
+          className="fixed inset-0 z-50 bg-[rgb(25_24_20_/_0.32)]"
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
@@ -65,10 +65,10 @@ export default function Drawer({ open, onClose, title, children }: { open: boole
             initial={{ x: 32, opacity: 0 }}
             animate={{ x: 0, opacity: 1 }}
             exit={{ x: 32, opacity: 0 }}
-            transition={{ duration: 0.2, ease: [0.2, 0, 0, 1] }}
-            className="absolute right-0 top-0 h-full w-full max-w-[560px] overflow-y-auto border-l border-ink-600 bg-ink-900 p-6"
+            transition={{ duration: 0.18, ease: [0.2, 0, 0, 1] }}
+            className="absolute right-0 top-0 h-full w-full max-w-[480px] overflow-y-auto rounded-xl bg-paper p-8 shadow-sheet"
           >
-            <h2 className="mb-4 font-serif text-title text-paper">{title}</h2>
+            <h2 className="mb-4 font-ui text-heading text-ink">{title}</h2>
             {children}
           </motion.section>
         </motion.div>

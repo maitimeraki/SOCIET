@@ -1,0 +1,292 @@
+/* eslint-disable react-refresh/only-export-components -- this module deliberately exports its pure helpers (the counts by kind and the state-free view) so the no-DOM suite can drive every toggle state and every map size without a renderer. */
+import { useMemo, useState } from 'react'
+import type { ReactNode, Ref } from 'react'
+import { ArrowsInSimple, ArrowsOutSimple, CaretUp, Minus } from '@phosphor-icons/react'
+import IconButton from '../ui/IconButton'
+import MapEntries from './MapEntries'
+import type { MapEntry } from './MapEntries'
+import { LayerIcon } from '../../graph/layerIcons'
+import { ALL_LAYERS, LAYER_NAMES, LayerVisibilityContext, nodeLayer } from '../../graph/layers'
+import type { LayerName } from '../../graph/layers'
+import { useGraphStore } from '../../graph/graphStore'
+import type { GraphEdge, GraphNode } from '../../graph/graphStore'
+import { TEXT_FALLBACK_LIMIT, graphTextFallback } from '../../graph/graphText'
+import type { MapCounts, MapSummary, PaneState } from './Workspace'
+
+export interface GraphPaneProps {
+  mapId: string
+  state: PaneState
+  onStateChange: (next: PaneState) => void
+  summary: MapSummary
+  /** The entries list's scroll container — the split's map half (§10.3). */
+  entriesRef?: Ref<HTMLDivElement>
+  children: ReactNode
+}
+
+// §9.1/§9.3 The pane's own height per state — minimised collapses to the live strip under the map.
+// In split the pane fills the height of the split's row (`min-h-full`), so the pine ground runs
+// edge to edge and the entries list is the half that scrolls (§10.3).
+const SIZE: Record<PaneState, string> = {
+  split: 'min-h-[60vh] lg:min-h-full',
+  expanded: 'min-h-[70vh]',
+  minimised: 'min-h-0',
+}
+
+const CONTROL = 'hover:bg-map-ground-2'
+
+/** §9.1 The toggles' words, in the order the pane draws them. `all` is the master, not a layer. */
+const LAYER_LABELS: Record<LayerName, string> = {
+  corpus: 'Corpus',
+  experts: 'Experts',
+  opinions: 'Opinions',
+  connections: 'Connections',
+}
+
+/** A toggle's identity: one layer, or the master `all` that shows them together. */
+export type LayerToggle = LayerName | 'all'
+
+/**
+ * The map's counts, by kind, as §9.4/§12's text alternative reads them. Entries are the material
+ * the extraction stream wrote; the experts and opinions the debate stream wrote are counted apart
+ * from it, so no kind is folded into another and no total stands in for the kinds.
+ */
+export function mapCounts(nodes: Record<string, GraphNode>, edges: Record<string, GraphEdge>): MapCounts {
+  const counts: MapCounts = { entries: 0, experts: 0, opinions: 0, connections: Object.keys(edges).length }
+  for (const node of Object.values(nodes)) {
+    const layer = nodeLayer(node)
+    if (layer === 'experts') counts.experts += 1
+    else if (layer === 'opinions') counts.opinions += 1
+    else counts.entries += 1
+  }
+  return counts
+}
+
+/**
+ * §8.7 The map's entries as its visible text alternative reads them: one row per stored node, labelled
+ * by the layer it belongs to (an expert, an opinion, or the material) so the kind never contradicts the
+ * counts strip above. A material entry keeps its extracted kind when it has one.
+ */
+export function mapEntries(nodes: Record<string, GraphNode>): MapEntry[] {
+  return Object.values(nodes).map((node) => {
+    const layer = nodeLayer(node)
+    const label = layer === 'experts' ? 'expert' : layer === 'opinions' ? 'opinion' : (node.kind ?? 'entry')
+    return { key: node.id, label, name: node.label }
+  })
+}
+
+/**
+ * §9.4/§12 The busiest entries — the map's most-connected entries, ranked by how many connections
+ * each one carries, busiest first. An entry with no connection is not "busy", so it is never named;
+ * a map with no connections has none, and the pane's busiest line is honestly absent rather than
+ * empty. Ties keep the store's own order (a stable sort), so the line never reshuffles on a re-render.
+ */
+export function busiestEntries(
+  nodes: Record<string, GraphNode>,
+  edges: Record<string, GraphEdge>,
+  limit = 3,
+): string[] {
+  const degree = new Map<string, number>()
+  const touch = (id: string) => degree.set(id, (degree.get(id) ?? 0) + 1)
+  for (const edge of Object.values(edges)) {
+    if (nodes[edge.source]) touch(edge.source)
+    if (nodes[edge.target]) touch(edge.target)
+  }
+  return [...degree]
+    .sort(([, a], [, b]) => b - a)
+    .slice(0, limit)
+    .map(([id]) => nodes[id].label)
+}
+
+/**
+ * One layer's toggle. A real button carrying `aria-pressed`, and a hidden layer is struck through —
+ * a shape, so the state reads to the eye without hue and never leans on a dimmed colour: `ink-2`
+ * measures 13.7:1 on the map ground and `ink-3` 6.7:1, both clear of AA for the control's own label.
+ */
+function LayerButton({ label, layer, on, onClick }: { label: string; layer?: LayerName; on: boolean; onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      aria-pressed={on}
+      onClick={onClick}
+      className={`inline-flex items-center gap-1 rounded-xs border border-ink-3 px-2 py-1 text-micro transition-colors duration-state hover:bg-map-ground-2 max-sm:min-h-11 max-sm:min-w-11 ${
+        on ? 'bg-map-ground-2 text-ink-2' : 'text-ink-3 line-through'
+      }`}
+    >
+      {layer !== undefined && <LayerIcon layer={layer} size={16} />}
+      {label}
+    </button>
+  )
+}
+
+export interface GraphPaneViewProps extends GraphPaneProps {
+  /** The layers the canvas may draw. */
+  layers: ReadonlySet<LayerName>
+  onToggleLayer: (key: LayerToggle) => void
+  /** The map's entries — the text alternative made visible, and the split's scrolling half. */
+  entries?: MapEntry[]
+  /** The map's relations, as text (`Source —REL→ Target`) — the half of the text alternative that
+   *  lives outside the canvas host so it survives every pane state. */
+  relations?: string[]
+  /** Relations past the line cap, said in words rather than silently dropped. */
+  omitted?: number
+}
+
+/**
+ * §9 The map pane, as static markup — the layer set is a prop, so every toggle state renders without
+ * a DOM (Ruling F17). It owns three states — split, expanded, minimised — the text alternative that
+ * makes the map readable without sight, and the toggles that filter what the one canvas draws.
+ *
+ * The canvas host (the `children`) is rendered in every state and simply `hidden` in minimised, and
+ * it is wrapped in the layer context rather than rebuilt: the map never unmounts, so a toggle change
+ * is a filter, not a re-fetch (§9.3, D14).
+ */
+export function GraphPaneView({
+  mapId,
+  state,
+  onStateChange,
+  summary,
+  entries = [],
+  entriesRef,
+  layers,
+  onToggleLayer,
+  relations = [],
+  omitted = 0,
+  children,
+}: GraphPaneViewProps) {
+  const minimised = state === 'minimised'
+  const expanded = state === 'expanded'
+  const hostId = `workspace-map-${mapId}`
+  const { counts, busiest, step } = summary
+  const allOn = LAYER_NAMES.every((name) => layers.has(name))
+
+  return (
+    <section
+      aria-label="The map"
+      className={`plot-ground flex flex-col overflow-hidden rounded-none shadow-none transition-[min-height] duration-layout ${SIZE[state]}`}
+    >
+      <div id={hostId} className="flex min-h-0 flex-1 flex-col" hidden={minimised} aria-hidden={minimised || undefined}>
+        <LayerVisibilityContext.Provider value={layers}>{children}</LayerVisibilityContext.Provider>
+      </div>
+
+      {/* §9.1 The layer toggles. Each one filters what the one canvas draws; none of them unmounts it.
+          Hidden with the map in minimised, so no off-screen control stays in the tab order. */}
+      <div
+        role="group"
+        aria-label="What the map shows"
+        hidden={minimised}
+        className="flex flex-wrap items-center gap-1 border-t border-map-rule px-3 py-2"
+      >
+        <LayerButton label="All" on={allOn} onClick={() => onToggleLayer('all')} />
+        {LAYER_NAMES.map((name) => (
+          <LayerButton
+            key={name}
+            label={LAYER_LABELS[name]}
+            layer={name}
+            on={layers.has(name)}
+            onClick={() => onToggleLayer(name)}
+          />
+        ))}
+      </div>
+
+      {/* §9.4/§12 The accessible reading — counts by kind, the busiest entries, the current step.
+          Always present; in minimised it is the whole pane. */}
+      <div
+        aria-label="What the map holds"
+        className="flex flex-wrap items-center gap-x-3 gap-y-1 border-t border-map-rule px-3 py-2 text-micro text-ink-3"
+      >
+        <p>
+          {step} · {counts.entries} entries · {counts.experts} experts · {counts.opinions} opinions ·{' '}
+          {counts.connections} connections
+        </p>
+        {busiest.length > 0 && <p>Busiest: {busiest.join(', ')}</p>}
+        {/* The relation list is part of the map's text alternative, and it lives here — outside the
+            canvas host — so it is readable in split, expanded and minimised alike (§14.4 row 10). */}
+        {relations.length > 0 && (
+          <ul className="sr-only">
+            {relations.map((line, index) => (
+              <li key={index}>{line}</li>
+            ))}
+            {omitted > 0 && <li>and {omitted} more</li>}
+          </ul>
+        )}
+
+        <div className="ml-auto flex items-center gap-1">
+          <IconButton
+            label={minimised ? 'Restore the map' : 'Minimise the map'}
+            aria-expanded={!minimised}
+            aria-controls={hostId}
+            onClick={() => onStateChange(minimised ? 'split' : 'minimised')}
+            className={CONTROL}
+          >
+            {minimised ? <CaretUp size={14} aria-hidden="true" /> : <Minus size={14} aria-hidden="true" />}
+          </IconButton>
+          {!minimised && (
+            <IconButton
+              label={expanded ? 'Restore the split' : 'Expand the map'}
+              aria-expanded={expanded}
+              aria-controls={hostId}
+              onClick={() => onStateChange(expanded ? 'split' : 'expanded')}
+              className={CONTROL}
+            >
+              {expanded ? <ArrowsInSimple size={14} aria-hidden="true" /> : <ArrowsOutSimple size={14} aria-hidden="true" />}
+            </IconButton>
+          )}
+        </div>
+      </div>
+
+      {/* §8.7 — the map's visible text alternative, and the scroll half of the split. The plot above
+          stays put; this list is what moves with the output (§10.3). Hidden with the map when the
+          pane is minimised. */}
+      <div
+        ref={entriesRef}
+        className="max-h-[min(30vh,220px)] flex-none overflow-auto px-3 pb-2"
+        hidden={minimised}
+      >
+        <MapEntries entries={entries} connections={counts.connections} />
+      </div>
+    </section>
+  )
+}
+
+/** Nothing shown — the state the master toggle reaches when every layer is already on. */
+const NO_LAYERS: ReadonlySet<LayerName> = new Set()
+
+/**
+ * §9 The stateful pane. It owns the layer set and hands it to the view, which is the only thing the
+ * toggles change — the canvas beneath stays the same element, so filtering never remounts the map.
+ */
+export default function GraphPane(props: GraphPaneProps) {
+  const [layers, setLayers] = useState<ReadonlySet<LayerName>>(ALL_LAYERS)
+  // The counts strip is a live reading of the same store the canvas draws. `version` is the store's
+  // invalidation key: the derivation is O(edges), so it must not re-run when an unrelated slice
+  // (labels, selection) re-renders the pane.
+  const nodes = useGraphStore((s) => s.nodes)
+  const edges = useGraphStore((s) => s.edges)
+  const version = useGraphStore((s) => s.version)
+  const fallback = useMemo(
+    () => graphTextFallback(Object.values(nodes), Object.values(edges), TEXT_FALLBACK_LIMIT),
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- version is the invalidation key for nodes/edges
+    [version],
+  )
+  const entries = useMemo(() => mapEntries(nodes), [nodes])
+
+  const toggleLayer = (key: LayerToggle) =>
+    setLayers((current) => {
+      if (key === 'all') return LAYER_NAMES.every((name) => current.has(name)) ? NO_LAYERS : ALL_LAYERS
+      const next = new Set(current)
+      if (next.has(key)) next.delete(key)
+      else next.add(key)
+      return next
+    })
+
+  return (
+    <GraphPaneView
+      {...props}
+      entries={entries}
+      layers={layers}
+      onToggleLayer={toggleLayer}
+      relations={fallback.lines}
+      omitted={fallback.omitted}
+    />
+  )
+}

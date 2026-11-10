@@ -5,10 +5,11 @@ society snapshot deliberately excludes) and renders them as a separate
 "YOUR PRIOR POSITIONS" block. Self and the society block stay two distinct
 blocks — the society block never contains the speaker's own lines.
 """
+
 import uuid
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from unittest.mock import AsyncMock, MagicMock, patch
 
 from src.persona.agent import (
     Agent,
@@ -24,10 +25,10 @@ from src.simulation.llm_batch import BatchedLLMRunner
 from src.simulation.orchestrator import DebateOrchestrator
 from src.simulation.pair_turn import CommPair, DebateVerdict, RoundResult
 from src.simulation.profile_synthesizer import ProfileSynthesizer
+from src.simulation.round_runner import _build_user_prompt
 from src.simulation.society_memory import SocietyMemory, SocietySnapshot
 from src.simulation.topology import CommunicationTopology
 from src.simulation.verdict import VerdictSynthesizer
-from src.simulation.round_runner import _build_user_prompt
 
 
 class FakeResult:
@@ -78,7 +79,10 @@ async def test_read_self_history_returns_own_opinions_ordered_by_round():
     svc, session = _mem_with_rows(rows)
 
     out = await svc.read_self_history(
-        dataset_id="ds1", query_hash="qh1", agent_name="Alice", through_round=3,
+        dataset_id="ds1",
+        query_hash="qh1",
+        agent_name="Alice",
+        through_round=3,
     )
 
     assert out == [
@@ -86,7 +90,7 @@ async def test_read_self_history_returns_own_opinions_ordered_by_round():
         {"round": 2, "stance": "NEGATIVE", "summary": "round two"},
     ]
     query, params = session.calls[0]
-    assert "ORDER BY o.round_no" in query          # ordered at the source
+    assert "ORDER BY o.round_no" in query  # ordered at the source
     assert "o.round_no < $through_round" in query  # strictly-prior rounds
     assert params["dataset_id"] == "ds1" and params["query_hash"] == "qh1"
     assert params["agent_name"] == "Alice"
@@ -101,7 +105,10 @@ async def test_read_self_history_truncates_summary_to_budget():
     )
 
     out = await svc.read_self_history(
-        dataset_id="ds1", query_hash="qh1", agent_name="Alice", through_round=2,
+        dataset_id="ds1",
+        query_hash="qh1",
+        agent_name="Alice",
+        through_round=2,
     )
 
     assert len(out[0]["summary"]) <= SELF_HISTORY_SUMMARY_CHARS
@@ -113,7 +120,10 @@ async def test_read_self_history_empty_when_speaker_has_none():
     svc, _ = _mem_with_rows([])
 
     out = await svc.read_self_history(
-        dataset_id="ds1", query_hash="qh1", agent_name="Newcomer", through_round=1,
+        dataset_id="ds1",
+        query_hash="qh1",
+        agent_name="Newcomer",
+        through_round=1,
     )
 
     assert out == []
@@ -125,10 +135,23 @@ def test_self_entries_default_empty():
 
 
 def test_self_prompt_renders_own_positions():
-    snap = SocietySnapshot(round=2, self_entries=[
-        {"agent": "Alice", "round": 1, "stance": "POSITIVE", "summary": "Alice round one"},
-        {"agent": "Bob", "round": 1, "stance": "NEGATIVE", "summary": "Bob round one"},
-    ])
+    snap = SocietySnapshot(
+        round=2,
+        self_entries=[
+            {
+                "agent": "Alice",
+                "round": 1,
+                "stance": "POSITIVE",
+                "summary": "Alice round one",
+            },
+            {
+                "agent": "Bob",
+                "round": 1,
+                "stance": "NEGATIVE",
+                "summary": "Bob round one",
+            },
+        ],
+    )
 
     block = snap.self_prompt("Alice")
 
@@ -139,18 +162,29 @@ def test_self_prompt_renders_own_positions():
 
 def test_self_prompt_omitted_when_speaker_has_none():
     """No prior opinions → no block, no stray header."""
-    snap = SocietySnapshot(round=2, self_entries=[
-        {"agent": "Bob", "round": 1, "stance": "NEGATIVE", "summary": "Bob round one"},
-    ])
+    snap = SocietySnapshot(
+        round=2,
+        self_entries=[
+            {
+                "agent": "Bob",
+                "round": 1,
+                "stance": "NEGATIVE",
+                "summary": "Bob round one",
+            },
+        ],
+    )
 
     assert snap.self_prompt("Alice") == ""
 
 
 def test_self_prompt_orders_by_round():
-    snap = SocietySnapshot(round=3, self_entries=[
-        {"agent": "Alice", "round": 2, "stance": "NEGATIVE", "summary": "later"},
-        {"agent": "Alice", "round": 1, "stance": "POSITIVE", "summary": "earlier"},
-    ])
+    snap = SocietySnapshot(
+        round=3,
+        self_entries=[
+            {"agent": "Alice", "round": 2, "stance": "NEGATIVE", "summary": "later"},
+            {"agent": "Alice", "round": 1, "stance": "POSITIVE", "summary": "earlier"},
+        ],
+    )
 
     block = snap.self_prompt("Alice")
 
@@ -159,14 +193,35 @@ def test_self_prompt_orders_by_round():
 
 def test_user_prompt_shows_own_positions_and_keeps_society_block_self_free():
     """Round >= 2: own lines render in their block; the society block still excludes them."""
-    snap = SocietySnapshot(round=2, entries=[
-        {"agent": "Alice", "round": 1, "stance": "POSITIVE", "confidence": 0.9,
-         "weight": 0.5, "summary": "ALICE SOCIETY LINE"},
-        {"agent": "Bob", "round": 1, "stance": "NEGATIVE", "confidence": 0.8,
-         "weight": 0.4, "summary": "BOB SOCIETY LINE"},
-    ], self_entries=[
-        {"agent": "Alice", "round": 1, "stance": "POSITIVE", "summary": "ALICE OWN PRIOR"},
-    ])
+    snap = SocietySnapshot(
+        round=2,
+        entries=[
+            {
+                "agent": "Alice",
+                "round": 1,
+                "stance": "POSITIVE",
+                "confidence": 0.9,
+                "weight": 0.5,
+                "summary": "ALICE SOCIETY LINE",
+            },
+            {
+                "agent": "Bob",
+                "round": 1,
+                "stance": "NEGATIVE",
+                "confidence": 0.8,
+                "weight": 0.4,
+                "summary": "BOB SOCIETY LINE",
+            },
+        ],
+        self_entries=[
+            {
+                "agent": "Alice",
+                "round": 1,
+                "stance": "POSITIVE",
+                "summary": "ALICE OWN PRIOR",
+            },
+        ],
+    )
 
     prompt = _build_user_prompt(_agent("Alice"), _agent("Bob"), "q", [], society=snap)
 
@@ -179,10 +234,19 @@ def test_user_prompt_shows_own_positions_and_keeps_society_block_self_free():
 
 def test_user_prompt_hides_prior_positions_in_round_one():
     """Round 1 has no self history: no block at all."""
-    snap = SocietySnapshot(round=1, entries=[
-        {"agent": "Bob", "round": 1, "stance": "NEGATIVE", "confidence": 0.8,
-         "weight": 0.4, "summary": "BOB SOCIETY LINE"},
-    ])
+    snap = SocietySnapshot(
+        round=1,
+        entries=[
+            {
+                "agent": "Bob",
+                "round": 1,
+                "stance": "NEGATIVE",
+                "confidence": 0.8,
+                "weight": 0.4,
+                "summary": "BOB SOCIETY LINE",
+            },
+        ],
+    )
 
     prompt = _build_user_prompt(_agent("Alice"), _agent("Bob"), "q", [], society=snap)
 
@@ -195,7 +259,10 @@ def _profile(n: int, name: str) -> Agent:
         identity=PersonaIdentity(name=name, archetype="E", communication_style="F"),
         discovery_type=DiscoveryType.INTENT_DRIVEN,
         expertise_level=ExpertiseLevel.TECHNICAL,
-        bio="b", detailed_perspective="p", domain_tags=["d"], confidence=0.7,
+        bio="b",
+        detailed_perspective="p",
+        domain_tags=["d"],
+        confidence=0.7,
         confidence_breakdown=ConfidenceBreakdown(
             source_breadth=1, node_density=1, relationship_connectivity=0.5
         ),
@@ -210,14 +277,20 @@ def _orchestrator(sm: AsyncMock) -> DebateOrchestrator:
     topo.compute_round_pairs.return_value = [CommPair(agent_a="Alice", agent_b="Bob")]
     verdict = MagicMock(spec=VerdictSynthesizer)
     verdict.asynthesize.return_value = DebateVerdict(
-        overall_stance=Stance.POSITIVE, confidence_score=0.9,
-        supporting_entities=[], opposing_entities=[], summary="v",
-        cluster_details={}, rounds_executed=1,
+        overall_stance=Stance.POSITIVE,
+        confidence_score=0.9,
+        supporting_entities=[],
+        opposing_entities=[],
+        summary="v",
+        cluster_details={},
+        rounds_executed=1,
     )
     return DebateOrchestrator(
-        profile_synthesizer=synth, topology=topo,
+        profile_synthesizer=synth,
+        topology=topo,
         llm_runner=MagicMock(spec=BatchedLLMRunner),
-        verdict_synthesizer=verdict, society_memory=sm,
+        verdict_synthesizer=verdict,
+        society_memory=sm,
     )
 
 
@@ -225,7 +298,12 @@ def _orchestrator(sm: AsyncMock) -> DebateOrchestrator:
 async def test_run_fetches_self_history_from_round_two_and_passes_it_to_the_runner():
     """The read actually rides the snapshot path the runner consumes — per speaker."""
     sm = AsyncMock(spec=SocietyMemory)
-    sm.commit_round.return_value = {"round": 1, "opinions": 2, "edges": 1, "failed": False}
+    sm.commit_round.return_value = {
+        "round": 1,
+        "opinions": 2,
+        "edges": 1,
+        "failed": False,
+    }
     sm.read_self_history.return_value = [
         {"round": 1, "stance": "POSITIVE", "summary": "prior"}
     ]
@@ -242,7 +320,9 @@ async def test_run_fetches_self_history_from_round_two_and_passes_it_to_the_runn
 
         rr.execute_round = AsyncMock(side_effect=execute_round)
         rr_cls.return_value = rr
-        await orch.run("q", "ds1", DebateConfig(max_agents=5, max_rounds=2), AsyncMock())
+        await orch.run(
+            "q", "ds1", DebateConfig(max_agents=5, max_rounds=2), AsyncMock()
+        )
 
     assert seen[0] is None  # round 1: no snapshot, no self history
     assert [e["agent"] for e in seen[1].self_entries] == ["Alice", "Bob"]
@@ -258,8 +338,12 @@ async def test_self_history_read_failure_degrades_to_warning():
     warnings: list[str] = []
 
     snap = await orch._with_self_history(
-        None, pairs=[CommPair(agent_a="Alice", agent_b="Bob")],
-        dataset_id="ds1", query_hash="qh", round_num=2, warnings=warnings,
+        None,
+        pairs=[CommPair(agent_a="Alice", agent_b="Bob")],
+        dataset_id="ds1",
+        query_hash="qh",
+        round_num=2,
+        warnings=warnings,
     )
 
     assert snap is None  # nothing to render, no crash
@@ -281,11 +365,14 @@ async def test_one_speaker_read_failure_keeps_the_other_speakers_block():
     warnings: list[str] = []
 
     snap = await orch._with_self_history(
-        None, pairs=[CommPair(agent_a="Alice", agent_b="Bob")],
-        dataset_id="ds1", query_hash="qh", round_num=2, warnings=warnings,
+        None,
+        pairs=[CommPair(agent_a="Alice", agent_b="Bob")],
+        dataset_id="ds1",
+        query_hash="qh",
+        round_num=2,
+        warnings=warnings,
     )
 
     assert snap is not None
     assert [e["agent"] for e in snap.self_entries] == ["Bob"]
     assert any("self history read failed for Alice" in w for w in warnings)
-

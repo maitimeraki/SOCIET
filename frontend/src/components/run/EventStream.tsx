@@ -12,7 +12,7 @@ function Announcements({ items }: { items: StreamItem[] }) {
   const lastWarning = [...items].reverse().find((item) => item.kind === 'warning')
   return (
     <div aria-live="polite" className="sr-only">
-      {lastHeader ? `Round ${lastHeader.round} begins. ` : ''}
+      {lastHeader ? `Pass ${lastHeader.round} begins. ` : ''}
       {lastWarning ? lastWarning.text : ''}
     </div>
   )
@@ -42,16 +42,16 @@ export default function EventStream({ items, live }: { items: StreamItem[]; live
           switch (item.kind) {
             case 'round-header':
               return (
-                <h3 key={index} className="pt-2 text-heading text-paper">
-                  Round {item.round}{' '}
-                  <span className="tnum font-mono text-micro text-paper-mute">{item.pairs} pairs</span>
+                <h3 key={index} className="pt-2 text-body-sm font-semibold text-ink">
+                  Pass {item.round}{' '}
+                  <span className="tnum font-mono text-micro text-ink-3">{item.pairs} pairs</span>
                 </h3>
               )
             case 'turn':
               return <TurnCard key={index} turn={item.turn} round={item.round} />
             case 'pending':
               return (
-                <p key={item.pairId} className="animate-pulse text-micro text-paper-mute">
+                <p key={item.pairId} className="animate-pulse text-micro text-ink-3">
                   {item.a} is preparing a reply…
                 </p>
               )
@@ -61,15 +61,15 @@ export default function EventStream({ items, live }: { items: StreamItem[]; live
               return <ActivationNote key={index} round={item.round} agents={item.agents} reasons={item.reasons} />
             case 'warning':
               return (
-                <p key={index} className="flex items-start gap-2 text-micro text-brass">
-                  <Warning size={14} className="mt-0.5 shrink-0" aria-hidden="true" /> {item.text}
+                <p key={index} className="flex items-start gap-2 text-micro text-ink-2">
+                  <Warning size={14} className="mt-0.5 shrink-0 text-warn" aria-hidden="true" /> {item.text}
                 </p>
               )
           }
         })}
-        {items.length === 0 && <p className="text-body text-paper-mute">Waiting for the floor…</p>}
+        {items.length === 0 && <p className="text-body text-ink-3">Waiting for the panel…</p>}
         {items.length > MAX_ROWS && (
-          <p className="text-micro text-paper-mute">Showing the last {MAX_ROWS} rows — the full record is in Artifacts.</p>
+          <p className="text-micro text-ink-3">Showing the last {MAX_ROWS} rows — the full record is in Artifacts.</p>
         )}
       </div>
       {paused && live && (
@@ -79,7 +79,7 @@ export default function EventStream({ items, live }: { items: StreamItem[]; live
             setPaused(false)
             container.current?.scrollTo({ top: container.current.scrollHeight })
           }}
-          className="sticky bottom-2 left-1/2 mt-2 -translate-x-1/2 rounded-[4px] border border-ink-600 bg-ink-800 px-3 py-1.5 text-micro text-paper"
+          className="sticky bottom-2 left-1/2 mt-2 -translate-x-1/2 rounded-xs border border-hairline bg-sand px-3 py-1.5 text-micro text-ink max-sm:inline-flex max-sm:min-h-11 max-sm:min-w-11 max-sm:items-center"
         >
           Jump to live ↓
         </button>

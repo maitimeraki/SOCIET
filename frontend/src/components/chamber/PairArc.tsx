@@ -21,7 +21,7 @@ export default function PairArc({ arc }: { arc: ArcSpec }) {
     <motion.path
       d={arcPath(arc.a, arc.b)}
       fill="none"
-      stroke={arc.active ? 'var(--color-accent)' : 'var(--color-ink-600)'}
+      stroke={arc.active ? 'var(--color-accent)' : 'var(--color-hairline)'}
       strokeWidth={arc.active ? 2 : 1.5}
       initial={{ opacity: 0 }}
       animate={{ opacity: arc.opacity }}

@@ -1,10 +1,13 @@
+import Label from '../ui/Label'
+import { ruleClasses } from '../ui/Rule'
+
 export default function RelationTable({ names }: { names: string[] }) {
   return (
-    <div className="rounded-[6px] border border-ink-700 bg-ink-900 p-4">
-      <h3 className="mb-3 text-label uppercase text-paper-mute">Relation types</h3>
+    <div className={`${ruleClasses('top')} pt-4`}>
+      <Label as="h3" className="mb-3">Relation types</Label>
       <ul className="space-y-1">
         {names.map((name) => (
-          <li key={name} className="tnum font-mono text-mono text-paper-dim">
+          <li key={name} className="tnum font-mono text-mono text-ink-2">
             {name}
           </li>
         ))}

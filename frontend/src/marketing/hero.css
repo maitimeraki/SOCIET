@@ -1,0 +1,51 @@
+/*
+ * The homepage — `/`.
+ *
+ * LAYOUT ONLY. The Quiet Room tokens, type scale and primitives are global (`src/index.css`,
+ * `components/ui/…`); this file keeps the page's shell width, the hero's first-light wash, the
+ * live dot's breathe, and the focus ring on the pine close. No colour is declared here.
+ */
+
+.hero-page .shell {
+  margin-inline: auto;
+  width: min(1360px, calc(100% - 2.5rem));
+}
+
+@media (min-width: 640px) {
+  .hero-page .shell {
+    width: min(1360px, calc(100% - 4rem));
+  }
+}
+
+@media (min-width: 1024px) {
+  .hero-page .shell {
+    width: min(1360px, calc(100% - 6rem));
+  }
+}
+
+/* §4.8 gradient 2 — the first light, the top 160px of the marketing hero, and nothing else. */
+.hero-page .hero-first-light {
+  background-image: var(--gradient-first-light);
+  background-repeat: no-repeat;
+  background-size: 100% 160px;
+}
+
+/* §13 — on pine the focus ring is the map's ink, not the evergreen (which falls short there). */
+.hero-page .band--dark {
+  --focus-ring: var(--color-map-ink);
+}
+
+/* §9.1 Breathe — the live dot's opacity, and the only looping motion on the page. */
+@keyframes hero-breathe {
+  0%,
+  100% {
+    opacity: 0.55;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+.hero-page .hero-live-dot {
+  animation: hero-breathe 2.4s ease-in-out infinite;
+}

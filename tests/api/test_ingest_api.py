@@ -1,161 +1,414 @@
-"""Ingest API tests: extraction shapes, per-file failures, url fetch."""
-import io
+"""Ingest API: the 202 enqueue flow, unit/cap gates, and worker extraction.
+
+The routes never extract — they validate, reserve units, store to the (mocked)
+bucket, write the ``uploads`` rows, and queue one ``extract_upload`` job.
+Extraction is driven here by a real ``rq.SimpleWorker`` burst against the local
+Redis and moto S3.
+"""
+
+import asyncio
+import datetime
+import os
+import sys
+import uuid
+from types import SimpleNamespace
 
 import pytest
+import pytest_asyncio
 from fastapi import FastAPI
-from fastapi.testclient import TestClient
+from httpx import ASGITransport, AsyncClient
+from rq import SimpleWorker
+from sqlalchemy import select
 
-from src.api.ingest_api import router
+from src.api import run_doc
+from src.api.errors import install_error_handlers
+from src.api.ingest_api import router as ingest_router
+from src.auth.deps import current_user
+from src.db.engine import get_session_factory
+from src.db.models import Upload, User
+from src.ingest import storage
+from src.jobs import queue as jobs_queue
+
+if sys.platform == "win32":
+    # psycopg refuses async on the default ProactorEventLoop (see conftest).
+    asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+
+requires_db = pytest.mark.skipif(
+    not os.getenv("DATABASE_URL"), reason="DATABASE_URL is not set"
+)
+pytestmark = [requires_db]
+
+BUCKET = "societas-uploads"
+TEXT = b"Steel tariffs reshape the European market and entry costs."
 
 
-@pytest.fixture
-def client():
-    # FastAPI >=0.135 requires the app-level AsyncExitStack middleware; a bare
-    # router lacks it ("fastapi_middleware_astack not found in request scope").
+@pytest_asyncio.fixture
+async def owner(db):
+    """A real user id — uploads.user_id and jobs.user_id are FKs."""
+    factory = get_session_factory()
+    async with factory() as session:
+        user = User(
+            email=f"auth-test-ingest-{uuid.uuid4().hex[:10]}@example.com",
+            password_hash="not-a-real-hash",
+        )
+        session.add(user)
+        await session.commit()
+        user_id = str(user.id)
+    yield user_id
+    await _drop_owner(user_id)
+
+
+@pytest_asyncio.fixture
+async def s3(monkeypatch):
+    """A mocked S3 with the configured bucket; a fresh client per test."""
+    moto = pytest.importorskip("moto")
+    settings = SimpleNamespace(
+        s3_endpoint_url=None,
+        s3_access_key="testing",
+        s3_secret_key="testing",
+        s3_bucket=BUCKET,
+        s3_region="us-east-1",
+    )
+    monkeypatch.setattr(storage, "get_settings", lambda: settings)
+    with moto.mock_aws():
+        storage._client.cache_clear()
+        storage._client().create_bucket(Bucket=BUCKET)
+        yield
+    storage._client.cache_clear()
+
+
+@pytest.fixture(autouse=True)
+def clean_queue():
+    queue = jobs_queue.get_queue()
+    queue.empty()
+    yield
+    queue.empty()
+
+
+def _client(user_id: str | None) -> AsyncClient:
     app = FastAPI()
-    app.include_router(router)
-    return TestClient(app)
-
-
-def _pdf_bytes() -> bytes:
-    import fitz
-
-    doc = fitz.open()
-    page = doc.new_page()
-    page.insert_text((72, 72), "Steel tariffs reshape the European market.")
-    data = doc.tobytes()
-    doc.close()
-    return data
-
-
-def _docx_bytes() -> bytes:
-    import docx
-
-    document = docx.Document()
-    document.add_paragraph("Entry costs dominate the expansion decision.")
-    buffer = io.BytesIO()
-    document.save(buffer)
-    return buffer.getvalue()
-
-
-class _FakeResponse:
-    def __init__(self, status_code: int = 200, text: str = ""):
-        self.status_code = status_code
-        self.text = text
-
-
-def test_pdf_document_shape(client):
-    response = client.post(
-        "/api/ingest/files",
-        files=[("files", ("eu-market.pdf", _pdf_bytes(), "application/pdf"))],
+    install_error_handlers(app)
+    app.include_router(ingest_router, prefix="/api/v1")
+    if user_id is not None:
+        app.dependency_overrides[current_user] = lambda: SimpleNamespace(
+            id=uuid.UUID(str(user_id)), plan_key="free"
+        )
+    return AsyncClient(
+        transport=ASGITransport(app=app, client=("10.9.9.9", 5000)),
+        base_url="http://testserver",
     )
-    document = response.json()["documents"][0]
-    assert response.status_code == 200
-    assert document["source_type"] == "file"
-    assert document["pages"] == 1
-    assert document["word_count"] > 0
-    assert document["title"] == "eu-market.pdf"
 
 
-def test_docx_document_shape(client):
-    response = client.post(
-        "/api/ingest/files",
-        files=[("files", ("steel-tariffs.docx", _docx_bytes(), "application/vnd.openxmlformats-officedocument.wordprocessingml.document"))],
-    )
-    document = response.json()["documents"][0]
-    assert document["word_count"] > 0
-    assert document["source_type"] == "file"
+def _run(coro):
+    """One ``asyncio.run``, disposing the pooled engine after — the worker tests
+    must burst outside a loop, and a pooled async connection cannot cross loops."""
+
+    async def _wrapped():
+        try:
+            return await coro
+        finally:
+            from src.db.engine import get_engine
+
+            await get_engine().dispose()
+
+    return asyncio.run(_wrapped())
 
 
-def test_txt_and_markdown_decode(client):
-    response = client.post(
-        "/api/ingest/files",
-        files=[
-            ("files", ("notes.txt", b"plain text notes", "text/plain")),
-            ("files", ("brief.md", b"# Brief\n\nmarkdown body", "text/markdown")),
-        ],
-    )
-    assert [d["word_count"] for d in response.json()["documents"]] == [3, 3]
+async def _drop_owner(user_id: str) -> None:
+    from sqlalchemy import delete
+
+    factory = get_session_factory()
+    async with factory() as session:
+        await session.execute(delete(User).where(User.id == uuid.UUID(user_id)))
+        await session.commit()
 
 
-def test_unsupported_file_type_fails_per_file(client):
-    response = client.post(
-        "/api/ingest/files",
-        files=[("files", ("sheet.xlsx", b"binary", "application/vnd.ms-excel"))],
-    )
-    failure = response.json()["failures"][0]
-    assert failure["status_code"] == 415
-    assert failure["detail"] == "Unsupported file type (.xlsx)"
+async def _make_owner() -> str:
+    factory = get_session_factory()
+    async with factory() as session:
+        user = User(
+            email=f"auth-test-ingest-{uuid.uuid4().hex[:10]}@example.com",
+            password_hash="not-a-real-hash",
+        )
+        session.add(user)
+        await session.commit()
+        return str(user.id)
 
 
-def test_empty_document_fails_per_file(client):
-    response = client.post(
-        "/api/ingest/files",
-        files=[("files", ("empty.txt", b"   \n  ", "text/plain"))],
-    )
-    failure = response.json()["failures"][0]
-    assert failure["detail"] == "Empty document — 0 words extracted"
+async def _uploads_for(owner: str) -> list[Upload]:
+    factory = get_session_factory()
+    async with factory() as session:
+        rows = await session.execute(
+            select(Upload).where(Upload.user_id == uuid.UUID(owner))
+        )
+        return list(rows.scalars().all())
 
 
-def test_oversize_file_fails_per_file(client):
-    response = client.post(
-        "/api/ingest/files",
-        files=[("files", ("big.txt", b"a" * (20 * 1024 * 1024 + 1), "text/plain"))],
-    )
-    failure = response.json()["failures"][0]
-    assert failure["status_code"] == 413
-    assert failure["detail"] == "File is over 20 MB"
+def _error(response) -> dict:
+    return response.json()["error"]
 
 
-def test_too_many_files_rejected(client):
+# --- gates (no storage, no extraction) ---------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_unauthenticated_is_401():
+    async with _client(None) as client:
+        response = await client.post(
+            "/api/v1/ingest/files",
+            files={"files": ("a.txt", TEXT, "text/plain")},
+        )
+    assert response.status_code == 401, response.text
+
+
+@pytest.mark.asyncio
+async def test_too_many_files_is_413(owner):
     files = [("files", (f"f{i}.txt", b"text", "text/plain")) for i in range(21)]
-    response = client.post("/api/ingest/files", files=files)
-    assert response.status_code == 413
+    async with _client(owner) as client:
+        response = await client.post("/api/v1/ingest/files", files=files)
+    assert response.status_code == 413, response.text
+    assert _error(response)["code"] == "payload_too_large"
 
 
-def test_mixed_batch_keeps_good_files(client):
-    response = client.post(
-        "/api/ingest/files",
-        files=[
-            ("files", ("good.txt", b"readable words here", "text/plain")),
-            ("files", ("bad.xlsx", b"binary", "application/vnd.ms-excel")),
-        ],
+@pytest.mark.asyncio
+async def test_oversize_file_is_413(owner):
+    async with _client(owner) as client:
+        response = await client.post(
+            "/api/v1/ingest/files",
+            files={"files": ("big.txt", b"a" * (5 * 1024 * 1024 + 1), "text/plain")},
+        )
+    assert response.status_code == 413, response.text
+
+
+@pytest.mark.asyncio
+async def test_spoofed_type_is_422(owner):
+    # A PDF body under a .txt name: the magic-byte check refuses it before any
+    # storage or enqueue (the uniform 422 contract).
+    async with _client(owner) as client:
+        response = await client.post(
+            "/api/v1/ingest/files",
+            files={"files": ("fake.txt", b"%PDF-1.7\njunk\n%%EOF\n", "text/plain")},
+        )
+    assert response.status_code == 422, response.text
+    assert _error(response)["code"] == "validation_error"
+    assert await _uploads_for(owner) == []
+
+
+@pytest.mark.asyncio
+async def test_url_blank_is_422(owner):
+    async with _client(owner) as client:
+        response = await client.post("/api/v1/ingest/url", json={"url": "   "})
+    assert response.status_code == 422, response.text
+
+
+async def _exhaust_units(owner: str) -> datetime.datetime:
+    """Spend the whole free plan, returning the period end for the reset date."""
+    from src.billing import units
+    from src.config.settings import get_settings
+
+    factory = get_session_factory()
+    async with factory() as session:
+        period_start, period_end = await units.resolve_period(session, uuid.UUID(owner))
+        await units.settle_call(
+            session,
+            user_id=uuid.UUID(owner),
+            period_start=period_start,
+            source="ingest",
+            amount=get_settings().plan_free_units,
+            idempotency_key=f"exhaust-{uuid.uuid4().hex}",
+        )
+    return period_end
+
+
+@pytest.mark.asyncio
+async def test_exhausted_units_is_402_with_the_reset_date(owner):
+    period_end = await _exhaust_units(owner)
+    async with _client(owner) as client:
+        response = await client.post(
+            "/api/v1/ingest/files",
+            files={"files": ("notes.txt", TEXT, "text/plain")},
+        )
+
+    assert response.status_code == 402, response.text
+    error = _error(response)
+    assert error["code"] == "payment_required"
+    assert period_end.date().isoformat() in error["message"]
+    assert await _uploads_for(owner) == []
+
+
+@pytest.mark.asyncio
+async def test_url_with_exhausted_units_is_402(owner, monkeypatch):
+    # The SSRF guard is out of scope here; the unit gate is what is under test.
+    monkeypatch.setattr("src.api.ingest_api.validate_url", lambda url: url)
+    period_end = await _exhaust_units(owner)
+    async with _client(owner) as client:
+        response = await client.post(
+            "/api/v1/ingest/url", json={"url": "https://example.com/report"}
+        )
+
+    assert response.status_code == 402, response.text
+    error = _error(response)
+    assert error["code"] == "payment_required"
+    assert period_end.date().isoformat() in error["message"]
+
+
+# --- the 202 flow + worker extraction ----------------------------------------
+#
+# These are synchronous: the SimpleWorker burst runs the real task target, which
+# calls ``asyncio.run`` — impossible from inside the test's own running loop.
+
+
+def _post_files(owner: str, filename: str, data: bytes, content_type: str) -> dict:
+    async def _go():
+        async with _client(owner) as client:
+            response = await client.post(
+                "/api/v1/ingest/files",
+                files={"files": (filename, data, content_type)},
+            )
+            return response.status_code, response.json()
+
+    return _run(_go())
+
+
+def _queue_and_burst() -> None:
+    SimpleWorker([jobs_queue.get_queue()], connection=jobs_queue.get_redis()).work(
+        burst=True
     )
-    payload = response.json()
-    assert response.status_code == 200
-    assert len(payload["documents"]) == 1
-    assert len(payload["failures"]) == 1
 
 
-def test_url_document_shape(client, monkeypatch):
-    html = "<html><head><title>Steel report</title></head><body><p>Body text here.</p></body></html>"
-    monkeypatch.setattr("requests.get", lambda *args, **kwargs: _FakeResponse(200, html))
-    response = client.post("/api/ingest/url", json={"url": "https://example.com/report"})
-    document = response.json()["document"]
-    assert response.status_code == 200
-    assert document["source_type"] == "url"
-    assert document["title"] == "Steel report"
+def test_a_large_free_plan_upload_holds_the_plan_not_a_402(s3, monkeypatch):
+    """A >2 MB file's byte ceiling exceeds the free plan; the hold is capped, not refused."""
+    monkeypatch.setenv("QUEUE_MODE", "rq")
+    from src.config.settings import get_settings
+    from src.db.models import Job
+
+    get_settings.cache_clear()
+    owner = _run(_make_owner())
+    try:
+        status, body = _post_files(
+            owner, "big.txt", b"a" * (2 * 1024 * 1024 + 1), "text/plain"
+        )
+        assert status == 202, body
+
+        async def _job():
+            factory = get_session_factory()
+            async with factory() as session:
+                return await session.get(Job, uuid.UUID(body["job_id"]))
+
+        job = _run(_job())
+        assert job.reserved_units == get_settings().plan_free_units
+    finally:
+        _run(_drop_owner(owner))
+        jobs_queue.get_queue().empty()
+        get_settings.cache_clear()
 
 
-def test_url_fetch_failure_is_502(client, monkeypatch):
-    import requests
+def test_enqueue_stores_and_the_worker_extracts(s3, monkeypatch):
+    monkeypatch.setenv("QUEUE_MODE", "rq")
+    from src.config.settings import get_settings
 
-    def _raise(*args, **kwargs):
-        raise requests.ConnectionError("dns failure")
+    get_settings.cache_clear()
+    owner = _run(_make_owner())
+    try:
+        status, body = _post_files(owner, "notes.txt", TEXT, "text/plain")
+        assert status == 202, body
+        assert body["status"] == "queued"
+        job_id = body["job_id"]
 
-    monkeypatch.setattr("requests.get", _raise)
-    response = client.post("/api/ingest/url", json={"url": "https://example.com/down"})
-    assert response.status_code == 502
+        # Stored + queued, not yet extracted.
+        rows = _run(_uploads_for(owner))
+        assert len(rows) == 1
+        assert rows[0].extracted_text is None
+        assert rows[0].sha256
+        assert _run(run_doc.read_job_doc(job_id))["status"] == "queued"
+
+        _queue_and_burst()
+
+        done = _run(run_doc.read_job_doc(job_id))
+        assert done["status"] == "completed", done
+        upload_id = done["result"]["upload_ids"][0]
+        row = next(r for r in _run(_uploads_for(owner)) if str(r.id) == upload_id)
+        assert "Steel tariffs" in row.extracted_text
+
+        # The payload is served back, owner-checked.
+        async def _fetch():
+            async with _client(owner) as client:
+                return await client.get(
+                    f"/api/v1/ingest/documents?upload_ids={upload_id}"
+                )
+
+        payload = _run(_fetch()).json()["documents"][0]
+        assert payload["title"] == "notes.txt"
+        assert "Steel tariffs" in payload["text"]
+    finally:
+        _run(_drop_owner(owner))
+        get_settings.cache_clear()
 
 
-def test_url_http_error_is_502_with_code(client, monkeypatch):
-    monkeypatch.setattr("requests.get", lambda *args, **kwargs: _FakeResponse(403, ""))
-    response = client.post("/api/ingest/url", json={"url": "https://example.com/secret"})
-    assert response.json()["detail"] == "Download failed: HTTP 403"
+def test_a_foreign_upload_id_is_not_returned(s3, monkeypatch):
+    monkeypatch.setenv("QUEUE_MODE", "rq")
+    from src.config.settings import get_settings
+
+    get_settings.cache_clear()
+    owner = _run(_make_owner())
+    try:
+        _post_files(owner, "notes.txt", TEXT, "text/plain")
+        _queue_and_burst()
+        assert len(_run(_uploads_for(owner))) == 1
+
+        stranger = str(uuid.uuid4())
+
+        async def _fetch():
+            async with _client(owner) as client:
+                return await client.get(
+                    f"/api/v1/ingest/documents?upload_ids={stranger}"
+                )
+
+        assert _run(_fetch()).json()["documents"] == []
+    finally:
+        _run(_drop_owner(owner))
+        get_settings.cache_clear()
 
 
-def test_api_server_registers_ingest_routes():
-    from src.api.api_server import app
+def test_a_failed_extraction_marks_the_job_failed(s3, monkeypatch):
+    monkeypatch.setenv("QUEUE_MODE", "rq")
+    from src.config.settings import get_settings
 
-    paths = {route.path for route in app.routes}
-    assert "/api/ingest/files" in paths
+    get_settings.cache_clear()
+    owner = _run(_make_owner())
+    try:
+        # A zip header under .docx passes the magic-byte gate but python-docx
+        # cannot read it — the extraction failure must land on the job row.
+        status, body = _post_files(
+            owner, "broken.docx", b"PK\x03\x04junk", "application/zip"
+        )
+        assert status == 202, body
+        job_id = body["job_id"]
+
+        _queue_and_burst()
+
+        done = _run(run_doc.read_job_doc(job_id))
+        assert done["status"] == "failed", done
+        assert done["error"]
+    finally:
+        _run(_drop_owner(owner))
+        get_settings.cache_clear()
+
+
+def test_an_enqueue_refusal_rolls_back_the_staged_upload(s3, monkeypatch):
+    # The per-user job cap refuses the enqueue (429) *after* the upload is
+    # stored — the row and its object must not survive as an orphan.
+    monkeypatch.setenv("MAX_JOBS_PER_USER", "0")
+    from src.config.settings import get_settings
+
+    get_settings.cache_clear()
+    owner = _run(_make_owner())
+    try:
+        status, body = _post_files(owner, "notes.txt", TEXT, "text/plain")
+        assert status == 429, body
+        assert body["error"]["code"] == "job_limit_exceeded"
+        assert _run(_uploads_for(owner)) == []
+        assert storage._client().list_objects_v2(Bucket=BUCKET)["KeyCount"] == 0
+    finally:
+        _run(_drop_owner(owner))
+        get_settings.cache_clear()

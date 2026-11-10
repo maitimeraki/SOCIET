@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { API_BASE, health } from '../../api/rest'
+import { health } from '../../api/rest'
 
 type HealthState = 'checking' | 'online' | 'offline'
 
@@ -18,14 +18,20 @@ export default function HealthDot() {
     return () => window.clearInterval(timer)
   }, [check])
 
-  const dot =
-    state === 'online' ? 'bg-good' : state === 'offline' ? 'bg-critical' : 'bg-paper-faint'
-  const label = state === 'online' ? 'API online' : state === 'offline' ? 'API unreachable — start uvicorn' : 'checking…'
+  // The mark is the map's own reading, never a stance hue: a live reading takes --accent, a failed one
+  // the danger hue, and an unread one the idle hairline ink.
+  const dot = state === 'online' ? 'bg-accent' : state === 'offline' ? 'bg-danger' : 'bg-hairline'
+  // §7.3/§12.3 — the customer sees Connected or Not connected, never server or API jargon. The
+  // dot is aria-hidden, so this word is the only signal: it must not say Working while offline.
+  const label =
+    state === 'online' ? 'Connected' : state === 'offline' ? 'Not connected' : 'Checking…'
 
   return (
-    <span className="inline-flex items-center gap-2" title={`Checked ${API_BASE}/health`}>
+    <span className="inline-flex items-center gap-2">
       <span aria-hidden="true" className={`h-2 w-2 rounded-full ${dot}`} />
-      <span className="tnum font-mono text-mono text-paper-mute">{label}</span>
+      {/* The dot itself is aria-hidden, so this word is the only carrier of the status; ink-2
+          measures 9.1:1 on the bone rail. */}
+      <span className="tnum font-mono text-mono text-ink-2">{label}</span>
     </span>
   )
 }

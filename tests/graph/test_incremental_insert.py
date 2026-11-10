@@ -4,10 +4,11 @@ No live LLM/Neo4j: llama_index is mocked at the module level exactly as
 tests/graph/test_graph_build.py does, and the two per-chunk seams
 (`_build_extractors`, `_extract_chunk`) are stubbed.
 """
+
 import threading
+from unittest.mock import MagicMock, patch
 
 import pytest
-from unittest.mock import MagicMock, patch
 
 from src.graph.models_graph import (
     EntityTypeDefinition,
@@ -24,22 +25,25 @@ from src.graph.models_graph import (
 # the test's fake extractor must get the *same* key objects.
 @pytest.fixture(autouse=True)
 def mock_llama_index():
-    with patch.dict('sys.modules', {
-        'llama_index.core': MagicMock(),
-        'llama_index.llms': MagicMock(),
-        'llama_index.llms.openai_like': MagicMock(),
-        'llama_index.embeddings': MagicMock(),
-        'llama_index.embeddings.ollama': MagicMock(),
-        'llama_index.graph_stores': MagicMock(),
-        'llama_index.graph_stores.neo4j': MagicMock(),
-        'llama_index.core.node_parser': MagicMock(),
-        'llama_index.core.node_parser.text_splitter': MagicMock(),
-        'llama_index.core.indices': MagicMock(),
-        'llama_index.core.indices.property_graph': MagicMock(),
-        'llama_index.core.settings': MagicMock(),
-        'llama_index.core.graph_stores': MagicMock(),
-        'llama_index.core.graph_stores.types': MagicMock(),
-    }):
+    with patch.dict(
+        "sys.modules",
+        {
+            "llama_index.core": MagicMock(),
+            "llama_index.llms": MagicMock(),
+            "llama_index.llms.openai_like": MagicMock(),
+            "llama_index.embeddings": MagicMock(),
+            "llama_index.embeddings.ollama": MagicMock(),
+            "llama_index.graph_stores": MagicMock(),
+            "llama_index.graph_stores.neo4j": MagicMock(),
+            "llama_index.core.node_parser": MagicMock(),
+            "llama_index.core.node_parser.text_splitter": MagicMock(),
+            "llama_index.core.indices": MagicMock(),
+            "llama_index.core.indices.property_graph": MagicMock(),
+            "llama_index.core.settings": MagicMock(),
+            "llama_index.core.graph_stores": MagicMock(),
+            "llama_index.core.graph_stores.types": MagicMock(),
+        },
+    ):
         yield
 
 
@@ -85,17 +89,20 @@ def _stage(config=None):
     from src.graph.config_graph import GraphConfig
     from src.graph.graph_build import GraphExtractionStage
 
-    with patch('src.graph.graph_build.OpenAILike'), \
-         patch('src.graph.graph_build.OllamaEmbedding'), \
-         patch('src.graph.graph_build.Neo4jPropertyGraphStore'), \
-         patch('src.graph.graph_build.SentenceSplitter'):
+    with (
+        patch("src.graph.graph_build.OpenAILike"),
+        patch("src.graph.graph_build.OllamaEmbedding"),
+        patch("src.graph.graph_build.Neo4jPropertyGraphStore"),
+        patch("src.graph.graph_build.SentenceSplitter"),
+    ):
         return GraphExtractionStage(config or GraphConfig())
 
 
 def _binding_index(n):
     """The MagicMock `PropertyGraphIndex(...)` returns, with a sized docstore."""
     import sys
-    core = sys.modules['llama_index.core']
+
+    core = sys.modules["llama_index.core"]
     index = core.PropertyGraphIndex.return_value
     index.docstore.docs = {f"node-{i}": MagicMock() for i in range(n)}
     return index
@@ -133,8 +140,10 @@ class TestIncrementalInsertDeltas:
         stage = _stage()
         index = _binding_index(len(chunks))
 
-        with patch.object(stage, "_build_extractors", return_value=[_fake_extractor()]), \
-             patch('src.graph.graph_build.publish') as mock_publish:
+        with (
+            patch.object(stage, "_build_extractors", return_value=[_fake_extractor()]),
+            patch("src.graph.graph_build.publish") as mock_publish,
+        ):
             count = await stage.run("ds", chunks, _ontology(), job_id="job-1")
 
         # one insert per chunk — the graph store receives exactly len(chunks)
@@ -162,8 +171,10 @@ class TestIncrementalInsertDeltas:
         stage = _stage()
         _binding_index(len(chunks))
 
-        with patch.object(stage, "_build_extractors", return_value=[_fake_extractor()]), \
-             patch('src.graph.graph_build.publish') as mock_publish:
+        with (
+            patch.object(stage, "_build_extractors", return_value=[_fake_extractor()]),
+            patch("src.graph.graph_build.publish") as mock_publish,
+        ):
             await stage.run("ds", chunks, _ontology(), job_id="job-1")
 
         progress = sorted(call.args[1].progress for call in mock_publish.call_args_list)
@@ -175,8 +186,10 @@ class TestIncrementalInsertDeltas:
         stage = _stage()
         _binding_index(len(chunks))
 
-        with patch.object(stage, "_build_extractors", return_value=[_fake_extractor()]), \
-             patch('src.graph.graph_build.publish') as mock_publish:
+        with (
+            patch.object(stage, "_build_extractors", return_value=[_fake_extractor()]),
+            patch("src.graph.graph_build.publish") as mock_publish,
+        ):
             await stage.run("ds", chunks, _ontology())
 
         mock_publish.assert_not_called()
@@ -195,7 +208,7 @@ class TestSlidingWindow:
         barrier = threading.Barrier(2, timeout=10)
         state = {"active": 0, "peak": 0, "starts": 0}
 
-        def _gated_extract(self, doc, extractors):
+        def _gated_extract(self, doc, extractors, relation_slots=None):
             with lock:
                 state["active"] += 1
                 state["peak"] = max(state["peak"], state["active"])
@@ -210,13 +223,15 @@ class TestSlidingWindow:
                     state["active"] -= 1
             return (doc, [], [], [], [])
 
-        with patch.object(type(stage), "_extract_chunk", _gated_extract), \
-             patch('src.graph.graph_build.publish') as mock_publish:
+        with (
+            patch.object(type(stage), "_extract_chunk", _gated_extract),
+            patch("src.graph.graph_build.publish") as mock_publish,
+        ):
             await stage.run("ds", chunks, _ontology(), job_id="job-1")
 
-        assert state["starts"] == len(chunks)      # every chunk ran
-        assert state["peak"] == 2                  # window filled to the limit
-        assert state["peak"] <= 2                  # and never exceeded it
+        assert state["starts"] == len(chunks)  # every chunk ran
+        assert state["peak"] == 2  # window filled to the limit
+        assert state["peak"] <= 2  # and never exceeded it
         assert mock_publish.call_count == len(chunks)
 
 
@@ -260,11 +275,15 @@ class TestSerialisedInserts:
         core = sys.modules["llama_index.core"]
         core.PropertyGraphIndex.return_value = _RecorderIndex()
 
-        with patch.object(stage, "_build_extractors", return_value=[_identity_extractor]), \
-             patch('src.graph.graph_build.publish') as mock_publish:
+        with (
+            patch.object(
+                stage, "_build_extractors", return_value=[_identity_extractor]
+            ),
+            patch("src.graph.graph_build.publish") as mock_publish,
+        ):
             await stage.run("ds", chunks, _ontology(), job_id="job-1")
 
         assert state["calls"] == len(chunks)
-        assert state["overlap"] is False   # two writes were never concurrent
-        assert state["peak"] == 1          # strictly serialised
+        assert state["overlap"] is False  # two writes were never concurrent
+        assert state["peak"] == 1  # strictly serialised
         assert mock_publish.call_count == len(chunks)

@@ -2,19 +2,37 @@ import type { ButtonHTMLAttributes } from 'react'
 import { CircleNotch } from '@phosphor-icons/react'
 
 export type ButtonVariant = 'primary' | 'secondary' | 'ghost' | 'danger'
-export type ButtonSize = 32 | 40
+export type ButtonSize = 32 | 40 | 48
 
+/**
+ * §8.1 Buttons. One accent-filled control on a surface; the rest are paper, ink or a rule.
+ * The primary is a FLAT evergreen fill — no ramp, no glow, no fully rounded pill.
+ * A 32px radius reads as a consumer app; this product is an instrument.
+ */
 const VARIANT: Record<ButtonVariant, string> = {
-  primary: 'bg-accent text-ink-1000 hover:bg-accent-strong active:bg-accent-dim',
-  secondary: 'border border-ink-600 text-paper hover:border-accent hover:text-accent',
-  ghost: 'text-paper-dim hover:bg-ink-800 hover:text-paper',
-  danger: 'border border-critical text-critical hover:bg-critical/10',
+  // primary — the action. The only accent-filled control in the app.
+  primary: 'action-fill rounded-md shadow-card hover:shadow-sheet',
+  // secondary — paper, one record rule, an ink label.
+  secondary: 'border border-rule bg-paper text-ink hover:bg-sand',
+  // ghost — the underlined measurement link: mono, ruled beneath, no box. The underline is the
+  // variant's only affordance, so it takes the record rule (§4.7: meaningful UI boundaries ≥3:1);
+  // the decorative hairline is never a control's sole boundary.
+  ghost:
+    'font-mono text-mono text-ink-2 underline underline-offset-4 decoration-rule hover:text-ink hover:decoration-accent',
+  // danger — paper, one danger rule, a danger label.
+  danger: 'border border-rule bg-paper text-danger hover:bg-danger/10',
 }
 
-// eslint-disable-next-line react-refresh/only-export-components -- buttonClasses is the shared Link-as-button styling API (HomePage, ui barrel)
+/**
+ * §10.4 — a standalone text link is still a target: at least 44px tall, with its label centred.
+ * Links inside a sentence opt out explicitly; they are read as prose, not as controls.
+ */
+export const inlineLinkClasses = 'inline-flex min-h-11 min-w-11 items-center'
+
+// eslint-disable-next-line react-refresh/only-export-components -- buttonClasses is the shared Link-as-button styling API (marketing, the shell)
 export function buttonClasses(variant: ButtonVariant = 'secondary', size: ButtonSize = 40, extra = ''): string {
-  const h = size === 40 ? 'h-10 px-4 text-body' : 'h-8 px-3 text-micro'
-  return `inline-flex select-none items-center justify-center gap-2 rounded-[4px] font-medium transition-colors duration-150 disabled:cursor-not-allowed disabled:opacity-50 ${VARIANT[variant]} ${h} ${extra}`
+  const h = size === 48 ? 'h-12 px-6 text-body' : size === 40 ? 'h-10 px-4 text-body-sm' : 'h-8 px-3 text-micro'
+  return `inline-flex select-none items-center justify-center gap-2 rounded-md font-semibold transition-[color,background-color,border-color,box-shadow,transform] duration-state disabled:cursor-not-allowed disabled:opacity-45 ${VARIANT[variant]} ${h} max-sm:min-h-11 max-sm:min-w-11 ${extra}`
 }
 
 export default function Button({

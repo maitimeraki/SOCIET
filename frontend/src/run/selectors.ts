@@ -1,4 +1,4 @@
-import type { AgentProfile, ClusterSummary, Stance, TurnInfo } from './events'
+import type { AgentProfile, ClusterSummary, DissentingView, EvidenceItem, Stance, TurnInfo } from './events'
 import { asStance } from './events'
 import type { RunRound, RunState } from './reducer'
 
@@ -54,7 +54,7 @@ export function railState(state: RunState): RailEntry[] {
   return [
     // A run cannot exist without ingest/graph/question — done by construction (§7.6).
     { key: 'ingest', label: 'Ingest', state: 'done', note: state.datasetId ?? undefined },
-    { key: 'graph', label: 'Graph', state: 'done' },
+    { key: 'graph', label: 'The map', state: 'done' },
     { key: 'question', label: 'Question', state: 'done' },
     { key: 'roster', label: 'Roster', state: seated ? 'done' : running ? 'running' : 'pending' },
     {
@@ -153,6 +153,10 @@ export interface VerdictView {
   confidence: number | null
   converged: boolean
   summary: string
+  narrative: string
+  narrativeStatus: string
+  dissentingViews: DissentingView[]
+  evidence: EvidenceItem[]
   clusters: ClusterSummary[]
   finalStances: { agent: string; stance: Stance }[]
   supporting: string[]
@@ -175,6 +179,10 @@ export function verdictView(state: RunState): VerdictView | null {
     confidence: verdict.confidence,
     converged: verdict.converged,
     summary: verdict.summary,
+    narrative: verdict.narrative,
+    narrativeStatus: verdict.narrativeStatus,
+    dissentingViews: verdict.dissentingViews,
+    evidence: verdict.evidence,
     clusters,
     finalStances: Object.entries(verdict.finalStances).map(([agent, value]) => ({ agent, stance: asStance(value) })),
     supporting: verdict.supporting,

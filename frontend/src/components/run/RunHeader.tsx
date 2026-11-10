@@ -3,8 +3,8 @@ import { Copy } from '@phosphor-icons/react'
 import type { RunState } from '../../run/reducer'
 import { currentRound } from '../../run/selectors'
 import { fmtElapsed, truncateId } from '../../utils/format'
-import StateChip from '../common/StateChip'
-import type { RunStateWord } from '../common/StateChip'
+import { StateChip } from '../ui/Chip'
+import type { RunStateWord } from '../ui/Chip'
 import IconButton from '../ui/IconButton'
 import { toast } from '../ui/Toast'
 
@@ -40,24 +40,24 @@ export default function RunHeader({
 
   return (
     <div className="space-y-2">
-      <p className="font-serif text-title text-paper">{run.query || 'Waiting for the floor…'}</p>
+      <p className="font-ui text-heading text-ink">{run.query || 'Waiting for the panel…'}</p>
       {run.intent?.core_question && (
-        <p className="tnum font-mono text-mono text-paper-mute">reading as: {run.intent.core_question}</p>
+        <p className="tnum font-mono text-mono text-ink-3">reading as: {run.intent.core_question}</p>
       )}
       <div className="flex flex-wrap items-center gap-3">
         <StateChip state={chip} />
         {round > 0 && (
-          <span className="tnum font-mono text-mono text-paper-dim">
-            ROUND {round}
+          <span className="tnum font-mono text-mono text-ink-2">
+            PASS {round}
             {maxRounds ? `/${maxRounds}` : ''}
           </span>
         )}
-        {elapsed && <span className="tnum font-mono text-mono text-paper-dim">{elapsed} elapsed</span>}
+        {elapsed && <span className="tnum font-mono text-mono text-ink-2">{elapsed} elapsed</span>}
         {run.runId && (
           <span className="flex items-center gap-1">
-            <span className="tnum font-mono text-mono text-paper-mute">run {truncateId(run.runId)}</span>
+            <span className="tnum font-mono text-mono text-ink-3">decision {truncateId(run.runId)}</span>
             <IconButton
-              label="Copy run id"
+              label="Copy decision id"
               onClick={() => {
                 void navigator.clipboard.writeText(run.runId ?? '')
                 toast('neutral', 'Copied')
@@ -67,7 +67,7 @@ export default function RunHeader({
             </IconButton>
           </span>
         )}
-        {connection === 'reconnecting' && <span className="text-micro text-brass">Connection lost — reattaching…</span>}
+        {connection === 'reconnecting' && <span className="text-micro text-ink-2">Connection lost — reattaching…</span>}
       </div>
     </div>
   )

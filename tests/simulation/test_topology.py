@@ -1,13 +1,19 @@
 """
 Tests for CommunicationTopology Cypher-based pair scoring.
 """
-import pytest
+
 from unittest.mock import AsyncMock, MagicMock
 
-from src.simulation.topology import CommunicationTopology
-from src.simulation.pair_turn import CommPair
+import pytest
+
+from src.persona.models_persona import (
+    AgentProfile,
+    ConfidenceBreakdown,
+    PersonaIdentity,
+)
 from src.simulation.debate_config import DebateConfig
-from src.persona.models_persona import AgentProfile, PersonaIdentity, ConfidenceBreakdown
+from src.simulation.pair_turn import CommPair
+from src.simulation.topology import CommunicationTopology
 
 
 @pytest.fixture
@@ -121,20 +127,26 @@ class TestComputeRoundPairs:
     """Test compute_round_pairs method."""
 
     @pytest.mark.asyncio
-    async def test_round1_returns_comm_pairs(self, mock_driver, sample_profiles, debate_config):
+    async def test_round1_returns_comm_pairs(
+        self, mock_driver, sample_profiles, debate_config
+    ):
         """Verify round 1 returns CommPair objects with expected fields."""
         driver, result = mock_driver
-        result.data = AsyncMock(return_value=[
-            {
-                "agent_a": "Alice",
-                "agent_b": "Bob",
-                "shared_entities": ["ai"],
-                "score": 0.5,
-            }
-        ])
+        result.data = AsyncMock(
+            return_value=[
+                {
+                    "agent_a": "Alice",
+                    "agent_b": "Bob",
+                    "shared_entities": ["ai"],
+                    "score": 0.5,
+                }
+            ]
+        )
 
         topology = CommunicationTopology(driver, "neo4j")
-        pairs = await topology.compute_round_pairs(sample_profiles, "ds_001", round_num=1, config=debate_config)
+        pairs = await topology.compute_round_pairs(
+            sample_profiles, "ds_001", round_num=1, config=debate_config
+        )
 
         assert len(pairs) == 1
         assert pairs[0].agent_a == "Alice"
@@ -142,13 +154,17 @@ class TestComputeRoundPairs:
         assert pairs[0].score == 0.5
 
     @pytest.mark.asyncio
-    async def test_round2_uses_multi_hop_cypher(self, mock_driver, sample_profiles, debate_config):
+    async def test_round2_uses_multi_hop_cypher(
+        self, mock_driver, sample_profiles, debate_config
+    ):
         """Verify round 2+ uses multi-hop path length based on comm_radius."""
         driver, result = mock_driver
         result.data = AsyncMock(return_value=[])
 
         topology = CommunicationTopology(driver, "neo4j")
-        pairs = await topology.compute_round_pairs(sample_profiles, "ds_001", round_num=2, config=debate_config)
+        pairs = await topology.compute_round_pairs(
+            sample_profiles, "ds_001", round_num=2, config=debate_config
+        )
 
         # Just verify it returns empty (multi-hop query worked)
         assert pairs == []
@@ -161,31 +177,39 @@ class TestComputeRoundPairs:
         result.data = AsyncMock(return_value=[])
 
         topology = CommunicationTopology(driver, "neo4j")
-        pairs = await topology.compute_round_pairs(sample_profiles, "ds_001", round_num=3, config=config)
+        pairs = await topology.compute_round_pairs(
+            sample_profiles, "ds_001", round_num=3, config=config
+        )
 
         assert pairs == []
 
     @pytest.mark.asyncio
-    async def test_parses_comm_pairs_correctly(self, mock_driver, sample_profiles, debate_config):
+    async def test_parses_comm_pairs_correctly(
+        self, mock_driver, sample_profiles, debate_config
+    ):
         """Verify response is parsed into CommPair objects."""
         driver, result = mock_driver
-        result.data = AsyncMock(return_value=[
-            {
-                "agent_a": "Alice",
-                "agent_b": "Bob",
-                "shared_entities": ["ai", "ml"],
-                "score": 0.65,
-            },
-            {
-                "agent_a": "Bob",
-                "agent_b": "Charlie",
-                "shared_entities": ["ml"],
-                "score": 0.45,
-            },
-        ])
+        result.data = AsyncMock(
+            return_value=[
+                {
+                    "agent_a": "Alice",
+                    "agent_b": "Bob",
+                    "shared_entities": ["ai", "ml"],
+                    "score": 0.65,
+                },
+                {
+                    "agent_a": "Bob",
+                    "agent_b": "Charlie",
+                    "shared_entities": ["ml"],
+                    "score": 0.45,
+                },
+            ]
+        )
 
         topology = CommunicationTopology(driver, "neo4j")
-        pairs = await topology.compute_round_pairs(sample_profiles, "ds_001", round_num=1, config=debate_config)
+        pairs = await topology.compute_round_pairs(
+            sample_profiles, "ds_001", round_num=1, config=debate_config
+        )
 
         assert len(pairs) == 2
         assert pairs[0].agent_a == "Alice"
@@ -199,24 +223,32 @@ class TestComputeRoundPairs:
         assert pairs[1].score == 0.45
 
     @pytest.mark.asyncio
-    async def test_empty_result_returns_empty_list(self, mock_driver, sample_profiles, debate_config):
+    async def test_empty_result_returns_empty_list(
+        self, mock_driver, sample_profiles, debate_config
+    ):
         """Verify empty result returns empty CommPair list."""
         driver, result = mock_driver
         result.data = AsyncMock(return_value=[])
 
         topology = CommunicationTopology(driver, "neo4j")
-        pairs = await topology.compute_round_pairs(sample_profiles, "ds_001", round_num=1, config=debate_config)
+        pairs = await topology.compute_round_pairs(
+            sample_profiles, "ds_001", round_num=1, config=debate_config
+        )
 
         assert pairs == []
 
     @pytest.mark.asyncio
-    async def test_uses_database_from_constructor(self, mock_driver, sample_profiles, debate_config):
+    async def test_uses_database_from_constructor(
+        self, mock_driver, sample_profiles, debate_config
+    ):
         """Verify the database parameter is passed to session."""
         driver, result = mock_driver
         result.data = AsyncMock(return_value=[])
 
         topology = CommunicationTopology(driver, "my_database")
-        await topology.compute_round_pairs(sample_profiles, "ds_001", round_num=1, config=debate_config)
+        await topology.compute_round_pairs(
+            sample_profiles, "ds_001", round_num=1, config=debate_config
+        )
 
         driver.session.assert_called_once_with(database="my_database")
 
@@ -228,9 +260,7 @@ class TestCypherGeneration:
         """Verify round 1 Cypher has expected structure."""
         topology = CommunicationTopology(MagicMock(), "test_db")
         cypher, params = topology._round1_cypher(
-            ["Alice", "Bob"],
-            "ds_001",
-            debate_config
+            ["Alice", "Bob"], "ds_001", debate_config
         )
 
         # Check key Cypher clauses
@@ -262,16 +292,23 @@ class TestCypherGeneration:
         """
         topology = CommunicationTopology(MagicMock(), "test_db")
         round1, _ = topology._round1_cypher(["Alice", "Bob"], "ds_001", debate_config)
-        round_n, _ = topology._round_n_cypher(["Alice", "Bob"], "ds_001", debate_config, 2)
+        round_n, _ = topology._round_n_cypher(
+            ["Alice", "Bob"], "ds_001", debate_config, 2
+        )
 
         for cypher in (round1, round_n, topology._ACTIVATION_ADJACENCY_CYPHER):
             assert "NOT e:Chunk" in cypher
 
         # the guarded node is still the untyped middle node of the same patterns
         assert "MATCH (a:Persona)-[r1]-(e)-[r2]-(b:Persona)" in round1
-        assert "MATCH (p:Persona)-[r1]-(e)-[r2]-(part:Persona)" in topology._ACTIVATION_ADJACENCY_CYPHER
+        assert (
+            "MATCH (p:Persona)-[r1]-(e)-[r2]-(part:Persona)"
+            in topology._ACTIVATION_ADJACENCY_CYPHER
+        )
 
-    def test_pair_cyphers_match_each_unordered_pair_once(self, sample_profiles, debate_config):
+    def test_pair_cyphers_match_each_unordered_pair_once(
+        self, sample_profiles, debate_config
+    ):
         """Both pair Cyphers guard orientation: one record per unordered pair.
 
         Un-guarded, `(a)-..-(b)` matches both orientations -- (a,b) and (b,a) --
@@ -280,7 +317,9 @@ class TestCypherGeneration:
         """
         topology = CommunicationTopology(MagicMock(), "test_db")
         round1, _ = topology._round1_cypher(["Alice", "Bob"], "ds_001", debate_config)
-        round_n, _ = topology._round_n_cypher(["Alice", "Bob"], "ds_001", debate_config, 2)
+        round_n, _ = topology._round_n_cypher(
+            ["Alice", "Bob"], "ds_001", debate_config, 2
+        )
 
         for cypher in (round1, round_n):
             assert "a.name < b.name" in cypher
@@ -292,10 +331,7 @@ class TestCypherGeneration:
         config = DebateConfig(comm_radius=3)
         topology = CommunicationTopology(MagicMock(), "test_db")
         cypher, params = topology._round_n_cypher(
-            ["Alice", "Bob"],
-            "ds_001",
-            config,
-            effective_radius=3
+            ["Alice", "Bob"], "ds_001", config, effective_radius=3
         )
 
         assert "[r1*1..3]" in cypher
@@ -331,21 +367,31 @@ class TestCommPair:
         assert pair.evidence == []
 
 
-from src.simulation.pair_turn import ActivationCandidate
-
-
 @pytest.mark.asyncio
 async def test_find_activation_candidates_merges_sources_and_caps(mock_driver):
     driver, result = mock_driver
-    result.data = AsyncMock(side_effect=[
-        [{"name": "Swing", "shared": ["carbon"]},                       # mentions source: 1 entity
-         {"name": "Quiet", "shared": ["tariff", "trade"]}],             # mentions source: 2 entities
-        [{"name": "Dormant", "shared_entities": ["ethics", "policy", "law"]},  # adjacency source: 3 entities
-         {"name": "Swing", "shared_entities": ["carbon", "ethics"]}],   # adjacency dup — mention copy wins
-    ])
+    result.data = AsyncMock(
+        side_effect=[
+            [
+                {"name": "Swing", "shared": ["carbon"]},  # mentions source: 1 entity
+                {"name": "Quiet", "shared": ["tariff", "trade"]},
+            ],  # mentions source: 2 entities
+            [
+                {
+                    "name": "Dormant",
+                    "shared_entities": ["ethics", "policy", "law"],
+                },  # adjacency source: 3 entities
+                {"name": "Swing", "shared_entities": ["carbon", "ethics"]},
+            ],  # adjacency dup — mention copy wins
+        ]
+    )
     topology = CommunicationTopology(driver, "db")
     cands = await topology.find_activation_candidates(
-        participants=["Alice"], dataset_id="ds1", query_hash="qh1", last_round=1, max_new=2,
+        participants=["Alice"],
+        dataset_id="ds1",
+        query_hash="qh1",
+        last_round=1,
+        max_new=2,
     )
     names = [c.agent_name for c in cands]
     # 3 merged candidates (> max_new), richest inserted last: the cap and the
@@ -354,7 +400,7 @@ async def test_find_activation_candidates_merges_sources_and_caps(mock_driver):
     assert "Dormant" in names
     assert names == ["Dormant", "Quiet"]
     assert cands[0].agent_name == "Dormant"  # ranked by shared-entity count desc
-    assert "Swing" not in names              # cap drops the poorest candidate
+    assert "Swing" not in names  # cap drops the poorest candidate
 
 
 @pytest.mark.asyncio
@@ -362,6 +408,8 @@ async def test_find_activation_candidates_disabled_or_no_candidates(mock_driver)
     driver, result = mock_driver
     result.data = AsyncMock(return_value=[])
     topology = CommunicationTopology(driver, "db")
-    assert await topology.find_activation_candidates(["A"], "ds", "qh", 1, max_new=0) == []
+    assert (
+        await topology.find_activation_candidates(["A"], "ds", "qh", 1, max_new=0) == []
+    )
     assert await topology.find_activation_candidates([], "ds", "qh", 1, max_new=2) == []
     driver.session.assert_not_called()  # short-circuit happens before any query
