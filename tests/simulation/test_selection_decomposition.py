@@ -2,7 +2,7 @@
 
 One production candidate set, two adapter read sets. Production entity rows are
 the extractor's properties plus `triplet_source_id` (llama-index writes it) and
-`/hatch` sector rows are mappings with `total_relevance`/`evidence_nodes` —
+sector rows are mappings with `total_relevance`/`evidence_nodes` —
 identical before and after P4-A. What P4-A changed is the *adapter*: the retired
 `_evidence_row` never read `triplet_source_id`, the shipped one does, so the
 same rows now surface their source chunk node ids as anchors. The recorded
@@ -63,7 +63,7 @@ def _production_evidence() -> dict[str, list]:
 
     Entity `.properties` are `{extractor output} ∪ {triplet_source_id}` — no
     `document_anchor`, no `document_ids`, no flat `chunk_id`/`chunk_ids` — plus
-    a `/hatch`-style mapping row.
+    a sector-style mapping row.
     """
     return {
         "Carbon Analyst": [

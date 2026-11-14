@@ -2,7 +2,7 @@
 Canonical Agent schema.
 
 Single source of truth for agent identity, bio, behavior, and provenance.
-Replaces the fragmented AgentProfile (persona/models_persona.py) model —
+Consumed by every simulation stage:
 verdict, round runner, topology, orchestrator, and society memory all consume
 this model.
 
@@ -229,64 +229,3 @@ class Agent(BaseModel):
         if isinstance(v, (list, tuple)):
             return [str(t).strip() for t in v if str(t).strip()]
         return []
-
-
-# ---------------------------------------------------------------------------
-# Backwards-compatible aliases
-# ---------------------------------------------------------------------------
-# Older imports (`from src.persona.models_persona import AgentProfile`)
-# keep working for one release. New code MUST import Agent from this module.
-# ---------------------------------------------------------------------------
-
-from src.persona.models_persona import (  # noqa: E402  (intentional late import)
-    AgentProfile as _AgentProfileShim,
-)
-
-
-def agent_profile_to_agent(profile: _AgentProfileShim, dataset_id: str) -> Agent:
-    """Convert a legacy AgentProfile to the canonical Agent.
-
-    Missing behavioral fields (stance, conviction, cior, etc.) are filled
-    with safe defaults so the verdict synthesizer stops silently falling
-    back to 0.5/0.0 on every profile.
-    """
-
-    # Pydantic v2: nested model fields need model_validate when given as
-    # model instances from a sibling class hierarchy.
-    identity_obj = profile.identity
-    if isinstance(identity_obj, PersonaIdentity):
-        identity_data = identity_obj.model_dump()
-    else:
-        identity_data = (
-            dict(identity_obj) if not isinstance(identity_obj, dict) else identity_obj
-        )
-    identity = PersonaIdentity.model_validate(identity_data)
-
-    cb_obj = profile.confidence_breakdown
-    if isinstance(cb_obj, ConfidenceBreakdown):
-        cb_data = cb_obj.model_dump()
-    else:
-        cb_data = dict(cb_obj) if not isinstance(cb_obj, dict) else cb_obj
-    cb = ConfidenceBreakdown.model_validate(cb_data)
-
-    return Agent(
-        agent_id=profile.agent_id,
-        identity=identity,
-        discovery_type=profile.discovery_type,
-        expertise_level=profile.expertise_level,
-        last_updated=profile.last_updated,
-        bio=profile.description,
-        detailed_perspective=profile.detailed_perspective,
-        role_description="",
-        stance=Stance.NEUTRAL,
-        intensity=0.5,
-        confidence=float(profile.confidence),
-        conviction=0.5,
-        belief="",
-        opinion="",
-        cior=0.0,
-        domain_tags=list(profile.domain_tags),
-        summary_provenance=list(profile.provenance),
-        confidence_breakdown=cb,
-        graph_snapshot=GraphSnapshot(dataset_id=dataset_id),
-    )

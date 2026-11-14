@@ -183,7 +183,6 @@ def test_both_mounts_serve_every_route():
         "/simulate/build_graph",
         "/simulate/normalize_graph",
         "/simulate/{job_id}",
-        "/api/personas/hatch",
         "/api/ingest/files",
         "/api/ingest/url",
     ):
@@ -220,7 +219,6 @@ _GUARDED = [
     ("POST", "/simulate/ontology", {"params": {"dataset_id": "ds"}, "json": []}),
     ("POST", "/simulate/build_graph", {"params": {"dataset_id": "ds"}, "json": []}),
     ("POST", "/simulate/normalize_graph", {"params": {"dataset_id": "ds"}}),
-    ("POST", "/api/personas/hatch", {"json": {"query": "Who should decide?"}}),
     ("POST", "/api/ingest/url", {"json": {"url": "https://example.com/a.txt"}}),
     (
         "POST",
@@ -248,18 +246,17 @@ async def test_unauthenticated_requests_get_the_uniform_401(
 # --- CSRF: a write without a valid token is refused ---------------------------
 #
 # One representative state-changing request per write router (debate, ingest,
-# jobs, simulate) plus the persona hatch route. Each carries a LIVE session but
-# no valid double-submit token, so the router-level `verify_csrf` dependency must
-# refuse it (403) before the handler runs. If any router's
-# `dependencies=[Depends(verify_csrf)]` is ever dropped, the request reaches the
-# handler and this assertion flips — the test IS the guard.
+# jobs, simulate). Each carries a LIVE session but no valid double-submit token,
+# so the router-level `verify_csrf` dependency must refuse it (403) before the
+# handler runs. If any router's `dependencies=[Depends(verify_csrf)]` is ever
+# dropped, the request reaches the handler and this assertion flips — the test
+# IS the guard.
 
 _CSRF_WRITE_ROUTES = [
     ("POST", "/simulate/debate", {"json": {"query": "Should we tax carbon?"}}),
     ("POST", "/simulate/ontology", {"params": {"dataset_id": "ds"}, "json": []}),
     ("POST", "/api/ingest/url", {"json": {"url": "https://example.com/a.txt"}}),
     ("DELETE", "/api/v1/jobs/some-job", {}),
-    ("POST", "/api/personas/hatch", {"json": {"query": "Who should decide?"}}),
 ]
 
 _CSRF_ROUTE_IDS = [f"{m} {p}" for m, p, _ in _CSRF_WRITE_ROUTES]
@@ -387,16 +384,18 @@ async def test_run_docs_are_listed_and_read_for_their_owner_only(client, account
 # --- both mounts, authenticated ----------------------------------------------
 
 
-@requires_db
 @pytest.mark.asyncio
 @pytest.mark.parametrize("path", _both_mounts("/api/personas/hatch"))
-async def test_hatch_is_guarded_on_both_mounts(client, accounts, path):
-    owner, _ = accounts
+async def test_hatch_route_is_gone(client, path):
+    """Audit C2: the legacy hatch surface is deleted. A signed-in, CSRF-valid
+    request gets 404 on both mounts (no route, so no cross-tenant read)."""
     response = await client.post(
-        path, json={"query": "   "}, cookies=_cookie(owner), headers=_csrf(owner)
+        path,
+        json={"query": "Who should decide?"},
+        cookies={"sid": "csrf-guard-probe", "csrf": "t"},
+        headers={"X-CSRF-Token": "t"},
     )
-    # 400 (blank query) proves auth passed and the handler ran — no Neo4j call.
-    assert response.status_code == 400
+    assert response.status_code == 404
 
 
 @requires_db

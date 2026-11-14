@@ -82,7 +82,6 @@ SimulationResponse (society_opinion, confidence_metrics, dissenting_views)
 | `api_server.py` | FastAPI app (real entry point), job management, `/simulate` endpoints |
 | `config_api.py` | Request/response Pydantic schemas |
 | `debate_api.py` | Debate router (`/simulate/debate` + job status + WS stream) |
-| `persona_api.py` | Persona router (`/api/personas/hatch`) |
 | `middleware.py` | Request/response logging with correlation IDs |
 
 > **Removed 2026-09-30 (decision D1):** the legacy `/api/agents` stack — `src/api/agent_api.py`, `src/persona/agent_repository.py`, `src/persona/response_tracker.py` and the `agent_node.py` model — was deleted. Superseded by the debate path: agents are created only from graph retrieval (`ProfileSynthesizer`), never from a second hardcoded agent store.
@@ -103,7 +102,6 @@ src/
 │   ├── api_server.py            # FastAPI app (real entry point), job management
 │   ├── config_api.py            # Request/response Pydantic schemas
 │   ├── debate_api.py            # Debate router + WebSocket stream
-│   ├── persona_api.py           # Persona router (/api/personas/hatch)
 │   └── middleware.py            # Logging middleware (correlation IDs)
 │
 ├── simulation/                  # Debate engine

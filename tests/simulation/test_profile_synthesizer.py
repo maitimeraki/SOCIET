@@ -7,8 +7,8 @@ from uuid import uuid4
 
 import pytest
 
-from src.persona.models_persona import (
-    AgentProfile,
+from src.persona.agent import (
+    Agent,
     ConfidenceBreakdown,
     DiscoveryType,
     ExpertiseLevel,
@@ -45,8 +45,8 @@ def mock_entity_nodes():
 
 @pytest.fixture
 def mock_agent_profile():
-    """Create a mock AgentProfile."""
-    return AgentProfile(
+    """Create a mock Agent."""
+    return Agent(
         discovery_type=DiscoveryType.INTENT_DRIVEN,
         expertise_level=ExpertiseLevel.STRATEGIC,
         identity=PersonaIdentity(
@@ -55,7 +55,7 @@ def mock_agent_profile():
             communication_style="factual",
         ),
         domain_tags=["ethics", "healthcare"],
-        description="Test agent description",
+        bio="Test agent description",
         detailed_perspective="Test perspective",
         confidence=0.75,
         confidence_breakdown=ConfidenceBreakdown(
@@ -63,7 +63,7 @@ def mock_agent_profile():
             node_density=5,
             relationship_connectivity=0.6,
         ),
-        provenance=[],
+        summary_provenance=[],
         last_updated=datetime.utcnow(),
     )
 
@@ -109,7 +109,7 @@ def synthesizer(mock_persona_repo, mock_graph_context):
 
 @pytest.mark.asyncio
 async def test_synthesize_returns_list_of_agent_profiles(synthesizer):
-    """Verify synthesize returns list of AgentProfile with length <= max_agents."""
+    """Verify synthesize returns list of Agent with length <= max_agents."""
     profiles = await synthesizer.synthesize(
         query="AI ethics healthcare",
         dataset_id="test_dataset",
@@ -119,7 +119,7 @@ async def test_synthesize_returns_list_of_agent_profiles(synthesizer):
     assert isinstance(profiles, list)
     assert len(profiles) <= 5
     for profile in profiles:
-        assert isinstance(profile, AgentProfile)
+        assert isinstance(profile, Agent)
 
 
 @pytest.mark.asyncio
@@ -187,16 +187,16 @@ async def test_synthesize_empty_entities(synthesizer):
 
 @pytest.mark.asyncio
 async def test_synthesize_profiles_have_valid_structure(mock_agent_profile):
-    """Verify returned profiles have all required AgentProfile fields."""
+    """Verify returned profiles have all required Agent fields."""
     profile = mock_agent_profile
 
     assert hasattr(profile, "identity")
     assert hasattr(profile, "domain_tags")
-    assert hasattr(profile, "description")
+    assert hasattr(profile, "bio")
     assert hasattr(profile, "detailed_perspective")
     assert hasattr(profile, "confidence")
     assert hasattr(profile, "confidence_breakdown")
-    assert hasattr(profile, "provenance")
+    assert hasattr(profile, "summary_provenance")
 
     assert isinstance(profile.identity, PersonaIdentity)
     assert isinstance(profile.confidence_breakdown, ConfidenceBreakdown)
@@ -235,20 +235,20 @@ async def test_synthesize_returns_exactly_target_profiles():
         }
     )
     repo.build_single_agent_profile_from_node = AsyncMock(
-        return_value=AgentProfile(
+        return_value=Agent(
             discovery_type=DiscoveryType.INTENT_DRIVEN,
             expertise_level=ExpertiseLevel.STRATEGIC,
             identity=PersonaIdentity(
                 name="Agent", archetype="Analyst", communication_style="factual"
             ),
             domain_tags=["test"],
-            description="desc",
+            bio="desc",
             detailed_perspective="perspective",
             confidence=0.75,
             confidence_breakdown=ConfidenceBreakdown(
                 source_breadth=1, node_density=1, relationship_connectivity=0.5
             ),
-            provenance=[],
+            summary_provenance=[],
             last_updated=datetime.utcnow(),
         )
     )
@@ -295,20 +295,20 @@ async def test_synthesize_returns_fewer_when_sparse():
         }
     )
     repo.build_single_agent_profile_from_node = AsyncMock(
-        return_value=AgentProfile(
+        return_value=Agent(
             discovery_type=DiscoveryType.INTENT_DRIVEN,
             expertise_level=ExpertiseLevel.STRATEGIC,
             identity=PersonaIdentity(
                 name="Agent", archetype="Analyst", communication_style="factual"
             ),
             domain_tags=["test"],
-            description="desc",
+            bio="desc",
             detailed_perspective="perspective",
             confidence=0.75,
             confidence_breakdown=ConfidenceBreakdown(
                 source_breadth=1, node_density=1, relationship_connectivity=0.5
             ),
-            provenance=[],
+            summary_provenance=[],
             last_updated=datetime.utcnow(),
         )
     )
@@ -352,20 +352,20 @@ async def test_synthesize_profiles_have_provenance_and_domain_tags():
         }
     )
     repo.build_single_agent_profile_from_node = AsyncMock(
-        return_value=AgentProfile(
+        return_value=Agent(
             discovery_type=DiscoveryType.INTENT_DRIVEN,
             expertise_level=ExpertiseLevel.STRATEGIC,
             identity=PersonaIdentity(
                 name="Agent", archetype="Analyst", communication_style="factual"
             ),
             domain_tags=["ethics", "healthcare"],
-            description="desc",
+            bio="desc",
             detailed_perspective="perspective",
             confidence=0.75,
             confidence_breakdown=ConfidenceBreakdown(
                 source_breadth=2, node_density=3, relationship_connectivity=0.6
             ),
-            provenance=[
+            summary_provenance=[
                 ProvenanceLink(
                     doc_id="doc1", title="Source", breadcrumb="a>b", chunk_id=uuid4()
                 )
@@ -382,7 +382,7 @@ async def test_synthesize_profiles_have_provenance_and_domain_tags():
 
     assert len(profiles) == 3
     for p in profiles:
-        assert len(p.provenance) > 0, "provenance must be non-empty"
+        assert len(p.summary_provenance) > 0, "provenance must be non-empty"
         assert len(p.domain_tags) > 0, "domain_tags must be non-empty"
 
 
@@ -418,20 +418,20 @@ async def test_synthesize_confidence_in_valid_range():
 
     # Build profiles with varying confidence values
     async def build_profile(*args, **kwargs):
-        return AgentProfile(
+        return Agent(
             discovery_type=DiscoveryType.INTENT_DRIVEN,
             expertise_level=ExpertiseLevel.STRATEGIC,
             identity=PersonaIdentity(
                 name="Agent", archetype="Analyst", communication_style="factual"
             ),
             domain_tags=["test"],
-            description="desc",
+            bio="desc",
             detailed_perspective="perspective",
             confidence=0.75,
             confidence_breakdown=ConfidenceBreakdown(
                 source_breadth=2, node_density=3, relationship_connectivity=0.6
             ),
-            provenance=[],
+            summary_provenance=[],
             last_updated=datetime.utcnow(),
         )
 

@@ -96,21 +96,6 @@ async def test_recent_memories_never_match_an_entity_by_its_property(recorder):
 
 
 @pytest.mark.asyncio
-async def test_agent_node_fallback_scopes_persona_or_entity_to_the_dataset(recorder):
-    await _repo_on(recorder).fetch_agent_node_props("Alice", dataset_id="ds-A")
-
-    query, params = recorder.calls[0]
-    assert persona_or_entity_in_dataset("n") in query
-    assert params["dataset_id"] == "ds-A"
-
-
-@pytest.mark.asyncio
-async def test_agent_node_fallback_requires_dataset_id(recorder):
-    with pytest.raises(TypeError):
-        await _repo_on(recorder).fetch_agent_node_props("Alice")
-
-
-@pytest.mark.asyncio
 async def test_recent_memories_require_dataset_id(recorder):
     with pytest.raises(TypeError):
         await _repo_on(recorder).fetch_recent_memories("Alice")

@@ -130,8 +130,7 @@ def _to_markdown(v: Verdict) -> str:
 class VerdictSynthesizer:
     """Cluster-weighted CIOR synthesizer.
 
-    Reads `conviction` and `cior` directly from the canonical `Agent`
-    (not from the legacy `AgentProfile` -- see Gap P1).
+    Reads `conviction` and `cior` directly from the canonical `Agent`.
     """
 
     async def asynthesize(

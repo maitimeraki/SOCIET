@@ -7,11 +7,10 @@ candidate's text covers), `density` (its structural relevance evidence, scaled
 to [0, 1] across the batch) and `blended` (`w1*semantic + w2*density`, weights
 from `DebateConfig`).
 
-Both selection surfaces route through `rank_candidates` so the score exists once:
+The selection path routes through `rank_candidates` so the score exists once:
   * the debate path — `ProfileSynthesizer.synthesize`
-  * `/hatch`        — `PersonaRepository.find_agent_sectors`
 
-`density_component` is the single density entry point for both, and its whole
+`density_component` is the single density entry point for it, and its whole
 shape read lives in `_evidence_row` — the graph-row adapter, so the
 Document-first graph model (P4-T1) is read in that one body and nothing else
 reads evidence rows. Selected rows also carry the provenance `anchors` of their
@@ -74,7 +73,7 @@ def density_component(evidence: Sequence[Any]) -> float:
     """Raw density/structural component of a candidate — sum of its relevance evidence.
 
     THE density entry point for S4: each surface hands in its own graph rows
-    (entity nodes for the debate path, sector rows for `/hatch`) and reads the
+    (entity nodes for the debate path) and reads the
     sum back. The one shape read is `_evidence_row`.
     """
     return sum((_evidence_row(item)[0] for item in evidence or ()), 0.0)
@@ -84,7 +83,7 @@ def _evidence_row(item: Any) -> tuple[float, tuple[dict[str, str], ...]]:
     """THE graph-row adapter — the single place that reads an evidence row.
 
     Returns `(raw_density, anchors)` for either surface's row shape:
-      * a mapping (a `/hatch` sector row): density from `total_relevance`
+      * a mapping (a sector row): density from `total_relevance`
         (falling back to `relevance_score`); anchors are the persona names in
         `evidence_nodes` — Persona nodes are identified by name, no id exists —
         plus any `document_anchor` / `document_ids` the row carries.
@@ -173,7 +172,7 @@ def _anchors_of(evidence: Sequence[Any]) -> tuple[dict[str, str], ...]:
 def intent_terms(intent: Any) -> list[str]:
     """The intent's keyword/entity frame plus its domain/capability tags.
 
-    Accepts a `QueryIntent` or its mapping form (the `/hatch` path passes the
+    Accepts a `QueryIntent` or its mapping form (the caller passes the
     `llm_output` dict when no intent object is available).
     """
     terms: list[str] = []

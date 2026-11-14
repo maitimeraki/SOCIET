@@ -7,8 +7,8 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from src.graph.scope import entity_in_dataset, path_in_dataset
-from src.persona.models_persona import (
-    AgentProfile,
+from src.persona.agent import (
+    Agent,
     ConfidenceBreakdown,
     PersonaIdentity,
 )
@@ -47,9 +47,9 @@ def mock_driver():
 
 @pytest.fixture
 def sample_profiles():
-    """Sample AgentProfiles for testing."""
+    """Sample Agents for testing."""
     return [
-        AgentProfile(
+        Agent(
             identity=PersonaIdentity(
                 name="Alice",
                 archetype="analyst",
@@ -58,7 +58,7 @@ def sample_profiles():
             discovery_type="intent_driven",
             expertise_level="Technical",
             domain_tags=["ai", "ml", "ethics"],
-            description="AI researcher",
+            bio="AI researcher",
             detailed_perspective="Focuses on AI safety",
             confidence=0.8,
             confidence_breakdown=ConfidenceBreakdown(
@@ -66,9 +66,9 @@ def sample_profiles():
                 node_density=10,
                 relationship_connectivity=0.7,
             ),
-            provenance=[],
+            summary_provenance=[],
         ),
-        AgentProfile(
+        Agent(
             identity=PersonaIdentity(
                 name="Bob",
                 archetype="strategist",
@@ -77,7 +77,7 @@ def sample_profiles():
             discovery_type="graph_discovery",
             expertise_level="Strategic",
             domain_tags=["ai", "policy", "governance"],
-            description="Policy expert",
+            bio="Policy expert",
             detailed_perspective="Focuses on AI governance",
             confidence=0.7,
             confidence_breakdown=ConfidenceBreakdown(
@@ -85,9 +85,9 @@ def sample_profiles():
                 node_density=8,
                 relationship_connectivity=0.5,
             ),
-            provenance=[],
+            summary_provenance=[],
         ),
-        AgentProfile(
+        Agent(
             identity=PersonaIdentity(
                 name="Charlie",
                 archetype="developer",
@@ -96,7 +96,7 @@ def sample_profiles():
             discovery_type="intent_driven",
             expertise_level="Technical",
             domain_tags=["ml", "engineering", "infrastructure"],
-            description="ML engineer",
+            bio="ML engineer",
             detailed_perspective="Focuses on ML systems",
             confidence=0.9,
             confidence_breakdown=ConfidenceBreakdown(
@@ -104,7 +104,7 @@ def sample_profiles():
                 node_density=12,
                 relationship_connectivity=0.8,
             ),
-            provenance=[],
+            summary_provenance=[],
         ),
     ]
 

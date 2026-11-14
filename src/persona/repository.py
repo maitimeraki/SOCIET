@@ -2,10 +2,8 @@ import asyncio
 import hashlib
 import inspect
 import uuid as _uuid
-from dataclasses import asdict
 from datetime import datetime
 from typing import (
-    TYPE_CHECKING,
     Any,
     Dict,
     List,
@@ -40,11 +38,6 @@ from src.persona.agent import (
     ProvenanceLink,
     Stance,
 )
-from src.simulation.debate_config import DebateConfig
-from src.simulation.relevance_matrix import SelectionCandidate, rank_candidates
-
-if TYPE_CHECKING:
-    from src.utils.queryIntend import QueryIntent
 
 logger = setup_logging()
 
@@ -141,28 +134,6 @@ class PersonaRepository:
             logger.exception("Failed to read node properties")
             return {}
 
-    async def fetch_agent_node_props(
-        self, name: str, dataset_id: str
-    ) -> Dict[str, Any] | None:
-        """Return the properties of the node `name` in `dataset_id` (audit C1).
-
-        A Persona of the dataset, or an entity through its document.
-        """
-        query = f"""
-        MATCH (n {{name: $name}})
-        WHERE {persona_or_entity_in_dataset("n")}
-        RETURN n LIMIT 1
-        """
-        async with self._driver.session(database=self._db) as session:
-            res = await session.run(
-                cast(LiteralString, query), name=name, dataset_id=dataset_id
-            )
-            row = await res.single()
-        if not row:
-            return None
-        node = row.get("n")
-        return self._node_props(node) if node else None
-
     async def fetch_recent_memories(
         self, name: str, dataset_id: str, memory_limit: int = 30
     ) -> List[Dict[str, Any]]:
@@ -222,105 +193,6 @@ class PersonaRepository:
         except Exception:
             return rows
 
-    async def find_agent_sectors(
-        self,
-        llm_output: Dict[str, List[str]],
-        dataset_id: str,
-        intent: Optional["QueryIntent"] = None,
-        config: Optional[DebateConfig] = None,
-    ) -> List[Dict[str, Any]]:
-        """Discover agent sectors by grouping Persona nodes by domain tags.
-
-        S4: sectors are ranked by the intent-semantic + density blend and each
-        row carries its decomposition under `selection`. `intent` is the S3
-        intent; without it the keyword/entity frame is read from `llm_output`,
-        and with neither the ordering is the previous density-only one.
-
-        Returns list of sector dicts with keys: domain_tag, total_relevance,
-        evidence_nodes, density, selection.
-        """
-        query = """
-        MATCH (n:Persona)
-        WHERE coalesce(n.dataset_id, '') = $dataset_id
-          AND size(coalesce(n.domain_tags, [])) > 0
-        UNWIND n.domain_tags AS tag
-        WITH tag, n,
-             size(n.domain_tags) AS tag_count,
-             coalesce(n.relevance_score, 0.5) AS node_relevance
-        RETURN tag AS domain_tag,
-               sum(node_relevance) AS total_relevance,
-               collect(DISTINCT n.name) AS evidence_nodes,
-               count(DISTINCT n) AS density
-        ORDER BY total_relevance DESC
-        LIMIT 20
-        """
-        async with self._driver.session(database=self._db) as session:
-            res = await session.run(query, dataset_id=dataset_id)
-            rows = await res.data()
-
-        sectors = [
-            {
-                "domain_tag": r["domain_tag"],
-                "total_relevance": float(r["total_relevance"] or 0),
-                "evidence_nodes": r["evidence_nodes"],
-                "density": int(r["density"] or 0),
-            }
-            for r in rows
-        ]
-
-        candidates = [
-            SelectionCandidate(
-                name=str(sector["domain_tag"]),
-                text=" ".join(
-                    [str(sector["domain_tag"])]
-                    + [str(node) for node in (sector["evidence_nodes"] or [])]
-                ),
-                evidence=[sector],
-            )
-            for sector in sectors
-        ]
-        ranked = rank_candidates(
-            candidates,
-            intent if intent is not None else llm_output,
-            config or DebateConfig(),
-        )
-
-        sectors_by_tag = {
-            candidate.name: sector for candidate, sector in zip(candidates, sectors)
-        }
-        for row in ranked:
-            sectors_by_tag[row.name]["selection"] = asdict(row)
-        return [sectors_by_tag[row.name] for row in ranked]
-
-    async def _get_embedding(
-        self, text: str, embedding_service: Any | None = None
-    ) -> List[float]:
-        """Compatibility wrapper: support async and sync embedding providers.
-
-        If an `embedding_service` is provided it will be used; otherwise falls back
-        to `self.embed_model` (synchronous OllamaEmbedding in this repo).
-        """
-        provider = embedding_service or getattr(self, "embed_model", None)
-        if provider is None:
-            raise RuntimeError("No embedding provider available")
-
-        # common method names
-        func = None
-        for name in ("get_embedding", "get_text_embedding", "embed", "encode"):
-            if hasattr(provider, name):
-                func = getattr(provider, name)
-                break
-
-        if func is None:
-            raise RuntimeError("Embedding provider has no recognizable method")
-
-        if inspect.iscoroutinefunction(func):
-            return await func(text)
-
-        # sync function: run in threadpool to avoid blocking the event loop
-        loop = asyncio.get_event_loop()
-        return await loop.run_in_executor(None, func, text)
-
     async def fetch_nodes_by_names(
         self, names: List[str], dataset_id: str
     ) -> Dict[str, Dict[str, Any]]:
@@ -360,91 +232,6 @@ class PersonaRepository:
                 props = {**props, "label": label}
             out.setdefault(name, props)
         return out
-
-    async def build_agent_profiles_from_sectors(
-        self,
-        llm_output: Dict[str, List[str]],
-        dataset_id: str,
-        user_query: str,
-        max_agents: int = 5,
-        intent: Optional["QueryIntent"] = None,
-    ) -> List[Agent]:
-        """Build canonical Agents from `find_agent_sectors` output.
-
-        This implementation is optimized for production: it collects top evidence
-        agent names, batch-fetches nodes, computes metrics from sector results,
-        and constructs profiles in parallel with a bounded concurrency.
-
-        `intent` is the S3 intent, forwarded so sector ranking consumes it.
-        """
-        sector_results = await self.find_agent_sectors(
-            llm_output, dataset_id, intent=intent
-        )  # return type: List[Dict[str, Any]] with keys: domain_tag, total_relevance, evidence_nodes, density, selection
-
-        """Here sector_results should be cashed such that we can further use these agent name and their data."""
-
-        # Collect unique agent names from the top sectors (preserve order)
-        evidence_names: List[str] = []
-        for res in (sector_results or [])[:10]:
-            for ev in res.get("evidence_nodes") or []:
-                if ev and ev not in evidence_names:
-                    evidence_names.append(ev)
-
-        agent_names = evidence_names[:max_agents]
-        if not agent_names:
-            return []
-
-        # Batch-fetch agent nodes to minimize DB round-trips
-        nodes_map = await self.fetch_nodes_by_names(
-            agent_names, dataset_id=dataset_id
-        )  # return type : Dict[str, Dict[str, Any]] mapping agent name to node properties
-
-        # Compute raw relevance per agent across the provided sector_results so we can normalize
-        raw_relevance: Dict[str, float] = {name: 0.0 for name in agent_names}
-        for res in sector_results or []:
-            score = float(res.get("total_relevance") or 0.0)
-            for ev in res.get("evidence_nodes") or []:
-                if ev in raw_relevance:
-                    raw_relevance[
-                        ev
-                    ] += score  # THere is the problem that the same agent can appear in multiple sectors with different relevance scores, we need to sum them up to get a total relevance score per agent
-
-        max_relevance = max(raw_relevance.values()) if raw_relevance else 0.0
-
-        # Build profiles concurrently with bounded parallelism
-        semaphore = asyncio.Semaphore(8)
-
-        async def _build_task(agent_name: str) -> Agent:
-            async with semaphore:
-                node = (
-                    nodes_map.get(agent_name)
-                    or await self.fetch_agent_node_props(
-                        agent_name, dataset_id=dataset_id
-                    )
-                    or {"name": agent_name}
-                )  # return Type: Dict[str, Any] where we fetch the node properties for the agent name, if not found we create a minimal dict with just the name to avoid None issues
-                metrics = await self.calculate_agent_metrics_and_context_for_llm(
-                    agent_name,
-                    node,
-                    sector_results or [],
-                    max_relevance=max_relevance,
-                    dataset_id=dataset_id,
-                )
-                src_chunk = node.get("triplet_source_id")
-                return await self.build_single_agent_profile_from_node(
-                    agent_name=agent_name,
-                    node=node,
-                    user_query=user_query,
-                    dataset_id=dataset_id,
-                    agent_metrics=metrics,
-                    sector_results=sector_results or [],
-                    llm_output=llm_output,
-                    chunk_node_ids=[src_chunk] if src_chunk else None,
-                )
-
-        tasks = [asyncio.create_task(_build_task(n)) for n in agent_names]
-        profiles = await asyncio.gather(*tasks)
-        return profiles
 
     async def build_single_agent_profile_from_node(
         self,
@@ -1675,54 +1462,3 @@ class PersonaRepository:
             for row in rows
             if row.get("doc_id")
         ]
-
-    # Full pipeline execution
-    async def create_agent_profiles_from_query(
-        self, user_query: str, dataset_id: str, max_agents: int = 5
-    ) -> List[Agent]:
-        """Main entry point: Query → Intent → Sectors → Agents"""
-        from src.utils.queryIntend import QueryIntend
-
-        intent_extractor = QueryIntend()
-
-        # 1. Extract intent using LLM (from your QueryIntentExtractor)
-        intent = await intent_extractor.expand_user_query(user_query)
-        if not intent:
-            return []
-
-        # 2. Convert to dict format for find_agent_sectors
-        llm_output = {
-            "direct_keywords": intent.direct_keywords,
-            "latent_sectors": intent.latent_sectors,
-            "search_perspectives": intent.search_perspectives,
-        }
-
-        # 4. Build complete agent profiles (sector ranking consumes the intent)
-        profiles = await self.build_agent_profiles_from_sectors(
-            llm_output=llm_output,
-            dataset_id=dataset_id,
-            user_query=user_query,
-            max_agents=max_agents,
-            intent=intent,
-        )
-
-        return profiles
-
-
-if __name__ == "__main__":
-    import asyncio
-
-    from src.graph.config_graph import GraphConfig
-
-    async def test():
-        cfg = GraphConfig()
-        repo = PersonaRepository(
-            neo4j_uri=cfg.neo4j_uri,
-            neo4j_user=cfg.neo4j_username,
-            neo4j_password=cfg.neo4j_password,
-            neo4j_database=cfg.neo4j_database,
-        )
-        profile = await repo.create_agent_profiles_from_query(user_query="Simulate debate on AI ethics in healthcare", dataset_id="test_dataset", max_agents=5)
-        print(profile)
-
-    asyncio.run(test())

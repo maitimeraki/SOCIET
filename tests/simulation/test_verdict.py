@@ -24,7 +24,7 @@ def test_debate_verdict_has_narrative():
 
 
 class MockProfile:
-    """Minimal stand-in for AgentProfile, compatible with _calibrate_cior lookups."""
+    """Minimal stand-in for Agent, compatible with _calibrate_cior lookups."""
 
     def __init__(self, name: str, conviction: float, cior: float):
         identity = MagicMock()

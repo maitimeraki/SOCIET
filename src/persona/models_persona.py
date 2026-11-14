@@ -1,7 +1,5 @@
-from datetime import datetime
 from enum import Enum
-from typing import List
-from uuid import UUID, uuid4
+from uuid import UUID
 
 from pydantic import BaseModel, Field
 
@@ -69,36 +67,3 @@ class ProvenanceLink(BaseModel):
     title: str
     breadcrumb: str
     chunk_id: UUID
-
-
-# --- The Root Agent Model ---
-
-
-class AgentProfile(BaseModel):
-    """The complete, production-grade Agent Profile for Simulation."""
-
-    # 1. Identity & System Metadata
-    agent_id: UUID = Field(default_factory=uuid4)
-    discovery_type: DiscoveryType
-    expertise_level: ExpertiseLevel
-    last_updated: datetime = Field(default_factory=datetime.utcnow)
-    # version_hash: str = Field(description="Hash of the graph state at time of synthesis")
-
-    # 2. Persona Definition (From your Dataclasses)
-    identity: PersonaIdentity
-    # biases: List[PersonaBias] = Field(default_factory=list)
-    # memories: List[PersonaMemory] = Field(default_factory=list)
-
-    # 3. GraphRAG Enrichment (The 'White-Box' logic)
-    # primary_sector: str
-    domain_tags: List[str]
-    # core_entities: List[str] = Field(description="Key Neo4j nodes this agent represents")
-
-    # 4. Perspective & Summarization
-    description: str = Field(description="High-level role summary for UI cards")
-    detailed_perspective: str = Field(description="Synthesized first-person worldview")
-
-    # 5. Reliability Metrics
-    confidence: float = Field(ge=-1, le=1)
-    confidence_breakdown: ConfidenceBreakdown
-    provenance: List[ProvenanceLink]
