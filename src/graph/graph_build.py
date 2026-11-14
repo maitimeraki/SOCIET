@@ -153,6 +153,9 @@ def _proposed_labels(extracted) -> tuple[List[str], List[str]]:
 
 # The writers' bookkeeping — llama-index stamps chunk lineage onto every entity,
 # and the pipeline stamps the dataset/ontology id. Never a displayable fact.
+# `triplet_source_id` (a chunk id) and `embedding` (a vector) are stored on the
+# node but never leave the server: both are stripped from every outbound
+# projection. Only `_public_props` reads this set, so nothing persisted depends on it.
 _LINEAGE_KEYS = frozenset(
     {
         "document_id",
@@ -162,6 +165,8 @@ _LINEAGE_KEYS = frozenset(
         "content_hash",
         "dataset_id",
         "ontology_id",
+        "triplet_source_id",
+        "embedding",
     }
 )
 
@@ -421,8 +426,10 @@ def _scope_entities(nodes, dataset_id: str) -> None:
     """
     from llama_index.core.graph_stores.types import KG_NODES_KEY, KG_RELATIONS_KEY
 
-    if not dataset_id:
-        raise ValueError("entity ids must be namespaced by a non-empty dataset_id")
+    if not dataset_id or ":" in dataset_id:
+        raise ValueError(
+            "entity ids need a non-empty dataset_id without ':' (the namespace separator)"
+        )
     for node in nodes:
         meta = getattr(node, "metadata", None) or {}
         bag = meta.get(KG_NODES_KEY, [])

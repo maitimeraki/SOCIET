@@ -16,13 +16,12 @@ import time
 import types
 from unittest.mock import AsyncMock, MagicMock, patch
 
-import pytest
-
-import src.api.api_server as api_server
 # The real llama-index graph-store types are imported before the mocks below
 # apply: ScopedEntityNode subclasses EntityNode, and a mocked base is not a type.
 import llama_index.core.graph_stores.types  # noqa: F401
+import pytest
 
+import src.api.api_server as api_server
 from src.graph.models_graph import (
     EntityTypeDefinition,
     LocalOntology,
@@ -199,9 +198,10 @@ class TestOneBadChunkAmongFour:
             extraction_chunk_retry_backoff_seconds=0.0,
         )
 
-        def _extract(self, doc, extractors, relation_slots=None, **_):
+        def _extract(self, doc, extractors, relation_slots=None, *, dataset_id):
             if doc.chunk.chunk_id == FAILING_CHUNK:
                 raise RuntimeError("provider 500")
+            assert dataset_id == "ds1"
             return _good(self, doc, extractors, relation_slots)
 
         indexes, extract_patch = _wire(stage, chunks, _extract)
@@ -237,7 +237,7 @@ class TestOneBadChunkAmongFour:
             extraction_chunk_retry_backoff_seconds=0.0,
         )
 
-        def _extract(self, doc, extractors, relation_slots=None, **_):
+        def _extract(self, doc, extractors, relation_slots=None, *, dataset_id):
             raise RuntimeError()
 
         _, extract_patch = _wire(stage, chunks, _extract)
@@ -260,7 +260,7 @@ class TestEveryChunkFails:
             extraction_chunk_retry_backoff_seconds=0.0,
         )
 
-        def _always_fail(self, doc, extractors):
+        def _always_fail(self, doc, extractors, relation_slots=None, *, dataset_id):
             raise RuntimeError("provider down")
 
         _, extract_patch = _wire(stage, chunks, _always_fail)
@@ -291,9 +291,10 @@ class TestJobScopedFailureVerdict:
             extraction_chunk_retry_backoff_seconds=0.0,
         )
 
-        def _extract(self, doc, extractors, relation_slots=None, **_):
+        def _extract(self, doc, extractors, relation_slots=None, *, dataset_id):
             if doc.chunk.parent_doc_id == "doc-a":
                 raise RuntimeError("provider 500")
+            assert dataset_id == "ds1"
             return _good(self, doc, extractors, relation_slots)
 
         _, extract_patch = _wire(stage, chunks, _extract)
@@ -329,7 +330,7 @@ class TestJobScopedFailureVerdict:
             extraction_chunk_retry_backoff_seconds=0.0,
         )
 
-        def _always_fail(self, doc, extractors):
+        def _always_fail(self, doc, extractors, relation_slots=None, *, dataset_id):
             raise RuntimeError("provider down")
 
         _, extract_patch = _wire(stage, chunks, _always_fail)
@@ -359,10 +360,11 @@ class TestFailureLeavesNoOrphanedWriters:
             extraction_chunk_retry_backoff_seconds=0.0,
         )
 
-        def _extract(self, doc, extractors, relation_slots=None, **_):
+        def _extract(self, doc, extractors, relation_slots=None, *, dataset_id):
             if doc.chunk.chunk_id == FAILING_CHUNK:
                 return ([], ["EXPLODE"], [], [], [])  # fails later, in promote
             time.sleep(0.3)  # hold the siblings in flight
+            assert dataset_id == "ds1"
             return _good(self, doc, extractors, relation_slots)
 
         def _promote(vocabulary, proposed, kind="entity"):

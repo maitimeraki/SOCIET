@@ -8,11 +8,10 @@ tests/graph/test_graph_build.py does, and the two per-chunk seams
 import threading
 from unittest.mock import MagicMock, patch
 
-import pytest
-
 # The real llama-index graph-store types are imported before the mocks below
 # apply: ScopedEntityNode subclasses EntityNode, and a mocked base is not a type.
 import llama_index.core.graph_stores.types  # noqa: F401
+import pytest
 
 from src.graph.models_graph import (
     EntityTypeDefinition,
@@ -208,10 +207,11 @@ class TestSlidingWindow:
 
         lock = threading.Lock()
         barrier = threading.Barrier(2, timeout=10)
-        state = {"active": 0, "peak": 0, "starts": 0}
+        state = {"active": 0, "peak": 0, "starts": 0, "datasets": set()}
 
-        def _gated_extract(self, doc, extractors, relation_slots=None, **_):
+        def _gated_extract(self, doc, extractors, relation_slots=None, *, dataset_id):
             with lock:
+                state["datasets"].add(dataset_id)
                 state["active"] += 1
                 state["peak"] = max(state["peak"], state["active"])
                 state["starts"] += 1
@@ -232,6 +232,9 @@ class TestSlidingWindow:
             await stage.run("ds", chunks, _ontology(), job_id="job-1")
 
         assert state["starts"] == len(chunks)  # every chunk ran
+        assert state["datasets"] == {
+            "ds"
+        }  # every chunk namespaced by the run's dataset
         assert state["peak"] == 2  # window filled to the limit
         assert state["peak"] <= 2  # and never exceeded it
         assert mock_publish.call_count == len(chunks)

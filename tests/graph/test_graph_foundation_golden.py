@@ -15,13 +15,12 @@ extractor and assert the delta the live path would emit.
 
 from unittest.mock import MagicMock, patch
 
-import pytest
-
-from src.graph.models_graph import LocalOntology
-
 # The real llama-index graph-store types are imported before the mocks below
 # apply: ScopedEntityNode subclasses EntityNode, and a mocked base is not a type.
 import llama_index.core.graph_stores.types  # noqa: F401
+import pytest
+
+from src.graph.models_graph import LocalOntology
 
 
 # Mock heavy llama_index imports before importing graph_build — the exact seam
@@ -57,17 +56,6 @@ def mock_llama_index():
             patch.object(gb, "SentenceSplitter", MagicMock()),
         ):
             yield
-
-
-def _pin_kg_keys():
-    """`_extract_chunk` reads KG_NODES_KEY/KG_RELATIONS_KEY from
-    `llama_index.core.graph_stores.types`; pin them to their real string values
-    so this test's metadata bag is the one the code reads."""
-    import sys
-
-    types = sys.modules["llama_index.core.graph_stores.types"]
-    types.KG_NODES_KEY = "nodes"
-    types.KG_RELATIONS_KEY = "relations"
 
 
 def _stage():
@@ -121,7 +109,6 @@ def test_extract_chunk_routes_leaked_value_onto_real_to_real_edge():
     slots. Each coerced value lands on that surviving edge (both halves of the
     binding criterion); no literal node survives and the literals' own PRICE/DATE
     edges are dropped."""
-    _pin_kg_keys()
     stage = _stage()
 
     amazon = MagicMock()
@@ -198,7 +185,6 @@ def test_extract_chunk_routes_value_onto_surviving_entity():
     """Entity fallback end to end: the literal's ONLY real neighbour is the
     Amazon entity, so the value lands on that entity (under the relation's
     lowercased label) and the dangling edge is dropped (§13.1)."""
-    _pin_kg_keys()
     stage = _stage()
 
     amazon = MagicMock()
@@ -222,7 +208,9 @@ def test_extract_chunk_routes_value_onto_surviving_entity():
 
     doc = MagicMock()
     doc.metadata = {}
-    _, _, _, delta_nodes, delta_edges = stage._extract_chunk(doc, [_extractor], dataset_id="ds-test")
+    _, _, _, delta_nodes, delta_edges = stage._extract_chunk(
+        doc, [_extractor], dataset_id="ds-test"
+    )
 
     assert {n["label"] for n in delta_nodes} == {"Amazon"}  # literal node gone
     assert delta_edges == []  # dangling edge removed

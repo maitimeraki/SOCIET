@@ -101,6 +101,43 @@ def test_read_returns_properties(monkeypatch):
     assert nodes[0]["properties"] == {"revenue": "$391B"}
 
 
+def test_read_never_sends_chunk_id_or_embedding(monkeypatch):
+    """Spec 4b: `triplet_source_id` (a chunk id) and `embedding` (a vector) are
+    stored on the node but must not reach the client in the snapshot, on nodes
+    or on edges."""
+    import src.api.graph_snapshot as gs
+
+    stored = {
+        "revenue": "$391B",
+        "triplet_source_id": "chunk-7",
+        "embedding": [0.1, 0.2],
+    }
+
+    class _Store:
+        def structured_query(self, q, param_map=None):
+            if " AS source" in q:
+                return [
+                    {
+                        "source": "e1",
+                        "target": "e2",
+                        "label": "OWNS",
+                        "props": dict(stored),
+                    }
+                ]
+            return [
+                {
+                    "id": "e1",
+                    "label": "Amazon",
+                    "type": "Company",
+                    "props": dict(stored),
+                }
+            ]
+
+    nodes, edges = gs._read(_Store(), "ds")
+    assert nodes[0]["properties"] == {"revenue": "$391B"}
+    assert edges[0]["properties"] == {"revenue": "$391B"}
+
+
 @pytest.mark.asyncio
 async def test_both_reads_are_scoped_by_dataset_id(store):
     await graph_snapshot.read_snapshot("ds-42")

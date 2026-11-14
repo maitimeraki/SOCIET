@@ -2,13 +2,12 @@
 
 from unittest.mock import AsyncMock, MagicMock, patch
 
-import pytest
-
-from src.graph.models_graph import LocalOntology, OntologyMetadata, ProcessedChunk
-
 # The real llama-index graph-store types are imported before the mocks below
 # apply: ScopedEntityNode subclasses EntityNode, and a mocked base is not a type.
 import llama_index.core.graph_stores.types  # noqa: F401
+import pytest
+
+from src.graph.models_graph import LocalOntology, OntologyMetadata, ProcessedChunk
 
 
 # Mock heavy llama_index imports before importing graph_build
@@ -526,17 +525,6 @@ class TestLiteralRouting:
         ):
             return GraphExtractionStage(GraphConfig())
 
-    @staticmethod
-    def _pin_kg_keys():
-        """`_extract_chunk` reads KG_NODES_KEY/KG_RELATIONS_KEY from the mocked
-        `llama_index.core.graph_stores.types`; pin them to their real string
-        values so this test's metadata bag is the one the code reads."""
-        import sys
-
-        types = sys.modules["llama_index.core.graph_stores.types"]
-        types.KG_NODES_KEY = "nodes"
-        types.KG_RELATIONS_KEY = "relations"
-
     def test_extract_chunk_routes_literals_onto_real_to_real_relation(self):
         """§13.2: a leaked value lands on the SURVIVING real→real edge's declared
         slot, and that edge — not the literal's own dangling edge — stays in the
@@ -550,7 +538,6 @@ class TestLiteralRouting:
             RelationTypeDefinition,
         )
 
-        self._pin_kg_keys()
         stage = self._stage()
 
         amazon = MagicMock()
@@ -633,7 +620,6 @@ class TestLiteralRouting:
             RelationTypeDefinition,
         )
 
-        self._pin_kg_keys()
         stage = self._stage()
 
         amazon = MagicMock()
@@ -720,7 +706,6 @@ class TestLiteralRouting:
         lowercased label — the value survives the drop (§13.1)."""
         from unittest.mock import MagicMock
 
-        self._pin_kg_keys()
         stage = self._stage()
 
         amazon = MagicMock()
@@ -764,7 +749,6 @@ class TestLiteralRouting:
             RelationTypeDefinition,
         )
 
-        self._pin_kg_keys()
         stage = self._stage()
 
         amazon = MagicMock()
@@ -807,7 +791,6 @@ class TestLiteralRouting:
     def test_extract_chunk_drops_relations_between_two_literals(self):
         from unittest.mock import MagicMock
 
-        self._pin_kg_keys()
         stage = self._stage()
 
         rel = MagicMock()
@@ -847,20 +830,11 @@ class TestDeltaPayloadProperties:
     uses — so this exercises the dict lookup the live path performs.
     """
 
-    @staticmethod
-    def _pin_kg_keys():
-        import sys
-
-        types = sys.modules["llama_index.core.graph_stores.types"]
-        types.KG_NODES_KEY = "nodes"
-        types.KG_RELATIONS_KEY = "relations"
-
     def test_delta_payload_carries_properties(self):
         from unittest.mock import MagicMock
 
         from src.graph.graph_build import _delta_payload
 
-        self._pin_kg_keys()
         item = MagicMock()
         item.id = "e1"
         item.name = "Amazon"
@@ -882,7 +856,6 @@ class TestDeltaPayloadProperties:
 
         from src.graph.graph_build import _delta_payload
 
-        self._pin_kg_keys()
         rel = MagicMock()
         rel.source_id = "e2"
         rel.target_id = "e3"

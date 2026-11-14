@@ -13,6 +13,7 @@ Task 0.2 scope predicate; it skips when Neo4j is unavailable.
 
 import asyncio
 import json
+import os
 import uuid
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
@@ -176,6 +177,11 @@ class TestEntityIdsAreNamespacedAtConstruction:
         with pytest.raises(ValueError):
             _extract(stage, "", [("Apple", "SUES", "Samsung")])
 
+    def test_dataset_id_containing_the_separator_is_refused(self):
+        stage = _stage_without_neo4j()
+        with pytest.raises(ValueError):
+            _extract(stage, "ds:a", [("Apple", "SUES", "Samsung")])
+
 
 class _TripleLLM(MockLLM):
     """Stub extraction LLM: reports the triples whose fragment the chunk contains."""
@@ -203,7 +209,12 @@ async def live_store():
     Every dataset a test builds through `build_dataset` is recorded, and its nodes
     are DETACH DELETEd on teardown.
     """
-    cfg = GraphConfig()
+    # A standalone server is reached over bolt://. NEO4J_URI (which the env loader
+    # may set from .env) overrides the default, but a neo4j:// routing scheme is
+    # rewritten to bolt://, since routing fails against a standalone server.
+    uri = os.getenv("NEO4J_URI") or "bolt://localhost:7687"
+    uri = "bolt://" + uri[len("neo4j://") :] if uri.startswith("neo4j://") else uri
+    cfg = GraphConfig(neo4j_uri=uri)
     try:
         with neo4j.GraphDatabase.driver(
             cfg.neo4j_uri,
