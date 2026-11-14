@@ -142,7 +142,10 @@ class SeatDecision:
 
 class SeatQueue:
     """Eligibility, then Maximal Marginal Relevance. A rejected profile frees its
-    seat for the next eligible candidate; nothing is re-scored."""
+    seat for the next eligible candidate; nothing is re-scored.
+
+    One draw at a time: next() refuses while a draw is unresolved, so accepts never
+    exceed n. Task 1.5 callers must dedupe by entity_id before building the queue."""
 
     def __init__(self, candidates: Iterable[Candidate], n: int):
         self._n = n
@@ -150,7 +153,7 @@ class SeatQueue:
         self._pool: list[Candidate] = []
         self._drawn: dict[str, Candidate] = {}
         self._decisions: dict[str, SeatDecision] = {}
-        ordered = sorted(candidates, key=lambda c: (-score(c), c.name))
+        ordered = sorted(candidates, key=lambda c: (-score(c), c.name, c.entity_id))
         ids = [c.entity_id for c in ordered]
         if len(set(ids)) != len(ids):
             raise ValueError(f"duplicate entity_id in candidates: {sorted({i for i in ids if ids.count(i) > 1})}")
@@ -173,13 +176,20 @@ class SeatQueue:
         return max((cosine(c.vector, s.vector) for s in self._seated), default=0.0)
 
     def _require_drawn(self, c: Candidate) -> None:
-        if c.entity_id not in self._drawn:
+        if not isinstance(c, Candidate):
+            raise ValueError(f"expected a Candidate, got {c!r}")
+        drawn = self._drawn.get(c.entity_id)
+        if drawn is None:
             raise ValueError(f"{c.name} was not drawn by next() or is already resolved")
+        if drawn is not c:
+            raise ValueError(f"{c.name} is not the object next() drew")
 
     def next(self) -> Candidate | None:
+        if self._drawn:
+            raise ValueError("a draw is unresolved: accept or reject it before drawing again")
         if len(self._seated) >= self._n or not self._pool:
             return None
-        best = min(self._pool, key=lambda c: (-(score(c) - MMR_LAMBDA * self._penalty(c)), c.name))
+        best = min(self._pool, key=lambda c: (-(score(c) - MMR_LAMBDA * self._penalty(c)), c.name, c.entity_id))
         self._pool.remove(best)
         self._drawn[best.entity_id] = best
         self._decisions[best.entity_id].reason = "drawn, unresolved"
@@ -187,8 +197,6 @@ class SeatQueue:
 
     def accept(self, c: Candidate) -> None:
         self._require_drawn(c)
-        if len(self._seated) >= self._n:
-            raise ValueError(f"all {self._n} seats are already filled")
         del self._drawn[c.entity_id]
         self._seated.append(c)
         d = self._decisions[c.entity_id]

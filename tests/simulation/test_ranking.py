@@ -82,7 +82,9 @@ def test_name_variants_collapse_to_one_cluster():
 
 def test_ineligible_candidates_carry_a_reason():
     q = SeatQueue([cand("Metric", is_actor=False), cand("Thin", evidence_count=1), cand("Ok")], n=3)
-    assert q.next().name == "Ok"
+    ok = q.next()
+    assert ok.name == "Ok"
+    q.accept(ok)
     assert q.next() is None
     reasons = {d.name: d.reason for d in q.decisions()}
     assert reasons["Metric"] == "not an actor"
@@ -91,7 +93,9 @@ def test_ineligible_candidates_carry_a_reason():
 
 def test_name_variants_share_one_seat():
     q = SeatQueue([cand("WisprFlow_700M", ppr=0.9), cand("WisprFlow_2B", ppr=0.8)], n=2)
-    assert q.next().name == "WisprFlow_700M"
+    first = q.next()
+    assert first.name == "WisprFlow_700M"
+    q.accept(first)
     assert q.next() is None
 
 
@@ -119,6 +123,18 @@ def test_a_rejected_profile_hands_the_seat_to_the_next_candidate():
     assert q.next().name == "B"
 
 
+def test_next_refuses_to_draw_while_a_draw_is_unresolved():
+    a = cand("A", ppr=0.9, vector=(1.0, 0.0))
+    b = cand("B", ppr=0.85, vector=(1.0, 0.0))
+    c = cand("C", ppr=0.7, vector=(0.0, 1.0))
+    q = SeatQueue([a, b, c], n=2)
+    q.next()
+    with pytest.raises(ValueError, match="before drawing again"):
+        q.next()
+    q.accept(a)
+    assert q.next().name == "C"
+
+
 def test_same_input_gives_the_same_order():
     pool = [cand("A", ppr=0.7), cand("B", ppr=0.7), cand("C", ppr=0.7)]
     run = lambda: [d.name for d in sorted(SeatQueue(pool, n=3).decisions(), key=lambda d: d.name)]
@@ -140,15 +156,21 @@ def test_seat_bound_stops_the_queue_after_n_accepts():
 
 def test_accept_without_a_draw_raises():
     q = SeatQueue([cand("A")], n=1)
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="not drawn by next"):
         q.accept(cand("A"))
+
+
+def test_accept_none_raises_value_error():
+    q = SeatQueue([cand("A")], n=1)
+    with pytest.raises(ValueError, match="expected a Candidate"):
+        q.accept(None)
 
 
 def test_double_accept_raises():
     q = SeatQueue([cand("A"), cand("B")], n=2)
     a = q.next()
     q.accept(a)
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="already resolved"):
         q.accept(a)
 
 
@@ -156,21 +178,34 @@ def test_reject_after_accept_raises():
     q = SeatQueue([cand("A"), cand("B")], n=2)
     a = q.next()
     q.accept(a)
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="already resolved"):
         q.reject(a, "too late")
 
 
-def test_accept_beyond_the_seat_bound_raises():
-    q = SeatQueue([cand("A", ppr=0.9), cand("B", ppr=0.8)], n=1)
-    a, b = q.next(), q.next()
-    q.accept(a)
-    with pytest.raises(ValueError):
-        q.accept(b)
+def test_accept_rejects_a_different_object_with_the_drawn_entity_id():
+    q = SeatQueue([cand("A", vector=(1.0, 0.0))], n=1)
+    q.next()
+    with pytest.raises(ValueError, match="is not the object next\\(\\) drew"):
+        q.accept(cand("A", vector=(0.0, 1.0)))
+
+
+def test_reject_rejects_a_different_object_with_the_drawn_entity_id():
+    q = SeatQueue([cand("A", vector=(1.0, 0.0))], n=1)
+    q.next()
+    with pytest.raises(ValueError, match="is not the object next\\(\\) drew"):
+        q.reject(cand("A", vector=(0.0, 1.0)), "impostor")
 
 
 def test_duplicate_entity_ids_raise_at_construction():
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="duplicate entity_id"):
         SeatQueue([cand("A"), cand("B", entity_id="A")], n=2)
+
+
+def test_same_name_and_score_seat_the_same_winner_in_either_input_order():
+    x = cand("Same", entity_id="e1")
+    y = cand("Same", entity_id="e2")
+    winner = lambda cands: SeatQueue(cands, n=1).next().entity_id
+    assert winner([x, y]) == winner([y, x]) == "e1"
 
 
 def test_a_drawn_but_unresolved_candidate_is_not_reported_as_not_reached():
