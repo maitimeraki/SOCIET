@@ -525,7 +525,7 @@ async def test_synthesize_from_names_builds_via_repo_pipeline(repo, synth):
         ["Carl"], "query", "ds1", {"Carl": 0.5}
     )
     assert len(profiles) == 1
-    repo.fetch_nodes_by_names.assert_awaited_with(["Carl"])
+    repo.fetch_nodes_by_names.assert_awaited_with(["Carl"], dataset_id="ds1")
     kwargs = repo.build_single_agent_profile_from_node.await_args.kwargs
     assert kwargs["agent_name"] == "Carl" and kwargs["dataset_id"] == "ds1"
     metrics_kw = repo.calculate_agent_metrics_and_context_for_llm.await_args.kwargs

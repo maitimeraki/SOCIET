@@ -6,6 +6,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, List
 
+from src.graph.scope import entity_in_dataset
 from src.simulation.pair_turn import ActivationCandidate, CommPair
 
 if TYPE_CHECKING:
@@ -92,7 +93,9 @@ class CommunicationTopology:
           AND a <> b
           AND a.name < b.name
           AND NOT e:Chunk
+          AND {entity_in_dataset("e")}
           AND coalesce(a.dataset_id, '') = $dataset_id
+          AND coalesce(b.dataset_id, '') = $dataset_id
         WITH a, b, count(DISTINCT e) AS shared_count,
              collect(DISTINCT e.name) AS shared_entities
         WHERE shared_count >= 1
@@ -157,7 +160,9 @@ class CommunicationTopology:
           AND a <> b
           AND a.name < b.name
           AND NOT e:Chunk
+          AND {entity_in_dataset("e")}
           AND coalesce(a.dataset_id, '') = $dataset_id
+          AND coalesce(b.dataset_id, '') = $dataset_id
         WITH a, b, count(DISTINCT e) AS shared_count,
              collect(DISTINCT e.name) AS shared_entities
         WHERE shared_count >= 1
@@ -193,10 +198,11 @@ class CommunicationTopology:
         }
         return cypher, params
 
-    _ACTIVATION_MENTIONS_CYPHER = """
-    MATCH (o:Opinion {dataset_id: $ds, query_hash: $qh, round_no: $last_round})-[:MENTIONS]->(e)
+    _ACTIVATION_MENTIONS_CYPHER = f"""
+    MATCH (o:Opinion {{dataset_id: $dataset_id, query_hash: $qh, round_no: $last_round}})-[:MENTIONS]->(e)
+    WHERE {entity_in_dataset("e")}
     MATCH (p:Persona)
-    WHERE coalesce(p.dataset_id, '') = $ds
+    WHERE coalesce(p.dataset_id, '') = $dataset_id
       AND NOT p.name IN $participants
       AND (e.name IN coalesce(p.entity_affinity, []) OR e.name IN coalesce(p.domain_tags, []))
     WITH p, collect(DISTINCT e.name) AS shared
@@ -206,13 +212,14 @@ class CommunicationTopology:
     LIMIT $limit
     """
 
-    _ACTIVATION_ADJACENCY_CYPHER = """
+    _ACTIVATION_ADJACENCY_CYPHER = f"""
     MATCH (p:Persona)-[r1]-(e)-[r2]-(part:Persona)
     WHERE part.name IN $participants
-      AND coalesce(p.dataset_id, '') = $ds
-      AND coalesce(part.dataset_id, '') = $ds
+      AND coalesce(p.dataset_id, '') = $dataset_id
+      AND coalesce(part.dataset_id, '') = $dataset_id
       AND p <> part
       AND NOT e:Chunk
+      AND {entity_in_dataset("e")}
       AND NOT p.name IN $participants
     WITH p, count(DISTINCT e) AS shared_count, collect(DISTINCT e.name) AS shared_entities
     WHERE shared_count >= 1
@@ -243,7 +250,7 @@ class CommunicationTopology:
             rows_m = await (
                 await session.run(
                     self._ACTIVATION_MENTIONS_CYPHER,
-                    ds=dataset_id,
+                    dataset_id=dataset_id,
                     qh=query_hash,
                     last_round=last_round,
                     participants=participants,
@@ -253,7 +260,7 @@ class CommunicationTopology:
             rows_a = await (
                 await session.run(
                     self._ACTIVATION_ADJACENCY_CYPHER,
-                    ds=dataset_id,
+                    dataset_id=dataset_id,
                     participants=participants,
                     limit=max_new,
                 )

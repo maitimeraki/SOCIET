@@ -103,6 +103,10 @@ async def _seed_writer_shaped_graph(repo, db, ds):
                 stance: 'NEUTRAL', domain_tags: ['trade'], dataset_id: $ds})
             CREATE (c)-[:MENTIONS]->(adv)
             CREATE (c)-[:MENTIONS]->(skep)
+            CREATE (d:Document {dataset_id: $ds, _test: true})
+            CREATE (adv)-[:DERIVED_FROM]->(d)
+            CREATE (skep)-[:DERIVED_FROM]->(d)
+            CREATE (legacy)-[:DERIVED_FROM]->(d)
             """,
             chunk_id=chunk_id,
             text=CHUNK_TEXT,

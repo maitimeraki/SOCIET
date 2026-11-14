@@ -1,5 +1,5 @@
 """Every graph read must carry the dataset predicate and bind $dataset_id (audit C1)."""
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -7,32 +7,7 @@ from src.graph.scope import chunk_in_dataset, entity_in_dataset
 from src.persona.graph_context import GraphContext
 
 
-class _Recorder:
-    """A fake Neo4j driver that records every (query, params) pair."""
-
-    def __init__(self):
-        self.calls: list[tuple[str, dict]] = []
-        result = MagicMock()
-        result.data = AsyncMock(return_value=[])
-        # A row, so get_entity_context gets past the entity fetch and runs the
-        # neighbour and provenance queries too.
-        result.single = AsyncMock(
-            return_value={"n": {"id": "a", "name": "a"}, "label": "Persona"}
-        )
-        session = MagicMock()
-
-        async def run(query, **params):
-            self.calls.append((str(query), params))
-            return result
-
-        session.run = run
-        session.__aenter__ = AsyncMock(return_value=session)
-        session.__aexit__ = AsyncMock(return_value=False)
-        self.driver = MagicMock()
-        self.driver.session = MagicMock(return_value=session)
-
-
-def _context(recorder: _Recorder) -> GraphContext:
+def _context(recorder) -> GraphContext:
     ctx = GraphContext.__new__(GraphContext)
     ctx._driver = recorder.driver
     ctx._db = "neo4j"
@@ -90,9 +65,8 @@ def test_predicates_reference_the_bound_parameter():
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("name", sorted(READS))
-async def test_graph_context_reads_bind_the_dataset(name):
+async def test_graph_context_reads_bind_the_dataset(name, recorder):
     read, required = READS[name]
-    recorder = _Recorder()
     await read(_context(recorder), dataset_id="ds-A")
     assert recorder.calls, "the read issued no query"
     for query, params in recorder.calls:
@@ -102,9 +76,8 @@ async def test_graph_context_reads_bind_the_dataset(name):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("name", sorted(READS))
-async def test_graph_context_reads_scope_every_graph_end(name):
+async def test_graph_context_reads_scope_every_graph_end(name, recorder):
     read, required = READS[name]
-    recorder = _Recorder()
     await read(_context(recorder), dataset_id="ds-A")
     for predicate in required:
         assert any(predicate in query for query, _ in recorder.calls), predicate
@@ -112,15 +85,14 @@ async def test_graph_context_reads_scope_every_graph_end(name):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("name", sorted(READS))
-async def test_dataset_id_is_required(name):
+async def test_dataset_id_is_required(name, recorder):
     read, _ = READS[name]
     with pytest.raises(TypeError):
-        await read(_context(_Recorder()))
+        await read(_context(recorder))
 
 
 @pytest.mark.asyncio
-async def test_provenance_or_is_parenthesised_so_the_chunk_guard_binds_both_keys():
-    recorder = _Recorder()
+async def test_provenance_or_is_parenthesised_so_the_chunk_guard_binds_both_keys(recorder):
     await _context(recorder).get_provenance("a", dataset_id="ds-A")
     query, _ = recorder.calls[0]
     assert "(n.id = $entity_id OR n.name = $entity_id)" in query

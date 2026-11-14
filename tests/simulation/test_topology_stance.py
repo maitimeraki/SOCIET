@@ -59,6 +59,8 @@ async def _seed_shared_entity(repo, db, ds, entity):
             CREATE (e:__Node__:__Entity__ {id: $entity, name: $entity,
                     dataset_id: $ds, triplet_source_id: $chunk_id, _test: true})
             CREATE (c)-[:MENTIONS]->(e)
+            CREATE (d:Document {dataset_id: $ds, _test: true})
+            CREATE (e)-[:DERIVED_FROM]->(d)
             """,
             chunk_id=chunk_id,
             ds=ds,

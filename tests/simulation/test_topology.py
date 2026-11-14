@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from src.graph.scope import entity_in_dataset
 from src.persona.models_persona import (
     AgentProfile,
     ConfidenceBreakdown,
@@ -413,3 +414,42 @@ async def test_find_activation_candidates_disabled_or_no_candidates(mock_driver)
     )
     assert await topology.find_activation_candidates([], "ds", "qh", 1, max_new=2) == []
     driver.session.assert_not_called()  # short-circuit happens before any query
+
+
+# ---- Audit C1: every topology read is scoped to the dataset ----
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("round_num", [1, 2], ids=["round-1", "round-n"])
+async def test_pair_scoring_scopes_both_personas_and_the_middle_entity(
+    recorder, sample_profiles, debate_config, round_num
+):
+    topology = CommunicationTopology(recorder.driver, "neo4j")
+
+    await topology.compute_round_pairs(
+        sample_profiles, "ds-A", round_num=round_num, config=debate_config
+    )
+
+    query, params = recorder.calls[0]
+    assert "coalesce(a.dataset_id, '') = $dataset_id" in query
+    assert "coalesce(b.dataset_id, '') = $dataset_id" in query
+    assert entity_in_dataset("e") in query
+    assert params["dataset_id"] == "ds-A"
+
+
+@pytest.mark.asyncio
+async def test_activation_scopes_candidates_and_the_opinion_run(recorder):
+    topology = CommunicationTopology(recorder.driver, "db")
+
+    await topology.find_activation_candidates(
+        participants=["Alice"],
+        dataset_id="ds-A",
+        query_hash="qh1",
+        last_round=1,
+        max_new=2,
+    )
+
+    assert len(recorder.calls) == 2  # mentions source and adjacency source
+    for query, params in recorder.calls:
+        assert entity_in_dataset("e") in query
+        assert params["dataset_id"] == "ds-A"

@@ -150,7 +150,9 @@ class ProfileSynthesizer:
                 )
             )
             snippets_by_chunk = (
-                await self._repo.fetch_source_evidence_by_chunk(batch_chunk_ids)
+                await self._repo.fetch_source_evidence_by_chunk(
+                    batch_chunk_ids, dataset_id=dataset_id
+                )
                 if batch_chunk_ids
                 else {}
             )
@@ -175,7 +177,7 @@ class ProfileSynthesizer:
         # so the pre-fetch cannot diverge from the per-profile lookups; a name
         # with no row keeps the node-properties fallback.
         nodes_by_name = await self._repo.fetch_nodes_by_names(
-            [row.name for row, _ in top_rows]
+            [row.name for row, _ in top_rows], dataset_id=dataset_id
         )
         profiles: list[Agent] = []
         semaphore = asyncio.Semaphore(8)
@@ -210,6 +212,7 @@ class ProfileSynthesizer:
                     node=node,
                     sector_results=sector_results,
                     max_relevance=max_relevance,
+                    dataset_id=dataset_id,
                 )
 
                 # Task 1: the same `_effective_stance` precedence the build uses
@@ -337,7 +340,9 @@ class ProfileSynthesizer:
         relevant = {str(k): float(v) for k, v in (relevance_by_name or {}).items()}
         # ONE batched node fetch for every joiner (was one query per name); the
         # per-name map keeps the same build-or-skip handling below.
-        nodes_by_name = await self._repo.fetch_nodes_by_names(names)
+        nodes_by_name = await self._repo.fetch_nodes_by_names(
+            names, dataset_id=dataset_id
+        )
         semaphore = asyncio.Semaphore(8)
 
         async def _build(name: str) -> Agent | None:
@@ -370,6 +375,7 @@ class ProfileSynthesizer:
                     node=node,
                     sector_results=sector_results,
                     max_relevance=1.0,
+                    dataset_id=dataset_id,
                 )
 
                 # D2 on the activation path: write the joiner's real provenance

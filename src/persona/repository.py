@@ -21,6 +21,7 @@ from uuid import uuid4
 from llama_index.embeddings.ollama import OllamaEmbedding
 from neo4j import AsyncGraphDatabase
 
+from src.graph.scope import chunk_in_dataset, entity_in_dataset
 from src.llm.config_llm import LLMConfig
 from src.logging.setup_logging import setup_logging
 from src.persona.agent import (
@@ -152,13 +153,19 @@ class PersonaRepository:
         return self._node_props(node) if node else None
 
     async def fetch_recent_memories(
-        self, name: str, memory_limit: int = 30
+        self, name: str, dataset_id: str, memory_limit: int = 30
     ) -> List[Dict[str, Any]]:
-        """Retrieve recent relationships/memories from agent that Maintains conversation context and agent memory across rounds"""
-        query = """
-            MATCH (n {name: $name})
+        """Retrieve recent relationships/memories from agent that Maintains conversation context and agent memory across rounds.
+
+        The agent and every target are scoped to `dataset_id`: a Persona by its
+        own `dataset_id`, an entity through its document (audit C1).
+        """
+        query = f"""
+            MATCH (n {{name: $name}})
+            WHERE coalesce(n.dataset_id, '') = $dataset_id OR {entity_in_dataset("n")}
             OPTIONAL MATCH (n)-[r]->(m)
             WHERE m.name IS NOT NULL
+              AND (coalesce(m.dataset_id, '') = $dataset_id OR {entity_in_dataset("m")})
             RETURN
             type(r) AS relation_type,
             m.name AS target_name,
@@ -169,7 +176,10 @@ class PersonaRepository:
             """
         async with self._driver.session(database=self._db) as session:
             res = await session.run(
-                cast(LiteralString, query), name=name, memory_limit=memory_limit
+                cast(LiteralString, query),
+                name=name,
+                dataset_id=dataset_id,
+                memory_limit=memory_limit,
             )
             rows = await res.data()
         # Attach lightweight target node properties to each row to provide richer context
@@ -178,7 +188,9 @@ class PersonaRepository:
             # preserve order, unique
             unique_targets = list(dict.fromkeys([t for t in targets if t]))
             if unique_targets:
-                nodes_map = await self.fetch_nodes_by_names(unique_targets)
+                nodes_map = await self.fetch_nodes_by_names(
+                    unique_targets, dataset_id=dataset_id
+                )
             else:
                 nodes_map = {}
             enriched: List[Dict[str, Any]] = []
@@ -298,24 +310,27 @@ class PersonaRepository:
         loop = asyncio.get_event_loop()
         return await loop.run_in_executor(None, func, text)
 
-    async def fetch_nodes_by_names(self, names: List[str]) -> Dict[str, Dict[str, Any]]:
-        """Batch-fetch nodes by their `name` property and return a map name->props.
+    async def fetch_nodes_by_names(
+        self, names: List[str], dataset_id: str
+    ) -> Dict[str, Dict[str, Any]]:
+        """Batch-fetch entity nodes by their `name` property and return a map name->props.
 
-        A name can be held by both a `:Persona` (round commits) and a
-        `:__Entity__` node. The entity row wins whatever order the driver
-        returns rows in, so entity props (`triplet_source_id` etc.) are never
-        shadowed by a persona's.
+        Only `:__Entity__` nodes of `dataset_id` match (audit C1). Persona nodes
+        carry no entity label, so a persona's own properties never shadow an
+        entity's (`triplet_source_id` etc.).
         """
         if not names:
             return {}
 
-        query = """
-        MATCH (n)
-        WHERE n.name IN $names
-        RETURN n.name AS name, n, n:__Entity__ AS is_entity, labels(n) AS labels
+        query = f"""
+        MATCH (n:__Entity__)
+        WHERE n.name IN $names AND {entity_in_dataset("n")}
+        RETURN n.name AS name, n, labels(n) AS labels
         """
         async with self._driver.session(database=self._db) as session:
-            res = await session.run(cast(LiteralString, query), names=names)
+            res = await session.run(
+                cast(LiteralString, query), names=names, dataset_id=dataset_id
+            )
             rows = await res.data()
 
         out: Dict[str, Dict[str, Any]] = {}
@@ -332,8 +347,7 @@ class PersonaRepository:
             label = _real_type_label(r.get("labels"))
             if label and not props.get("label"):
                 props = {**props, "label": label}
-            if name not in out or r.get("is_entity"):
-                out[name] = props
+            out.setdefault(name, props)
         return out
 
     async def build_agent_profiles_from_sectors(
@@ -371,7 +385,7 @@ class PersonaRepository:
 
         # Batch-fetch agent nodes to minimize DB round-trips
         nodes_map = await self.fetch_nodes_by_names(
-            agent_names
+            agent_names, dataset_id=dataset_id
         )  # return type : Dict[str, Dict[str, Any]] mapping agent name to node properties
 
         # Compute raw relevance per agent across the provided sector_results so we can normalize
@@ -397,7 +411,11 @@ class PersonaRepository:
                     or {"name": agent_name}
                 )  # return Type: Dict[str, Any] where we fetch the node properties for the agent name, if not found we create a minimal dict with just the name to avoid None issues
                 metrics = await self.calculate_agent_metrics_and_context_for_llm(
-                    agent_name, node, sector_results or [], max_relevance=max_relevance
+                    agent_name,
+                    node,
+                    sector_results or [],
+                    max_relevance=max_relevance,
+                    dataset_id=dataset_id,
                 )
                 src_chunk = node.get("triplet_source_id")
                 return await self.build_single_agent_profile_from_node(
@@ -420,7 +438,7 @@ class PersonaRepository:
         agent_name: str,
         node: Dict[str, Any],
         user_query: str,
-        dataset_id: Optional[str],
+        dataset_id: str,
         agent_metrics: Dict[str, Any],
         sector_results: List[Dict[str, Any]],
         llm_output: Optional[Dict[str, List[str]]],
@@ -560,7 +578,9 @@ class PersonaRepository:
 
         # Source evidence: this persona's own chunk texts, one batched query,
         # rendered in its debate prompt. Synthesis-time only — never persisted.
-        source_evidence = await self.fetch_source_evidence(chunk_node_ids)
+        source_evidence = await self.fetch_source_evidence(
+            chunk_node_ids, dataset_id=dataset_id
+        )
 
         # Behavioral core — every field read by verdict / round / topology.
         # `_effective_stance` is the ONE precedence (distilled → deterministic
@@ -928,6 +948,8 @@ class PersonaRepository:
         node: Dict[str, Any],
         sector_results: List[Dict[str, Any]],
         max_relevance: float | None = None,
+        *,
+        dataset_id: str,
     ) -> Dict[str, Any]:
         """Calculate relevance and metrics based on sector matching.
 
@@ -986,7 +1008,9 @@ class PersonaRepository:
         # If either metric is missing, derive neighbor info from recent memories
         mem_rows: List[Dict[str, Any]] = []
         try:
-            mem_rows = await self.fetch_recent_memories(agent_name, memory_limit=200)
+            mem_rows = await self.fetch_recent_memories(
+                agent_name, dataset_id=dataset_id, memory_limit=200
+            )
             targets = {
                 r.get("target_name") for r in (mem_rows or []) if r.get("target_name")
             }
@@ -1052,7 +1076,9 @@ class PersonaRepository:
                     )
                 ]
                 if names_to_fetch:
-                    neighbor_props_map = await self.fetch_nodes_by_names(names_to_fetch)
+                    neighbor_props_map = await self.fetch_nodes_by_names(
+                        names_to_fetch, dataset_id=dataset_id
+                    )
             except Exception:
                 neighbor_props_map = {}
 
@@ -1415,10 +1441,11 @@ class PersonaRepository:
         if not chunk_ids:
             return 0
 
-        cypher = """
+        cypher = f"""
         UNWIND $chunk_ids AS cid
-        MATCH (c:__Node__ {id: cid})
-        MERGE (p:Persona {name: $name, dataset_id: $dataset_id})
+        MATCH (c:__Node__ {{id: cid}})
+        WHERE {chunk_in_dataset("c")}
+        MERGE (p:Persona {{name: $name, dataset_id: $dataset_id}})
         MERGE (p)-[:MENTIONS]->(c)
         RETURN count(*) AS written
         """
@@ -1463,11 +1490,12 @@ class PersonaRepository:
         if not chunk_ids:
             return 0
 
-        cypher = """
+        cypher = f"""
         UNWIND $chunk_ids AS cid
-        MATCH (c:__Node__ {id: cid})-[:MENTIONS]->(e:__Entity__)
+        MATCH (c:__Node__ {{id: cid}})-[:MENTIONS]->(e:__Entity__)
+        WHERE {chunk_in_dataset("c")} AND {entity_in_dataset("e")}
         WITH DISTINCT e
-        MERGE (p:Persona {name: $name, dataset_id: $dataset_id})
+        MERGE (p:Persona {{name: $name, dataset_id: $dataset_id}})
         MERGE (p)-[:MENTIONS]->(e)
         WITH p, collect(DISTINCT e.name) AS names
         WHERE size(names) > 0
@@ -1491,6 +1519,7 @@ class PersonaRepository:
     async def fetch_source_evidence(
         self,
         chunk_node_ids: Optional[Sequence[str]],
+        dataset_id: str,
         limit: int = SOURCE_EVIDENCE_MAX_SNIPPETS,
     ) -> List[str]:
         """The text of up to `limit` of the persona's source chunks, in ONE query.
@@ -1512,17 +1541,19 @@ class PersonaRepository:
         if not ids:
             return []
 
-        cypher = """
+        cypher = f"""
         UNWIND $chunk_ids AS cid
-        MATCH (c:Chunk {id: cid})
-        WHERE c.text IS NOT NULL AND trim(c.text) <> ''
+        MATCH (c:Chunk {{id: cid}})
+        WHERE {chunk_in_dataset("c")} AND c.text IS NOT NULL AND trim(c.text) <> ''
         RETURN c.text AS text
         LIMIT $limit
         """
 
         try:
             async with self._driver.session(database=self._db) as session:
-                result = await session.run(cypher, chunk_ids=ids, limit=limit)
+                result = await session.run(
+                    cypher, chunk_ids=ids, dataset_id=dataset_id, limit=limit
+                )
                 rows = await result.data()
         except Exception as exc:  # evidence is additive; never fail the build
             logger.warning("source-evidence fetch failed: %s", exc)
@@ -1533,6 +1564,7 @@ class PersonaRepository:
     async def fetch_source_evidence_by_chunk(
         self,
         chunk_node_ids: Optional[Sequence[str]],
+        dataset_id: str,
     ) -> Dict[str, List[str]]:
         """`{chunk_id: [snippet, ...]}` for the given chunk nodes, in ONE query.
 
@@ -1561,16 +1593,16 @@ class PersonaRepository:
         if not ids:
             return {}
 
-        cypher = """
+        cypher = f"""
         UNWIND $chunk_ids AS cid
-        MATCH (c:Chunk {id: cid})
-        WHERE c.text IS NOT NULL AND trim(c.text) <> ''
+        MATCH (c:Chunk {{id: cid}})
+        WHERE {chunk_in_dataset("c")} AND c.text IS NOT NULL AND trim(c.text) <> ''
         RETURN c.id AS chunk_id, c.text AS text
         """
 
         try:
             async with self._driver.session(database=self._db) as session:
-                result = await session.run(cypher, chunk_ids=ids)
+                result = await session.run(cypher, chunk_ids=ids, dataset_id=dataset_id)
                 rows = await result.data()
         except Exception as exc:  # evidence is additive; never fail the build
             logger.warning("source-evidence fetch failed: %s", exc)
@@ -1585,7 +1617,7 @@ class PersonaRepository:
         return buckets
 
     async def get_provenance(
-        self, agent_name: str, dataset_id: Optional[str] = None, limit: int = 5
+        self, agent_name: str, dataset_id: str, limit: int = 5
     ) -> List[ProvenanceLink]:
         """The real source chunks a persona's `MENTIONS` edges point at.
 
@@ -1595,16 +1627,17 @@ class PersonaRepository:
         `document_id`/`doc_id` properties to the sentinel `"None"`). Guarding on
         `document_anchor` returns only REAL chunks, so a persona with no wired
         chunks yields `[]` — the caller's sector fallback, never a read of a
-        fabricated id. `dataset_id`, when given, scopes to the writer's Persona
-        MERGE key (`name` + `dataset_id`).
+        fabricated id. The persona and its chunk are both scoped to `dataset_id`
+        (audit C1), so another tenant's persona of the same name reads `[]`.
         """
         from uuid import UUID
 
         # Optimized query: fixed path, indexed lookup
-        cypher = """
-        MATCH (a:Persona {name: $name})-[:MENTIONS]->(chunk:Chunk)
+        cypher = f"""
+        MATCH (a:Persona {{name: $name}})-[:MENTIONS]->(chunk:Chunk)
         WHERE chunk.document_anchor IS NOT NULL
-          AND ($dataset_id IS NULL OR a.dataset_id = $dataset_id)
+          AND a.dataset_id = $dataset_id
+          AND {chunk_in_dataset("chunk")}
         RETURN DISTINCT
             chunk.document_anchor AS doc_id,
             chunk.title AS title,

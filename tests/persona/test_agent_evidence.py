@@ -61,21 +61,26 @@ def _repo_returning(rows: list[dict]) -> PersonaRepository:
 async def test_fetch_source_evidence_returns_snippets():
     repo = _repo_returning([{"text": "first"}, {"text": "second"}])
 
-    assert await repo.fetch_source_evidence(["c1", "c2"]) == ["first", "second"]
+    assert await repo.fetch_source_evidence(["c1", "c2"], dataset_id="ds-A") == [
+        "first",
+        "second",
+    ]
 
 
 @pytest.mark.asyncio
 async def test_fetch_source_evidence_skips_rows_without_text():
     repo = _repo_returning([{"text": "only"}, {"text": None}, {}])
 
-    assert await repo.fetch_source_evidence(["c1", "c2", "c3"]) == ["only"]
+    assert await repo.fetch_source_evidence(["c1", "c2", "c3"], dataset_id="ds-A") == [
+        "only"
+    ]
 
 
 @pytest.mark.asyncio
 async def test_fetch_source_evidence_empty_ids_makes_no_query():
     repo = _repo_returning([])
 
-    assert await repo.fetch_source_evidence([]) == []
+    assert await repo.fetch_source_evidence([], dataset_id="ds-A") == []
     repo._driver.session.assert_not_called()
 
 
@@ -84,7 +89,9 @@ async def test_fetch_source_evidence_is_capped():
     rows = [{"text": f"s{i}"} for i in range(SOURCE_EVIDENCE_MAX_SNIPPETS + 2)]
     repo = _repo_returning(rows)
 
-    out = await repo.fetch_source_evidence([f"c{i}" for i in range(len(rows))])
+    out = await repo.fetch_source_evidence(
+        [f"c{i}" for i in range(len(rows))], dataset_id="ds-A"
+    )
 
     assert len(out) == SOURCE_EVIDENCE_MAX_SNIPPETS
 
@@ -100,7 +107,7 @@ async def test_fetch_by_chunk_groups_snippets_under_their_chunk_id():
         ]
     )
 
-    out = await repo.fetch_source_evidence_by_chunk(["c1", "c2"])
+    out = await repo.fetch_source_evidence_by_chunk(["c1", "c2"], dataset_id="ds-A")
 
     assert out == {"c1": ["first", "second"], "c2": ["third"]}
 
@@ -109,7 +116,7 @@ async def test_fetch_by_chunk_groups_snippets_under_their_chunk_id():
 async def test_fetch_by_chunk_skips_rows_missing_an_id_or_text():
     repo = _repo_returning([{"chunk_id": "c1", "text": "only"}, {"chunk_id": "c2"}, {}])
 
-    assert await repo.fetch_source_evidence_by_chunk(["c1", "c2"]) == {"c1": ["only"]}
+    assert await repo.fetch_source_evidence_by_chunk(["c1", "c2"], dataset_id="ds-A") == {"c1": ["only"]}
 
 
 @pytest.mark.asyncio
@@ -122,7 +129,7 @@ async def test_fetch_by_chunk_leaves_capping_to_the_caller():
     ids = [f"c{i}" for i in range(12)]
     repo = _repo_returning([{"chunk_id": cid, "text": f"t{cid}"} for cid in ids])
 
-    out = await repo.fetch_source_evidence_by_chunk(ids)
+    out = await repo.fetch_source_evidence_by_chunk(ids, dataset_id="ds-A")
 
     assert sorted(out) == sorted(ids)
     session = repo._driver.session.return_value.__aenter__.return_value
@@ -133,7 +140,7 @@ async def test_fetch_by_chunk_leaves_capping_to_the_caller():
 async def test_fetch_by_chunk_empty_ids_makes_no_query():
     repo = _repo_returning([])
 
-    assert await repo.fetch_source_evidence_by_chunk([]) == {}
+    assert await repo.fetch_source_evidence_by_chunk([], dataset_id="ds-A") == {}
     repo._driver.session.assert_not_called()
 
 
@@ -143,7 +150,7 @@ async def test_fetch_by_chunk_swallows_a_driver_error():
     repo = _repo_returning([])
     repo._driver.session.side_effect = RuntimeError("neo4j down")
 
-    assert await repo.fetch_source_evidence_by_chunk(["c1"]) == {}
+    assert await repo.fetch_source_evidence_by_chunk(["c1"], dataset_id="ds-A") == {}
 
 
 @pytest.mark.asyncio
@@ -165,7 +172,7 @@ async def test_build_carries_source_evidence_from_chunk_ids():
     )
 
     assert agent.source_evidence == ["grounded text"]
-    repo.fetch_source_evidence.assert_awaited_once_with(["c1"])
+    repo.fetch_source_evidence.assert_awaited_once_with(["c1"], dataset_id="ds")
 
 
 @pytest.mark.asyncio

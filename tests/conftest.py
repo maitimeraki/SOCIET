@@ -87,3 +87,39 @@ async def redis_reset():
 
     yield
     await service.close_redis()
+
+
+class RecordingDriver:
+    """A fake Neo4j driver that records every (query, params) pair.
+
+    Scope guards (audit C1) assert the dataset predicate and its bound
+    `dataset_id` on what a reader actually sends, so the driver is the seam.
+    """
+
+    def __init__(self):
+        from unittest.mock import AsyncMock, MagicMock
+
+        self.calls: list[tuple[str, dict]] = []
+        result = MagicMock()
+        result.data = AsyncMock(return_value=[])
+        # A row, so get_entity_context gets past the entity fetch and runs the
+        # neighbour and provenance queries too.
+        result.single = AsyncMock(
+            return_value={"n": {"id": "a", "name": "a"}, "label": "Persona"}
+        )
+        session = MagicMock()
+
+        async def run(query, **params):
+            self.calls.append((str(query), params))
+            return result
+
+        session.run = run
+        session.__aenter__ = AsyncMock(return_value=session)
+        session.__aexit__ = AsyncMock(return_value=False)
+        self.driver = MagicMock()
+        self.driver.session = MagicMock(return_value=session)
+
+
+@pytest.fixture
+def recorder() -> RecordingDriver:
+    return RecordingDriver()

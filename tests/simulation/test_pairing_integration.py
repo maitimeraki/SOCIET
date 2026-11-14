@@ -76,11 +76,13 @@ async def test_synthesis_written_entity_links_produce_round1_pairs(live):
                 """
                 CREATE (c:__Node__:Chunk {id: $chunk_id, chunk_id: $chunk_id, doc_id: $doc_id,
                         dataset_id: $ds, title: 'itest', breadcrumb: '', _test: true})
-                WITH c
+                CREATE (d:Document {dataset_id: $ds, _test: true})
+                WITH c, d
                 UNWIND $names AS name
                 CREATE (e:__Node__:__Entity__ {id: name, name: name, dataset_id: $ds,
                         triplet_source_id: $chunk_id, _test: true})
                 CREATE (c)-[:MENTIONS]->(e)
+                CREATE (e)-[:DERIVED_FROM]->(d)
                 """,
                 chunk_id=chunk_id,
                 doc_id=doc_id,
@@ -151,11 +153,13 @@ async def test_single_cell_graph_synthesizes_a_debatable_roster(live):
                 """
                 CREATE (c:__Node__:Chunk {id: $chunk_id, chunk_id: $chunk_id, doc_id: $doc_id,
                         dataset_id: $ds, title: 'itest', breadcrumb: '', _test: true})
-                WITH c
+                CREATE (d:Document {dataset_id: $ds, _test: true})
+                WITH c, d
                 UNWIND $names AS name
                 CREATE (e:__Node__:__Entity__ {id: name, name: name, dataset_id: $ds,
                         triplet_source_id: $chunk_id, _test: true})
                 CREATE (c)-[:MENTIONS]->(e)
+                CREATE (e)-[:DERIVED_FROM]->(d)
                 """,
                 chunk_id=chunk_id,
                 doc_id=doc_id,

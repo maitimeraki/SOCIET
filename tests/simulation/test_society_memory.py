@@ -8,6 +8,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from src.graph.scope import entity_in_dataset
 from src.simulation.pair_turn import AgentTurn, CommPair, RoundResult
 from src.simulation.society_memory import SocietyMemory, SocietySnapshot
 
@@ -459,3 +460,36 @@ async def test_failure_receipt_still_shapes_correctly():
     # A failed write claims nothing: no nodes, no links.
     assert receipt["written_nodes"] == []
     assert receipt["written_links"] == []
+
+
+# ---- Audit C1: the mention and neighbour reads are scoped to the dataset ----
+
+
+@pytest.mark.asyncio
+async def test_mentions_writer_scopes_the_entity_to_the_dataset():
+    driver, tx = _recording_driver()
+    await SocietyMemory(driver, "neo4j").commit_round(
+        round_result=_round_with_two_opinions(),
+        dataset_id="ds-A",
+        query_hash="q1",
+        profile_map={},
+    )
+    query, kwargs = next(
+        (c.args[0], c.kwargs) for c in tx.run.await_args_list if "$rows" in c.args[0]
+    )
+    assert entity_in_dataset("e") in query
+    assert "NOT e:Persona" not in query  # the entity predicate replaces it
+    assert kwargs["dataset_id"] == "ds-A"
+
+
+@pytest.mark.asyncio
+async def test_snapshot_neighbours_scope_the_shared_entity_to_the_dataset():
+    session = FakeSession()
+    driver = MagicMock()
+    driver.session.return_value = session
+    await SocietyMemory(driver, "db").read_snapshot("ds-A", "qh1", 1)
+    query, kwargs = next(
+        (q, kw) for q, kw in session.calls if "collect(DISTINCT q.name)" in q
+    )
+    assert entity_in_dataset("e") in query
+    assert kwargs["dataset_id"] == "ds-A"

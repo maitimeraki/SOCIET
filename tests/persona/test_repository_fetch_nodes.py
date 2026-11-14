@@ -1,32 +1,20 @@
-"""Re-review obs #2: a name held by both a `:Persona` and a `:__Entity__` node.
+"""Batch node fetches read only the caller's dataset (audit C1).
 
-`fetch_nodes_by_names` matches on the bare `name` property, and round commits
-create `:Persona` nodes — so on a repeat run a name can resolve to either
-shape. The entity row must win deterministically, whatever order the driver
-returns the rows in, or the I2 joiner write silently degrades.
-
-No live Neo4j: the driver is stubbed (same seam as `test_repository_provenance`).
+`fetch_nodes_by_names` reads `:__Entity__` nodes only, scoped to the dataset
+through their DERIVED_FROM document. `fetch_recent_memories` scopes the agent
+and every target it returns. No live Neo4j: the driver is stubbed (the
+`recorder` seam in tests/conftest.py, or a fixed result for row shapes).
 """
 
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from src.graph.scope import entity_in_dataset
 from src.persona.repository import PersonaRepository
 
-ENTITY_ROW = {
-    "name": "Alice",
-    "n": {"name": "Alice", "triplet_source_id": "src-1", "domain_tags": ["energy"]},
-    "is_entity": True,
-}
-PERSONA_ROW = {
-    "name": "Alice",
-    "n": {"name": "Alice", "stance": "NEGATIVE", "conviction": 0.5},
-    "is_entity": False,
-}
 
-
-def _repo_returning(rows) -> tuple[PersonaRepository, AsyncMock]:
+def _repo_returning(rows) -> PersonaRepository:
     """A repository whose Neo4j seam returns `rows` from the batch fetch."""
     result = AsyncMock()
     result.data = AsyncMock(return_value=rows)
@@ -41,39 +29,61 @@ def _repo_returning(rows) -> tuple[PersonaRepository, AsyncMock]:
     repo = PersonaRepository.__new__(PersonaRepository)
     repo._driver = driver
     repo._db = "testdb"
-    return repo, session
+    return repo
 
 
-@pytest.mark.asyncio
-@pytest.mark.parametrize(
-    "rows",
-    [[ENTITY_ROW, PERSONA_ROW], [PERSONA_ROW, ENTITY_ROW]],
-    ids=["entity-row-first", "persona-row-first"],
-)
-async def test_entity_row_wins_whatever_the_row_order(rows):
-    repo, session = _repo_returning(rows)
-
-    out = await repo.fetch_nodes_by_names(["Alice"])
-
-    assert out["Alice"]["triplet_source_id"] == "src-1"
-    assert "stance" not in out["Alice"]
-    # The label predicate is what makes the preference knowable per row.
-    assert "n:__Entity__ AS is_entity" in session.run.await_args.args[0]
+def _repo_on(recorder) -> PersonaRepository:
+    repo = PersonaRepository.__new__(PersonaRepository)
+    repo._driver = recorder.driver
+    repo._db = "testdb"
+    return repo
 
 
 @pytest.mark.asyncio
 async def test_no_collision_names_are_returned_verbatim():
-    """A name held by one node only is unchanged — and still returned."""
-    repo, _ = _repo_returning(
+    """A name held by one entity node is returned as that node's props."""
+    repo = _repo_returning(
         [
             {
                 "name": "Bob",
                 "n": {"name": "Bob", "domain_tags": ["energy"]},
-                "is_entity": False,
+                "labels": ["__Entity__", "Company"],
             },
         ]
     )
 
-    out = await repo.fetch_nodes_by_names(["Bob", "Missing"])
+    out = await repo.fetch_nodes_by_names(["Bob", "Missing"], dataset_id="ds-A")
 
-    assert out == {"Bob": {"name": "Bob", "domain_tags": ["energy"]}}
+    assert out == {"Bob": {"name": "Bob", "domain_tags": ["energy"], "label": "Company"}}
+
+
+@pytest.mark.asyncio
+async def test_batch_fetch_reads_only_entities_of_the_dataset(recorder):
+    await _repo_on(recorder).fetch_nodes_by_names(["Alice"], dataset_id="ds-A")
+
+    query, params = recorder.calls[0]
+    assert "MATCH (n:__Entity__)" in query
+    assert entity_in_dataset("n") in query
+    assert params["dataset_id"] == "ds-A"
+
+
+@pytest.mark.asyncio
+async def test_batch_fetch_requires_dataset_id(recorder):
+    with pytest.raises(TypeError):
+        await _repo_on(recorder).fetch_nodes_by_names(["Alice"])
+
+
+@pytest.mark.asyncio
+async def test_recent_memories_scope_the_agent_and_every_target(recorder):
+    await _repo_on(recorder).fetch_recent_memories("Alice", dataset_id="ds-A")
+
+    query, params = recorder.calls[0]
+    assert entity_in_dataset("n") in query
+    assert entity_in_dataset("m") in query
+    assert params["dataset_id"] == "ds-A"
+
+
+@pytest.mark.asyncio
+async def test_recent_memories_require_dataset_id(recorder):
+    with pytest.raises(TypeError):
+        await _repo_on(recorder).fetch_recent_memories("Alice")

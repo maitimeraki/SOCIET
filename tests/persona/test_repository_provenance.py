@@ -13,10 +13,18 @@ from uuid import UUID
 import pytest
 import pytest_asyncio
 
+from src.graph.scope import chunk_in_dataset, entity_in_dataset
 from src.persona.agent import ProvenanceLink
 from src.persona.repository import PersonaRepository
 
 CHUNK_UUID = "3f1d2c9a-0000-4000-8000-000000000001"
+
+
+def _repo_on(recorder) -> PersonaRepository:
+    repo = PersonaRepository.__new__(PersonaRepository)
+    repo._driver = recorder.driver
+    repo._db = "testdb"
+    return repo
 
 
 def _repo_capturing(rows=None) -> tuple[PersonaRepository, AsyncMock]:
@@ -106,7 +114,7 @@ async def test_get_provenance_returns_the_real_chunk_ids_the_writer_links():
         ]
     )
 
-    links = await repo.get_provenance("Alice")
+    links = await repo.get_provenance("Alice", dataset_id="ds1")
 
     assert [link.chunk_id for link in links] == [UUID(CHUNK_UUID)]
     assert links[0].doc_id == "doc:report"
@@ -260,6 +268,77 @@ async def test_build_keeps_real_provenance_in_summary_provenance():
     agent = await _build(repo, _sector_results())
 
     assert [p.doc_id for p in agent.summary_provenance] == ["DOC-1"]
+
+
+# ---- Audit C1: every provenance and evidence read and write is dataset-scoped ----
+
+
+@pytest.mark.asyncio
+async def test_provenance_writer_scopes_the_chunk_to_the_dataset(recorder):
+    await _repo_on(recorder).write_persona_provenance("Alice", "ds-A", ["node-7"])
+
+    query, params = recorder.calls[0]
+    assert chunk_in_dataset("c") in query
+    assert params["dataset_id"] == "ds-A"
+
+
+@pytest.mark.asyncio
+async def test_entity_link_writer_scopes_the_chunk_and_the_entity(recorder):
+    await _repo_on(recorder).write_persona_entity_links("Alice", "ds-A", ["node-7"])
+
+    query, params = recorder.calls[0]
+    assert chunk_in_dataset("c") in query
+    assert entity_in_dataset("e") in query
+    assert params["dataset_id"] == "ds-A"
+
+
+@pytest.mark.asyncio
+async def test_provenance_reader_scopes_the_persona_and_the_chunk(recorder):
+    await _repo_on(recorder).get_provenance("Alice", dataset_id="ds-A")
+
+    query, params = recorder.calls[0]
+    assert "a.dataset_id = $dataset_id" in query
+    assert chunk_in_dataset("chunk") in query
+    assert "$dataset_id IS NULL" not in query
+    assert params["dataset_id"] == "ds-A"
+
+
+@pytest.mark.asyncio
+async def test_provenance_reader_requires_dataset_id(recorder):
+    with pytest.raises(TypeError):
+        await _repo_on(recorder).get_provenance("Alice")
+
+
+@pytest.mark.asyncio
+async def test_source_evidence_scopes_the_chunks_to_the_dataset(recorder):
+    await _repo_on(recorder).fetch_source_evidence(["c1"], dataset_id="ds-A")
+
+    query, params = recorder.calls[0]
+    assert chunk_in_dataset("c") in query
+    assert params["dataset_id"] == "ds-A"
+
+
+@pytest.mark.asyncio
+async def test_attributed_source_evidence_scopes_the_chunks_to_the_dataset(recorder):
+    await _repo_on(recorder).fetch_source_evidence_by_chunk(["c1"], dataset_id="ds-A")
+
+    query, params = recorder.calls[0]
+    assert chunk_in_dataset("c") in query
+    assert params["dataset_id"] == "ds-A"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "call",
+    [
+        lambda repo: repo.fetch_source_evidence(["c1"]),
+        lambda repo: repo.fetch_source_evidence_by_chunk(["c1"]),
+    ],
+    ids=["source-evidence", "source-evidence-by-chunk"],
+)
+async def test_source_evidence_requires_dataset_id(recorder, call):
+    with pytest.raises(TypeError):
+        await call(_repo_on(recorder))
 
 
 # ---- Live: the reader recovers REAL provenance from a writer-shaped chunk ----

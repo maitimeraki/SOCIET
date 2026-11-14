@@ -14,6 +14,7 @@ from collections import Counter
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Dict, List, Optional
 
+from src.graph.scope import entity_in_dataset
 from src.simulation.pair_turn import RoundResult
 
 if TYPE_CHECKING:
@@ -78,12 +79,12 @@ RETURN o.round_no AS round_no, o.stance AS stance,
 ORDER BY o.round_no ASC
 """
 
-_MENTIONS_CYPHER = """
+_MENTIONS_CYPHER = f"""
 UNWIND $rows AS row
-MATCH (o:Opinion {dataset_id: $dataset_id, query_hash: $query_hash,
-                  round_no: row.round_no, agent_name: row.agent_name})
+MATCH (o:Opinion {{dataset_id: $dataset_id, query_hash: $query_hash,
+                  round_no: row.round_no, agent_name: row.agent_name}})
 UNWIND row.entities AS ref
-MATCH (e) WHERE e.name = ref AND NOT e:Persona AND NOT e:Chunk
+MATCH (e:__Entity__) WHERE e.name = ref AND {entity_in_dataset("e")}
 MERGE (o)-[:MENTIONS]->(e)
 """
 
@@ -388,7 +389,7 @@ class SocietyMemory:
         # the dataset. They only count as "directly connected" when the pair also
         # shares a graph entity (the same static relation topology pairs on) or has a
         # REACTED_TO edge in this run. The REACTED_TO arm stays narrowed to this debate.
-        neighbor_q = """
+        neighbor_q = f"""
         MATCH (p:Persona)-[r:OPPOSES|SUPPORTS|REACTED_TO]-(q:Persona)
         WHERE coalesce(p.dataset_id, '') = $dataset_id
           AND coalesce(q.dataset_id, '') = $dataset_id
@@ -397,13 +398,13 @@ class SocietyMemory:
             OR (
               type(r) <> 'REACTED_TO'
               AND (
-                EXISTS {
+                EXISTS {{
                   MATCH (p)-[r1]-(e)-[r2]-(q)
-                  WHERE NOT e:Chunk AND NOT e:Persona
-                }
-                OR EXISTS {
+                  WHERE NOT e:Chunk AND NOT e:Persona AND {entity_in_dataset("e")}
+                }}
+                OR EXISTS {{
                   MATCH (p)-[x:REACTED_TO]-(q) WHERE x.query_hash = $query_hash
-                }
+                }}
               )
             )
           )
