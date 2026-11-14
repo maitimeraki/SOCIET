@@ -1,6 +1,8 @@
 # tests/api/test_public_events.py
 import json
+import logging
 import uuid
+from datetime import datetime, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
@@ -201,3 +203,77 @@ async def test_not_debatable_message_reaches_the_user():
 
     assert manager.broadcast.call_args.args[0]["error"] == "Nothing to debate yet."
     assert job["error"] == "Nothing to debate yet."
+
+
+# --- fix round 1 ----------------------------------------------------------------
+
+COMPLETE_EVENT = {
+    "type": "complete", "converged": True, "verdict": "Proceed.", "narrative": "n",
+    "narrative_status": "ok", "final_stances": {"Kestra": "POSITIVE"}, "warnings": [],
+    "rounds_executed": 2, "confidence_score": 0.7, "weight_share": 0.7, "contested": False,
+    "provenance_by_claim": {"Proceed.": [{"doc_id": "DOC-XYZ", "title": "Memo", "breadcrumb": "Sec 1",
+                                          "chunk_id": "CHUNK-XYZ", "spans": [[0, 9]],
+                                          "quote": "QUOTE-XYZ"}]},
+    "cluster_details": {}, "supporting_entities": [], "opposing_entities": [],
+    "dissenting_views": [], "evidence": [{"entity": "Acme", "claim": "claim text"}],
+}
+COMPLETE_LEAKS = ("DOC-XYZ", "CHUNK-XYZ", "QUOTE-XYZ", '"spans"')
+
+
+def test_complete_event_provenance_is_narrowed_like_the_result():
+    assert project_event(COMPLETE_EVENT)["provenance_by_claim"] == project_result(COMPLETE_EVENT)["provenance_by_claim"]
+
+
+@pytest.mark.asyncio
+async def test_complete_event_leaks_no_provenance_ids_on_any_surface():
+    from src.api.debate_api import _DebateWSManager, get_debate_doc
+
+    run_id, user_id = str(uuid.uuid4()), uuid.uuid4()
+    manager = _DebateWSManager(job_id=run_id)
+    ws = AsyncMock()
+    manager.connections.append(ws)
+    with (
+        patch("src.api.debate_api.run_doc.append_run_event", new=AsyncMock()) as append,
+        patch("src.api.debate_api._persist_debate_run", new=AsyncMock()),
+    ):
+        await manager.broadcast(COMPLETE_EVENT)
+
+    # A legacy row written before the boundary existed: the raw complete event.
+    stored = {"user_id": str(user_id), "events": [COMPLETE_EVENT],
+              "result": {"provenance_by_claim": COMPLETE_EVENT["provenance_by_claim"]}}
+    with (
+        patch("src.api.debate_api.run_doc.read_run_doc", new=AsyncMock(return_value=stored)),
+        patch("src.api.debate_api.require_owner", new=AsyncMock()),
+    ):
+        doc = await get_debate_doc(run_id, user=_user(user_id))
+
+    surfaces = {
+        "persisted run_events row": json.dumps(append.call_args.args[2]),
+        "live ws frame": json.dumps(ws.send_json.call_args.args[0]),
+        "ws replay buffer": json.dumps(manager.buffer),
+        "run doc (legacy row)": json.dumps(doc),
+    }
+    leaks = [(name, token) for name, text in surfaces.items() for token in COMPLETE_LEAKS if token in text]
+    assert leaks == []
+    assert doc["events"][0]["provenance_by_claim"] == {"Proceed.": [{"title": "Memo", "breadcrumb": "Sec 1"}]}
+
+
+def test_account_export_run_verdict_is_projected():
+    from src.jobs.tasks import _run_json
+
+    run = SimpleNamespace(
+        id=uuid.uuid4(), query="q", status="complete", confidence=0.7,
+        verdict={"verdict": "v", "selection": [{"anchors": [1]}],
+                 "provenance_by_claim": {"c": [{"doc_id": "DOC-XYZ", "title": "T",
+                                                "breadcrumb": "B", "chunk_id": "CHUNK-XYZ"}]}},
+        created_at=datetime(2026, 1, 1, tzinfo=timezone.utc), finished_at=None,
+    )
+
+    assert _run_json(run)["verdict"] == {"verdict": "v", "provenance_by_claim": {"c": [{"title": "T", "breadcrumb": "B"}]}}
+
+
+@pytest.mark.parametrize("kind", [["complete"], {"type": "complete"}, None, 3])
+def test_non_string_event_type_is_dropped_without_logging_its_payload(kind, caplog):
+    with caplog.at_level(logging.WARNING):
+        assert project_event({"type": kind, "verdict": "SECRET-PAYLOAD"}) is None
+    assert "SECRET-PAYLOAD" not in caplog.text

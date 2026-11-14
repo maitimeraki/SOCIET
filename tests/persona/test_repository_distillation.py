@@ -179,7 +179,8 @@ async def test_whole_call_failure_falls_back_every_persona_with_one_warning():
     assert set(out) == {"Alice", "Bob"}
     assert out["Alice"][0].startswith("Alice:") and out["Bob"][0].startswith("Bob:")
     assert len(warnings) == 1
-    assert "provider down" in warnings[0] and "2 personas" in warnings[0]
+    assert "RuntimeError" in warnings[0] and "2 personas" in warnings[0]
+    assert "provider down" not in warnings[0]
 
 
 @pytest.mark.asyncio

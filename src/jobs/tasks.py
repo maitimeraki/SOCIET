@@ -24,6 +24,7 @@ import time
 import uuid
 from typing import Any
 
+from src.api.public_events import project_result
 from src.jobs.queue import (
     cancel_check,
     is_cancelled,
@@ -458,7 +459,7 @@ def _run_json(run) -> dict[str, Any]:
         "run_id": str(run.id),
         "query": run.query,
         "status": run.status,
-        "verdict": run.verdict,
+        "verdict": project_result(run.verdict),
         "confidence": run.confidence,
         "created_at": run.created_at.isoformat(),
         "finished_at": run.finished_at.isoformat() if run.finished_at else None,

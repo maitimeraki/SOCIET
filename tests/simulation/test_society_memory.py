@@ -138,6 +138,17 @@ async def test_commit_round_failure_isolated():
 
 
 @pytest.mark.asyncio
+async def test_commit_failure_receipt_names_the_exception_type_not_its_text():
+    session = FakeSession(run_side_effect=RuntimeError("connection lost to bolt://10.0.0.5"))
+    driver = MagicMock()
+    driver.session.return_value = session
+    svc = SocietyMemory(driver, "db")
+    rnd = _round(1, [_turn("A", "a")], [CommPair(agent_a="A", agent_b="B")])
+    receipt = await svc.commit_round(rnd, "ds", "qh", {})
+    assert receipt["error"] == "RuntimeError"
+
+
+@pytest.mark.asyncio
 async def test_commit_round_no_turns_noop():
     driver = MagicMock()
     svc = SocietyMemory(driver, "db")

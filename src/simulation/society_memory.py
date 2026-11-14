@@ -360,7 +360,8 @@ class SocietyMemory:
                 "opinions": len(opinions),
                 "edges": len(reactions),
                 "failed": True,
-                "error": str(exc),
+                # The receipt names the exception type; the full exception is in the log above.
+                "error": type(exc).__name__,
                 # A failed write claims nothing: no nodes, no links.
                 "written_nodes": [],
                 "written_links": [],

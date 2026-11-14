@@ -1133,7 +1133,8 @@ class PersonaRepository:
                     resp if isinstance(resp, str) else getattr(resp, "text", str(resp))
                 )
             except Exception as exc:
-                call_error = f"batch call failed: {exc}"
+                logger.warning("S5 distillation batch call failed", exc_info=exc)
+                call_error = f"batch call failed ({type(exc).__name__})"
 
         if call_error is not None or not text_out:
             reason = call_error or "the batch call returned no text"
