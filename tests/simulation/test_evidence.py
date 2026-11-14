@@ -1,4 +1,4 @@
-from src.simulation.evidence import ChunkRow, build_pack
+from src.simulation.evidence import ChunkRow, build_pack, sentence_spans
 
 CHUNK = ChunkRow("c1", "d1", "Deal memo", "Acquisitions",
                  "Amazon acquired Whole Foods in 2017. The deal was valued at $13.7 billion. Weather was mild.", 0.9)
@@ -38,3 +38,30 @@ def test_items_are_ranked_by_chunk_score_then_position_and_capped():
 def test_documents_and_chunks_are_counted_from_the_items():
     pack = build_pack("Kestra", [], [ChunkRow("a", "d1", "T", "", "Kestra a.", 1), ChunkRow("b", "d2", "T", "", "Kestra b.", 1)], [])
     assert (pack.doc_count, pack.chunk_count) == (2, 2)
+
+
+def test_a_name_beyond_word_forty_yields_no_item():
+    late = ChunkRow("c5", "d", "T", "", "word " * 45 + "Kestra closes.", 0.5)
+    assert build_pack("Kestra", [], [late], []).items == ()
+
+
+def test_a_blank_name_yields_no_items():
+    assert build_pack("  ", [], [CHUNK], []).items == ()
+
+
+def test_blank_aliases_yield_no_items():
+    assert build_pack("", ["  ", ""], [CHUNK], []).items == ()
+
+
+def test_a_padded_name_still_matches():
+    padded = ChunkRow("c6", "d", "T", "", "Kestra raised prices.", 0.5)
+    assert [i.text for i in build_pack(" Kestra ", [], [padded], []).items] == ["Kestra raised prices."]
+
+
+def test_leading_whitespace_is_trimmed_from_the_first_span():
+    assert sentence_spans("  Kestra raised prices. Orin cut.")[0] == (2, 2 + len("Kestra raised prices."))
+
+
+def test_leading_whitespace_is_not_part_of_an_item():
+    lead = ChunkRow("c7", "d", "T", "", "  Kestra raised prices.", 0.5)
+    assert build_pack("Kestra", [], [lead], []).items[0].text == "Kestra raised prices."
