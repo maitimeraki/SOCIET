@@ -21,7 +21,7 @@ def test_defaults_carry_the_plan_numbers():
         settings.plan_starter_max_agents,
         settings.plan_studio_max_agents,
         settings.plan_enterprise_max_agents,
-    ) == (10, 20, 20, 40)
+    ) == (10, 12, 12, 12)
     assert (
         settings.plan_free_max_rounds,
         settings.plan_starter_max_rounds,

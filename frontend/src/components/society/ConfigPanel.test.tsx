@@ -12,12 +12,11 @@ const render = (limits?: { max_agents: number; max_rounds: number }) => {
 
 describe('ConfigPanel — the plan caps', () => {
   it('caps the two plan-bound fields at the plan limit, with the cap in the hint', () => {
-    const html = render({ max_agents: 20, max_rounds: 4 })
-    // `snapshot_top_k` also caps at 20, so exactly two fields carry max="20" — the capped
-    // max_agents field and the untouched snapshot field.
-    expect(html.match(/max="20"/g)).toHaveLength(2)
+    const html = render({ max_agents: 8, max_rounds: 4 })
+    // The seat cap (8) and the pass cap (4) are the plan's; snapshot_top_k keeps its server bound of 20.
+    expect(html).toContain('max="8"')
     expect(html).toContain('max="4"')
-    expect(html).toContain('1–20')
+    expect(html).toContain('1–8')
     expect(html).toContain('1–4')
     // The other fields keep the server's absolute bound.
     expect(html).toContain('max="5"')
@@ -25,14 +24,14 @@ describe('ConfigPanel — the plan caps', () => {
 
   it('falls back to the absolute server bounds when no plan is known', () => {
     const html = render()
-    expect(html).toContain('max="100"')
+    expect(html).toContain('max="12"')
     expect(html).toContain('max="20"')
-    expect(fieldMax('max_agents')).toBe(100)
+    expect(fieldMax('max_agents')).toBe(12)
     expect(fieldMax('max_rounds')).toBe(20)
   })
 
   it('never loosens a cap beyond the server bound', () => {
-    expect(fieldMax('max_agents', { max_agents: 500, max_rounds: 50 })).toBe(100)
+    expect(fieldMax('max_agents', { max_agents: 500, max_rounds: 50 })).toBe(12)
     expect(fieldMax('max_rounds', { max_agents: 500, max_rounds: 50 })).toBe(20)
   })
 })

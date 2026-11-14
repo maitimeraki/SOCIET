@@ -103,7 +103,7 @@ export interface DebateConfig {
 }
 
 export const DEBATE_CONFIG_DEFAULTS: DebateConfig = {
-  max_agents: 50,
+  max_agents: 8,
   max_rounds: 5,
   comm_radius: 1,
   min_entity_overlap: 1,
@@ -117,7 +117,7 @@ export const DEBATE_CONFIG_DEFAULTS: DebateConfig = {
 
 /** Field ranges = `DebateConfig.__post_init__` (backend truth), not the rounder spec notes. */
 export const DEBATE_CONFIG_RANGES: Record<keyof DebateConfig, { min: number; max: number; step?: number }> = {
-  max_agents: { min: 1, max: 100 },
+  max_agents: { min: 1, max: 12 },
   max_rounds: { min: 1, max: 20 },
   comm_radius: { min: 1, max: 5 },
   min_entity_overlap: { min: 1, max: 10 },

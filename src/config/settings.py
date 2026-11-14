@@ -148,9 +148,9 @@ class Settings(BaseSettings):
     graph_job_reserve_units: int = 2_000
 
     plan_free_max_agents: int = 10
-    plan_starter_max_agents: int = 20
-    plan_studio_max_agents: int = 20
-    plan_enterprise_max_agents: int = 40
+    plan_starter_max_agents: int = 12
+    plan_studio_max_agents: int = 12
+    plan_enterprise_max_agents: int = 12
 
     plan_free_max_rounds: int = 3
     plan_starter_max_rounds: int = 4
@@ -181,8 +181,8 @@ class Settings(BaseSettings):
             if getattr(self, f"plan_{plan}_units") <= 0:
                 raise ValueError(f"plan_{plan}_units must be > 0")
             max_agents = getattr(self, f"plan_{plan}_max_agents")
-            if not 2 <= max_agents <= 100 or max_agents % 2:
-                raise ValueError(f"plan_{plan}_max_agents must be even and in [2, 100]")
+            if not 2 <= max_agents <= 12 or max_agents % 2:
+                raise ValueError(f"plan_{plan}_max_agents must be even and in [2, 12]")
             if not 1 <= getattr(self, f"plan_{plan}_max_rounds") <= 10:
                 raise ValueError(f"plan_{plan}_max_rounds must be in [1, 10]")
 

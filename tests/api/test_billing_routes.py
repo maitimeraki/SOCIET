@@ -119,7 +119,7 @@ async def test_plans_are_public_and_come_from_the_server_table():
         "price_usd": 10,
         "price_label": "$10",
         "units": 8000,
-        "max_agents": 20,
+        "max_agents": 12,
         "max_rounds": 4,
     }
     assert rows[2]["price_usd"] is None

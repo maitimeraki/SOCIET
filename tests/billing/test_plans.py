@@ -26,11 +26,11 @@ def test_default_plan_values():
     plans = get_plans()
     assert (plans["free"].units, plans["free"].max_agents) == (1_000, 10)
     assert plans["free"].max_rounds == 3
-    assert (plans["starter"].units, plans["starter"].max_agents) == (8_000, 20)
+    assert (plans["starter"].units, plans["starter"].max_agents) == (8_000, 12)
     assert plans["starter"].max_rounds == 4
-    assert (plans["studio"].units, plans["studio"].max_agents) == (16_000, 20)
+    assert (plans["studio"].units, plans["studio"].max_agents) == (16_000, 12)
     assert plans["studio"].max_rounds == 4
-    assert (plans["enterprise"].units, plans["enterprise"].max_agents) == (80_000, 40)
+    assert (plans["enterprise"].units, plans["enterprise"].max_agents) == (80_000, 12)
     assert plans["enterprise"].max_rounds == 4
     assert plans["free"].stripe_price_id is None
     assert plans["enterprise"].stripe_price_id is None

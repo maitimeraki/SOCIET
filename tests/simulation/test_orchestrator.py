@@ -141,7 +141,6 @@ async def test_five_step_flow():
         dataset_id="ds1",
         max_agents=5,
         intent=None,
-        config=config,
         warnings=result.warnings,
         selection_rows=result.selection_rows,
         distill=False,

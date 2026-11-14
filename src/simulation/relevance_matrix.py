@@ -4,8 +4,8 @@ Selection used to be density-only (structural relevance sums). S4 makes it read
 the S3 query intent as well, and makes every row explainable: `semantic` (the
 share of the intent's keyword/entity frame and domain/capability tags the
 candidate's text covers), `density` (its structural relevance evidence, scaled
-to [0, 1] across the batch) and `blended` (`w1*semantic + w2*density`, weights
-from `DebateConfig`).
+to [0, 1] across the batch) and `blended` (`SEMANTIC_WEIGHT*semantic +
+DENSITY_WEIGHT*density`).
 
 The selection path routes through `rank_candidates` so the score exists once:
   * the debate path — `ProfileSynthesizer.synthesize`
@@ -24,9 +24,14 @@ from dataclasses import dataclass
 from math import ceil
 from typing import Any
 
-from src.simulation.debate_config import DebateConfig
-
 logger = logging.getLogger(__name__)
+
+# The S4 blend: blended = SEMANTIC_WEIGHT*semantic + DENSITY_WEIGHT*density, both
+# components in [0, 1]. The intent ranking applies only when some candidate reaches
+# SELECTION_SCORE_THRESHOLD; otherwise selection falls back to density-only order.
+SEMANTIC_WEIGHT = 0.6
+DENSITY_WEIGHT = 0.4
+SELECTION_SCORE_THRESHOLD = 0.6
 
 _TOKEN_RE = re.compile(r"[a-z0-9]+")
 _MIN_TERM_LENGTH = 2
@@ -55,7 +60,7 @@ class SelectionRow:
     """One ranked S4 row, explainable field by field.
 
     `semantic` and `density` are the two components of `blended`
-    (`w1*semantic + w2*density`); `density` is normalized to [0, 1] across the
+    (`SEMANTIC_WEIGHT*semantic + DENSITY_WEIGHT*density`); `density` is normalized to [0, 1] across the
     batch so the decomposition adds up as documented. `anchors` are the
     provenance anchors of the candidate's evidence — source node ids/names and
     chunk ids where the row carries them, deduped and in evidence order — the
@@ -212,21 +217,20 @@ def semantic_component(terms: Sequence[str], text: str) -> float:
     return matched / counted if counted else 0.0
 
 
-def blended_score(semantic: float, density: float, config: DebateConfig) -> float:
-    """The documented blend: `w1*semantic + w2*density` (both components in [0, 1])."""
-    return config.w1 * semantic + config.w2 * density
+def blended_score(semantic: float, density: float) -> float:
+    """The documented blend (both components in [0, 1])."""
+    return SEMANTIC_WEIGHT * semantic + DENSITY_WEIGHT * density
 
 
 def rank_candidates(
     candidates: Sequence[SelectionCandidate],
     intent: Any,
-    config: DebateConfig,
     warnings: list[str] | None = None,
 ) -> list[SelectionRow]:
     """Score, blend and order candidates best-first.
 
     Ordering is the blended score when the intent ranks at least one candidate
-    above `config.selection_score_threshold`. When no candidate clears it, the
+    above `SELECTION_SCORE_THRESHOLD`. When no candidate clears it, the
     previous density-only ordering is restored and a warning says so. With no
     intent terms at all there is nothing to clear: density-only ordering, no
     warning — the pre-S4 behaviour for callers that pass no intent.
@@ -251,19 +255,19 @@ def rank_candidates(
                 name=candidate.name,
                 semantic=semantic,
                 density=density,
-                blended=blended_score(semantic, density, config),
+                blended=blended_score(semantic, density),
                 anchors=_anchors_of(candidate.evidence),
             )
         )
 
-    if terms and any(row.blended >= config.selection_score_threshold for row in rows):
+    if terms and any(row.blended >= SELECTION_SCORE_THRESHOLD for row in rows):
         rows.sort(key=lambda row: row.blended, reverse=True)
         return rows
 
     if terms:
         message = (
-            "S4 selection: no candidate cleared selection_score_threshold="
-            f"{config.selection_score_threshold:.2f} "
+            "S4 selection: no candidate cleared SELECTION_SCORE_THRESHOLD="
+            f"{SELECTION_SCORE_THRESHOLD:.2f} "
             f"(best blended={max((row.blended for row in rows), default=0.0):.3f})"
             " — falling back to density-only ordering."
         )

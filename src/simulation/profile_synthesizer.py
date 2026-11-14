@@ -11,7 +11,6 @@ from typing import Any
 from src.persona.agent import SOURCE_EVIDENCE_MAX_SNIPPETS, Agent
 from src.persona.graph_context import EntityNode, GraphContext
 from src.persona.repository import PersonaRepository
-from src.simulation.debate_config import DebateConfig
 from src.simulation.relevance_matrix import (
     NoAgentsDerivableError,
     SelectionCandidate,
@@ -37,7 +36,6 @@ class ProfileSynthesizer:
         dataset_id: str,
         max_agents: int = 5,
         intent: QueryIntent | None = None,
-        config: DebateConfig | None = None,
         warnings: list[str] | None = None,
         selection_rows: list[SelectionRow] | None = None,
         distill: bool = False,
@@ -53,8 +51,8 @@ class ProfileSynthesizer:
         4. Take top nodes (adaptive count)
         5. Build one Agent per node
 
-        `intent` is the read-only S3 intent (None for older callers); `config`
-        carries the S4 blend weights. Raises `NoAgentsDerivableError` when the
+        `intent` is the read-only S3 intent (None for older callers). Raises
+        `NoAgentsDerivableError` when the
         graph yields no candidate at all — an empty roster is a failed job, not
         a debate with nobody in it.
 
@@ -102,9 +100,7 @@ class ProfileSynthesizer:
             )
             for node in required
         ]
-        rows = rank_candidates(
-            candidates, intent, config or DebateConfig(), warnings=warnings
-        )
+        rows = rank_candidates(candidates, intent, warnings=warnings)
         if selection_rows is not None:
             selection_rows.extend(rows)
         # S9 visibility: expose the S4 decomposition the moment it exists, so the

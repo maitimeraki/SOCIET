@@ -24,9 +24,9 @@ describe('the question cannot become a request before the map exists (§9, D3)',
 })
 
 describe('the form starts inside the plan (§7.10)', () => {
-  it('a free plan starts at 10 experts and 3 passes, not the absolute 50/5', () => {
-    expect(initialConfig({ max_agents: 10, max_rounds: 3 })).toMatchObject({
-      max_agents: 10,
+  it('a plan tighter than the 8-seat default starts at the plan cap, and 3 passes', () => {
+    expect(initialConfig({ max_agents: 6, max_rounds: 3 })).toMatchObject({
+      max_agents: 6,
       max_rounds: 3,
     })
   })
@@ -39,7 +39,7 @@ describe('the form starts inside the plan (§7.10)', () => {
       role: 'user',
       plan: 'free',
       entitlements: {
-        max_agents: 10,
+        max_agents: 6,
         max_rounds: 3,
         units_remaining: 1000,
         period_end: '2026-12-01T00:00:00Z',
@@ -49,7 +49,7 @@ describe('the form starts inside the plan (§7.10)', () => {
     useAuthStore.getState().setUser(signup)
     const config = initialConfig(useAuthStore.getState().user?.entitlements)
 
-    expect(config.max_agents).toBe(10)
+    expect(config.max_agents).toBe(6)
     expect(config.max_rounds).toBe(3)
     expect(config.max_agents).not.toBe(DEBATE_CONFIG_DEFAULTS.max_agents)
     expect(config.max_rounds).not.toBe(DEBATE_CONFIG_DEFAULTS.max_rounds)

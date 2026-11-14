@@ -4,7 +4,6 @@ import logging
 
 import pytest
 
-from src.simulation.debate_config import DebateConfig
 from src.simulation.relevance_matrix import (
     SelectionCandidate,
     SelectionRow,
@@ -67,9 +66,8 @@ def test_density_component_sums_node_and_sector_evidence():
 
 
 def test_blended_score_is_the_documented_formula():
-    config = DebateConfig()
-    assert blended_score(0.5, 0.25, config) == pytest.approx(
-        config.w1 * 0.5 + config.w2 * 0.25
+    assert blended_score(0.5, 0.25) == pytest.approx(
+        0.6 * 0.5 + 0.4 * 0.25
     )
 
 
@@ -99,9 +97,8 @@ def test_intent_terms_reads_the_intent_object_and_its_mapping_form():
 
 
 def test_rows_carry_both_components_and_the_documented_blend():
-    config = DebateConfig()
     rows = rank_candidates(
-        _candidates(), _intent(direct_keywords=["carbon", "tax"]), config
+        _candidates(), _intent(direct_keywords=["carbon", "tax"])
     )
 
     by_name = {row.name: row for row in rows}
@@ -113,7 +110,7 @@ def test_rows_carry_both_components_and_the_documented_blend():
     assert by_name["on_topic"].density == pytest.approx(0.5)
     for row in rows:
         assert row.blended == pytest.approx(
-            config.w1 * row.semantic + config.w2 * row.density
+            0.6 * row.semantic + 0.4 * row.density
         )
 
     # the on-topic candidate clears the threshold and outranks the denser one
@@ -122,33 +119,34 @@ def test_rows_carry_both_components_and_the_documented_blend():
 
 def test_two_intents_produce_two_different_orderings():
     """P2-T1: selection changes when the intent changes."""
-    config = DebateConfig()
     by_carbon = rank_candidates(
-        _candidates(), _intent(direct_keywords=["carbon"]), config
+        _candidates(), _intent(direct_keywords=["carbon"])
     )
     by_logistics = rank_candidates(
-        _candidates(), _intent(direct_keywords=["logistics"]), config
+        _candidates(), _intent(direct_keywords=["logistics"])
     )
 
     assert [row.name for row in by_carbon] == ["on_topic", "dense"]
     assert [row.name for row in by_logistics] == ["dense", "on_topic"]
 
 
-def test_no_candidate_clears_the_threshold_falls_back_to_density_ordering(caplog):
-    config = DebateConfig(selection_score_threshold=0.99)
+def test_no_candidate_clears_the_threshold_falls_back_to_density_ordering(
+    caplog, monkeypatch
+):
+    monkeypatch.setattr("src.simulation.relevance_matrix.SELECTION_SCORE_THRESHOLD", 0.99)
     with caplog.at_level(logging.WARNING, logger=_MATRIX_LOGGER):
         rows = rank_candidates(
-            _candidates(), _intent(direct_keywords=["carbon", "tax"]), config
+            _candidates(), _intent(direct_keywords=["carbon", "tax"])
         )
 
     assert [row.name for row in rows] == ["dense", "on_topic"]
-    assert rows[0].blended < config.selection_score_threshold
+    assert rows[0].blended < 0.99
     assert "falling back to density-only ordering" in caplog.text
 
 
 def test_no_intent_is_density_only_ordering_and_does_not_warn(caplog):
     with caplog.at_level(logging.WARNING, logger=_MATRIX_LOGGER):
-        rows = rank_candidates(_candidates(), None, DebateConfig())
+        rows = rank_candidates(_candidates(), None)
 
     assert [row.name for row in rows] == ["dense", "on_topic"]
     assert all(row.semantic == 0.0 for row in rows)
@@ -179,7 +177,7 @@ def test_every_evidence_row_is_read_through_the_single_adapter(monkeypatch):
             evidence=[{"total_relevance": 1.0, "evidence_nodes": ["Alice"]}],
         ),
     ]
-    rows = matrix.rank_candidates(candidates, None, DebateConfig())
+    rows = matrix.rank_candidates(candidates, None)
 
     assert all(item in seen for candidate in candidates for item in candidate.evidence)
     assert [row.density for row in rows] == [1.0, pytest.approx(0.5)]
@@ -189,7 +187,7 @@ def test_every_evidence_row_is_read_through_the_single_adapter(monkeypatch):
         "_evidence_row",
         lambda item: (3.0, ({"kind": "node", "name": "patched"},)),
     )
-    rows = matrix.rank_candidates(candidates, None, DebateConfig())
+    rows = matrix.rank_candidates(candidates, None)
 
     assert [row.density for row in rows] == [1.0, 1.0]
     assert all(row.anchors == ({"kind": "node", "name": "patched"},) for row in rows)
@@ -212,7 +210,6 @@ def test_rows_carry_deduped_stable_provenance_anchors():
     rows = rank_candidates(
         [SelectionCandidate(name="cluster", text="", evidence=evidence)],
         None,
-        DebateConfig(),
     )
 
     assert rows[0].anchors == (
@@ -226,7 +223,7 @@ def test_rows_carry_deduped_stable_provenance_anchors():
     assert SelectionRow(name="x", semantic=0.0, density=0.0, blended=0.0).anchors == ()
     assert (
         rank_candidates(
-            [SelectionCandidate(name="x", text="", evidence=[])], None, DebateConfig()
+            [SelectionCandidate(name="x", text="", evidence=[])], None
         )[0].anchors
         == ()
     )
@@ -239,7 +236,7 @@ def test_rows_carry_deduped_stable_provenance_anchors():
             evidence=[{"total_relevance": 1.0, "evidence_nodes": ["Alice", "Bob"]}],
         )
     ]
-    assert rank_candidates(sector, None, DebateConfig())[0].anchors == (
+    assert rank_candidates(sector, None)[0].anchors == (
         {"kind": "node", "name": "Alice"},
         {"kind": "node", "name": "Bob"},
     )
@@ -262,7 +259,6 @@ def test_string_evidence_nodes_is_one_name_not_per_character_anchors():
             )
         ],
         None,
-        DebateConfig(),
     )
 
     assert rows[0].anchors == ({"kind": "node", "name": "Alice"},)
@@ -286,7 +282,6 @@ def test_triplet_source_id_becomes_a_chunk_anchor_without_moving_density():
             )
         ],
         None,
-        DebateConfig(),
     )
 
     assert rows[0].density == pytest.approx(1.0)  # normalized batch peak, unchanged
@@ -318,7 +313,6 @@ def test_document_anchor_and_document_ids_become_document_anchors():
     rows = rank_candidates(
         [SelectionCandidate(name="row", text="", evidence=evidence)],
         None,
-        DebateConfig(),
     )
 
     assert rows[0].anchors == (

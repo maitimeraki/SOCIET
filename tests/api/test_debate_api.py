@@ -159,7 +159,7 @@ class TestDebateRequest:
     def test_debate_request_defaults(self):
         """Test default values for DebateConfigRequest."""
         config = DebateConfigRequest()
-        assert config.max_agents == 50
+        assert config.max_agents == 8
         assert config.max_rounds == 5
         assert config.comm_radius == 1
         assert config.min_entity_overlap == 1
@@ -177,7 +177,7 @@ class TestDebateRequest:
     def test_debate_request_custom_values(self):
         """Test custom config values."""
         config = DebateConfigRequest(
-            max_agents=25,
+            max_agents=12,
             max_rounds=3,
             comm_radius=2,
             min_entity_overlap=2,
@@ -185,7 +185,7 @@ class TestDebateRequest:
             llm_concurrency=16,
             topology_score_threshold=0.25,
         )
-        assert config.max_agents == 25
+        assert config.max_agents == 12
         assert config.max_rounds == 3
         assert config.comm_radius == 2
         assert config.min_entity_overlap == 2
@@ -581,14 +581,14 @@ class TestDebateJobPayload:
         assert complete_msg["confidence_score"] == result["confidence_score"] == 0.9
 
     @pytest.mark.asyncio
-    async def test_job_result_warns_when_selection_falls_back_to_density(self):
+    async def test_job_result_warns_when_selection_falls_back_to_density(self, monkeypatch):
         """Nothing clears the S4 threshold → the degradation is in the payload."""
+        monkeypatch.setattr("src.simulation.relevance_matrix.SELECTION_SCORE_THRESHOLD", 0.99)
         job_id = f"payload-{uuid.uuid4()}"
         config = DebateConfig(
             max_agents=5,
             max_rounds=1,
             max_new_agents_per_round=0,
-            selection_score_threshold=0.99,
         )
 
         job, _ = await _run_stubbed_job(job_id, config)

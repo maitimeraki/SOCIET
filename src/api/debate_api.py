@@ -60,7 +60,7 @@ router = APIRouter(
 class DebateConfigRequest(BaseModel):
     """Debate configuration from request."""
 
-    max_agents: int = Field(default=50, ge=1, le=100)
+    max_agents: int = Field(default=8, ge=1, le=12)
     max_rounds: int = Field(default=5, ge=1, le=20)
     comm_radius: int = Field(default=1, ge=1, le=5)
     min_entity_overlap: int = Field(default=1, ge=1, le=10)

@@ -494,7 +494,6 @@ import logging
 
 import pytest
 
-from src.simulation.debate_config import DebateConfig
 
 
 @pytest.fixture
@@ -758,12 +757,12 @@ async def test_synthesize_keeps_both_clusters_when_representatives_share_a_name(
 
 
 @pytest.mark.asyncio
-async def test_synthesize_falls_back_to_density_order_and_warns(caplog):
+async def test_synthesize_falls_back_to_density_order_and_warns(caplog, monkeypatch):
     """An intent that clears no candidate restores the density ordering and warns."""
     intent = QueryIntent(
         direct_keywords=["energy"], latent_sectors=[], search_perspectives=[]
     )
-    config = DebateConfig(selection_score_threshold=0.99)
+    monkeypatch.setattr("src.simulation.relevance_matrix.SELECTION_SCORE_THRESHOLD", 0.99)
 
     with caplog.at_level(logging.WARNING, logger="src.simulation.relevance_matrix"):
         profiles = await _selection_synth(_SELECTION_ENTITIES).synthesize(
@@ -771,7 +770,6 @@ async def test_synthesize_falls_back_to_density_order_and_warns(caplog):
             dataset_id="ds",
             max_agents=2,
             intent=intent,
-            config=config,
         )
 
     assert [p.identity.name for p in profiles] == ["Carbon Analyst", "Grid Engineer"]
@@ -809,8 +807,9 @@ async def test_synthesize_fills_the_selection_rows_sink():
 
 
 @pytest.mark.asyncio
-async def test_synthesize_reports_the_selection_fallback_to_the_warnings_sink():
+async def test_synthesize_reports_the_selection_fallback_to_the_warnings_sink(monkeypatch):
     """S4's degradation reaches the run result, not only the log stream."""
+    monkeypatch.setattr("src.simulation.relevance_matrix.SELECTION_SCORE_THRESHOLD", 0.99)
     intent = QueryIntent(
         direct_keywords=["energy"], latent_sectors=[], search_perspectives=[]
     )
@@ -821,7 +820,6 @@ async def test_synthesize_reports_the_selection_fallback_to_the_warnings_sink():
         dataset_id="ds",
         max_agents=2,
         intent=intent,
-        config=DebateConfig(selection_score_threshold=0.99),
         warnings=warnings,
     )
 

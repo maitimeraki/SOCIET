@@ -113,7 +113,7 @@ def sample_profiles():
 def debate_config():
     """Default DebateConfig for testing."""
     return DebateConfig(
-        max_agents=50,
+        max_agents=8,
         max_rounds=5,
         comm_radius=2,
         min_entity_overlap=1,

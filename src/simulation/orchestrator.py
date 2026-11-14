@@ -216,7 +216,6 @@ class DebateOrchestrator:
             dataset_id=dataset_id,
             max_agents=config.max_agents,
             intent=intent,
-            config=config,
             warnings=warnings,
             selection_rows=selection_rows,
             distill=distill,

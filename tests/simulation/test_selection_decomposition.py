@@ -31,7 +31,6 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from src.persona.models_persona import PersonaIdentity
-from src.simulation.debate_config import DebateConfig
 from src.simulation.profile_synthesizer import ProfileSynthesizer
 from src.simulation.relevance_matrix import SelectionCandidate, rank_candidates
 from src.utils.queryIntend import QueryIntent
@@ -39,7 +38,6 @@ from src.utils.queryIntend import QueryIntent
 _INTENT = QueryIntent(
     direct_keywords=["carbon", "tax"], latent_sectors=[], search_perspectives=[]
 )
-_CONFIG = DebateConfig()
 
 # The semantic text is a property of the candidate, not of its evidence shape.
 _TEXT = {"Carbon Analyst": "carbon tax policy", "Grid Engineer": "grid engineering"}
@@ -122,7 +120,7 @@ def _run(evidence: dict[str, list]) -> list:
         SelectionCandidate(name=name, text=_TEXT[name], evidence=rows)
         for name, rows in evidence.items()
     ]
-    return rank_candidates(candidates, _INTENT, _CONFIG)
+    return rank_candidates(candidates, _INTENT)
 
 
 def _by_name(rows) -> dict:
@@ -152,7 +150,7 @@ def test_numbers_hold_across_the_retired_and_shipped_read_sets():
     assert after["Grid Engineer"].density == pytest.approx(0.4)
     for row in after.values():
         assert row.blended == pytest.approx(
-            _CONFIG.w1 * row.semantic + _CONFIG.w2 * row.density
+            0.6 * row.semantic + 0.4 * row.density
         )
 
 
@@ -196,7 +194,6 @@ def test_document_anchor_reads_are_tolerant_not_a_production_shape():
     rows = rank_candidates(
         [SelectionCandidate(name="Tolerant", text="t", evidence=[entity])],
         _INTENT,
-        _CONFIG,
     )
     assert {"kind": "document", "id": "doc-9"} in rows[0].anchors
 
@@ -209,7 +206,6 @@ def test_document_anchor_reads_are_tolerant_not_a_production_shape():
     rows = rank_candidates(
         [SelectionCandidate(name="S", text="t", evidence=[sector])],
         _INTENT,
-        _CONFIG,
     )
     assert {"kind": "document", "id": "doc-10"} in rows[0].anchors
 
@@ -263,7 +259,6 @@ async def test_selection_rows_flow_through_synthesize_with_the_document_model_an
         dataset_id="ds",
         max_agents=2,
         intent=_INTENT,
-        config=_CONFIG,
         selection_rows=rows,
     )
 
@@ -272,5 +267,5 @@ async def test_selection_rows_flow_through_synthesize_with_the_document_model_an
     top = rows[0]
     assert {"kind": "chunk", "id": "node-7"} in top.anchors
     assert top.blended == pytest.approx(
-        _CONFIG.w1 * top.semantic + _CONFIG.w2 * top.density
+        0.6 * top.semantic + 0.4 * top.density
     )

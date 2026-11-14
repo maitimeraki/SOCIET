@@ -4,7 +4,7 @@ import { fmtScore } from '../../utils/format'
 import Label from '../ui/Label'
 import { ruleClasses } from '../ui/Rule'
 
-/** DebateConfig.selection_score_threshold default — display-only; not exposed in UI v1. */
+/** relevance_matrix.SELECTION_SCORE_THRESHOLD default — display-only; not exposed in UI v1. */
 export const SELECTION_THRESHOLD = 0.6
 
 export default function SelectionTable({

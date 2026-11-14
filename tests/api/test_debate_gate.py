@@ -116,7 +116,7 @@ async def _post(client, config: dict | None = None):
 async def test_explicit_over_cap_is_rejected_without_a_job_or_reservation(
     client, account
 ):
-    response = await _post(client, {"max_agents": 20})
+    response = await _post(client, {"max_agents": 11})
 
     assert response.status_code == 403
     assert response.json()["error"]["code"] == "plan_limit_exceeded"
@@ -124,16 +124,27 @@ async def test_explicit_over_cap_is_rejected_without_a_job_or_reservation(
     assert await _balance(account.id) == (0, 0)
 
 
-async def test_omitted_config_is_clamped_and_reserved(client, account):
+async def test_seat_count_above_twelve_is_rejected_by_the_request_schema(
+    client, account
+):
+    response = await _post(client, {"max_agents": 13})
+
+    assert response.status_code == 422
+    assert await _job_count(account.id) == 0
+
+
+async def test_omitted_config_uses_the_eight_seat_default_and_reserves_the_plan(
+    client, account
+):
     response = await _post(client)
 
     assert response.status_code == 202
     job_id = response.json()["job_id"]
 
     doc = await run_doc.read_run_doc(job_id)
-    assert doc["config"]["max_agents"] == 10
+    assert doc["config"]["max_agents"] == 8
     assert doc["config"]["max_rounds"] == 3
-    assert doc["config"]["max_pairs_per_round"] == 10
+    assert doc["config"]["max_pairs_per_round"] == 8
 
     job = await _job_row(job_id)
     plan = get_plan("free")

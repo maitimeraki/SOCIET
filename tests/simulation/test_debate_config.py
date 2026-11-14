@@ -6,7 +6,7 @@ from src.simulation.debate_config import DebateConfig
 class TestDebateConfig:
     def test_default_constructs_valid(self):
         config = DebateConfig()
-        assert config.max_agents == 50
+        assert config.max_agents == 8
         assert config.max_rounds == 5
         assert config.comm_radius == 1
         assert config.min_entity_overlap == 1
@@ -46,7 +46,7 @@ class TestDebateConfigDefaults:
     def test_default_values(self):
         """Test that defaults are set correctly."""
         config = DebateConfig()
-        assert config.max_agents == 50
+        assert config.max_agents == 8
         assert config.max_rounds == 5
         assert config.comm_radius == 1
         assert config.min_entity_overlap == 1
@@ -58,13 +58,13 @@ class TestDebateConfigValidation:
     """Tests for validation."""
 
     def test_max_agents_valid(self):
-        """Test max_agents valid range."""
+        """Test max_agents (seat count) valid range."""
         config = DebateConfig(max_agents=1)
         assert config.max_agents == 1
-        config = DebateConfig(max_agents=100)
-        assert config.max_agents == 100
-        config = DebateConfig(max_agents=50)
-        assert config.max_agents == 50
+        config = DebateConfig(max_agents=12)
+        assert config.max_agents == 12
+        config = DebateConfig(max_agents=8)
+        assert config.max_agents == 8
 
     def test_max_agents_invalid_low(self):
         """Test max_agents rejects values below 1."""
@@ -72,9 +72,9 @@ class TestDebateConfigValidation:
             DebateConfig(max_agents=0)
 
     def test_max_agents_invalid_high(self):
-        """Test max_agents rejects values above 100."""
+        """Test max_agents rejects values above 12."""
         with pytest.raises(ValueError, match="max_agents"):
-            DebateConfig(max_agents=101)
+            DebateConfig(max_agents=13)
 
     def test_max_rounds_valid(self):
         """Test max_rounds valid range."""
@@ -173,14 +173,14 @@ class TestDebateConfigValidation:
     def test_all_valid_values_accepted(self):
         """Test that all valid values together are accepted."""
         config = DebateConfig(
-            max_agents=75,
+            max_agents=12,
             max_rounds=15,
             comm_radius=3,
             min_entity_overlap=5,
             max_pairs_per_round=100,
             convergence_threshold=0.85,
         )
-        assert config.max_agents == 75
+        assert config.max_agents == 12
         assert config.max_rounds == 15
         assert config.comm_radius == 3
         assert config.min_entity_overlap == 5
@@ -201,20 +201,15 @@ def test_new_loop_fields_validated():
         DebateConfig(snapshot_top_k=4)
 
 
-def test_s4_blend_fields_defaults():
-    cfg = DebateConfig()
-    assert cfg.w1 == 0.6
-    assert cfg.w2 == 0.4
-    assert cfg.w1 + cfg.w2 == pytest.approx(1.0)
-    assert cfg.selection_score_threshold == 0.6
+def test_seat_count_defaults_to_eight():
+    assert DebateConfig().max_agents == 8
 
 
-def test_s4_blend_fields_validated():
-    with pytest.raises(ValueError, match="w1 must be between 0.0 and 1.0"):
-        DebateConfig(w1=1.1)
-    with pytest.raises(ValueError, match="w2 must be between 0.0 and 1.0"):
-        DebateConfig(w2=-0.1)
-    with pytest.raises(
-        ValueError, match="selection_score_threshold must be between 0.0 and 1.0"
-    ):
-        DebateConfig(selection_score_threshold=1.1)
+def test_seat_count_is_capped_at_twelve():
+    with pytest.raises(ValueError):
+        DebateConfig(max_agents=13)
+
+
+def test_blend_settings_are_gone():
+    assert not hasattr(DebateConfig(), "w1")
+    assert not hasattr(DebateConfig(), "selection_score_threshold")
