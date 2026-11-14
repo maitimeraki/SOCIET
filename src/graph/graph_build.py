@@ -4,6 +4,7 @@ import sys
 import uuid
 from typing import List, Optional
 
+from llama_index.core.graph_stores.types import EntityNode
 from llama_index.core.node_parser import SentenceSplitter
 from llama_index.embeddings.ollama import OllamaEmbedding
 from llama_index.graph_stores.neo4j import Neo4jPropertyGraphStore
@@ -393,6 +394,57 @@ def _route_literals(nodes, relation_slots=None):
     return nodes
 
 
+class ScopedEntityNode(EntityNode):
+    """An extracted entity whose graph id is namespaced by its dataset.
+
+    llama-index keys `__Entity__` nodes by bare name, so two datasets that both
+    extract "Apple" MERGE onto one node and overwrite each other's properties and
+    edges. The id becomes `<dataset_id>:<name>`; `name` stays the bare display
+    name, which is what the embedding text and every read projection show.
+    """
+
+    dataset_ns: str
+
+    @property
+    def id(self) -> str:
+        return f"{self.dataset_ns}:{super().id}"
+
+
+def _scope_entities(nodes, dataset_id: str) -> None:
+    """Re-key this chunk's extracted entities onto dataset-namespaced ids, in place.
+
+    The extractor builds plain `EntityNode`s and its relations reference them by
+    bare id, so both are rewritten together: each entity becomes a
+    `ScopedEntityNode`, and each relation endpoint naming one of this chunk's
+    entities is remapped to the namespaced id. Endpoints that name no entity here
+    (llama-index's chunk-to-chunk structural edges) are left as they are.
+    """
+    from llama_index.core.graph_stores.types import KG_NODES_KEY, KG_RELATIONS_KEY
+
+    if not dataset_id:
+        raise ValueError("entity ids must be namespaced by a non-empty dataset_id")
+    for node in nodes:
+        meta = getattr(node, "metadata", None) or {}
+        bag = meta.get(KG_NODES_KEY, [])
+        remap = {}
+        scoped = []
+        for item in bag:
+            entity = ScopedEntityNode(
+                name=item.name,
+                label=item.label,
+                properties=dict(item.properties),
+                dataset_ns=dataset_id,
+            )
+            remap[item.id] = entity.id
+            scoped.append(entity)
+        if not scoped:
+            continue
+        meta[KG_NODES_KEY] = scoped
+        for rel in meta.get(KG_RELATIONS_KEY, []):
+            rel.source_id = remap.get(rel.source_id, rel.source_id)
+            rel.target_id = remap.get(rel.target_id, rel.target_id)
+
+
 class _NoOpSplit:
     """Truthy pass-through transform: returns its input nodes unchanged.
 
@@ -633,7 +685,11 @@ class GraphExtractionStage:
                             delta_nodes,
                             delta_edges,
                         ) = await asyncio.to_thread(
-                            self._extract_chunk, doc, extractors, slice_.relation_types
+                            self._extract_chunk,
+                            doc,
+                            extractors,
+                            slice_.relation_types,
+                            dataset_id=dataset_id,
                         )
                         # Serialise the store write: extraction is concurrent, but
                         # only one chunk writes the shared index at a time. The
@@ -742,7 +798,7 @@ class GraphExtractionStage:
             logger.error(f"Error during graph extraction for dataset {dataset_id}: {e}")
             raise
 
-    def _extract_chunk(self, doc, extractors, relation_slots=None):
+    def _extract_chunk(self, doc, extractors, relation_slots=None, *, dataset_id: str):
         """Extract ONE chunk exactly once and harvest its delta + proposed labels.
 
         Runs off the event loop (the path extractors call `asyncio.run`
@@ -760,12 +816,14 @@ class GraphExtractionStage:
 
         `relation_slots` is the chunk slice's `relation_types`; literal nodes are
         routed into those declared slots (falling back to `"value"`) and removed
-        before the labels and delta are harvested.
+        before the labels and delta are harvested. `dataset_id` namespaces the
+        surviving entity ids (`_scope_entities`) before anything reads them.
         """
         nodes = [doc]
         for extractor in extractors:
             nodes = list(extractor(nodes))
         _route_literals(nodes, relation_slots)
+        _scope_entities(nodes, dataset_id)
         entity_labels, relation_labels = _proposed_labels(nodes)
         delta_nodes, delta_edges = _delta_payload(nodes)
         return nodes, entity_labels, relation_labels, delta_nodes, delta_edges

@@ -19,6 +19,10 @@ import pytest
 
 from src.graph.models_graph import LocalOntology
 
+# The real llama-index graph-store types are imported before the mocks below
+# apply: ScopedEntityNode subclasses EntityNode, and a mocked base is not a type.
+import llama_index.core.graph_stores.types  # noqa: F401
+
 
 # Mock heavy llama_index imports before importing graph_build — the exact seam
 # tests/graph/test_graph_build.py pins: any module that already imported
@@ -42,8 +46,6 @@ def mock_llama_index():
             "llama_index.core.indices": MagicMock(),
             "llama_index.core.indices.property_graph": MagicMock(),
             "llama_index.core.settings": MagicMock(),
-            "llama_index.core.graph_stores": MagicMock(),
-            "llama_index.core.graph_stores.types": MagicMock(),
         },
     ):
         import src.graph.graph_build as gb
@@ -58,7 +60,7 @@ def mock_llama_index():
 
 
 def _pin_kg_keys():
-    """`_extract_chunk` reads KG_NODES_KEY/KG_RELATIONS_KEY from the mocked
+    """`_extract_chunk` reads KG_NODES_KEY/KG_RELATIONS_KEY from
     `llama_index.core.graph_stores.types`; pin them to their real string values
     so this test's metadata bag is the one the code reads."""
     import sys
@@ -178,7 +180,7 @@ def test_extract_chunk_routes_leaked_value_onto_real_to_real_edge():
     doc = MagicMock()
     doc.metadata = {}
     _, _, _, delta_nodes, delta_edges = stage._extract_chunk(
-        doc, [_extractor], onto.relation_types
+        doc, [_extractor], onto.relation_types, dataset_id="ds-test"
     )
 
     assert {n["label"] for n in delta_nodes} == {
@@ -220,7 +222,7 @@ def test_extract_chunk_routes_value_onto_surviving_entity():
 
     doc = MagicMock()
     doc.metadata = {}
-    _, _, _, delta_nodes, delta_edges = stage._extract_chunk(doc, [_extractor])
+    _, _, _, delta_nodes, delta_edges = stage._extract_chunk(doc, [_extractor], dataset_id="ds-test")
 
     assert {n["label"] for n in delta_nodes} == {"Amazon"}  # literal node gone
     assert delta_edges == []  # dangling edge removed

@@ -6,6 +6,10 @@ import pytest
 
 from src.graph.models_graph import LocalOntology, OntologyMetadata, ProcessedChunk
 
+# The real llama-index graph-store types are imported before the mocks below
+# apply: ScopedEntityNode subclasses EntityNode, and a mocked base is not a type.
+import llama_index.core.graph_stores.types  # noqa: F401
+
 
 # Mock heavy llama_index imports before importing graph_build
 @pytest.fixture(autouse=True)
@@ -33,9 +37,6 @@ def mock_llama_index():
             "llama_index.core.indices": MagicMock(),
             "llama_index.core.indices.property_graph": MagicMock(),
             "llama_index.core.settings": MagicMock(),
-            # Task 7: `_proposed_labels` / `_delta_payload` read these keys lazily.
-            "llama_index.core.graph_stores": MagicMock(),
-            "llama_index.core.graph_stores.types": MagicMock(),
         },
     ):
         import src.graph.graph_build as gb
@@ -597,7 +598,10 @@ class TestLiteralRouting:
         doc = MagicMock()
         doc.metadata = {}
         _, ent_labels, _, delta_nodes, delta_edges = stage._extract_chunk(
-            doc, [_extractor], ontology.relation_types
+            doc,
+            [_extractor],
+            ontology.relation_types,
+            dataset_id="ds-test",
         )
 
         assert [n["label"] for n in delta_nodes] == [
@@ -606,7 +610,7 @@ class TestLiteralRouting:
         ]  # literal node gone
         assert "Money" not in ent_labels
         assert [(e["source"], e["target"]) for e in delta_edges] == [
-            ("e2", "e3")
+            ("ds-test:Amazon", "ds-test:WholeFoods")
         ]  # ACQUIRED survives
         assert acquired.properties["price"] == {"amount": 2.5e9, "currency": "USD"}
         assert (
@@ -704,7 +708,9 @@ class TestLiteralRouting:
 
         doc = MagicMock()
         doc.metadata = {}
-        stage._extract_chunk(doc, [_extractor], ontology.relation_types)
+        stage._extract_chunk(
+            doc, [_extractor], ontology.relation_types, dataset_id="ds-test"
+        )
 
         assert acquired.properties["price"] == {"amount": 2.5e9, "currency": "USD"}
         assert has_revenue.properties["amount"] == {"amount": 391e9, "currency": "USD"}
@@ -739,7 +745,7 @@ class TestLiteralRouting:
         doc = MagicMock()
         doc.metadata = {}
         _, ent_labels, _, delta_nodes, delta_edges = stage._extract_chunk(
-            doc, [_extractor]
+            doc, [_extractor], dataset_id="ds-test"
         )
 
         assert [n["label"] for n in delta_nodes] == ["Amazon"]  # literal node gone
@@ -792,7 +798,9 @@ class TestLiteralRouting:
 
         doc = MagicMock()
         doc.metadata = {}
-        stage._extract_chunk(doc, [_extractor], ontology.relation_types)
+        stage._extract_chunk(
+            doc, [_extractor], ontology.relation_types, dataset_id="ds-test"
+        )
 
         assert amazon.properties["price"] == {"amount": 2.5e9, "currency": "USD"}
 
@@ -823,7 +831,7 @@ class TestLiteralRouting:
         doc = MagicMock()
         doc.metadata = {}
         _, ent_labels, _, delta_nodes, delta_edges = stage._extract_chunk(
-            doc, [_extractor]
+            doc, [_extractor], dataset_id="ds-test"
         )
 
         assert delta_nodes == []

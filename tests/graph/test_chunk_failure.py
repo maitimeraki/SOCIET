@@ -19,6 +19,10 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 import src.api.api_server as api_server
+# The real llama-index graph-store types are imported before the mocks below
+# apply: ScopedEntityNode subclasses EntityNode, and a mocked base is not a type.
+import llama_index.core.graph_stores.types  # noqa: F401
+
 from src.graph.models_graph import (
     EntityTypeDefinition,
     LocalOntology,
@@ -48,8 +52,6 @@ def mock_llama_index():
             "llama_index.core.indices": MagicMock(),
             "llama_index.core.indices.property_graph": MagicMock(),
             "llama_index.core.settings": MagicMock(),
-            "llama_index.core.graph_stores": MagicMock(),
-            "llama_index.core.graph_stores.types": MagicMock(),
         },
     ):
         yield
@@ -197,7 +199,7 @@ class TestOneBadChunkAmongFour:
             extraction_chunk_retry_backoff_seconds=0.0,
         )
 
-        def _extract(self, doc, extractors, relation_slots=None):
+        def _extract(self, doc, extractors, relation_slots=None, **_):
             if doc.chunk.chunk_id == FAILING_CHUNK:
                 raise RuntimeError("provider 500")
             return _good(self, doc, extractors, relation_slots)
@@ -235,7 +237,7 @@ class TestOneBadChunkAmongFour:
             extraction_chunk_retry_backoff_seconds=0.0,
         )
 
-        def _extract(self, doc, extractors, relation_slots=None):
+        def _extract(self, doc, extractors, relation_slots=None, **_):
             raise RuntimeError()
 
         _, extract_patch = _wire(stage, chunks, _extract)
@@ -289,7 +291,7 @@ class TestJobScopedFailureVerdict:
             extraction_chunk_retry_backoff_seconds=0.0,
         )
 
-        def _extract(self, doc, extractors, relation_slots=None):
+        def _extract(self, doc, extractors, relation_slots=None, **_):
             if doc.chunk.parent_doc_id == "doc-a":
                 raise RuntimeError("provider 500")
             return _good(self, doc, extractors, relation_slots)
@@ -357,7 +359,7 @@ class TestFailureLeavesNoOrphanedWriters:
             extraction_chunk_retry_backoff_seconds=0.0,
         )
 
-        def _extract(self, doc, extractors, relation_slots=None):
+        def _extract(self, doc, extractors, relation_slots=None, **_):
             if doc.chunk.chunk_id == FAILING_CHUNK:
                 return ([], ["EXPLODE"], [], [], [])  # fails later, in promote
             time.sleep(0.3)  # hold the siblings in flight

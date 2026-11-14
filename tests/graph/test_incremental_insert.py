@@ -10,6 +10,10 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+# The real llama-index graph-store types are imported before the mocks below
+# apply: ScopedEntityNode subclasses EntityNode, and a mocked base is not a type.
+import llama_index.core.graph_stores.types  # noqa: F401
+
 from src.graph.models_graph import (
     EntityTypeDefinition,
     LocalOntology,
@@ -19,10 +23,9 @@ from src.graph.models_graph import (
 )
 
 
-# Mock heavy llama_index imports before importing graph_build. The two
-# graph_stores entries are needed because `_proposed_labels` / `_delta_payload`
-# import KG_NODES_KEY / KG_RELATIONS_KEY lazily — both the code under test and
-# the test's fake extractor must get the *same* key objects.
+# Mock heavy llama_index imports before importing graph_build. The graph-store
+# types stay real (imported above), so the code under test and the fake
+# extractor share the real KG key objects and EntityNode base.
 @pytest.fixture(autouse=True)
 def mock_llama_index():
     with patch.dict(
@@ -40,8 +43,6 @@ def mock_llama_index():
             "llama_index.core.indices": MagicMock(),
             "llama_index.core.indices.property_graph": MagicMock(),
             "llama_index.core.settings": MagicMock(),
-            "llama_index.core.graph_stores": MagicMock(),
-            "llama_index.core.graph_stores.types": MagicMock(),
         },
     ):
         yield
@@ -51,6 +52,7 @@ class _FakeEntity:
     def __init__(self, name, label):
         self.name = name
         self.label = label
+        self.properties = {}
         self.id = f"{label}:{name}"
 
 
@@ -163,7 +165,7 @@ class TestIncrementalInsertDeltas:
 
         # the delta carries the extracted nodes/edges, not the popped metadata
         assert novel[0].nodes and novel[0].edges
-        assert {n["id"] for n in novel[0].nodes} == {"Person:Alpha", "Novel:Beta"}
+        assert {n["id"] for n in novel[0].nodes} == {"ds:Alpha", "ds:Beta"}
 
     @pytest.mark.asyncio
     async def test_progress_is_monotone_and_reaches_one(self):
@@ -208,7 +210,7 @@ class TestSlidingWindow:
         barrier = threading.Barrier(2, timeout=10)
         state = {"active": 0, "peak": 0, "starts": 0}
 
-        def _gated_extract(self, doc, extractors, relation_slots=None):
+        def _gated_extract(self, doc, extractors, relation_slots=None, **_):
             with lock:
                 state["active"] += 1
                 state["peak"] = max(state["peak"], state["active"])
