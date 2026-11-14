@@ -14,7 +14,11 @@ class _Recorder:
         self.calls: list[tuple[str, dict]] = []
         result = MagicMock()
         result.data = AsyncMock(return_value=[])
-        result.single = AsyncMock(return_value=None)
+        # A row, so get_entity_context gets past the entity fetch and runs the
+        # neighbour and provenance queries too.
+        result.single = AsyncMock(
+            return_value={"n": {"id": "a", "name": "a"}, "label": "Persona"}
+        )
         session = MagicMock()
 
         async def run(query, **params):
@@ -36,17 +40,45 @@ def _context(recorder: _Recorder) -> GraphContext:
     return ctx
 
 
+# Each read, and the predicates its Cypher must contain: one per graph end the
+# read touches. The walks and the neighbour read must scope BOTH ends.
 READS = {
-    "find_relevant_entities": lambda ctx, **kw: ctx.find_relevant_entities("q", **kw),
-    "find_connected_nodes": lambda ctx, **kw: ctx.find_connected_nodes(["a"], **kw),
-    "find_connected_nodes_by_seed": lambda ctx, **kw: ctx.find_connected_nodes_by_seed(
-        ["a"], **kw
+    "find_relevant_entities": (
+        lambda ctx, **kw: ctx.find_relevant_entities("q", **kw),
+        [entity_in_dataset("node")],
     ),
-    "_get_entity_by_id": lambda ctx, **kw: ctx._get_entity_by_id("a", **kw),
-    "_get_neighbors": lambda ctx, **kw: ctx._get_neighbors("a", **kw),
-    "get_provenance": lambda ctx, **kw: ctx.get_provenance("a", **kw),
-    "get_provenance_batch": lambda ctx, **kw: ctx.get_provenance_batch(["a"], **kw),
-    "get_entity_context": lambda ctx, **kw: ctx.get_entity_context("a", **kw),
+    "find_connected_nodes": (
+        lambda ctx, **kw: ctx.find_connected_nodes(["a"], **kw),
+        [entity_in_dataset("seed"), entity_in_dataset("n")],
+    ),
+    "find_connected_nodes_by_seed": (
+        lambda ctx, **kw: ctx.find_connected_nodes_by_seed(["a"], **kw),
+        [entity_in_dataset("seed"), entity_in_dataset("n")],
+    ),
+    "_get_entity_by_id": (
+        lambda ctx, **kw: ctx._get_entity_by_id("a", **kw),
+        [entity_in_dataset("n")],
+    ),
+    "_get_neighbors": (
+        lambda ctx, **kw: ctx._get_neighbors("a", **kw),
+        [
+            entity_in_dataset("n"),
+            entity_in_dataset("m"),
+            "(m:Chunk AND " + chunk_in_dataset("m") + ")",
+        ],
+    ),
+    "get_provenance": (
+        lambda ctx, **kw: ctx.get_provenance("a", **kw),
+        [entity_in_dataset("n"), chunk_in_dataset("chunk")],
+    ),
+    "get_provenance_batch": (
+        lambda ctx, **kw: ctx.get_provenance_batch(["a"], **kw),
+        [entity_in_dataset("n"), chunk_in_dataset("chunk")],
+    ),
+    "get_entity_context": (
+        lambda ctx, **kw: ctx.get_entity_context("a", **kw),
+        [entity_in_dataset("n"), entity_in_dataset("m"), chunk_in_dataset("chunk")],
+    ),
 }
 
 
@@ -59,19 +91,31 @@ def test_predicates_reference_the_bound_parameter():
 @pytest.mark.asyncio
 @pytest.mark.parametrize("name", sorted(READS))
 async def test_graph_context_reads_bind_the_dataset(name):
+    read, required = READS[name]
     recorder = _Recorder()
-    await READS[name](_context(recorder), dataset_id="ds-A")
+    await read(_context(recorder), dataset_id="ds-A")
     assert recorder.calls, "the read issued no query"
     for query, params in recorder.calls:
-        assert "dataset_id" in query
+        assert "$dataset_id" in query
         assert params.get("dataset_id") == "ds-A"
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("name", sorted(READS))
+async def test_graph_context_reads_scope_every_graph_end(name):
+    read, required = READS[name]
+    recorder = _Recorder()
+    await read(_context(recorder), dataset_id="ds-A")
+    for predicate in required:
+        assert any(predicate in query for query, _ in recorder.calls), predicate
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("name", sorted(READS))
 async def test_dataset_id_is_required(name):
+    read, _ = READS[name]
     with pytest.raises(TypeError):
-        await READS[name](_context(_Recorder()))
+        await read(_context(_Recorder()))
 
 
 @pytest.mark.asyncio

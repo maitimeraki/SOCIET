@@ -337,7 +337,7 @@ class GraphContext:
           AND {entity_in_dataset("n")}
         WITH m, type(r) AS rel_type, r.summary AS rel_summary
         WHERE m.name IS NOT NULL
-          AND ({entity_in_dataset("m")} OR {chunk_in_dataset("m")})
+          AND ({entity_in_dataset("m")} OR (m:Chunk AND {chunk_in_dataset("m")}))
         RETURN m, rel_type, rel_summary
         LIMIT $limit
         """

@@ -1238,11 +1238,11 @@ class _CountingContext:
     async def find_relevant_entities(self, query, dataset_id, limit=10):
         return self._entities
 
-    async def get_provenance_batch(self, entity_ids):
+    async def get_provenance_batch(self, entity_ids, dataset_id):
         self.batch_calls.append(list(entity_ids))
         return {eid: list(self._provenance_by_id.get(eid, [])) for eid in entity_ids}
 
-    async def get_provenance(self, entity_id):
+    async def get_provenance(self, entity_id, dataset_id):
         self.single_calls += 1
         return list(self._provenance_by_id.get(entity_id, []))
 
