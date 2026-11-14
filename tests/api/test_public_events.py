@@ -11,6 +11,8 @@ import pytest
 from src.api.public_events import project_event, project_result
 from src.persona.models_persona import ProvenanceLink
 
+_PROFILE_LINK_ID = uuid.UUID("c0ffee00-0000-4000-8000-000000000002")
+
 FORBIDDEN = ("chunk_id", "doc_id", "version_hash", "graph_snapshot", "source_evidence",
              "summary_provenance", "llm_model", "llm_provider", "REASONING", "anchors")
 
@@ -19,7 +21,8 @@ AGENT_EVENT = {
     "profile": {
         "agent_id": "a", "identity": {"name": "Kestra", "archetype": "x", "communication_style": "y"},
         "bio": "b", "detailed_perspective": "d", "stance": "POSITIVE", "intensity": 0.5, "confidence": 0.5,
-        "summary_provenance": [{"doc_id": "d1", "title": "Memo", "chunk_id": "c1"}],
+        "summary_provenance": [ProvenanceLink(doc_id="d1", title="Memo", breadcrumb="Sec 1",
+                                              chunk_id=_PROFILE_LINK_ID).model_dump(mode="json")],
         "graph_snapshot": {"dataset_id": "ds", "version_hash": "abc"},
         "source_evidence": ["Some customer text"],
     },
@@ -28,6 +31,7 @@ AGENT_EVENT = {
 def test_agent_event_drops_provenance_and_snapshot():
     out = json.dumps(project_event(AGENT_EVENT))
     assert not any(token in out for token in FORBIDDEN)
+    assert str(_PROFILE_LINK_ID) not in out
 
 def test_pair_turn_never_carries_a_raw_response():
     out = project_event({"type": "pair_turn", "pair_id": "ds:A:B", "response": "REASONING: secret\nANSWER: hi", "error": "boom"})
@@ -220,9 +224,12 @@ COMPLETE_EVENT = {
     "rounds_executed": 2, "confidence_score": 0.7, "weight_share": 0.7, "contested": False,
     "provenance_by_claim": {"Proceed.": [_REAL_LINK]},
     "cluster_details": {}, "supporting_entities": [], "opposing_entities": [],
-    "dissenting_views": [], "evidence": [{"entity": "Acme", "claim": "claim text"}],
+    "dissenting_views": [{"stance": "NEGATIVE", "view": "view text", "quote": "Q-SECRET", "chunk_id": "X-SECRET"}],
+    "evidence": [{"entity": "Acme", "claim": "claim text", "quote": "Q-SECRET", "chunk_id": "X-SECRET"}],
 }
-COMPLETE_LEAKS = ("DOC-XYZ", "c0ffee00-0000-4000-8000-000000000001")
+COMPLETE_LEAKS = ("DOC-XYZ", "c0ffee00-0000-4000-8000-000000000001", "Q-SECRET", "X-SECRET")
+_NARROWED_EVIDENCE = [{"entity": "Acme", "claim": "claim text"}]
+_NARROWED_DISSENT = [{"stance": "NEGATIVE", "view": "view text"}]
 
 
 def test_complete_event_provenance_is_narrowed_like_the_result():
@@ -262,6 +269,10 @@ async def test_complete_event_leaks_no_provenance_ids_on_any_surface():
     assert append.called and ws.send_json.called and manager.buffer
     assert leaks == []
     assert doc["events"][0]["provenance_by_claim"] == {"Proceed.": [{"title": "Memo", "breadcrumb": "Sec 1"}]}
+    assert doc["events"][0]["evidence"] == _NARROWED_EVIDENCE
+    assert doc["events"][0]["dissenting_views"] == _NARROWED_DISSENT
+    assert json.loads(surfaces["live ws frame"])["evidence"] == _NARROWED_EVIDENCE
+    assert json.loads(surfaces["persisted run_events row"])["dissenting_views"] == _NARROWED_DISSENT
 
 
 def _export_run(verdict):
@@ -275,16 +286,21 @@ def _export_run(verdict):
 def test_debate_run_export_verdict_is_projected():
     from src.jobs.tasks import _run_json
 
+    link = ProvenanceLink(doc_id="DOC-XYZ", title="T", breadcrumb="B",
+                          chunk_id=uuid.UUID("c0ffee00-0000-4000-8000-000000000003")).model_dump(mode="json")
     run = _export_run({
         "verdict": "v", "selection": [{"anchors": [1]}],
-        "provenance_by_claim": {"c": [{"doc_id": "DOC-XYZ", "title": "T",
-                                       "breadcrumb": "B", "chunk_id": "CHUNK-XYZ"}]},
+        "provenance_by_claim": {"c": [link]},
+        "evidence": [{"entity": "Acme", "claim": "claim text", "quote": "Q-SECRET", "chunk_id": "X-SECRET"}],
+        "dissenting_views": [{"stance": "NEGATIVE", "view": "view text", "quote": "Q-SECRET"}],
     })
 
     out = _run_json(run, "debate")
 
-    assert out["verdict"] == {"verdict": "v", "provenance_by_claim": {"c": [{"title": "T", "breadcrumb": "B"}]}}
-    assert "CHUNK-XYZ" not in json.dumps(out) and "DOC-XYZ" not in json.dumps(out)
+    assert out["verdict"] == {"verdict": "v", "provenance_by_claim": {"c": [{"title": "T", "breadcrumb": "B"}]},
+                              "evidence": _NARROWED_EVIDENCE, "dissenting_views": _NARROWED_DISSENT}
+    text = json.dumps(out)
+    assert not any(t in text for t in ("c0ffee00-0000-4000-8000-000000000003", "DOC-XYZ", "Q-SECRET", "X-SECRET"))
 
 
 def test_build_graph_job_export_keeps_its_verdict_state():
@@ -336,3 +352,39 @@ def test_malformed_profile_and_rows_do_not_raise_or_pass_through():
     selection = project_event({"type": "selection", "rows": ["CHUNK-XYZ", None]})
     assert agent["profile"] == {}
     assert selection["rows"] == [{}, {}]
+
+
+# --- fix round 4: evidence and dissenting_views are LLM output ------------------
+
+@pytest.mark.parametrize("key", ["evidence", "dissenting_views"])
+def test_llm_item_keys_are_narrowed_on_event_and_result(key):
+    items = [{"entity": "A", "claim": "c", "stance": "POSITIVE", "view": "v",
+              "quote": "Q-SECRET", "chunk_id": "X-SECRET", "doc_id": "D-SECRET"}]
+    for out in (project_event({"type": "complete", key: items}), project_result({key: items})):
+        assert "SECRET" not in json.dumps(out)
+
+
+def test_evidence_and_dissent_keep_only_their_rendered_keys():
+    out = project_result({
+        "evidence": [{"entity": "A", "claim": "c", "quote": "Q"}],
+        "dissenting_views": [{"stance": "NEGATIVE", "view": "v", "entity": "A", "quote": "Q"}],
+    })
+    assert out == {"evidence": [{"entity": "A", "claim": "c"}],
+                   "dissenting_views": [{"stance": "NEGATIVE", "view": "v"}]}
+
+
+@pytest.mark.parametrize("key", ["evidence", "dissenting_views"])
+def test_malformed_llm_items_are_dropped(key):
+    assert project_result({key: ["SECRET", None, 3]}) == {key: []}
+    assert project_result({key: "SECRET"}) == {key: []}
+    assert project_result({key: None}) == {key: []}
+
+
+def test_non_text_evidence_values_are_dropped_not_passed_through():
+    out = project_result({"evidence": [{"entity": {"chunk_id": "X-SECRET"}, "claim": "c"}]})
+    assert "X-SECRET" not in json.dumps(out)
+
+
+@pytest.mark.parametrize("event", [None, "complete", ["type"], 3])
+def test_non_mapping_event_is_dropped(event):
+    assert project_event(event) is None

@@ -71,16 +71,31 @@ def _narrow_provenance(claims: Any) -> dict[str, list[dict[str, Any]]]:
     }
 
 
+def _narrow_items(items: Any, keys: tuple[str, ...]) -> list[dict[str, str | None]]:
+    # LLM-produced list items: only the named text keys survive (quote, chunk id
+    # and anything else the model emitted stay behind).
+    if not isinstance(items, (list, tuple)):
+        return []
+    return [{k: _text(item.get(k)) for k in keys} for item in items if isinstance(item, Mapping)]
+
+
 def _narrow_verdict(source: Mapping[str, Any], keys: frozenset[str]) -> dict[str, Any]:
     out = _pick(source, keys)
     if "intent" in out:
         out["intent"] = _pick(out["intent"], _INTENT_KEYS)
     if "provenance_by_claim" in out:
         out["provenance_by_claim"] = _narrow_provenance(out["provenance_by_claim"])
+    if "evidence" in out:
+        out["evidence"] = _narrow_items(out["evidence"], ("entity", "claim"))
+    if "dissenting_views" in out:
+        out["dissenting_views"] = _narrow_items(out["dissenting_views"], ("stance", "view"))
     return out
 
 
 def project_event(event: Mapping[str, Any]) -> dict[str, Any] | None:
+    if not isinstance(event, Mapping):
+        logger.warning("dropping run event that is not a mapping (%s)", type(event).__name__)
+        return None
     kind = event.get("type")
     if not isinstance(kind, str):
         # Logged by type only: the payload may be what must not leave.
