@@ -87,6 +87,15 @@ def test_decimal_points_do_not_split_a_cited_sentence():
     assert _sentence_gate("Growth was 3.5 percent [e1].") == []
 
 
+def test_a_decimal_with_a_percent_sign_does_not_split_a_cited_sentence():
+    assert _sentence_gate("Revenue grew 3.5% [e1].") == []
+
+
+def test_a_period_before_a_year_is_a_clause_end():
+    rejected = _sentence_gate("Revenue rose [e1].2025 pricing power is unproven")
+    assert rejected and rejected[0].repairable
+
+
 @pytest.mark.parametrize("extra", [
     "Revenue rose [e1]; pricing power is unproven; churn fell [e2].",
     "Revenue rose [e1]\n\nPricing power is unproven",

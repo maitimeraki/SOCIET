@@ -74,7 +74,10 @@ def _is_clause_end(paragraph: str, match: re.Match) -> bool:
     end = match.end()
     if end == len(paragraph) or paragraph[end].isspace():
         return True
-    return paragraph[end].isalpha() or paragraph[end] in "\"'("  # a digit after "." is a decimal, not a break
+    if paragraph[end].isdigit():
+        decimal = punct == "." and match.start() > 0 and paragraph[match.start() - 1].isdigit()
+        return not decimal
+    return paragraph[end].isalpha() or paragraph[end] in "\"'("
 
 
 def _split_paragraph(paragraph: str) -> list[str]:
@@ -92,6 +95,7 @@ def split_sentences(text: str) -> list[str]:
 
     A cite marker written right after a clause's end stays with that clause, so each
     piece must carry its own marker. Abbreviations ("Inc.", "e.g.") and decimals do not end a clause.
+    An abbreviation word that really ends a sentence ("... grew in Acme Inc.") merges with the next clause; accepted.
     """
     return [piece for paragraph in _PARAGRAPH_BREAK.split(text) for piece in _split_paragraph(paragraph)]
 
