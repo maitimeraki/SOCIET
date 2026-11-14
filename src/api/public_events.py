@@ -9,6 +9,10 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
+# What a client sees when a run or job fails for a reason we did not author.
+# The exception text stays in the server log.
+RUN_FAILED_MESSAGE = "The run failed. Try again, or contact support with the run id."
+
 _INTENT_KEYS = frozenset({"core_question", "stance_axis", "direct_keywords", "latent_sectors",
                           "search_perspectives", "domain_tags", "entity_frame", "extraction_confidence"})
 # interim: selection scores are shown by the roster today; Task 1.5 drops the
@@ -76,7 +80,9 @@ def _narrow_items(items: Any, keys: tuple[str, ...]) -> list[dict[str, str | Non
     # and anything else the model emitted stay behind).
     if not isinstance(items, (list, tuple)):
         return []
-    return [{k: _text(item.get(k)) for k in keys} for item in items if isinstance(item, Mapping)]
+    narrowed = [{k: _text(item.get(k)) for k in keys} for item in items if isinstance(item, Mapping)]
+    # An item with no surviving value carries nothing a reader can use.
+    return [item for item in narrowed if any(v is not None for v in item.values())]
 
 
 def _narrow_verdict(source: Mapping[str, Any], keys: frozenset[str]) -> dict[str, Any]:

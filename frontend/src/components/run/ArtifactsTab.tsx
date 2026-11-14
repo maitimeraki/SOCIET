@@ -23,7 +23,7 @@ export default function ArtifactsTab({ run, events }: { run: RunState; events: R
                 term: 'confidence',
                 value: (
                   <span className="tnum font-mono">
-                    {fmtScore(run.intent.extraction_confidence)} · {run.intent.llm_model || '—'} · {run.intent.llm_provider || '—'}
+                    {fmtScore(run.intent.extraction_confidence)}
                   </span>
                 ),
               },

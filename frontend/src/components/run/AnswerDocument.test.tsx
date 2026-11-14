@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest'
 // section builder, so "what is read and what leaves are the same document" is pinned, not assumed.
 import { renderToStaticMarkup } from 'react-dom/server'
 import type { VerdictView } from '../../run/selectors'
+import type { AgentProfile } from '../../run/events'
 import { NARRATIVE_FALLBACK_COPY } from '../verdict/NarrativeFallbackNotice'
 import { stanceWord } from '../ui/PositionMark'
 import AnswerDocument, { answerSections, answerText, blockLines, sourceTitles } from './AnswerDocument'
@@ -157,6 +158,10 @@ describe('AnswerDocument — honesty about what it does not have (D7)', () => {
 })
 
 describe('sourceTitles', () => {
+  it('names nothing for a roster profile that carries no source links', () => {
+    expect(sourceTitles([{} as AgentProfile])).toEqual([])
+  })
+
   it('collects the distinct source titles a run reads from, in first-seen order', () => {
     const profile = (name: string, titles: string[]) => ({
       agent_id: name,

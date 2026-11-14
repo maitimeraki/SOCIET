@@ -24,7 +24,7 @@ import time
 import uuid
 from typing import Any
 
-from src.api.public_events import project_result
+from src.api.public_events import RUN_FAILED_MESSAGE, project_result
 from src.jobs.queue import (
     cancel_check,
     is_cancelled,
@@ -689,7 +689,8 @@ async def process_stripe_event_core(event_row_id: str) -> None:
             row = await db.get(WebhookEvent, key)
             if row is not None:
                 row.status = "failed"
-                row.error = str(exc)
+                logger.warning("webhook %s handler failed", key, exc_info=exc)
+                row.error = type(exc).__name__
                 await db.commit()
             raise
         row.status = "processed"
@@ -915,7 +916,7 @@ async def execute(kind: str, job_id: str, payload: dict[str, Any]) -> None:
             return
         except Exception as exc:
             logger.error("job %s (%s) failed: %s", job_id, kind, exc, exc_info=exc)
-            await _set_status(job_id, "failed", error=str(exc))
+            await _set_status(job_id, "failed", error=RUN_FAILED_MESSAGE)
             raise
         # The body owns the result and writes the richer terminal row itself; a
         # body that failed before any write (or a bare test core) still lands

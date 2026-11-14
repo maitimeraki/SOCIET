@@ -388,3 +388,13 @@ def test_non_text_evidence_values_are_dropped_not_passed_through():
 @pytest.mark.parametrize("event", [None, "complete", ["type"], 3])
 def test_non_mapping_event_is_dropped(event):
     assert project_event(event) is None
+
+
+def test_evidence_item_with_no_surviving_value_is_dropped():
+    out = project_result({"evidence": [{"entity": {"chunk_id": "X-SECRET"}, "claim": 3}]})
+    assert out == {"evidence": []}
+
+
+def test_dissenting_view_with_no_surviving_value_is_dropped():
+    out = project_event({"type": "complete", "dissenting_views": [{"stance": 1, "view": None}, {"stance": "NEG", "view": "keep"}]})
+    assert out["dissenting_views"] == [{"stance": "NEG", "view": "keep"}]

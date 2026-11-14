@@ -14,8 +14,6 @@ export interface QueryIntent {
   entity_frame: string[]
   stance_axis: string
   extraction_confidence: number
-  llm_model?: string
-  llm_provider?: string
 }
 
 export interface SelectionRow {

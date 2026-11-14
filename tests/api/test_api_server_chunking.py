@@ -20,6 +20,7 @@ from sqlalchemy import delete
 import src.api.api_server as api_server
 import src.api.jobs_api as jobs_api
 import src.api.run_doc as run_doc
+from src.api.public_events import RUN_FAILED_MESSAGE
 from src.api.api_server import _chunk_documents
 from src.db.engine import get_session_factory
 from src.db.models import User
@@ -326,7 +327,7 @@ async def test_build_job_discovery_failure_marks_job_failed(monkeypatch):
     # A terminal discovery failure must persist, not leave the job stuck.
     assert api_server.RUNS[job_id]["status"] == "failed"
     assert api_server.RUNS[job_id]["stage"] == "failed"
-    assert "dataset vocabulary discovery failed" in api_server.RUNS[job_id]["error"]
+    assert api_server.RUNS[job_id]["error"] == RUN_FAILED_MESSAGE
 
 
 class _FlakyDiscovery:
@@ -445,7 +446,7 @@ async def test_stage_construction_failure_marks_job_failed_not_queued(monkeypatc
 
     assert api_server.RUNS[job_id]["status"] == "failed"
     assert api_server.RUNS[job_id]["stage"] == "failed"
-    assert "Neo4j unreachable" in api_server.RUNS[job_id]["error"]
+    assert api_server.RUNS[job_id]["error"] == RUN_FAILED_MESSAGE
 
 
 class _FailThenBlockExtraction:

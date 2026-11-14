@@ -1,5 +1,6 @@
 """Tests for RoundRunner."""
 
+import json
 import uuid
 from unittest.mock import AsyncMock
 
@@ -12,7 +13,7 @@ from src.persona.agent import (
     ExpertiseLevel,
     PersonaIdentity,
 )
-from src.simulation.llm_batch import BatchedLLMRunner
+from src.simulation.llm_batch import BatchedLLMRunner, PairPrompt
 from src.simulation.pair_turn import CommPair, RoundResult
 from src.simulation.round_runner import (
     PERSONA_PERSPECTIVE_CHARS,
@@ -508,3 +509,52 @@ async def test_execute_round_passes_intent_into_prompts():
     for c in mock_llm.generate.call_args_list:
         assert "INTENT CONTEXT" in c.kwargs["user_prompt"]
         assert "Should carbon emissions be taxed?" in c.kwargs["user_prompt"]
+
+
+@pytest.mark.asyncio
+async def test_pair_turn_broadcast_never_carries_response_or_provider_error_text():
+    secret_response = "SECRET-RESPONSE-TEXT"
+    secret_error = "SECRET-PROVIDER-ERROR"
+    replies = iter([secret_response, RuntimeError(secret_error)])
+
+    async def generate(**kwargs):
+        reply = next(replies)
+        if isinstance(reply, Exception):
+            raise reply
+        return reply
+
+    mock_llm = AsyncMock()
+    mock_llm.generate = generate
+    ws_calls = []
+
+    async def track_ws(msg):
+        ws_calls.append(msg)
+
+    rr = RoundRunner(BatchedLLMRunner(mock_llm), ws_broadcast=track_ws)
+    _, alice = make_profile("Alice", ["x"], "x", 0.8)
+    _, bob = make_profile("Bob", ["y"], "y", 0.7)
+    await rr.execute_round([alice, bob], [make_pair("Alice", "Bob", [])], round_num=1, query="Topic?", history=[])
+
+    assert len(ws_calls) == 2
+    for msg in ws_calls:
+        assert msg == {"type": "pair_turn", "pair_id": msg["pair_id"]}
+    outbound = json.dumps(ws_calls)
+    assert secret_response not in outbound
+    assert secret_error not in outbound
+
+
+@pytest.mark.asyncio
+async def test_failed_llm_call_result_carries_the_exception_type_only():
+    mock_llm = AsyncMock()
+    mock_llm.generate = AsyncMock(side_effect=RuntimeError("SECRET-PROVIDER-ERROR"))
+    runner = BatchedLLMRunner(mock_llm)
+    prompt = PairPrompt(
+        pair_id="ds:A:B", system_prompt="s", user_prompt="u",
+        provider="p", model="m", temperature=0.0,
+    )
+
+    result = await runner._run_single(prompt)
+
+    assert result.error == "RuntimeError"
+    assert result.response == ""
+    assert "SECRET-PROVIDER-ERROR" not in repr(result)

@@ -84,9 +84,9 @@ const scheduleFrame = (flush: () => void): void => {
 const foldIntoMap = (event: RunEvent): void => {
   const { mergeExpert, mergeOpinions } = useGraphStore.getState()
   if (event.type === 'agent') {
-    const datasetId = event.profile.graph_snapshot?.dataset_id
-    // Without a dataset there is no Persona key to mirror: leave the entry unseated rather than key
-    // it off a fabricated id. The live payload always carries one.
+    // The run's own dataset keys the expert (the run doc, or the first pair turn). Without one there is
+    // no Persona key to mirror: leave the entry unseated rather than key it off a fabricated id.
+    const datasetId = useRunStore.getState().run.datasetId
     if (datasetId) mergeExpert({ datasetId, name: event.profile.identity.name })
     return
   }
@@ -175,7 +175,7 @@ export const useRunStore = create<RunStoreState>((set, get) => {
         if (generation !== loadGeneration) return
         const reopened = doc.events.reduce<RunState>(
           (state, event) => applyEvent(state, event, Date.now()),
-          { ...initialState, runId, config: doc.config ?? null },
+          { ...initialState, runId, config: doc.config ?? null, datasetId: doc.dataset_id ?? null },
         )
         // The replayed event buffer carries no corpus, so the material is read on its own.
         const corpus = await readCorpus(runId)

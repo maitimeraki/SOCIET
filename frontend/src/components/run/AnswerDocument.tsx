@@ -52,7 +52,7 @@ export function sourceTitles(profiles: AgentProfile[]): string[] {
   const seen = new Set<string>()
   const titles: string[] = []
   for (const profile of profiles) {
-    for (const link of profile.summary_provenance) {
+    for (const link of profile.summary_provenance ?? []) {
       if (link.title && !seen.has(link.title)) {
         seen.add(link.title)
         titles.push(link.title)

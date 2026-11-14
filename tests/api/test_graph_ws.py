@@ -13,6 +13,7 @@ stubbed `read_snapshot`) so no cross-thread queue access is involved.
 """
 
 import asyncio
+import json
 import threading
 import uuid
 from types import SimpleNamespace
@@ -400,4 +401,5 @@ async def test_snapshot_read_failure_is_reported_and_does_not_escape(monkeypatch
     await stream_graph(ws, job_id)  # must return, not raise
 
     assert [f["type"] for f in ws.sent] == ["error", "done"]
-    assert "neo4j unreachable" in ws.sent[0]["message"]
+    assert ws.sent[0]["message"] == "snapshot read failed"
+    assert "neo4j unreachable" not in json.dumps(ws.sent)

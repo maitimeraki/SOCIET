@@ -7,8 +7,12 @@ import { composeRunGraph } from './runGraphStore'
 
 const NOW = () => 1_000
 
-/** An `agent` event seating one expert, carrying the dataset id the backend keys the stored person under. */
-const agent = (name: string, datasetId = 'ds-1'): RunEvent => {
+/** The run's own dataset, which the run state carries (the run doc or the first pair turn). */
+const DATASET = 'ds-1'
+const folded = (events: RunEvent[], now: () => number) => ({ ...fold(events, now), datasetId: DATASET })
+
+/** An `agent` event seating one expert, as the live allowlist sends it (no snapshot: the run's dataset keys it). */
+const agent = (name: string): RunEvent => {
   const profile: AgentProfile = {
     agent_id: name,
     identity: { name, archetype: 'analyst', communication_style: 'measured' },
@@ -23,7 +27,6 @@ const agent = (name: string, datasetId = 'ds-1'): RunEvent => {
     communication_radius: 1,
     summary_provenance: [],
     confidence_breakdown: { source_breadth: 0, node_density: 0, relationship_connectivity: 0 },
-    graph_snapshot: { dataset_id: datasetId, chunk_count: 1, version_hash: 'v1' },
   }
   return { type: 'agent', index: 1, total: 1, profile }
 }
@@ -51,13 +54,13 @@ const countsByType = (graph: ReturnType<typeof composeRunGraph>): Record<string,
 
 describe('composeRunGraph', () => {
   it('seats the corpus layer and one expert per agent', () => {
-    const state = fold([agent('D. Weber'), agent('M. Chen')], NOW)
+    const state = folded([agent('D. Weber'), agent('M. Chen')], NOW)
     // The expert kind is the live store's own — read from it, so the composer cannot drift from the map's colouring.
     expect(countsByType(composeRunGraph(state, CORPUS))).toEqual({ Region: 1, Topic: 1, Company: 1, [EXPERT_TYPE]: 2 })
   })
 
   it("adds a commit payload's written entries with their written connections", () => {
-    const state = fold(
+    const state = folded(
       [
         agent('D. Weber'),
         {
@@ -91,7 +94,7 @@ describe('composeRunGraph', () => {
       written_nodes: [written],
       written_links: [],
     })
-    const graph = composeRunGraph(fold([commit(1), commit(2)], NOW), null)
+    const graph = composeRunGraph(folded([commit(1), commit(2)], NOW), null)
     expect(graph.order).toBe(1)
   })
 
@@ -108,13 +111,13 @@ describe('composeRunGraph', () => {
         written_links: [{ from: 'ds-1:D. Weber', to: 'ds-1:qh:1:D. Weber', kind: 'STATED' }],
       },
     ]
-    const first = composeRunGraph(fold(events, NOW), CORPUS).export()
-    const second = composeRunGraph(fold(events, NOW), CORPUS).export()
+    const first = composeRunGraph(folded(events, NOW), CORPUS).export()
+    const second = composeRunGraph(folded(events, NOW), CORPUS).export()
     expect(first).toEqual(second)
   })
 
   it('seats each opinion with the position the pass recorded for its holder (§9.2)', () => {
-    const state = fold(
+    const state = folded(
       [
         agent('D. Weber'),
         {
@@ -140,7 +143,7 @@ describe('composeRunGraph', () => {
   })
 
   it('leaves the position unseated when the stored events carry no turn for the holder — never a guess', () => {
-    const state = fold(
+    const state = folded(
       [
         {
           type: 'commit',
@@ -166,7 +169,7 @@ describe('composeRunGraph', () => {
       written_nodes: [{ key: `ds-1:qh:${round}:D. Weber`, label: 'Opinion', name: `D. Weber · pass ${round}` }],
       written_links: [{ from: 'ds-1:D. Weber', to: `ds-1:qh:${round}:D. Weber`, kind: 'STATED' }],
     })
-    const state = fold([agent('D. Weber'), commit(1), commit(2)], NOW)
+    const state = folded([agent('D. Weber'), commit(1), commit(2)], NOW)
 
     const all = composeRunGraph(state, null)
     const round1 = composeRunGraph(state, null, 1)
@@ -180,7 +183,7 @@ describe('composeRunGraph', () => {
   })
 
   it('leaves the corpus layer intact when replaying a pass', () => {
-    const state = fold(
+    const state = folded(
       [
         agent('D. Weber'),
         {
@@ -203,7 +206,7 @@ describe('composeRunGraph', () => {
   })
 
   it('keeps an entry of an unknown kind rather than dropping it', () => {
-    const state = fold(
+    const state = folded(
       [
         {
           type: 'commit',

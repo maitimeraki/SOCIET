@@ -35,8 +35,6 @@ export const RUN_SAMPLE: RunEvent[] = [
       entity_frame: ['EU'],
       stance_axis: 'expansion risk vs opportunity',
       extraction_confidence: 0.9,
-      llm_model: 'gpt-4',
-      llm_provider: 'openai',
     },
   },
   { type: 'stage', stage: 'intake', index: 0, query: 'Should we expand into the European market in 2027?' },

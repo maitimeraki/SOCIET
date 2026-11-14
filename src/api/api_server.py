@@ -34,6 +34,7 @@ from src.api.config_api import (
 from src.api.errors import error_response, install_error_handlers, payment_required
 from src.api.limits import JSONBodySizeLimitMiddleware, install_rate_limiter
 from src.api.middleware import LoggingMiddleware, SecurityHeadersMiddleware
+from src.api.public_events import RUN_FAILED_MESSAGE
 from src.auth.cookies import verify_csrf
 from src.billing import units as billing_units
 from src.billing.entitlements import resolve_entitlements
@@ -709,11 +710,12 @@ async def _execute_unified_job(
             RUNS[job_id]["progress"] = 1.0
             await _persist_run(job_id, RUNS[job_id])
 
-    except Exception as exc:
+    except Exception:
+        logger.exception("graph job %s failed", job_id)
         async with _RUNS_LOCK:
             RUNS[job_id]["status"] = "failed"
             RUNS[job_id]["stage"] = "failed"
-            RUNS[job_id]["error"] = str(exc)
+            RUNS[job_id]["error"] = RUN_FAILED_MESSAGE
             await _persist_run(job_id, RUNS[job_id])
     finally:
         # A job marked failed must stop writing: cancel and await any worker
@@ -786,11 +788,12 @@ async def run_normalize_job(job_id: str, dataset_id: str) -> None:
             RUNS[job_id]["stage"] = "completed"
             RUNS[job_id]["progress"] = 1.0
             await _persist_run(job_id, RUNS[job_id])
-    except Exception as exc:
+    except Exception:
+        logger.exception("graph job %s failed", job_id)
         async with _RUNS_LOCK:
             RUNS[job_id]["status"] = "failed"
             RUNS[job_id]["stage"] = "failed"
-            RUNS[job_id]["error"] = str(exc)
+            RUNS[job_id]["error"] = RUN_FAILED_MESSAGE
             await _persist_run(job_id, RUNS[job_id])
         raise
 

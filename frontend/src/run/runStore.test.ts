@@ -33,6 +33,14 @@ const doc = (patch: Partial<RunDoc> = {}): RunDoc => ({
   ...patch,
 })
 
+/** The live allowlist sends no snapshot on a profile; the run doc's dataset keys the expert instead. */
+const withoutSnapshot = (event: RunEvent): RunEvent => {
+  if (event.type !== 'agent') return event
+  const profile: Partial<AgentProfile> = { ...event.profile }
+  delete profile.graph_snapshot
+  return { ...event, profile: profile as AgentProfile }
+}
+
 beforeEach(() => {
   connectRun.mockReset()
   connectRun.mockReturnValue({ close: vi.fn() })
@@ -146,10 +154,8 @@ describe('runStore rAF batching', () => {
 
   it('grows the one map from a dispatched agent and commit as the frame lands (the live path)', () => {
     const seated = RUN_SAMPLE.find((event) => event.type === 'agent') as Extract<RunEvent, { type: 'agent' }>
-    const agent: RunEvent = {
-      ...seated,
-      profile: { ...seated.profile, graph_snapshot: { dataset_id: 'ds-1', chunk_count: 3, version_hash: 'v1' } },
-    }
+    const agent: RunEvent = withoutSnapshot(seated)
+    useRunStore.setState({ run: { ...initialState, datasetId: 'ds-1' } })
     const commit: RunEvent = {
       type: 'commit',
       round: 1,
@@ -214,7 +220,6 @@ describe('runStore reopened-run map (replay = live)', () => {
       communication_radius: 1,
       summary_provenance: [],
       confidence_breakdown: { source_breadth: 0, node_density: 0, relationship_connectivity: 0 },
-      graph_snapshot: { dataset_id: DATASET, chunk_count: 2, version_hash: 'v1' },
     }
     return { type: 'agent', index: 1, total: 2, profile }
   }
@@ -259,9 +264,18 @@ describe('runStore reopened-run map (replay = live)', () => {
     return { nodes, edges, labels }
   }
 
+  it('a reopened run seats its experts from the run doc dataset when the profiles carry no snapshot', async () => {
+    getRun.mockResolvedValue(doc({ dataset_id: DATASET, status: 'complete', events: EVENTS.map(withoutSnapshot) }))
+    getRunGraph.mockResolvedValue(CORPUS)
+    await useRunStore.getState().loadAndConnect('run-1')
+
+    expect(Object.keys(useGraphStore.getState().nodes)).toContain(`${DATASET}:D. Weber`)
+  })
+
   it('a reopened run rebuilds the map the live stream built, store content for store content', async () => {
     // Producer one — live: the corpus arrived over the build stream, then the events streamed in.
     useGraphStore.getState().applySnapshot(CORPUS)
+    useRunStore.setState({ run: { ...initialState, datasetId: DATASET } })
     for (const event of EVENTS) useRunStore.getState().dispatch(event)
     flushFrame()
     const live = storeContents()
@@ -295,7 +309,7 @@ describe('runStore reopened-run map (replay = live)', () => {
       written_nodes: [{ key: `${DATASET}:qh:${round}:D. Weber`, label: 'Opinion', name: `D. Weber · pass ${round}` }],
       written_links: [{ from: `${DATASET}:D. Weber`, to: `${DATASET}:qh:${round}:D. Weber`, kind: 'STATED' }],
     })
-    useRunStore.setState({ run: fold([seat('D. Weber'), commit(1), commit(2)], () => NOW) })
+    useRunStore.setState({ run: { ...fold([seat('D. Weber'), commit(1), commit(2)], () => NOW), datasetId: DATASET } })
 
     useRunStore.getState().seedMap(1)
     expect(useRunStore.getState().mapRound).toBe(1)

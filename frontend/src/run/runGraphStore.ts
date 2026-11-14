@@ -88,10 +88,9 @@ export function composeRunGraph(run: RunState, corpus: GraphSnapshot | null, max
   for (const edge of corpus?.edges ?? []) edges[edgeKey(edge.source, edge.target, edge.label)] = edge
 
   // Expert layer — one entry per agent, keyed as the backend keys the stored person (`{dataset_id}:{name}`).
-  for (const profile of run.roster) {
-    const datasetId = profile.graph_snapshot?.dataset_id
-    // Without a dataset there is no Persona key to mirror: seat nothing rather than key a fabricated id.
-    if (!datasetId) continue
+  // Without a dataset there is no Persona key to mirror: seat nothing rather than key a fabricated id.
+  const datasetId = run.datasetId
+  for (const profile of datasetId ? run.roster : []) {
     const id = expertKey({ datasetId, name: profile.identity.name })
     nodes[id] = { id, label: profile.identity.name, type: EXPERT_TYPE }
   }

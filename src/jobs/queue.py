@@ -23,6 +23,7 @@ import redis
 from rq import Queue, Retry
 
 from src.api import run_doc
+from src.api.public_events import RUN_FAILED_MESSAGE
 from src.config.settings import get_settings
 
 logger = logging.getLogger(__name__)
@@ -269,7 +270,7 @@ async def enqueue(kind: str, payload: dict[str, Any]) -> str:
         logger.error(
             "could not dispatch %s job %s: %s", kind, job_id, exc, exc_info=exc
         )
-        await run_doc.set_job_status(job_id, "failed", error=str(exc))
+        await run_doc.set_job_status(job_id, "failed", error=RUN_FAILED_MESSAGE)
         # The caller releases the period itself; clear the row so the lease
         # sweep cannot subtract the same amount from a sibling's hold.
         try:

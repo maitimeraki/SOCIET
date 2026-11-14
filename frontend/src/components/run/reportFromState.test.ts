@@ -3,6 +3,15 @@ import { describe, expect, it } from 'vitest'
 import { fold } from '../../run/reducer'
 import { RUN_SAMPLE } from '../../run/__fixtures__/run-sample'
 import { reportFromState } from './reportFromState'
+import type { AgentProfile, RunEvent } from '../../run/events'
+
+/** The allowlist no longer sends `summary_provenance` to the client: the roster profile has no such key. */
+const withoutProvenance = (event: RunEvent): RunEvent => {
+  if (event.type !== 'agent') return event
+  const profile: Partial<AgentProfile> = { ...event.profile }
+  delete profile.summary_provenance
+  return { ...event, profile: profile as AgentProfile }
+}
 
 // The fold clock is deliberately NOT the stored day: the report reads the run doc's stored date, not
 // the moment the buffer was refolded (R59).
@@ -12,6 +21,11 @@ const STATE = fold(RUN_SAMPLE, () => FOLD_CLOCK)
 const REPORT = reportFromState(STATE, STORED_AT)!
 
 describe('the filed report is derived from folded run state (R57)', () => {
+  it('builds the report from a roster whose profiles carry no source links, without throwing', () => {
+    const bare = fold(RUN_SAMPLE.map(withoutProvenance), () => FOLD_CLOCK)
+    expect(reportFromState(bare, STORED_AT)?.sources).toEqual([])
+  })
+
   it('carries the question, the stored filing day, the position and the share', () => {
     expect(REPORT.question).toBe('Should we expand into the European market in 2027?')
     expect(REPORT.filed).toBe('22 Oct 2026')

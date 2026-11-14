@@ -292,7 +292,7 @@ async def stream_graph(websocket: WebSocket, job_id: str):
         )
         try:
             await websocket.send_json(
-                {"type": "error", "message": f"snapshot read failed: {exc}"}
+                {"type": "error", "message": "snapshot read failed"}
             )
             await websocket.send_json({"type": "done"})
         except (WebSocketDisconnect, RuntimeError):

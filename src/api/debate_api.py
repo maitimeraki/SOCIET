@@ -27,7 +27,7 @@ from src.api.errors import payment_required
 from src.api.graph_snapshot import read_snapshot as read_graph_snapshot
 from src.api.jobs_api import enqueue_or_http
 from src.api.limits import limiter, service_available
-from src.api.public_events import project_event, project_result
+from src.api.public_events import RUN_FAILED_MESSAGE, project_event, project_result
 from src.audit import client_ip
 from src.audit import record as audit_record
 from src.auth.cookies import verify_csrf
@@ -45,12 +45,6 @@ from src.db.models import User
 from src.simulation.debate_config import DebateConfig
 
 logger = logging.getLogger(__name__)
-
-# What a client sees when a run fails for a reason we did not author. The
-# exception text stays in the server log.
-_RUN_FAILED_MESSAGE = (
-    "The run failed. Try again, or contact support with the run id."
-)
 
 router = APIRouter(
     prefix="/simulate", tags=["debate"], dependencies=[Depends(verify_csrf)]
@@ -355,7 +349,7 @@ async def _run_debate_async(
             message = str(exc)
         else:
             logger.exception("debate run %s failed", job_id)
-            message = _RUN_FAILED_MESSAGE
+            message = RUN_FAILED_MESSAGE
         async with _DEBATE_JOBS_LOCK:
             _DEBATE_JOBS.setdefault(job_id, {})["status"] = "failed"
             _DEBATE_JOBS.setdefault(job_id, {})["error"] = message

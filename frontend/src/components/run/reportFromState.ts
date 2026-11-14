@@ -49,7 +49,7 @@ export function reportFromState(state: RunState, filedAt: string | null): Report
 function sourceRows(profiles: AgentProfile[]): ReportModel['sources'] {
   const references = new Map<string, string>()
   for (const profile of profiles) {
-    for (const link of profile.summary_provenance) {
+    for (const link of profile.summary_provenance ?? []) {
       if (link.title && link.breadcrumb && !references.has(link.title)) references.set(link.title, link.breadcrumb)
     }
   }
