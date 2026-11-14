@@ -122,7 +122,7 @@ def features(c: Candidate) -> dict[str, float]:
     }
 
 
-def _cosine(a: Sequence[float], b: Sequence[float]) -> float:
+def cosine(a: Sequence[float], b: Sequence[float]) -> float:
     if not a or not b or len(a) != len(b):
         return 0.0
     na, nb = math.sqrt(sum(x * x for x in a)), math.sqrt(sum(x * x for x in b))
@@ -170,7 +170,7 @@ class SeatQueue:
             self._decisions[c.entity_id] = SeatDecision(c.entity_id, c.name, score(c), features(c), reason=reason)
 
     def _penalty(self, c: Candidate) -> float:
-        return max((_cosine(c.vector, s.vector) for s in self._seated), default=0.0)
+        return max((cosine(c.vector, s.vector) for s in self._seated), default=0.0)
 
     def _require_drawn(self, c: Candidate) -> None:
         if c.entity_id not in self._drawn:
