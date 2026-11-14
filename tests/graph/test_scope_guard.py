@@ -88,6 +88,16 @@ async def test_graph_context_reads_scope_every_graph_end(name, recorder):
 
 
 @pytest.mark.asyncio
+async def test_each_chunk_leg_carries_the_chunk_predicate(recorder):
+    """The generic check passes if one leg keeps the predicate, so each leg is checked alone."""
+    await _context(recorder).find_relevant_chunks("q", dataset_id="ds-A", limit=5)
+    legs = [query for query, _ in recorder.calls if "db.index." in query]
+    assert len(legs) == 2  # the fulltext leg and the vector leg
+    for query in legs:
+        assert chunk_in_dataset("node") in query
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("name", sorted(READS))
 async def test_dataset_id_is_required(name, recorder):
     read, _ = READS[name]

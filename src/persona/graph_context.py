@@ -15,6 +15,7 @@ from llama_index.embeddings.ollama import OllamaEmbedding
 from neo4j import AsyncGraphDatabase
 from pydantic import BaseModel, Field
 
+from src.billing.metering import MeteringError
 from src.graph.config_graph import GraphConfig
 from src.graph.neo4j_bootstrap import (
     CHUNK_EMBEDDINGS_INDEX,
@@ -33,6 +34,8 @@ _EMBED_TIMEOUT_SECONDS = 60
 
 # The vector index cannot pre-filter by dataset, so over-fetch and post-filter.
 VECTOR_OVERFETCH = 5
+# A chunk leg widens its fetch up to this many times the requested limit.
+CHUNK_RECALL_CAP = 20
 
 # Lucene query syntax, and the AND/OR/NOT words it reads as operators. Stripped
 # from the user's question so it can never break or steer the fulltext query.
@@ -43,8 +46,9 @@ _LUCENE_OPERATOR_WORDS = re.compile(r"\b(AND|OR|NOT)\b")
 _CHUNK_COLUMNS = (
     "node.chunk_id AS chunk_id, node.document_anchor AS doc_id, "
     "node.title AS doc_title, node.breadcrumb AS section, node.text AS text, "
+    "CASE WHEN node IS NULL THEN [] ELSE "
     "[(node)-[:MENTIONS]->(e:__Entity__) WHERE e.id IS NOT NULL AND "
-    f"{entity_in_dataset('e')} | e.id] AS entity_ids"
+    f"{entity_in_dataset('e')} | e.id] END AS entity_ids"
 )
 
 
@@ -103,6 +107,26 @@ def _lucene_terms(query: str) -> str:
     return " ".join(cleaned.split())
 
 
+def _leg_cypher(procedure: str) -> str:
+    """One chunk leg: the index's raw hits, post-filtered to the dataset, top `$limit`.
+
+    `raw_hits` rides on every row. The sentinel (null node, score -2.0) always
+    survives the filter, so a leg with no in-dataset hits still reports whether
+    the index filled `$fetch`.
+    """
+    return f"""
+    CALL {procedure}
+    YIELD node, score
+    WITH count(*) AS raw_hits, collect({{node: node, score: score}}) AS raw
+    UNWIND (raw + [{{node: null, score: -2.0}}]) AS hit
+    WITH raw_hits, hit.node AS node, hit.score AS leg_score
+    WHERE node IS NULL OR {chunk_in_dataset("node")}
+    RETURN raw_hits, {_CHUNK_COLUMNS}, leg_score
+    ORDER BY leg_score DESC
+    LIMIT $limit
+    """
+
+
 def _chunk_hits(rows: List[Dict[str, Any]]) -> List[ChunkHit]:
     hits: List[ChunkHit] = []
     for row in rows:
@@ -138,14 +162,21 @@ class GraphContext:
             auth=(self.config.neo4j_username, self.config.neo4j_password),
         )
         self._db = self.config.neo4j_database
-        # Capabilities a read could not use this run, e.g. "no_embeddings".
-        self.degraded: set[str] = set()
         self._embed_model = OllamaEmbedding(
             model_name=LLMConfig.embedding_model,
             base_url=LLMConfig.ollama_base_url,
             client_kwargs={"timeout": _EMBED_TIMEOUT_SECONDS},
             ollama_additional_kwargs={"mirostat": 0},
         )
+
+    @property
+    def degraded(self) -> set[str]:
+        """Capabilities a read could not use this run, e.g. "no_embeddings".
+
+        Created per instance on first use, so an instance built without
+        __init__ (the test doubles) cannot raise AttributeError on a failure path.
+        """
+        return vars(self).setdefault("_degraded", set())
 
     async def close(self) -> None:
         """Close the Neo4j driver."""
@@ -238,69 +269,66 @@ class GraphContext:
     ) -> ChunkSearch:
         """Dataset chunks for the query, as two ranked legs (fusion is the caller's).
 
-        The fulltext leg needs no embedding. If the query embedding fails, the
-        vector leg is dropped and "no_embeddings" is recorded in `degraded`.
+        A question with no searchable terms returns nothing and reads nothing. The
+        fulltext leg needs no embedding. If the query embedding fails, the vector
+        leg is dropped and "no_embeddings" is recorded in `degraded`.
         """
-        fulltext = await self._fulltext_chunks(query, dataset_id, limit)
+        search = _lucene_terms(query)
+        if not search:
+            return ChunkSearch(vector=[], fulltext=[])
+        fulltext = await self._recall_chunks(
+            f"db.index.fulltext.queryNodes('{CHUNK_TEXT_INDEX}', $search, {{limit: $fetch}})",
+            dataset_id,
+            limit,
+            search=search,
+        )
         try:
             query_vector = await self._get_embedding(query)
+        except MeteringError:
+            raise
         except Exception as exc:
             logger.warning("Chunk vector leg skipped, no query embedding: %s", exc)
             self.degraded.add("no_embeddings")
             return ChunkSearch(vector=[], fulltext=fulltext)
-        vector = await self._vector_chunks(query_vector, dataset_id, limit)
+        vector = await self._recall_chunks(
+            f"db.index.vector.queryNodes('{CHUNK_EMBEDDINGS_INDEX}', $fetch, $vector)",
+            dataset_id,
+            limit,
+            vector=query_vector,
+        )
         return ChunkSearch(vector=vector, fulltext=fulltext)
 
-    async def _vector_chunks(
-        self, query_vector: List[float], dataset_id: str, limit: int
+    async def _recall_chunks(
+        self, procedure: str, dataset_id: str, limit: int, **params: Any
     ) -> List[ChunkHit]:
-        cypher = f"""
-        CALL db.index.vector.queryNodes('{CHUNK_EMBEDDINGS_INDEX}', $fetch, $vector)
-        YIELD node, score
-        WHERE {chunk_in_dataset("node")}
-        RETURN {_CHUNK_COLUMNS}, score AS vector_score
-        ORDER BY vector_score DESC
-        LIMIT $limit
-        """
-        return await self._run_chunk_query(
-            cypher,
-            dataset_id,
-            vector=query_vector,
-            fetch=limit * VECTOR_OVERFETCH,
-            limit=limit,
-        )
+        """Top `limit` dataset chunks from one index leg.
 
-    async def _fulltext_chunks(
-        self, query: str, dataset_id: str, limit: int
-    ) -> List[ChunkHit]:
-        search = _lucene_terms(query)
-        if not search:
-            return []
-        cypher = f"""
-        CALL db.index.fulltext.queryNodes('{CHUNK_TEXT_INDEX}', $search, {{limit: $fetch}})
-        YIELD node, score
-        WHERE {chunk_in_dataset("node")}
-        RETURN {_CHUNK_COLUMNS}, score AS text_score
-        ORDER BY text_score DESC
-        LIMIT $limit
+        The index cannot pre-filter by dataset, so `fetch` raw hits are taken and
+        post-filtered. A leg whose raw hits filled `fetch` but kept fewer than
+        `limit` widens (fetch doubles) until it has `limit`, the index runs out, or
+        fetch reaches CHUNK_RECALL_CAP x limit, which is recorded in `degraded`.
         """
-        return await self._run_chunk_query(
-            cypher,
-            dataset_id,
-            search=search,
-            fetch=limit * VECTOR_OVERFETCH,
-            limit=limit,
-        )
-
-    async def _run_chunk_query(
-        self, cypher: str, dataset_id: str, **params: Any
-    ) -> List[ChunkHit]:
-        async with self._driver.session(database=self._db) as session:
-            result = await session.run(
-                cast(LiteralString, cypher), dataset_id=dataset_id, **params
-            )
-            rows = await result.data()
-        return _chunk_hits(rows)
+        cypher = cast(LiteralString, _leg_cypher(procedure))
+        fetch = limit * VECTOR_OVERFETCH
+        cap = limit * CHUNK_RECALL_CAP
+        while True:
+            async with self._driver.session(database=self._db) as session:
+                result = await session.run(
+                    cypher,
+                    dataset_id=dataset_id,
+                    fetch=fetch,
+                    limit=limit,
+                    **params,
+                )
+                rows = await result.data()
+            hits = _chunk_hits(rows)
+            raw_hits = (rows[0].get("raw_hits") or 0) if rows else 0
+            if len(hits) >= limit or raw_hits < fetch:
+                return hits
+            if fetch >= cap:
+                self.degraded.add("recall_capped")
+                return hits
+            fetch = min(fetch * 2, cap)
 
     def _entity_from_node(self, node: Any, relevance_score: float) -> EntityNode:
         """One EntityNode from a Neo4j node — the single node-reading body the

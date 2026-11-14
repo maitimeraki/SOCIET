@@ -10,6 +10,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+from src.billing.metering import MeteringError
 from src.graph.config_graph import GraphConfig
 from src.graph.neo4j_bootstrap import ensure_schema
 from src.persona.graph_context import (
@@ -568,9 +569,39 @@ async def test_find_connected_nodes_by_seed_empty_ids_run_no_query():
 
 def _chunk_ctx(rows, embed=None):
     ctx, driver = _batch_ctx(lambda cypher, params: rows)
-    ctx.degraded = set()
     ctx._get_embedding = embed or AsyncMock(return_value=[0.1, 0.2])
     return ctx, driver
+
+
+def _index_stub(dataset_by_rank):
+    """Answers a chunk leg the way the index does: the top `fetch` raw hits, the
+    requested dataset's kept, and a sentinel row (no chunk id) when none are."""
+
+    def respond(cypher, params):
+        raw = dataset_by_rank[: params["fetch"]]
+        kept = [
+            rank for rank, ds in enumerate(raw) if ds == params["dataset_id"]
+        ][: params["limit"]]
+        if not kept:
+            return [{"raw_hits": len(raw), "chunk_id": None}]
+        return [
+            {
+                "raw_hits": len(raw),
+                "chunk_id": f"c{rank}",
+                "doc_id": "d",
+                "doc_title": "T",
+                "section": "S",
+                "text": "t",
+                "entity_ids": [],
+            }
+            for rank in kept
+        ]
+
+    return respond
+
+
+def _fetches(driver, leg):
+    return [params["fetch"] for cypher, params in driver.queries if leg in cypher]
 
 
 def _hit_row(chunk_id, text="body"):
@@ -632,11 +663,73 @@ async def test_embedding_failure_degrades_to_fulltext_only():
 
 
 @pytest.mark.asyncio
+async def test_empty_question_reads_nothing_and_skips_the_embedding():
+    embed = AsyncMock(return_value=[0.1, 0.2])
+    ctx, driver = _chunk_ctx([], embed=embed)
+
+    search = await ctx.find_relevant_chunks("?! ()", "ds-A", limit=5)
+
+    assert search == ChunkSearch(vector=[], fulltext=[])
+    assert driver.queries == []
+    embed.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_metering_error_is_not_absorbed_by_the_embedding_fallback():
+    ctx, _ = _chunk_ctx(
+        [], embed=AsyncMock(side_effect=MeteringError("budget exhausted"))
+    )
+
+    with pytest.raises(MeteringError):
+        await ctx.find_relevant_chunks("alpha", "ds-A", limit=5)
+    assert "no_embeddings" not in ctx.degraded
+
+
+@pytest.mark.asyncio
+async def test_recall_widens_until_the_dataset_fills():
+    """Three tenant chunks sit beyond the first fetch; the leg widens to reach them."""
+    universe = ["ds-B"] * 40 + ["ds-A"] * 3 + ["ds-B"] * 57
+    ctx, driver = _batch_ctx(_index_stub(universe))
+    ctx._get_embedding = AsyncMock(return_value=[0.1, 0.2])
+
+    search = await ctx.find_relevant_chunks("alpha", "ds-A", limit=3)
+
+    assert _fetches(driver, "db.index.vector") == [15, 30, 60]
+    assert _fetches(driver, "db.index.fulltext") == [15, 30, 60]
+    assert [h.chunk_id for h in search.vector] == ["c40", "c41", "c42"]
+    assert "recall_capped" not in ctx.degraded
+
+
+@pytest.mark.asyncio
+async def test_recall_stops_at_the_cap_and_records_it():
+    ctx, driver = _batch_ctx(_index_stub(["ds-B"] * 100))
+    ctx._get_embedding = AsyncMock(return_value=[0.1, 0.2])
+
+    search = await ctx.find_relevant_chunks("alpha", "ds-A", limit=3)
+
+    assert _fetches(driver, "db.index.vector") == [15, 30, 60]  # 20x limit, then stop
+    assert search.vector == []
+    assert "recall_capped" in ctx.degraded
+
+
+@pytest.mark.asyncio
+async def test_exhausted_index_stops_without_recall_cap():
+    ctx, driver = _batch_ctx(_index_stub(["ds-B"] * 10))
+    ctx._get_embedding = AsyncMock(return_value=[0.1, 0.2])
+
+    await ctx.find_relevant_chunks("alpha", "ds-A", limit=3)
+
+    assert _fetches(driver, "db.index.vector") == [15]  # fewer raw hits than fetch
+    assert "recall_capped" not in ctx.degraded
+
+
+@pytest.mark.asyncio
 async def test_find_relevant_chunks_is_tenant_scoped_live(graph_ctx):
     """A chunk of another dataset carrying the same text is never returned."""
     probe = "tenantprobe zq7 mergers"
     other = "ds-test-other-tenant"
-    await ensure_schema(graph_ctx._driver, graph_ctx._db)
+    schema = await ensure_schema(graph_ctx._driver, graph_ctx._db)
+    assert schema["failed"] == []
     async with graph_ctx._driver.session(database=graph_ctx._db) as session:
         await session.run(
             """
