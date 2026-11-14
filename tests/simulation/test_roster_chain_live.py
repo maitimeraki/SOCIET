@@ -40,10 +40,10 @@ class _StubCtx:
     def __init__(self, nodes):
         self._nodes = list(nodes)
 
-    async def find_relevant_entities(self, query, limit):
+    async def find_relevant_entities(self, query, dataset_id, limit):
         return list(self._nodes)
 
-    def find_connected_nodes(self, ids, limit):
+    def find_connected_nodes(self, ids, dataset_id, limit):
         return []
 
 

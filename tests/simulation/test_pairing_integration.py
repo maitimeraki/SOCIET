@@ -167,7 +167,7 @@ async def test_single_cell_graph_synthesizes_a_debatable_roster(live):
         # else is real: node-level derivation, the real writers, the real
         # round-1 pairing Cypher.
         class _SeededContext:
-            async def find_relevant_entities(self, query, limit=10):
+            async def find_relevant_entities(self, query, dataset_id, limit=10):
                 return [
                     EntityNode(
                         id=name,

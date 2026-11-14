@@ -135,6 +135,7 @@ async def test_synthesize_calls_graph_context_with_query(
 
     mock_graph_context.find_relevant_entities.assert_called_once_with(
         "AI ethics healthcare",
+        dataset_id="test_dataset",
         limit=15,  # max_agents * 3
     )
 
@@ -484,7 +485,7 @@ async def test_synthesize_vector_search_called_with_query_string():
     )
 
     ctx.find_relevant_entities.assert_called_once_with(
-        "AI ethics in healthcare policy", limit=9
+        "AI ethics in healthcare policy", dataset_id="ds", limit=9
     )
 
 
@@ -1234,7 +1235,7 @@ class _CountingContext:
         self.batch_calls: list[list[str]] = []
         self.single_calls = 0
 
-    async def find_relevant_entities(self, query, limit=10):
+    async def find_relevant_entities(self, query, dataset_id, limit=10):
         return self._entities
 
     async def get_provenance_batch(self, entity_ids):
@@ -1502,10 +1503,10 @@ async def test_synthesize_expands_the_roster_with_walked_neighbours():
     walked = _cluster_entity("Neighbour", 0.0, ["x"], "linked context")
 
     class _WalkingContext:
-        async def find_relevant_entities(self, query, limit=10):
+        async def find_relevant_entities(self, query, dataset_id, limit=10):
             return [_cluster_entity("Seed", 0.9, ["x"], "seed text")]
 
-        async def find_connected_nodes(self, node_ids, limit=10):
+        async def find_connected_nodes(self, node_ids, dataset_id, limit=10):
             return [walked]
 
     synth, _ = _synth_over(_WalkingContext())
@@ -1520,7 +1521,7 @@ async def test_synthesize_survives_a_failing_traversal(caplog):
     """A raising walk logs and degrades to the seed nodes — never breaks synthesis."""
 
     class _RaisingWalkContext(_CountingContext):
-        async def find_connected_nodes(self, node_ids, limit=10):
+        async def find_connected_nodes(self, node_ids, dataset_id, limit=10):
             raise RuntimeError("neo4j transient")
 
     synth, _ = _synth_over(_RaisingWalkContext(list(_ROSTER), {}))
@@ -1612,7 +1613,7 @@ async def test_synthesize_rosters_seeds_when_the_context_has_no_traversal():
     """A context predating the walk still rosters its seeds (mock tolerance)."""
 
     class _SeedOnlyContext:
-        async def find_relevant_entities(self, query, limit=10):
+        async def find_relevant_entities(self, query, dataset_id, limit=10):
             return list(_ROSTER)
 
     synth, _ = _synth_over(_SeedOnlyContext())
@@ -1664,10 +1665,10 @@ async def test_candidate_evidence_includes_the_subgraph():
     neighbour = _cluster_entity("WholeFoods", 0.0, ["grocery"], "wholefoods summary")
 
     class _SubgraphContext:
-        async def find_relevant_entities(self, query, limit=10):
+        async def find_relevant_entities(self, query, dataset_id, limit=10):
             return [seed]
 
-        async def find_connected_nodes_by_seed(self, node_ids, limit=10):
+        async def find_connected_nodes_by_seed(self, node_ids, dataset_id, limit=10):
             return {"Amazon": [neighbour]}
 
     synth, repo = _synth_over(_SubgraphContext())
@@ -1689,10 +1690,10 @@ async def test_subgraph_failure_degrades_to_the_node_alone(caplog):
     """A raising subgraph fetch is logged and never breaks synthesis."""
 
     class _RaisingSubgraph:
-        async def find_relevant_entities(self, query, limit=10):
+        async def find_relevant_entities(self, query, dataset_id, limit=10):
             return [_cluster_entity("Solo", 0.9, ["x"], "solo summary")]
 
-        async def find_connected_nodes_by_seed(self, node_ids, limit=10):
+        async def find_connected_nodes_by_seed(self, node_ids, dataset_id, limit=10):
             raise RuntimeError("neo4j transient")
 
     synth, repo = _synth_over(_RaisingSubgraph())

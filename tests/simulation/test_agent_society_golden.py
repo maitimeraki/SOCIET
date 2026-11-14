@@ -87,7 +87,7 @@ class _RosterContext:
     def __init__(self, entities):
         self._entities = entities
 
-    async def find_relevant_entities(self, query, limit=10):
+    async def find_relevant_entities(self, query, dataset_id, limit=10):
         return self._entities
 
 

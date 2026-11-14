@@ -72,7 +72,9 @@ class ProfileSynthesizer:
         """
         # Adaptive target: sqrt(n) * 4, capped at max_agents
         search_limit = max_agents * 3
-        seeds = await self._ctx.find_relevant_entities(query, limit=search_limit)
+        seeds = await self._ctx.find_relevant_entities(
+            query, dataset_id=dataset_id, limit=search_limit
+        )
 
         if not seeds:
             raise NoAgentsDerivableError(
@@ -83,11 +85,15 @@ class ProfileSynthesizer:
         # Required nodes are the roster's candidates: one agent per node. The
         # old path grouped by shared document provenance, so a single-document
         # graph collapsed to one cluster — and one un-pairable agent.
-        required = await self._required_nodes(seeds, limit=search_limit)
+        required = await self._required_nodes(
+            seeds, dataset_id=dataset_id, limit=search_limit
+        )
         target = min(max_agents, int(math.sqrt(len(required)) * 4))
 
         # Ground each persona in its node's 1-hop subgraph, not one bare node.
-        subgraph = await self._subgraph_by_seed(required, search_limit)
+        subgraph = await self._subgraph_by_seed(
+            required, dataset_id=dataset_id, limit=search_limit
+        )
         candidates = [
             SelectionCandidate(
                 name=node.name,
@@ -427,7 +433,7 @@ class ProfileSynthesizer:
         return [p for p in results if p is not None]
 
     async def _subgraph_by_seed(
-        self, nodes: list[EntityNode], limit: int
+        self, nodes: list[EntityNode], dataset_id: str, limit: int
     ) -> dict[str, list[EntityNode]]:
         """Each node's 1-hop entity neighbours, keyed by node id — ONE query for
         the whole roster. A missing method, a raising fetch or a non-mapping
@@ -437,7 +443,9 @@ class ProfileSynthesizer:
         if not callable(fetch):
             return {}
         try:
-            grouped = fetch([node.id for node in nodes], limit=limit)
+            grouped = fetch(
+                [node.id for node in nodes], dataset_id=dataset_id, limit=limit
+            )
             if inspect.iscoroutine(grouped):
                 grouped = await grouped
         except Exception as exc:
@@ -449,7 +457,7 @@ class ProfileSynthesizer:
         return grouped if isinstance(grouped, Mapping) else {}
 
     async def _required_nodes(
-        self, seeds: list[EntityNode], limit: int
+        self, seeds: list[EntityNode], dataset_id: str, limit: int
     ) -> list[EntityNode]:
         """The roster's candidate nodes: the seeds plus their one-hop entity
         neighbours, deduped by (id, name). A missing method, a raising walk or
@@ -459,7 +467,9 @@ class ProfileSynthesizer:
         try:
             walk = getattr(self._ctx, "find_connected_nodes", None)
             neighbours = (
-                walk([seed.id for seed in seeds], limit) if callable(walk) else []
+                walk([seed.id for seed in seeds], dataset_id=dataset_id, limit=limit)
+                if callable(walk)
+                else []
             )
             if inspect.iscoroutine(neighbours):
                 neighbours = await neighbours

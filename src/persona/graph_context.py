@@ -15,12 +15,16 @@ from pydantic import BaseModel, Field
 
 from src.graph.config_graph import GraphConfig
 from src.graph.neo4j_bootstrap import ENTITY_EMBEDDINGS_INDEX
+from src.graph.scope import chunk_in_dataset, entity_in_dataset
 from src.llm.config_llm import LLMConfig
 from src.persona.models_persona import ProvenanceLink
 
 # The ollama clients default to httpx `timeout=None` (unbounded) — a stuck
 # localhost embed call would wait forever. 60 s is a generous bound for it.
 _EMBED_TIMEOUT_SECONDS = 60
+
+# The vector index cannot pre-filter by dataset, so over-fetch and post-filter.
+VECTOR_OVERFETCH = 5
 
 
 # Store/base labels carried by every graph node — never the entity's real type.
@@ -127,17 +131,19 @@ class GraphContext:
         return await loop.run_in_executor(None, func, text)
 
     async def find_relevant_entities(
-        self, query: str, limit: int = 10
+        self, query: str, dataset_id: str, limit: int = 10
     ) -> List[EntityNode]:
-        """Find entity nodes most relevant to the query using hybrid search.
+        """Find the dataset's entity nodes most relevant to the query.
 
-        Uses vector similarity on entity embeddings combined with keyword matching.
+        Vector similarity on entity embeddings; over-fetches and post-filters by
+        dataset, so a crowded-out dataset returns fewer rows, never another's.
         """
         query_vector = await self._get_embedding(query)
 
         cypher = f"""
-        CALL db.index.vector.queryNodes('{ENTITY_EMBEDDINGS_INDEX}', $limit, $vector)
+        CALL db.index.vector.queryNodes('{ENTITY_EMBEDDINGS_INDEX}', $fetch, $vector)
         YIELD node, score AS vector_score
+        WHERE {entity_in_dataset("node")}
         RETURN node, vector_score
         ORDER BY vector_score DESC
         LIMIT $limit
@@ -146,7 +152,9 @@ class GraphContext:
             result = await session.run(
                 cast(LiteralString, cypher),
                 vector=query_vector,
+                fetch=limit * VECTOR_OVERFETCH,
                 limit=limit,
+                dataset_id=dataset_id,
             )
             rows = await result.data()
 
@@ -174,7 +182,7 @@ class GraphContext:
         )
 
     async def find_connected_nodes(
-        self, node_ids: List[str], limit: int = 25
+        self, node_ids: List[str], dataset_id: str, limit: int = 25
     ) -> List[EntityNode]:
         """Entity nodes one relationship hop from the seed nodes.
 
@@ -188,12 +196,14 @@ class GraphContext:
         if not seed_ids:
             return []
 
-        cypher = """
+        cypher = f"""
         MATCH (seed:__Entity__)
-        WHERE seed.id IN $node_ids OR seed.name IN $node_ids
+        WHERE (seed.id IN $node_ids OR seed.name IN $node_ids)
+          AND {entity_in_dataset("seed")}
         MATCH (seed)-[r]-(n:__Entity__)
         WHERE NOT n:Chunk
           AND NOT (n.id IN $node_ids OR n.name IN $node_ids)
+          AND {entity_in_dataset("n")}
         WITH n, count(DISTINCT seed) AS seed_degree
         RETURN n, seed_degree
         ORDER BY seed_degree DESC
@@ -203,6 +213,7 @@ class GraphContext:
             result = await session.run(
                 cast(LiteralString, cypher),
                 node_ids=seed_ids,
+                dataset_id=dataset_id,
                 limit=limit,
             )
             rows = await result.data()
@@ -214,7 +225,7 @@ class GraphContext:
         ]
 
     async def find_connected_nodes_by_seed(
-        self, node_ids: List[str], limit: int = 10
+        self, node_ids: List[str], dataset_id: str, limit: int = 10
     ) -> Dict[str, List[EntityNode]]:
         """Per-seed 1-hop entity neighbours (entity↔entity only), keyed by seed id
         AND seed name so a caller resolving either key finds its group. One query.
@@ -223,10 +234,12 @@ class GraphContext:
         if not keys:
             return {}
 
-        cypher = """
+        cypher = f"""
         MATCH (seed:__Entity__)-[r]-(n:__Entity__)
         WHERE (seed.id IN $node_ids OR seed.name IN $node_ids)
+          AND {entity_in_dataset("seed")}
           AND NOT n:Chunk AND NOT (n.id IN $node_ids OR n.name IN $node_ids)
+          AND {entity_in_dataset("n")}
         RETURN seed.id AS seed_id, seed.name AS seed_name, n, type(r) AS rel_type
         LIMIT $limit
         """
@@ -234,6 +247,7 @@ class GraphContext:
             result = await session.run(
                 cast(LiteralString, cypher),
                 node_ids=keys,
+                dataset_id=dataset_id,
                 limit=limit * max(1, len(keys)),
             )
             rows = await result.data()
@@ -258,14 +272,16 @@ class GraphContext:
             return [t.strip() for t in tags.split(",") if t.strip()]
         return []
 
-    async def get_entity_context(self, entity_id: str) -> Optional[EntityContext]:
+    async def get_entity_context(
+        self, entity_id: str, dataset_id: str
+    ) -> Optional[EntityContext]:
         """Get complete context for an entity: itself, neighbors, and provenance."""
-        entity = await self._get_entity_by_id(entity_id)
+        entity = await self._get_entity_by_id(entity_id, dataset_id)
         if entity is None:
             return None
 
-        neighbors = await self._get_neighbors(entity_id)
-        provenance = await self.get_provenance(entity_id)
+        neighbors = await self._get_neighbors(entity_id, dataset_id)
+        provenance = await self.get_provenance(entity_id, dataset_id)
 
         return EntityContext(
             entity=entity,
@@ -273,11 +289,14 @@ class GraphContext:
             provenance=provenance,
         )
 
-    async def _get_entity_by_id(self, entity_id: str) -> Optional[EntityNode]:
-        """Fetch a single entity by ID or name."""
-        cypher = """
+    async def _get_entity_by_id(
+        self, entity_id: str, dataset_id: str
+    ) -> Optional[EntityNode]:
+        """Fetch a single entity by ID or name, within the dataset."""
+        cypher = f"""
         MATCH (n)
-        WHERE n.id = $entity_id OR n.name = $entity_id
+        WHERE (n.id = $entity_id OR n.name = $entity_id)
+          AND {entity_in_dataset("n")}
         RETURN n, labels(n)[0] AS label
         LIMIT 1
         """
@@ -285,6 +304,7 @@ class GraphContext:
             result = await session.run(
                 cast(LiteralString, cypher),
                 entity_id=entity_id,
+                dataset_id=dataset_id,
             )
             row = await result.single()
 
@@ -307,13 +327,17 @@ class GraphContext:
             domain_tags=self._parse_tags(props.get("domain_tags")),
         )
 
-    async def _get_neighbors(self, entity_id: str, limit: int = 10) -> List[EntityNode]:
-        """Fetch neighboring entities connected to the given entity."""
-        cypher = """
+    async def _get_neighbors(
+        self, entity_id: str, dataset_id: str, limit: int = 10
+    ) -> List[EntityNode]:
+        """Fetch neighboring entities connected to the given entity, within the dataset."""
+        cypher = f"""
         MATCH (n)-[r]-(m)
-        WHERE n.id = $entity_id OR n.name = $entity_id
+        WHERE (n.id = $entity_id OR n.name = $entity_id)
+          AND {entity_in_dataset("n")}
         WITH m, type(r) AS rel_type, r.summary AS rel_summary
         WHERE m.name IS NOT NULL
+          AND ({entity_in_dataset("m")} OR {chunk_in_dataset("m")})
         RETURN m, rel_type, rel_summary
         LIMIT $limit
         """
@@ -321,6 +345,7 @@ class GraphContext:
             result = await session.run(
                 cast(LiteralString, cypher),
                 entity_id=entity_id,
+                dataset_id=dataset_id,
                 limit=limit,
             )
             rows = await result.data()
@@ -351,8 +376,10 @@ class GraphContext:
 
         return neighbors
 
-    async def get_provenance(self, entity_id: str) -> List[ProvenanceLink]:
-        """Return source chunks that contributed to the entity.
+    async def get_provenance(
+        self, entity_id: str, dataset_id: str
+    ) -> List[ProvenanceLink]:
+        """Return source chunks that contributed to the entity, within the dataset.
 
         Chunks point at the entities they mention (the llama-index store's
         direction), so an entity's provenance is its inbound MENTIONS. The
@@ -360,10 +387,12 @@ class GraphContext:
         generic `document_id`/`doc_id` properties to the sentinel `"None"`, so
         reading `doc_id` would return a fabricated id.
         """
-        cypher = """
+        cypher = f"""
         MATCH (n)<-[:MENTIONS]-(chunk:Chunk)
-        WHERE n.id = $entity_id OR n.name = $entity_id
-        AND chunk.document_anchor IS NOT NULL
+        WHERE (n.id = $entity_id OR n.name = $entity_id)
+          AND chunk.document_anchor IS NOT NULL
+          AND {entity_in_dataset("n")}
+          AND {chunk_in_dataset("chunk")}
         RETURN DISTINCT
             chunk.document_anchor AS doc_id,
             chunk.title AS title,
@@ -375,6 +404,7 @@ class GraphContext:
             result = await session.run(
                 cast(LiteralString, cypher),
                 entity_id=entity_id,
+                dataset_id=dataset_id,
             )
             rows = await result.data()
 
@@ -403,9 +433,9 @@ class GraphContext:
         return provenance
 
     async def get_provenance_batch(
-        self, entity_ids: List[str]
+        self, entity_ids: List[str], dataset_id: str
     ) -> Dict[str, List[ProvenanceLink]]:
-        """Return source chunks for a whole roster in ONE query.
+        """Return source chunks for a whole roster in ONE query, within the dataset.
 
         Same per-entity result as `get_provenance` (a row reaches every
         requested key its node id or name matches, same chunk order), keyed by
@@ -415,10 +445,12 @@ class GraphContext:
         if not by_key:
             return by_key
 
-        cypher = """
+        cypher = f"""
         MATCH (n)<-[:MENTIONS]-(chunk:Chunk)
         WHERE (n.id IN $entity_ids OR n.name IN $entity_ids)
-        AND chunk.document_anchor IS NOT NULL
+          AND chunk.document_anchor IS NOT NULL
+          AND {entity_in_dataset("n")}
+          AND {chunk_in_dataset("chunk")}
         RETURN DISTINCT
             n.id AS node_id,
             n.name AS node_name,
@@ -432,6 +464,7 @@ class GraphContext:
             result = await session.run(
                 cast(LiteralString, cypher),
                 entity_ids=list(by_key),
+                dataset_id=dataset_id,
             )
             rows = await result.data()
 
@@ -479,18 +512,22 @@ def create_graph_context(config: Optional[GraphConfig] = None) -> GraphContext:
 
 if __name__ == "__main__":
     import asyncio
+    import sys
 
     async def test():
         config = GraphConfig()
+        dataset_id = sys.argv[1]
         async with GraphContext(config) as ctx:
-            entities = await ctx.find_relevant_entities("AI ethics healthcare", limit=5)
+            entities = await ctx.find_relevant_entities(
+                "AI ethics healthcare", dataset_id, limit=5
+            )
             print(f"Found {len(entities)} relevant entities")
             for e in entities:
                 print(f"  - {e.name} ({e.label}): score={e.relevance_score:.3f}")
 
             if entities:
                 entity_id = entities[0].id
-                context = await ctx.get_entity_context(entity_id)
+                context = await ctx.get_entity_context(entity_id, dataset_id)
                 if context:
                     print(f"\nContext for {context.entity.name}:")
                     print(f"  Neighbors: {len(context.neighbors)}")

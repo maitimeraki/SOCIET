@@ -14,6 +14,8 @@ from src.graph.config_graph import GraphConfig
 from src.persona.graph_context import EntityContext, EntityNode, GraphContext
 from src.persona.models_persona import ProvenanceLink
 
+DATASET_ID = "ds-test-graph-context"
+
 
 @pytest_asyncio.fixture
 async def graph_ctx():
@@ -64,6 +66,18 @@ async def seeded_node(graph_ctx):
             desc="A test entity",
             tags=["test", "graph"],
         )
+        # The dataset scope: the node is DERIVED_FROM a Document of DATASET_ID.
+        await session.run(
+            """
+            MATCH (n:Persona {name: $name})
+            MERGE (d:Document {document_id: $doc})
+            SET d.dataset_id = $dataset_id, d._test = true
+            MERGE (n)-[:DERIVED_FROM]->(d)
+            """,
+            name=node_id,
+            doc="test_graph_context_doc",
+            dataset_id=DATASET_ID,
+        )
         # Create a neighbor (marked _test so the cleanup sweeps it too —
         # an unmarked neighbor leaks one node per run).
         await session.run(
@@ -82,7 +96,7 @@ async def seeded_node(graph_ctx):
         await session.run(
             """
             MATCH (n:Persona {name: $name})
-            CREATE (chunk:__Node__:Chunk {doc_id: 'None', document_anchor: $doc_id, title: $title, breadcrumb: $breadcrumb, chunk_id: $chunk_id})
+            CREATE (chunk:__Node__:Chunk {doc_id: 'None', document_anchor: $doc_id, title: $title, breadcrumb: $breadcrumb, chunk_id: $chunk_id, dataset_id: $dataset_id})
             CREATE (chunk)-[:MENTIONS]->(n)
             """,
             name=node_id,
@@ -90,6 +104,7 @@ async def seeded_node(graph_ctx):
             title="Test Document",
             breadcrumb="Test > Section",
             chunk_id="12345678-1234-1234-1234-123456789abc",
+            dataset_id=DATASET_ID,
         )
 
     yield node_id
@@ -107,7 +122,9 @@ async def seeded_node(graph_ctx):
 @pytest.mark.asyncio
 async def test_find_relevant_entities_returns_list(graph_ctx):
     """Test that find_relevant_entities returns a list of EntityNode."""
-    results = await graph_ctx.find_relevant_entities("test entity graph", limit=10)
+    results = await graph_ctx.find_relevant_entities(
+        "test entity graph", dataset_id=DATASET_ID, limit=10
+    )
     assert isinstance(results, list)
     for entity in results:
         assert isinstance(entity, EntityNode)
@@ -118,14 +135,14 @@ async def test_find_relevant_entities_returns_list(graph_ctx):
 @pytest.mark.asyncio
 async def test_find_relevant_entities_respects_limit(graph_ctx):
     """Test that the limit parameter is respected."""
-    results = await graph_ctx.find_relevant_entities("test", limit=3)
+    results = await graph_ctx.find_relevant_entities("test", dataset_id=DATASET_ID, limit=3)
     assert len(results) <= 3
 
 
 @pytest.mark.asyncio
 async def test_get_entity_context_includes_neighbors(seeded_node, graph_ctx):
     """Test that get_entity_context returns neighbors."""
-    context = await graph_ctx.get_entity_context(seeded_node)
+    context = await graph_ctx.get_entity_context(seeded_node, DATASET_ID)
     assert context is not None
     assert isinstance(context, EntityContext)
     assert context.entity is not None
@@ -136,7 +153,7 @@ async def test_get_entity_context_includes_neighbors(seeded_node, graph_ctx):
 @pytest.mark.asyncio
 async def test_get_entity_context_includes_provenance(seeded_node, graph_ctx):
     """Test that get_entity_context includes provenance."""
-    context = await graph_ctx.get_entity_context(seeded_node)
+    context = await graph_ctx.get_entity_context(seeded_node, DATASET_ID)
     assert context is not None
     assert isinstance(context.provenance, list)
 
@@ -144,14 +161,14 @@ async def test_get_entity_context_includes_provenance(seeded_node, graph_ctx):
 @pytest.mark.asyncio
 async def test_get_entity_context_returns_none_for_nonexistent(graph_ctx):
     """Test that get_entity_context returns None for non-existent entity."""
-    context = await graph_ctx.get_entity_context("nonexistent_entity_id_12345")
+    context = await graph_ctx.get_entity_context("nonexistent_entity_id_12345", DATASET_ID)
     assert context is None
 
 
 @pytest.mark.asyncio
 async def test_get_provenance_traces_to_source(seeded_node, graph_ctx):
     """Test that provenance traces back to source chunks."""
-    provenance = await graph_ctx.get_provenance(seeded_node)
+    provenance = await graph_ctx.get_provenance(seeded_node, DATASET_ID)
     assert isinstance(provenance, list)
     assert any(
         link.doc_id == "doc:test_doc" for link in provenance
@@ -165,7 +182,7 @@ async def test_get_provenance_traces_to_source(seeded_node, graph_ctx):
 @pytest.mark.asyncio
 async def test_get_provenance_empty_for_nonexistent(graph_ctx):
     """Test that get_provenance returns empty list for non-existent entity."""
-    provenance = await graph_ctx.get_provenance("nonexistent_entity_id_12345")
+    provenance = await graph_ctx.get_provenance("nonexistent_entity_id_12345", DATASET_ID)
     assert isinstance(provenance, list)
     assert len(provenance) == 0
 
@@ -211,7 +228,7 @@ async def test_entity_context_dataclass(graph_ctx):
 async def test_async_context_manager(graph_ctx):
     """Test that GraphContext works as an async context manager."""
     async with GraphContext(graph_ctx.config) as ctx:
-        results = await ctx.find_relevant_entities("test", limit=5)
+        results = await ctx.find_relevant_entities("test", dataset_id=DATASET_ID, limit=5)
         assert isinstance(results, list)
 
 
@@ -286,7 +303,7 @@ async def test_get_provenance_reads_the_writer_shape():
     """
     ctx, driver = _batch_ctx(lambda cypher, params: [])
 
-    await ctx.get_provenance("e1")
+    await ctx.get_provenance("e1", "ds-A")
 
     cypher = driver.queries[0][0]
     assert "chunk.document_anchor AS doc_id" in cypher
@@ -298,7 +315,7 @@ async def test_get_provenance_reads_the_writer_shape():
 async def test_get_provenance_batch_reads_the_writer_shape():
     ctx, driver = _batch_ctx(lambda cypher, params: [])
 
-    await ctx.get_provenance_batch(["e1"])
+    await ctx.get_provenance_batch(["e1"], "ds-A")
 
     cypher = driver.queries[0][0]
     assert "chunk.document_anchor AS doc_id" in cypher
@@ -316,7 +333,7 @@ async def test_get_provenance_batch_serves_the_whole_roster_with_one_query():
     ]
     ctx, driver = _batch_ctx(lambda cypher, params: rows)
 
-    result = await ctx.get_provenance_batch(["e1", "e2", "e3"])
+    result = await ctx.get_provenance_batch(["e1", "e2", "e3"], "ds-A")
 
     assert len(driver.queries) == 1  # the whole roster, one query
     cypher, params = driver.queries[0]
@@ -342,7 +359,7 @@ async def test_get_provenance_batch_attributes_rows_by_id_and_name():
     ]
     ctx, _ = _batch_ctx(lambda cypher, params: rows)
 
-    result = await ctx.get_provenance_batch(["Alpha", "e2"])
+    result = await ctx.get_provenance_batch(["Alpha", "e2"], "ds-A")
 
     # Matches the two single fetches exactly: get_provenance("Alpha") hits both
     # rows (one by name, one by id-or-name), get_provenance("e2") hits the second.
@@ -356,7 +373,7 @@ async def test_get_provenance_batch_empty_roster_runs_no_query():
         lambda cypher, params: pytest.fail("query executed for an empty roster")
     )
 
-    assert await ctx.get_provenance_batch([]) == {}
+    assert await ctx.get_provenance_batch([], "ds-A") == {}
     assert driver.queries == []
 
 
@@ -364,7 +381,7 @@ async def test_get_provenance_batch_empty_roster_runs_no_query():
 async def test_get_provenance_batch_serves_a_live_roster(seeded_node, graph_ctx):
     """The batch Cypher itself executes against live Neo4j with single-fetch parity."""
     result = await graph_ctx.get_provenance_batch(
-        [seeded_node, "nonexistent_entity_id_12345"]
+        [seeded_node, "nonexistent_entity_id_12345"], DATASET_ID
     )
 
     assert result["nonexistent_entity_id_12345"] == []
@@ -374,7 +391,7 @@ async def test_get_provenance_batch_serves_a_live_roster(seeded_node, graph_ctx)
         assert isinstance(link, ProvenanceLink)
         assert link.title is not None
 
-    single = await graph_ctx.get_provenance(seeded_node)
+    single = await graph_ctx.get_provenance(seeded_node, DATASET_ID)
     assert [link.doc_id for link in single] == docs  # same result, same order
 
 
@@ -418,7 +435,7 @@ async def test_find_connected_nodes_walks_one_hop_and_parses_entities():
     rows = [_traversal_row("n1", "Neighbour One", seed_degree=2)]
     ctx, driver = _batch_ctx(lambda cypher, params: rows)
 
-    nodes = await ctx.find_connected_nodes(["seed-1", "seed-2"], limit=10)
+    nodes = await ctx.find_connected_nodes(["seed-1", "seed-2"], "ds-A", limit=10)
 
     assert len(driver.queries) == 1
     cypher, params = driver.queries[0]
@@ -440,7 +457,7 @@ async def test_find_connected_nodes_empty_seeds_run_no_query():
         lambda cypher, params: pytest.fail("query executed for empty seeds")
     )
 
-    assert await ctx.find_connected_nodes([]) == []
+    assert await ctx.find_connected_nodes([], "ds-A") == []
     assert driver.queries == []
 
 
@@ -489,7 +506,7 @@ async def test_get_neighbors_reads_real_labels():
     ]
     ctx, _ = _batch_ctx(lambda cypher, params: rows)
 
-    neighbours = await ctx._get_neighbors("seed")
+    neighbours = await ctx._get_neighbors("seed", "ds-A")
 
     assert [n.label for n in neighbours] == ["Company"]
 
@@ -516,7 +533,7 @@ async def test_find_connected_nodes_by_seed_groups_per_seed():
     ]
     ctx, driver = _batch_ctx(lambda cypher, params: rows)
 
-    out = await ctx.find_connected_nodes_by_seed(["s1", "s2"], limit=10)
+    out = await ctx.find_connected_nodes_by_seed(["s1", "s2"], "ds-A", limit=10)
 
     assert len(driver.queries) == 1
     cypher, params = driver.queries[0]
@@ -535,5 +552,5 @@ async def test_find_connected_nodes_by_seed_empty_ids_run_no_query():
         lambda cypher, params: pytest.fail("query executed for empty ids")
     )
 
-    assert await ctx.find_connected_nodes_by_seed([]) == {}
+    assert await ctx.find_connected_nodes_by_seed([], "ds-A") == {}
     assert driver.queries == []
