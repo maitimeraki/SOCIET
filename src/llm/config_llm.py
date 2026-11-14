@@ -95,6 +95,16 @@ class LLMConfig:
         default_factory=lambda: int(os.getenv("VERDICT_MAX_TOKENS", "3000"))
     )
 
+    # Agent profile call (one per agent) and its support judge. Same tier pattern
+    # as the verdict: PROFILE_LLM_MODEL overrides, else the ANALYSIS tier.
+    profile_model: str = field(
+        default_factory=lambda: os.getenv("PROFILE_LLM_MODEL")
+        or os.getenv("ANALYSIS_LLM_MODEL", "claude-sonnet-5")
+    )
+    profile_max_tokens: int = field(
+        default_factory=lambda: int(os.getenv("PROFILE_MAX_TOKENS", "1200"))
+    )
+
     @classmethod
     def update_provider(cls, provider: str):
         """Update the default provider"""
