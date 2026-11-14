@@ -46,19 +46,21 @@ def personalized_pagerank(
     alpha: float = PPR_ALPHA,
     iterations: int = 50,
 ) -> dict[str, float]:
-    nodes = set(adj) | {m for ns in adj.values() for m in ns} | set(seeds)
-    total = sum(seeds.values())
+    # Sorted everywhere: float sums must not depend on set/dict/input order (spec 7).
+    nodes = sorted(set(adj) | {m for ns in adj.values() for m in ns} | set(seeds))
     if not nodes:
         return {}
+    total = sum(seeds[s] for s in sorted(seeds))
     if total <= 0:
         return {n: 0.0 for n in nodes}
     restart = {n: seeds.get(n, 0.0) / total for n in nodes}
+    neighbours = {n: sorted(adj.get(n, ())) for n in nodes}
     rank = dict(restart)
     for _ in range(iterations):
         nxt = {n: (1 - alpha) * restart[n] for n in nodes}
         dangling = 0.0
         for n in nodes:
-            out = adj.get(n, ())
+            out = neighbours[n]
             if not out:
                 dangling += rank[n]
                 continue
@@ -73,6 +75,7 @@ def personalized_pagerank(
 
 
 def percentile(value: float, population: Sequence[float]) -> float:
+    """Share of population values <= value; 0.0 for an empty population."""
     return sum(1 for p in population if p <= value) / len(population) if population else 0.0
 
 
@@ -145,9 +148,14 @@ class SeatQueue:
         self._n = n
         self._seated: list[Candidate] = []
         self._pool: list[Candidate] = []
+        self._drawn: dict[str, Candidate] = {}
         self._decisions: dict[str, SeatDecision] = {}
+        ordered = sorted(candidates, key=lambda c: (-score(c), c.name))
+        ids = [c.entity_id for c in ordered]
+        if len(set(ids)) != len(ids):
+            raise ValueError(f"duplicate entity_id in candidates: {sorted({i for i in ids if ids.count(i) > 1})}")
         seen: set[str] = set()
-        for c in sorted(candidates, key=lambda c: (-score(c), c.name)):
+        for c in ordered:
             reason = ""
             if not c.is_actor:
                 reason = "not an actor"
@@ -164,19 +172,31 @@ class SeatQueue:
     def _penalty(self, c: Candidate) -> float:
         return max((_cosine(c.vector, s.vector) for s in self._seated), default=0.0)
 
+    def _require_drawn(self, c: Candidate) -> None:
+        if c.entity_id not in self._drawn:
+            raise ValueError(f"{c.name} was not drawn by next() or is already resolved")
+
     def next(self) -> Candidate | None:
         if len(self._seated) >= self._n or not self._pool:
             return None
         best = min(self._pool, key=lambda c: (-(score(c) - MMR_LAMBDA * self._penalty(c)), c.name))
         self._pool.remove(best)
+        self._drawn[best.entity_id] = best
+        self._decisions[best.entity_id].reason = "drawn, unresolved"
         return best
 
     def accept(self, c: Candidate) -> None:
+        self._require_drawn(c)
+        if len(self._seated) >= self._n:
+            raise ValueError(f"all {self._n} seats are already filled")
+        del self._drawn[c.entity_id]
         self._seated.append(c)
         d = self._decisions[c.entity_id]
         d.seated, d.reason, d.order = True, "seated", len(self._seated)
 
     def reject(self, c: Candidate, reason: str) -> None:
+        self._require_drawn(c)
+        del self._drawn[c.entity_id]
         self._decisions[c.entity_id].reason = f"rejected: {reason}"
 
     def decisions(self) -> list[SeatDecision]:
