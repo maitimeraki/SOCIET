@@ -32,7 +32,7 @@ export const PLANS: PlanCard[] = [
     per: '/ month',
     rows: [
       ['Units / month', '8,000'],
-      ['Panel size', '20'],
+      ['Panel size', '12'],
       ['Passes per decision', '4'],
     ],
     action: 'Start with Starter',
@@ -46,7 +46,7 @@ export const PLANS: PlanCard[] = [
     per: '/ month',
     rows: [
       ['Units / month', '16,000'],
-      ['Panel size', '20'],
+      ['Panel size', '12'],
       ['Passes per decision', '4'],
     ],
     action: 'Start with Studio',
@@ -56,7 +56,7 @@ export const PLANS: PlanCard[] = [
 
 export const ENTERPRISE_ROWS: [string, string][] = [
   ['Units / month', 'Custom'],
-  ['Panel size', '40'],
+  ['Panel size', '12'],
   ['Passes per decision', '4'],
 ]
 

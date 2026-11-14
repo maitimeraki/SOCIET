@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest'
 // required because the page's header and actions are `<Link>`s — React Router throws outside one.
 import { renderToStaticMarkup } from 'react-dom/server'
 import { MemoryRouter } from 'react-router-dom'
-import PricingPage, { mergeServerPlans } from './PricingPage'
+import PricingPage, { ENTERPRISE_ROWS, PLANS, mergeServerPlans } from './PricingPage'
 import { BANNED_TERMS, renderedText } from '../test/copyLaw'
 
 const render = () =>
@@ -54,25 +54,32 @@ describe('the plans', () => {
 
   it("renders the server's rate card when it loads", () => {
     const merged = mergeServerPlans([
-      { key: 'starter', price_usd: 12, price_label: '$12', units: 9000, max_agents: 24, max_rounds: 5 },
-      { key: 'studio', price_usd: 24, price_label: '$24', units: 18000, max_agents: 26, max_rounds: 6 },
-      { key: 'enterprise', price_usd: null, price_label: 'Custom', units: 90000, max_agents: 48, max_rounds: 8 },
+      { key: 'starter', price_usd: 12, price_label: '$12', units: 9000, max_agents: 12, max_rounds: 5 },
+      { key: 'studio', price_usd: 24, price_label: '$24', units: 18000, max_agents: 12, max_rounds: 6 },
+      { key: 'enterprise', price_usd: null, price_label: 'Custom', units: 90000, max_agents: 12, max_rounds: 8 },
     ])
 
     expect(merged.plans[0]).toMatchObject({
       amount: '$12',
       rows: [
         ['Units / month', '9,000'],
-        ['Panel size', '24'],
+        ['Panel size', '12'],
         ['Passes per decision', '5'],
       ],
     })
     expect(merged.plans[1].amount).toBe('$24')
     expect(merged.enterpriseRows).toEqual([
       ['Units / month', '90,000'],
-      ['Panel size', '48'],
+      ['Panel size', '12'],
       ['Passes per decision', '8'],
     ])
+  })
+
+  it('shows the server seat cap in the static fallback, before the rate card loads', () => {
+    for (const plan of PLANS) {
+      expect(plan.rows).toContainEqual(['Panel size', '12'])
+    }
+    expect(ENTERPRISE_ROWS).toContainEqual(['Panel size', '12'])
   })
 
   it('keeps the enterprise mailto and the 44px targets', () => {

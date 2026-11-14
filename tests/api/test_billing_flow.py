@@ -222,12 +222,12 @@ async def test_the_billing_flow_shares_one_pool_and_keeps_internals_off_the_wire
 
             debate_job = await _job_row(factory, debate_job_id)
             free = get_plan("free")
-            assert debate_job.reserved_units == free.max_agents * free.max_rounds * 2
-            assert debate_job.reserved_units == 60
+            # The default 8 seats (under the free cap of 10) * 3 rounds * 2 turns.
+            assert debate_job.reserved_units == 8 * free.max_rounds * 2 == 48
 
             during = await _usage(client, bodies)
             assert during["units_used"] == estimate
-            assert during["units_remaining"] == 1000 - estimate - 60
+            assert during["units_remaining"] == 1000 - estimate - 48
 
             measured = 5
             await _settle(
@@ -278,7 +278,7 @@ async def test_the_billing_flow_shares_one_pool_and_keeps_internals_off_the_wire
                 json={
                     "query": "Should we expand into Europe?",
                     "graph_id": str(corpus),
-                    "config": {"max_agents": 20},
+                    "config": {"max_agents": 11},
                 },
                 headers=_csrf(client),
             )

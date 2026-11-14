@@ -495,7 +495,6 @@ import logging
 import pytest
 
 
-
 @pytest.fixture
 def repo():
     repo = AsyncMock()
@@ -762,7 +761,9 @@ async def test_synthesize_falls_back_to_density_order_and_warns(caplog, monkeypa
     intent = QueryIntent(
         direct_keywords=["energy"], latent_sectors=[], search_perspectives=[]
     )
-    monkeypatch.setattr("src.simulation.relevance_matrix.SELECTION_SCORE_THRESHOLD", 0.99)
+    monkeypatch.setattr(
+        "src.simulation.relevance_matrix.SELECTION_SCORE_THRESHOLD", 0.99
+    )
 
     with caplog.at_level(logging.WARNING, logger="src.simulation.relevance_matrix"):
         profiles = await _selection_synth(_SELECTION_ENTITIES).synthesize(
@@ -807,9 +808,13 @@ async def test_synthesize_fills_the_selection_rows_sink():
 
 
 @pytest.mark.asyncio
-async def test_synthesize_reports_the_selection_fallback_to_the_warnings_sink(monkeypatch):
+async def test_synthesize_reports_the_selection_fallback_to_the_warnings_sink(
+    monkeypatch,
+):
     """S4's degradation reaches the run result, not only the log stream."""
-    monkeypatch.setattr("src.simulation.relevance_matrix.SELECTION_SCORE_THRESHOLD", 0.99)
+    monkeypatch.setattr(
+        "src.simulation.relevance_matrix.SELECTION_SCORE_THRESHOLD", 0.99
+    )
     intent = QueryIntent(
         direct_keywords=["energy"], latent_sectors=[], search_perspectives=[]
     )

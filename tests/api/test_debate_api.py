@@ -581,9 +581,13 @@ class TestDebateJobPayload:
         assert complete_msg["confidence_score"] == result["confidence_score"] == 0.9
 
     @pytest.mark.asyncio
-    async def test_job_result_warns_when_selection_falls_back_to_density(self, monkeypatch):
+    async def test_job_result_warns_when_selection_falls_back_to_density(
+        self, monkeypatch
+    ):
         """Nothing clears the S4 threshold → the degradation is in the payload."""
-        monkeypatch.setattr("src.simulation.relevance_matrix.SELECTION_SCORE_THRESHOLD", 0.99)
+        monkeypatch.setattr(
+            "src.simulation.relevance_matrix.SELECTION_SCORE_THRESHOLD", 0.99
+        )
         job_id = f"payload-{uuid.uuid4()}"
         config = DebateConfig(
             max_agents=5,

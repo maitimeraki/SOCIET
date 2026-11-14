@@ -1,6 +1,7 @@
 """The debate gate: plan caps, atomic reservation, and release on enqueue failure."""
 
 import asyncio
+import dataclasses
 import datetime
 import os
 import sys
@@ -21,10 +22,10 @@ from src.api.debate_api import router as debate_router
 from src.api.errors import install_error_handlers
 from src.auth.deps import current_user
 from src.billing import units
-from src.billing.plans import get_plan
+from src.billing.plans import get_plan, get_plans
 from src.billing.units import _calendar_month_bounds
 from src.db.engine import get_session_factory
-from src.db.models import Job, UsageEvent, UsagePeriod, User
+from src.db.models import AuditLog, Job, UsageEvent, UsagePeriod, User
 
 if sys.platform == "win32":
     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
@@ -53,6 +54,18 @@ async def _balance(user_id: uuid.UUID) -> tuple[int, int]:
     async with get_session_factory()() as session:
         period_start, _ = await units.resolve_period(session, user_id)
         return await units.get_balance(session, user_id, period_start)
+
+
+async def _plan_clamp_audits(user_id: uuid.UUID) -> list[dict]:
+    async with get_session_factory()() as session:
+        rows = (
+            await session.execute(
+                select(AuditLog).where(
+                    AuditLog.user_id == user_id, AuditLog.action == "plan_clamp"
+                )
+            )
+        ).scalars()
+        return [row.meta for row in rows]
 
 
 @pytest_asyncio.fixture
@@ -148,10 +161,38 @@ async def test_omitted_config_uses_the_eight_seat_default_and_reserves_the_plan(
 
     job = await _job_row(job_id)
     plan = get_plan("free")
-    assert job.reserved_units == plan.max_agents * plan.max_rounds * 2 == 60
+    # 8 default seats (under the free cap of 10) * 3 rounds (clamped from 5) * 2 turns
+    assert job.reserved_units == 8 * plan.max_rounds * 2 == 48
     expected_start, _ = _calendar_month_bounds(datetime.datetime.now(datetime.UTC))
     assert job.reserved_period_start == expected_start
-    assert await _balance(account.id) == (0, 60)
+    assert await _balance(account.id) == (0, 48)
+
+
+async def test_default_seats_are_clamped_to_the_plan_cap_and_reserved(
+    client, account, monkeypatch
+):
+    capped_free = dataclasses.replace(get_plan("free"), max_agents=6)
+    monkeypatch.setattr(
+        "src.billing.plans.get_plans",
+        lambda: {**get_plans(), "free": capped_free},
+    )
+
+    response = await _post(client)
+
+    assert response.status_code == 202
+    job_id = response.json()["job_id"]
+    doc = await run_doc.read_run_doc(job_id)
+    assert doc["config"]["max_agents"] == 6
+    assert doc["config"]["max_pairs_per_round"] == 6
+
+    job = await _job_row(job_id)
+    assert job.reserved_units == 6 * 3 * 2 == 36
+    assert await _balance(account.id) == (0, 36)
+
+    clamps = await _plan_clamp_audits(account.id)
+    assert len(clamps) == 1
+    assert clamps[0]["requested"]["max_agents"] == 8
+    assert clamps[0]["applied"]["max_agents"] == 6
 
 
 async def test_exhausted_balance_is_402_and_names_the_reset_date(client, account):

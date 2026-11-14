@@ -20,12 +20,16 @@ describe('ConfigPanel — the plan caps', () => {
     expect(html).toContain('1–4')
     // The other fields keep the server's absolute bound.
     expect(html).toContain('max="5"')
+    // Only the untouched snapshot field keeps max="20" under a plan with max_rounds 4.
+    expect(html.match(/max="20"/g)).toHaveLength(1)
   })
 
   it('falls back to the absolute server bounds when no plan is known', () => {
     const html = render()
-    expect(html).toContain('max="12"')
-    expect(html).toContain('max="20"')
+    // Exactly one field is capped at the 12-seat ceiling: max_agents.
+    expect(html.match(/max="12"/g)).toHaveLength(1)
+    // max_rounds and snapshot_top_k both carry the 20 ceiling.
+    expect(html.match(/max="20"/g)).toHaveLength(2)
     expect(fieldMax('max_agents')).toBe(12)
     expect(fieldMax('max_rounds')).toBe(20)
   })

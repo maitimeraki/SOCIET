@@ -52,9 +52,8 @@ class ProfileSynthesizer:
         5. Build one Agent per node
 
         `intent` is the read-only S3 intent (None for older callers). Raises
-        `NoAgentsDerivableError` when the
-        graph yields no candidate at all — an empty roster is a failed job, not
-        a debate with nobody in it.
+        `NoAgentsDerivableError` when the graph yields no candidate at all — an
+        empty roster is a failed job, not a debate with nobody in it.
 
         `warnings` and `selection_rows` are optional caller-owned sinks the S4
         degradation message and the full ranked decomposition (all rows, best

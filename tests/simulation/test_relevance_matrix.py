@@ -66,9 +66,7 @@ def test_density_component_sums_node_and_sector_evidence():
 
 
 def test_blended_score_is_the_documented_formula():
-    assert blended_score(0.5, 0.25) == pytest.approx(
-        0.6 * 0.5 + 0.4 * 0.25
-    )
+    assert blended_score(0.5, 0.25) == pytest.approx(0.6 * 0.5 + 0.4 * 0.25)
 
 
 def test_semantic_component_scores_intent_term_coverage():
@@ -97,9 +95,7 @@ def test_intent_terms_reads_the_intent_object_and_its_mapping_form():
 
 
 def test_rows_carry_both_components_and_the_documented_blend():
-    rows = rank_candidates(
-        _candidates(), _intent(direct_keywords=["carbon", "tax"])
-    )
+    rows = rank_candidates(_candidates(), _intent(direct_keywords=["carbon", "tax"]))
 
     by_name = {row.name: row for row in rows}
     assert by_name["dense"].semantic == 0.0
@@ -109,9 +105,7 @@ def test_rows_carry_both_components_and_the_documented_blend():
     assert by_name["on_topic"].semantic == 1.0
     assert by_name["on_topic"].density == pytest.approx(0.5)
     for row in rows:
-        assert row.blended == pytest.approx(
-            0.6 * row.semantic + 0.4 * row.density
-        )
+        assert row.blended == pytest.approx(0.6 * row.semantic + 0.4 * row.density)
 
     # the on-topic candidate clears the threshold and outranks the denser one
     assert [row.name for row in rows] == ["on_topic", "dense"]
@@ -119,9 +113,7 @@ def test_rows_carry_both_components_and_the_documented_blend():
 
 def test_two_intents_produce_two_different_orderings():
     """P2-T1: selection changes when the intent changes."""
-    by_carbon = rank_candidates(
-        _candidates(), _intent(direct_keywords=["carbon"])
-    )
+    by_carbon = rank_candidates(_candidates(), _intent(direct_keywords=["carbon"]))
     by_logistics = rank_candidates(
         _candidates(), _intent(direct_keywords=["logistics"])
     )
@@ -133,7 +125,9 @@ def test_two_intents_produce_two_different_orderings():
 def test_no_candidate_clears_the_threshold_falls_back_to_density_ordering(
     caplog, monkeypatch
 ):
-    monkeypatch.setattr("src.simulation.relevance_matrix.SELECTION_SCORE_THRESHOLD", 0.99)
+    monkeypatch.setattr(
+        "src.simulation.relevance_matrix.SELECTION_SCORE_THRESHOLD", 0.99
+    )
     with caplog.at_level(logging.WARNING, logger=_MATRIX_LOGGER):
         rows = rank_candidates(
             _candidates(), _intent(direct_keywords=["carbon", "tax"])
@@ -222,9 +216,9 @@ def test_rows_carry_deduped_stable_provenance_anchors():
     # additive default: direct constructions and evidence-free rows keep working
     assert SelectionRow(name="x", semantic=0.0, density=0.0, blended=0.0).anchors == ()
     assert (
-        rank_candidates(
-            [SelectionCandidate(name="x", text="", evidence=[])], None
-        )[0].anchors
+        rank_candidates([SelectionCandidate(name="x", text="", evidence=[])], None)[
+            0
+        ].anchors
         == ()
     )
 
