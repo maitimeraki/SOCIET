@@ -258,18 +258,35 @@ async def test_complete_event_leaks_no_provenance_ids_on_any_surface():
     assert doc["events"][0]["provenance_by_claim"] == {"Proceed.": [{"title": "Memo", "breadcrumb": "Sec 1"}]}
 
 
-def test_account_export_run_verdict_is_projected():
-    from src.jobs.tasks import _run_json
-
-    run = SimpleNamespace(
+def _export_run(verdict):
+    return SimpleNamespace(
         id=uuid.uuid4(), query="q", status="complete", confidence=0.7,
-        verdict={"verdict": "v", "selection": [{"anchors": [1]}],
-                 "provenance_by_claim": {"c": [{"doc_id": "DOC-XYZ", "title": "T",
-                                                "breadcrumb": "B", "chunk_id": "CHUNK-XYZ"}]}},
+        verdict=verdict,
         created_at=datetime(2026, 1, 1, tzinfo=timezone.utc), finished_at=None,
     )
 
-    assert _run_json(run)["verdict"] == {"verdict": "v", "provenance_by_claim": {"c": [{"title": "T", "breadcrumb": "B"}]}}
+
+def test_debate_run_export_verdict_is_projected():
+    from src.jobs.tasks import _run_json
+
+    run = _export_run({
+        "verdict": "v", "selection": [{"anchors": [1]}],
+        "provenance_by_claim": {"c": [{"doc_id": "DOC-XYZ", "title": "T",
+                                       "breadcrumb": "B", "chunk_id": "CHUNK-XYZ"}]},
+    })
+
+    out = _run_json(run, "debate")
+
+    assert out["verdict"] == {"verdict": "v", "provenance_by_claim": {"c": [{"title": "T", "breadcrumb": "B"}]}}
+    assert "CHUNK-XYZ" not in json.dumps(out) and "DOC-XYZ" not in json.dumps(out)
+
+
+def test_graph_job_export_keeps_its_verdict_state():
+    from src.jobs.tasks import _run_json
+
+    state = {"stage": "done", "progress": 1.0, "result": {"ontology": {"classes": ["Person"]}}}
+
+    assert _run_json(_export_run(state), "graph")["verdict"] == state
 
 
 @pytest.mark.parametrize("kind", [["complete"], {"type": "complete"}, None, 3])

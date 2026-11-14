@@ -454,12 +454,15 @@ async def _account_delete_core(job_id: str, payload: dict[str, Any]) -> None:
     _delete_graph_data(graph_ids)
 
 
-def _run_json(run) -> dict[str, Any]:
+def _run_json(run, kind: str) -> dict[str, Any]:
+    # Only a debate's verdict is a result doc; other kinds keep their job state
+    # (stage, progress, result) as stored.
+    verdict = project_result(run.verdict) if kind == "debate" else run.verdict
     return {
         "run_id": str(run.id),
         "query": run.query,
         "status": run.status,
-        "verdict": project_result(run.verdict),
+        "verdict": verdict,
         "confidence": run.confidence,
         "created_at": run.created_at.isoformat(),
         "finished_at": run.finished_at.isoformat() if run.finished_at else None,
@@ -495,19 +498,15 @@ async def _account_export_core(job_id: str, payload: dict[str, Any]) -> None:
         # The account-lifecycle jobs write their own run rows; they are not the
         # user's data and must not appear in their export.
         runs = (
-            (
-                await session.execute(
-                    select(Run)
-                    .join(Job, Job.id == Run.id)
-                    .where(
-                        Run.user_id == owner,
-                        Job.kind.notin_(("account_export", "account_delete")),
-                    )
+            await session.execute(
+                select(Run, Job.kind)
+                .join(Job, Job.id == Run.id)
+                .where(
+                    Run.user_id == owner,
+                    Job.kind.notin_(("account_export", "account_delete")),
                 )
             )
-            .scalars()
-            .all()
-        )
+        ).all()
         uploads = (
             (await session.execute(select(Upload).where(Upload.user_id == owner)))
             .scalars()
@@ -518,7 +517,7 @@ async def _account_export_core(job_id: str, payload: dict[str, Any]) -> None:
     with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
         archive.writestr(
             "runs.json",
-            json.dumps([_run_json(run) for run in runs], indent=2, default=str),
+            json.dumps([_run_json(run, kind) for run, kind in runs], indent=2, default=str),
         )
         archive.writestr(
             "uploads.json",
