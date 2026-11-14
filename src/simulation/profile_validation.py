@@ -24,8 +24,9 @@ SHINGLE_WORDS = 8
 SINGLE_DOC_CONFIDENCE_MAX = 0.5
 TERM_MIN_LEN = 5
 
-_MARKER = re.compile(r"\[([^\[\]]+)\]")
+CITE_MARKER = re.compile(r"\[([^\[\]]+)\]")
 _MARKER_WITH_SPACE = re.compile(r"\s*\[[^\[\]]+\]")
+_SENTENCE_END = re.compile(r"[.!?](?:\s*\[[^\[\]]+\])*(?=\s|$)")
 _WORD = re.compile(r"\w+")
 
 
@@ -60,6 +61,20 @@ class UniquenessReport:
 
 def strip_markers(text: str) -> str:
     return _MARKER_WITH_SPACE.sub("", text).strip()
+
+
+def split_sentences(text: str) -> list[str]:
+    """Sentences of a details text. A cite marker written right after a sentence's end stays with it."""
+    pieces, start = [], 0
+    for match in _SENTENCE_END.finditer(text):
+        pieces.append(text[start:match.end()].strip())
+        start = match.end()
+    pieces.append(text[start:].strip())
+    return [piece for piece in pieces if piece]
+
+
+def has_valid_marker(sentence: str, valid_ids: set[str]) -> bool:
+    return any(marker in valid_ids for marker in CITE_MARKER.findall(sentence))
 
 
 def _words(text: str) -> list[str]:
@@ -129,13 +144,20 @@ def _check_details_length(draft: ProfileDraft, pack: EvidencePack) -> Rejection 
 
 
 def _check_details_markers(draft: ProfileDraft, pack: EvidencePack) -> Rejection | None:
-    markers = _MARKER.findall(draft.details)
+    markers = CITE_MARKER.findall(draft.details)
     valid = pack.ids()
     if any(marker not in valid for marker in markers):
         return Rejection("details", "details has a cite marker that is not in the pack", False)
     if len(set(markers)) < 2:
         return Rejection("details", "details needs at least two distinct cite markers", False)
     return None
+
+
+def _check_sentence_markers(draft: ProfileDraft, pack: EvidencePack) -> Rejection | None:
+    valid = pack.ids()
+    if all(has_valid_marker(sentence, valid) for sentence in split_sentences(draft.details)):
+        return None
+    return Rejection("details", "a sentence in details has no valid cite marker", True)
 
 
 def _check_copying(draft: ProfileDraft, pack: EvidencePack) -> Rejection | None:
@@ -157,6 +179,7 @@ _CHECKS: tuple[Callable[[ProfileDraft, EvidencePack], Rejection | None], ...] = 
     _check_bio,
     _check_details_length,
     _check_details_markers,
+    _check_sentence_markers,
     _check_copying,
     _check_confidence,
 )

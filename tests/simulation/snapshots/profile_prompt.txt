@@ -7,7 +7,7 @@ Rules:
 - stance: the agent's position on the question as asked, not on the topic in general. Cite at least one on-axis evidence id. Use "abstain" only when no evidence bears on the question; then cite nothing.
 - strength: 0 to 1, how firmly the cited evidence supports the stance.
 - bio: 25 to 60 words in two or three lines. Cite at least one own evidence id. Use at least one term that appears in the evidence.
-- details: 1500 to 2100 characters of prose, one concern per paragraph. Put an inline marker such as [e3] after each claim, using only ids from the evidence list. Use at least two distinct markers. Do not copy 25 or more words in a row from the evidence.
+- details: 1500 to 2100 characters of prose, one concern per paragraph. End every sentence with an inline marker such as [e3], using only ids from the evidence list. Use at least two distinct markers. Do not copy 25 or more words in a row from the evidence.
 - confidence: 0 to 1, guidance only. One item from one document is about 0.2. Several items from two or more documents with no contradiction is about 0.8.
 - cites: for each field, the evidence and relation ids that support it. Use only ids from the lists given.
 

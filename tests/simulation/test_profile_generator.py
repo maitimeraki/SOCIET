@@ -1,7 +1,9 @@
 import json
+from contextlib import contextmanager
 
 import pytest
 
+from src.billing import metering
 from src.billing.metering import MeteringError
 from src.llm.config_llm import get_llm_config
 from src.simulation.evidence import EvidenceItem, EvidencePack, RelationItem
@@ -22,6 +24,18 @@ BIO = (
 )
 
 
+ACTIVE_SCOPES: list[str] = []
+
+
+@contextmanager
+def _spy_scope(source):
+    ACTIVE_SCOPES.append(source)
+    try:
+        yield
+    finally:
+        ACTIVE_SCOPES.pop()
+
+
 class FakeClient:
     def __init__(self, replies=(), raises=None):
         self.replies = list(replies)
@@ -29,11 +43,13 @@ class FakeClient:
         self.calls = 0
         self.kwargs: list[dict] = []
         self.users: list[str] = []
+        self.scopes: list = []
 
     async def generate(self, system_prompt, user_prompt, **kwargs) -> str:
         self.calls += 1
         self.kwargs.append(kwargs)
         self.users.append(user_prompt)
+        self.scopes.append(ACTIVE_SCOPES[-1] if ACTIVE_SCOPES else None)
         if self.raises is not None:
             raise self.raises
         reply = self.replies.pop(0)
@@ -209,3 +225,71 @@ def test_markup_in_names_and_evidence_text_is_stripped():
     pack = _pack(text='Kestra "wins" <b>big</b> deals in Berlin')
     _, user = build_prompt(**{**ARGS, "name": 'Kes"tra<>'}, pack=pack)
     assert "<b>" not in user and 'Kes"tra' not in user
+
+
+def _reply_with_details(details: str) -> str:
+    return json.dumps(_draft_dict(details=details))
+
+
+@pytest.mark.asyncio
+async def test_removals_that_break_the_length_bound_reject_the_profile(pack, draft):
+    client = FakeClient([json.dumps({"unsupported": [0, 1, 2, 3, 4]})])
+    kept, rejections = await judge_support(client, draft, pack)
+    assert kept is None and rejections[0].reason == "removal broke the profile rules"
+
+
+@pytest.mark.asyncio
+async def test_a_non_integer_judge_entry_fails_closed(pack, draft):
+    client = FakeClient(['{"unsupported": ["0"]}', '{"unsupported": ["0"]}'])
+    assert (await judge_support(client, draft, pack))[0] is None
+
+
+@pytest.mark.asyncio
+async def test_a_deeply_nested_judge_reply_fails_closed(pack, draft):
+    deep = "{" + "[" * 100000 + "]" * 100000 + "}"
+    assert (await judge_support(FakeClient([deep, deep]), draft, pack))[0] is None
+
+
+@pytest.mark.asyncio
+async def test_a_deeply_nested_profile_reply_is_a_failed_attempt(pack):
+    deep = "{" + "[" * 100000 + "]" * 100000 + "}"
+    result = await generate_profile(FakeClient([deep, deep]), **ARGS, pack=pack)
+    assert result.draft is None and result.attempts == 2
+
+
+@pytest.mark.asyncio
+async def test_metering_error_propagates_from_the_repair_call(pack):
+    client = FakeClient([short_details_reply(), MeteringError("hold gone")])
+    with pytest.raises(MeteringError):
+        await generate_profile(client, **ARGS, pack=pack)
+
+
+@pytest.mark.asyncio
+async def test_every_model_call_runs_inside_the_debate_scope(pack, monkeypatch):
+    monkeypatch.setattr(metering, "source_scope", _spy_scope)
+    client = FakeClient([good_reply(), '{"unsupported": []}'])
+    await generate_profile(client, **ARGS, pack=pack)
+    assert client.scopes == ["debate", "debate"]
+
+
+@pytest.mark.asyncio
+async def test_the_judge_call_sets_model_temperature_and_token_cap_explicitly(pack, draft):
+    client = FakeClient(['{"unsupported": []}'])
+    await judge_support(client, draft, pack)
+    assert client.kwargs[0] == {"model": get_llm_config().analysis_model, "temperature": 0.0, "max_tokens": 600}
+
+
+@pytest.mark.asyncio
+async def test_a_sentence_without_a_valid_cite_is_rejected_for_repair(pack):
+    client = FakeClient([_reply_with_details(_details() + " A bare claim with no marker."), good_reply(), '{"unsupported": []}'])
+    result = await generate_profile(client, **ARGS, pack=pack)
+    assert result.draft is not None and result.attempts == 2
+
+
+@pytest.mark.asyncio
+async def test_a_sentence_without_a_valid_cite_never_reaches_the_judge(pack, draft):
+    bare = draft.model_copy(update={"details": draft.details + " A bare claim with no marker."})
+    client = FakeClient(['{"unsupported": []}'])
+    kept, _ = await judge_support(client, bare, pack)
+    assert "bare claim" not in client.users[0]
+    assert kept is not None and "bare claim" not in kept.details
