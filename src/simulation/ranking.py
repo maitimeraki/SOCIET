@@ -152,6 +152,7 @@ class SeatQueue:
         self._seated: list[Candidate] = []
         self._pool: list[Candidate] = []
         self._drawn: dict[str, Candidate] = {}
+        self._resolved: set[str] = set()
         self._decisions: dict[str, SeatDecision] = {}
         ordered = sorted(candidates, key=lambda c: (-score(c), c.name, c.entity_id))
         ids = [c.entity_id for c in ordered]
@@ -180,7 +181,9 @@ class SeatQueue:
             raise ValueError(f"expected a Candidate, got {c!r}")
         drawn = self._drawn.get(c.entity_id)
         if drawn is None:
-            raise ValueError(f"{c.name} was not drawn by next() or is already resolved")
+            if c.entity_id in self._resolved:
+                raise ValueError(f"{c.name} is already resolved")
+            raise ValueError(f"{c.name} was not drawn by next()")
         if drawn is not c:
             raise ValueError(f"{c.name} is not the object next() drew")
 
@@ -198,6 +201,7 @@ class SeatQueue:
     def accept(self, c: Candidate) -> None:
         self._require_drawn(c)
         del self._drawn[c.entity_id]
+        self._resolved.add(c.entity_id)
         self._seated.append(c)
         d = self._decisions[c.entity_id]
         d.seated, d.reason, d.order = True, "seated", len(self._seated)
@@ -205,7 +209,8 @@ class SeatQueue:
     def reject(self, c: Candidate, reason: str) -> None:
         self._require_drawn(c)
         del self._drawn[c.entity_id]
+        self._resolved.add(c.entity_id)
         self._decisions[c.entity_id].reason = f"rejected: {reason}"
 
     def decisions(self) -> list[SeatDecision]:
-        return sorted(self._decisions.values(), key=lambda d: (d.order is None, d.order or 0, -d.score, d.name))
+        return sorted(self._decisions.values(), key=lambda d: (d.order is None, d.order or 0, -d.score, d.name, d.entity_id))

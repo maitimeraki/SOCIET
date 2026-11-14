@@ -34,6 +34,10 @@ READS = {
         lambda ctx, **kw: ctx.find_connected_nodes_by_seed(["a"], **kw),
         [entity_in_dataset("seed"), entity_in_dataset("n")],
     ),
+    "find_entities_by_ids": (
+        lambda ctx, **kw: ctx.find_entities_by_ids(["a"], **kw),
+        [entity_in_dataset("n")],
+    ),
     "_get_entity_by_id": (
         lambda ctx, **kw: ctx._get_entity_by_id("a", **kw),
         [entity_in_dataset("n")],

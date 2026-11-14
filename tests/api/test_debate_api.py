@@ -31,6 +31,7 @@ from src.api.debate_api import (
 from src.auth.deps import current_user
 from src.db.engine import get_session_factory
 from src.db.models import User
+from src.persona.graph_context import ChunkHit, ChunkSearch
 from src.persona.agent import (
     Agent,
     ConfidenceBreakdown,
@@ -397,8 +398,36 @@ _INTENT_REPLY = json.dumps(
     }
 )
 
-# The denser cluster is the OFF-topic one, so the intent visibly flips the
-# ranking — that is what makes the delivered selection explain the roster.
+# The two chunks about carbon name "Carbon Analyst" (twice, so it is grounded in
+# two pieces of evidence); the logistics chunks name the other entity.
+_CHUNK_MENTIONS = {
+    "c_carbon": ["Carbon Analyst"],
+    "c_carbon2": ["Carbon Analyst"],
+    "c_log": ["Quarterly Logistics Review"],
+    "c_log2": ["Quarterly Logistics Review"],
+}
+
+
+def _chunk_hits(ids):
+    return [
+        ChunkHit(
+            chunk_id=cid,
+            doc_id=f"doc-{cid}",
+            doc_title="",
+            section="",
+            text="",
+            rank=rank,
+            entity_ids=tuple(_CHUNK_MENTIONS.get(cid, ())),
+        )
+        for rank, cid in enumerate(ids, start=1)
+    ]
+
+
+_CARBON_CHUNKS = ChunkSearch(
+    vector=_chunk_hits(["c_carbon", "c_carbon2", "c_log", "c_log2"]),
+    fulltext=_chunk_hits(["c_carbon", "c_carbon2"]),
+)
+
 _SELECTION_ENTITIES = [
     ("Quarterly Logistics Review", 0.9, ["operations"], "quarterly logistics report"),
     ("Carbon Analyst", 0.5, ["economics"], "carbon tax economic policy"),
@@ -421,7 +450,11 @@ def _selection_entity_nodes():
 
 
 async def _run_stubbed_job(
-    job_id, config, query="Should we tax carbon?", pre_stored_ws_manager=None
+    job_id,
+    config,
+    query="Should we tax carbon?",
+    pre_stored_ws_manager=None,
+    chunks=None,
 ):
     """Run the real job path — real orchestrator, S4 selection and S9 wiring —
     with only the graph (Neo4j), round LLM calls and verdict seams stubbed.
@@ -436,6 +469,11 @@ async def _run_stubbed_job(
     ctx.__aenter__ = AsyncMock(return_value=ctx)
     ctx.__aexit__ = AsyncMock(return_value=False)
     ctx.find_relevant_entities = AsyncMock(return_value=_selection_entity_nodes())
+    ctx.find_relevant_chunks = AsyncMock(
+        return_value=chunks if chunks is not None else _CARBON_CHUNKS
+    )
+    ctx.find_entities_by_ids = AsyncMock(return_value=[])
+    ctx.find_connected_nodes_by_seed = AsyncMock(return_value={})
 
     repo = MagicMock()
     repo.fetch_nodes_by_names = AsyncMock(return_value={})
@@ -543,19 +581,14 @@ class TestDebateJobPayload:
         assert result["intent"]["core_question"] == "Should we tax carbon?"
         assert result["intent"]["extraction_confidence"] == 0.9
 
-        # selection: the S4 decomposition, best first. The intent outranks the
-        # denser but off-topic cluster — the payload explains the roster.
+        # selection: the seated names, best first. The entity the question's
+        # chunks name outranks the other; no scores or features leave the server.
         selection = result["selection"]
         assert [row["name"] for row in selection] == [
             "Carbon Analyst",
             "Quarterly Logistics Review",
         ]
-        assert set(selection[0]) >= {"name", "semantic", "density", "blended"}
-        assert selection[0]["semantic"] > selection[1]["semantic"]
-        assert selection[0]["density"] < selection[1]["density"]
-        assert selection[0]["blended"] == pytest.approx(
-            0.6 * selection[0]["semantic"] + 0.4 * selection[0]["density"]
-        )
+        assert all(set(row) == {"name"} for row in selection)
 
         # stage events: real transitions pushed through the job's WS manager
         assert [e["stage"] for e in _stage_events(ws_manager)] == [
@@ -581,32 +614,19 @@ class TestDebateJobPayload:
         assert complete_msg["confidence_score"] == result["confidence_score"] == 0.9
 
     @pytest.mark.asyncio
-    async def test_job_result_warns_when_selection_falls_back_to_density(
-        self, monkeypatch
+    async def test_a_question_no_chunk_reaches_fails_the_job_with_the_coverage_message(
+        self,
     ):
-        """Nothing clears the S4 threshold → the degradation is in the payload."""
-        monkeypatch.setattr(
-            "src.simulation.relevance_matrix.SELECTION_SCORE_THRESHOLD", 0.99
-        )
+        """No candidate reaches the question: the job fails with the authored refusal."""
         job_id = f"payload-{uuid.uuid4()}"
-        config = DebateConfig(
-            max_agents=5,
-            max_rounds=1,
-            max_new_agents_per_round=0,
+        config = DebateConfig(max_agents=5, max_rounds=1, max_new_agents_per_round=0)
+
+        job, _ = await _run_stubbed_job(
+            job_id, config, chunks=ChunkSearch(vector=[], fulltext=[])
         )
 
-        job, _ = await _run_stubbed_job(job_id, config)
-
-        assert job["status"] == "complete"
-        assert any(
-            "falling back to density-only ordering" in w
-            for w in job["result"]["warnings"]
-        )
-        # the fallback reorders to density; the decomposition is still delivered
-        assert [row["name"] for row in job["result"]["selection"]] == [
-            "Quarterly Logistics Review",
-            "Carbon Analyst",
-        ]
+        assert job["status"] == "failed"
+        assert "does not cover this question" in job["error"]
 
 
 class TestWSManagerResilience:

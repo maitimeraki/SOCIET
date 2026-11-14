@@ -1,3 +1,5 @@
+import json
+
 import pytest
 
 from src.billing.metering import MeteringError
@@ -104,3 +106,26 @@ async def test_duplicate_labels_collapse_to_one_entry():
     client = FakeClient('{"Company": true, "Revenue": false}')
     result, degraded = await classify_actor_labels(client, ["Company", "Company", "Revenue"])
     assert result == {"Company": True, "Revenue": False} and not degraded and client.calls == 1
+
+
+class EchoClient:
+    """Replies to each batch from its own user prompt: labels ending in 1 are actors."""
+
+    def __init__(self):
+        self.calls: list[dict] = []
+
+    async def generate(self, **kwargs) -> str:
+        self.calls.append(kwargs)
+        labels = json.loads(kwargs["user_prompt"])
+        return json.dumps({label: label.endswith("1") for label in labels})
+
+
+@pytest.mark.asyncio
+async def test_large_label_sets_are_classified_in_batches_of_one_hundred():
+    labels = [f"Label{i}" for i in range(250)]
+    client = EchoClient()
+    result, degraded = await classify_actor_labels(client, labels)
+    assert len(client.calls) == 3
+    assert all(len(json.loads(call["user_prompt"])) <= 100 for call in client.calls)
+    assert result == {label: label.endswith("1") for label in labels}
+    assert not degraded

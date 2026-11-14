@@ -755,3 +755,33 @@ async def test_find_relevant_chunks_is_tenant_scoped_live(graph_ctx):
     assert "scope-probe-own" in fulltext_ids  # the query really ran
     assert "scope-probe-other" not in fulltext_ids
     assert "scope-probe-other" not in {h.chunk_id for h in search.vector}
+
+
+# ---- Batched entity read by id (chunk-mentioned entities for the candidate pool) ----
+
+
+@pytest.mark.asyncio
+async def test_find_entities_by_ids_reads_the_dataset_in_one_query():
+    rows = [_traversal_row("e1", "Lumen Pay")]
+    ctx, driver = _batch_ctx(lambda cypher, params: rows)
+
+    nodes = await ctx.find_entities_by_ids(["e1", "e2"], "ds-A")
+
+    assert len(driver.queries) == 1
+    cypher, params = driver.queries[0]
+    assert "__Entity__" in cypher and "NOT n:Chunk" in cypher
+    assert params["entity_ids"] == ["e1", "e2"]
+    assert params["dataset_id"] == "ds-A"
+    assert [(n.id, n.name) for n in nodes] == [("e1", "Lumen Pay")]
+    assert all(isinstance(n, EntityNode) for n in nodes)
+    assert nodes[0].relevance_score == 0.0
+
+
+@pytest.mark.asyncio
+async def test_find_entities_by_ids_empty_ids_run_no_query():
+    ctx, driver = _batch_ctx(
+        lambda cypher, params: pytest.fail("query executed for empty ids")
+    )
+
+    assert await ctx.find_entities_by_ids([], "ds-A") == []
+    assert driver.queries == []

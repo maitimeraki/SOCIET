@@ -213,3 +213,22 @@ def test_a_drawn_but_unresolved_candidate_is_not_reported_as_not_reached():
     q.next()
     reasons = {d.name: d.reason for d in q.decisions()}
     assert reasons == {"A": "drawn, unresolved", "B": "eligible, not reached"}
+
+
+def test_never_drawn_and_already_resolved_have_distinct_messages():
+    q = SeatQueue([cand("A"), cand("B")], n=2)
+    with pytest.raises(ValueError) as never_drawn:
+        q.accept(cand("A"))
+    a = q.next()
+    q.accept(a)
+    with pytest.raises(ValueError) as resolved_twice:
+        q.accept(a)
+    assert "not drawn by next()" in str(never_drawn.value)
+    assert "already resolved" not in str(never_drawn.value)
+    assert "already resolved" in str(resolved_twice.value)
+
+
+def test_decisions_break_ties_by_entity_id():
+    ineligible = [cand("Same", entity_id="e2", evidence_count=0), cand("Same", entity_id="e1", evidence_count=0)]
+    ids = [d.entity_id for d in SeatQueue(ineligible, n=1).decisions()]
+    assert ids == ["e1", "e2"]

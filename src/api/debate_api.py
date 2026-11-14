@@ -191,7 +191,7 @@ async def _run_debate_async(
 ) -> None:
     """Background task to run debate and stream results via WebSocket."""
     from src.simulation.orchestrator import DebateCancelled, SocietyNotDebatableError
-    from src.simulation.relevance_matrix import NoAgentsDerivableError
+    from src.simulation.ranking import NoAgentsDerivableError
 
     # Reuse the manager the job already holds: a client that connected before
     # the task started created and stored one (`stream_debate`), and replacing
@@ -260,6 +260,9 @@ async def _run_debate_async(
                 society_memory=SocietyMemory(ctx._driver, ctx._db),
             )
 
+            # Seat decisions: the caller-owned sink the seated set is read from.
+            seat_decisions: list = []
+
             # Run debate with orchestrator. The S9 stage emitter is the job's
             # own WS manager: real transitions, pushed alongside round events.
             result = await orchestrator.run(
@@ -273,6 +276,7 @@ async def _run_debate_async(
                 distill=distill,
                 context=context,
                 cancel_check=cancel_check,
+                decisions=seat_decisions,
             )
 
         # S9: this layer owns the intent extraction, so it reports the
@@ -302,7 +306,9 @@ async def _run_debate_async(
                 "intent": result.intent.model_dump() if result.intent else None,
                 # S4 decomposition, rendered field-by-field so later additions
                 # (e.g. P2-B's provenance anchor) flow through automatically.
-                "selection": [asdict(row) for row in result.selection_rows],
+                "selection": [
+                    {"name": decision.name} for decision in seat_decisions if decision.seated
+                ],
                 "confidence_score": result.confidence_score,
                 "weight_share": result.weight_share,
                 "contested": result.contested,

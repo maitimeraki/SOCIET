@@ -17,6 +17,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from src.persona.graph_context import ChunkHit, ChunkSearch
 from src.persona.repository import DistilledProfile, PersonaRepository
 from src.simulation.profile_synthesizer import ProfileSynthesizer
 
@@ -81,14 +82,36 @@ def _golden_repo(snippets_by_chunk: dict[str, str]) -> PersonaRepository:
     return repo
 
 
+def _hit(chunk_id: str, entity_id: str, rank: int) -> ChunkHit:
+    return ChunkHit(
+        chunk_id=chunk_id,
+        doc_id=f"doc-{chunk_id}",
+        doc_title="",
+        section="",
+        text="",
+        rank=rank,
+        entity_ids=(entity_id,),
+    )
+
+
 class _RosterContext:
-    """A GraphContext stand-in exposing only the seed fetch (traversal absent)."""
+    """A GraphContext stand-in: the seed fetch and the chunk legs (traversal absent)."""
 
     def __init__(self, entities):
         self._entities = entities
 
     async def find_relevant_entities(self, query, dataset_id, limit=10):
         return self._entities
+
+    async def find_relevant_chunks(self, query, dataset_id, limit=200):
+        # Each entity is named by its own chunk twice over, so it has two pieces of evidence.
+        hits = [
+            _hit(f"{entity.properties['triplet_source_id']}-{leg}", entity.id, rank)
+            for rank, (entity, leg) in enumerate(
+                [(e, leg) for e in self._entities for leg in ("a", "b")], start=1
+            )
+        ]
+        return ChunkSearch(vector=hits, fulltext=hits[:2])
 
 
 _COMPANY = _entity("Acme Bank", "Company", 0.9, "c1", "retail")

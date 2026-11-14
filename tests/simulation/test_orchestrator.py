@@ -133,18 +133,17 @@ async def test_five_step_flow():
 
     result = await orchestrator.run("test query", "ds1", config, ws_broadcast)
 
-    # Step 1: profile_synthesizer called — with the S3 intent, the run's config
-    # (so S4 selection can blend against it) and the run's S9 sinks (so the
-    # selection decomposition and any S4 degradation land on the result)
+    # Step 1: profile_synthesizer called — with the run's config, its warnings
+    # sink, the caller-owned seat decisions sink and the run's LLM client
     synth.synthesize.assert_awaited_once_with(
         query="test query",
         dataset_id="ds1",
         max_agents=5,
         intent=None,
         warnings=result.warnings,
-        selection_rows=result.selection_rows,
+        decisions=ANY,
         distill=False,
-        on_selection=ANY,
+        llm_client=None,
         on_profile=ANY,
     )
 
@@ -353,7 +352,7 @@ async def test_non_debatable_raise_carries_the_accumulated_warnings():
     society_memory = AsyncMock(spec=SocietyMemory)
 
     async def synthesize(**kwargs):
-        kwargs["warnings"].append("S4 selection degraded to density-only")
+        kwargs["warnings"].append("actor filter degraded")
         return [_make_profile(1, "Alice")]
 
     synth.synthesize.side_effect = synthesize
@@ -364,7 +363,7 @@ async def test_non_debatable_raise_carries_the_accumulated_warnings():
             "q", "ds1", DebateConfig(max_agents=5, max_rounds=1), AsyncMock()
         )
 
-    assert excinfo.value.warnings == ["S4 selection degraded to density-only"]
+    assert excinfo.value.warnings == ["actor filter degraded"]
 
 
 @pytest.mark.asyncio
@@ -990,7 +989,7 @@ async def test_no_emitter_and_failing_emitter_both_leave_the_run_intact():
     assert result.verdict == "Test verdict."
 
 
-"""P5: the run streams the S4 selection, each built profile and the round's weights."""
+"""P5: the run streams each built profile and the seated names, and the round's weights."""
 
 
 def _orchestrator_with(synth, topo, llm_runner, verdict_synth, society_memory):
@@ -1004,10 +1003,8 @@ def _orchestrator_with(synth, topo, llm_runner, verdict_synth, society_memory):
 
 
 @pytest.mark.asyncio
-async def test_selection_and_agent_events_are_broadcast():
-    """S4/S5 progression is visible: selection once, then one agent event per profile, in order."""
-    from src.simulation.relevance_matrix import SelectionRow
-
+async def test_agent_events_are_broadcast_in_order_without_a_selection_event():
+    """Each built profile streams in order; no selection event is streamed."""
     synth = AsyncMock(spec=ProfileSynthesizer)
     topo = AsyncMock(spec=CommunicationTopology)
     llm_runner = MagicMock(spec=BatchedLLMRunner)
@@ -1015,10 +1012,8 @@ async def test_selection_and_agent_events_are_broadcast():
     society_memory = AsyncMock(spec=SocietyMemory)
 
     profiles = [_make_profile(1, "Alice"), _make_profile(2, "Bob")]
-    row = SelectionRow(name="Alice", semantic=0.8, density=0.6, blended=0.72)
 
     async def fake_synthesize(**kwargs):
-        await kwargs["on_selection"]([row])
         for index, profile in enumerate(profiles, start=1):
             await kwargs["on_profile"](profile, index, len(profiles))
         return profiles
@@ -1050,7 +1045,7 @@ async def test_selection_and_agent_events_are_broadcast():
         )
 
     types = [m["type"] for m in ws_calls]
-    assert types.index("selection") < types.index("agent")
+    assert "selection" not in types
     agents = [m for m in ws_calls if m["type"] == "agent"]
     assert [m["index"] for m in agents] == [1, 2]
     assert all(m["total"] == 2 for m in agents)

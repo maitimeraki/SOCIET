@@ -428,6 +428,37 @@ class GraphContext:
                     grouped.setdefault(str(key), []).append(entity)
         return grouped
 
+    async def find_entities_by_ids(
+        self, entity_ids: List[str], dataset_id: str
+    ) -> List[EntityNode]:
+        """Dataset entities with the given ids, in one read (chunk-mentioned candidates).
+
+        Unscored: relevance is 0.0, the caller takes relevance from the chunks.
+        """
+        ids = [str(entity_id) for entity_id in entity_ids if str(entity_id or "").strip()]
+        if not ids:
+            return []
+
+        cypher = f"""
+        MATCH (n:__Entity__)
+        WHERE n.id IN $entity_ids AND NOT n:Chunk
+          AND {entity_in_dataset("n")}
+        RETURN n
+        """
+        async with self._driver.session(database=self._db) as session:
+            result = await session.run(
+                cast(LiteralString, cypher),
+                entity_ids=ids,
+                dataset_id=dataset_id,
+            )
+            rows = await result.data()
+
+        return [
+            self._entity_from_node(row.get("n"), 0.0)
+            for row in rows
+            if row.get("n") is not None
+        ]
+
     def _parse_tags(self, tags: Any) -> List[str]:
         """Parse domain_tags from various formats."""
         if not tags:

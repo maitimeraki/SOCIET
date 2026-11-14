@@ -20,9 +20,9 @@ METERING_STOPPED_MESSAGE = (
 
 _INTENT_KEYS = frozenset({"core_question", "stance_axis", "direct_keywords", "latent_sectors",
                           "search_perspectives", "domain_tags", "entity_frame", "extraction_confidence"})
-# interim: selection scores are shown by the roster today; Task 1.5 drops the
-# scores from the wire and Task 3.2 removes `selection` altogether.
-_ROW_KEYS = frozenset({"name", "semantic", "density", "blended"})
+# interim: no selection event is streamed any more; should one arrive it carries
+# names only (no scores or features). Task 3.2 removes `selection` altogether.
+_ROW_KEYS = frozenset({"name"})
 # interim: the roster UI reads these profile extras; Task 2.x narrows the
 # profile to the ranked seat and Task 3.1 switches the frontend to AgentView.
 _PROFILE_KEYS = frozenset({"agent_id", "identity", "bio", "detailed_perspective", "role_description",

@@ -41,10 +41,10 @@ def test_intent_drops_model_identity():
     out = project_event({"type": "intent", "intent": {"core_question": "q", "llm_model": "m", "llm_provider": "p", "extraction_confidence": 0.9}})
     assert out["intent"] == {"core_question": "q", "extraction_confidence": 0.9}
 
-def test_selection_rows_lose_anchors():
+def test_selection_rows_carry_only_the_seated_name():
     out = project_event({"type": "selection", "rows": [{"name": "A", "semantic": 0.1, "density": 0.2, "blended": 0.3,
                                                          "anchors": [{"kind": "chunk", "id": "c1"}]}]})
-    assert "anchors" not in out["rows"][0]
+    assert out["rows"] == [{"name": "A"}]
 
 def test_unknown_event_types_are_dropped():
     assert project_event({"type": "debug_dump", "payload": "x"}) is None

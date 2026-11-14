@@ -21,6 +21,8 @@ ACTOR_SYSTEM_PROMPT = (
 )
 TOKENS_PER_LABEL = 25
 MIN_MAX_TOKENS = 400
+#: Labels per call: keeps the reply inside max_tokens for a large type set.
+ACTOR_BATCH = 100
 
 
 def _all_actors(labels: Sequence[str]) -> tuple[dict[str, bool], bool]:
@@ -51,10 +53,21 @@ async def classify_actor_labels(
     client, labels: Sequence[str]
 ) -> tuple[dict[str, bool], bool]:
     """Return (label -> is_actor, degraded). Labels the model fails to classify
-    count as actors and set degraded; MeteringError is always re-raised."""
+    count as actors and set degraded; MeteringError is always re-raised. Labels
+    go in batches of ACTOR_BATCH, one call each."""
     labels = list(dict.fromkeys(labels))
-    if not labels:
-        return {}, False
+    flags: dict[str, bool] = {}
+    degraded = False
+    for start in range(0, len(labels), ACTOR_BATCH):
+        batch_flags, batch_degraded = await _classify_batch(
+            client, labels[start : start + ACTOR_BATCH]
+        )
+        flags.update(batch_flags)
+        degraded = degraded or batch_degraded
+    return flags, degraded
+
+
+async def _classify_batch(client, labels: list[str]) -> tuple[dict[str, bool], bool]:
     cfg = get_llm_config()
     with metering.source_scope("debate"):
         try:

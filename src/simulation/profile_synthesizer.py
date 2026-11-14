@@ -1,26 +1,52 @@
-"""ProfileSynthesizer: Graph-backed agent profile synthesis from the required nodes."""
+"""ProfileSynthesizer: Graph-backed agent profile synthesis, seated by query relevance."""
 
 import asyncio
 import inspect
 import logging
-import math
 from collections import defaultdict
 from collections.abc import Awaitable, Callable, Mapping
+from dataclasses import replace
 from typing import Any
 
 from src.persona.agent import SOURCE_EVIDENCE_MAX_SNIPPETS, Agent
 from src.persona.graph_context import EntityNode, GraphContext
 from src.persona.repository import PersonaRepository
-from src.simulation.relevance_matrix import (
+from src.simulation.actor_filter import classify_actor_labels
+from src.simulation.ranking import (
+    Candidate,
     NoAgentsDerivableError,
-    SelectionCandidate,
-    SelectionRow,
-    cap_by_type,
-    rank_candidates,
+    SeatDecision,
+    SeatQueue,
+    adjacency,
+    percentile,
+    personalized_pagerank,
+    rrf_fuse,
 )
 from src.utils.queryIntend import QueryIntent
 
 logger = logging.getLogger(__name__)
+
+#: Fused chunks read per leg; the entities they mention form the candidate pool.
+CHUNK_POOL = 200
+#: Entity vector hits read; their similarity is percentile-ranked.
+ENTITY_HITS = 100
+#: Graph neighbours read per pool entity (PPR edges and evidence).
+NEIGHBOURS_PER_SEED = 10
+NO_COVERAGE_MESSAGE = "the graph does not cover this question"
+_UNTYPED_LABELS = frozenset({"", "Entity", "__Entity__"})
+
+
+def _type_label(node: EntityNode) -> str:
+    """The entity's real type label, or "" when the graph carries none."""
+    return "" if node.label in _UNTYPED_LABELS else node.label
+
+
+def _embedding(node: EntityNode) -> tuple[float, ...]:
+    """The entity's stored embedding, for the MMR diversity penalty; () when absent."""
+    raw = node.properties.get("embedding")
+    if isinstance(raw, (list, tuple)) and all(isinstance(x, (int, float)) for x in raw):
+        return tuple(float(x) for x in raw)
+    return ()
 
 
 class ProfileSynthesizer:
@@ -37,97 +63,49 @@ class ProfileSynthesizer:
         max_agents: int = 5,
         intent: QueryIntent | None = None,
         warnings: list[str] | None = None,
-        selection_rows: list[SelectionRow] | None = None,
+        decisions: list[SeatDecision] | None = None,
         distill: bool = False,
-        on_selection: "Callable[[list[SelectionRow]], Awaitable[None]] | None" = None,
+        llm_client: Any = None,
         on_profile: "Callable[[Agent, int, int], Awaitable[None]] | None" = None,
     ) -> list[Agent]:
-        """Synthesize agent profiles from relevant graph entities.
+        """Synthesize agent profiles: seat the question's most relevant graph entities.
 
-        1. Vector-search entities by query
-        2. The required node set (the seeds plus their one-hop entity neighbours)
-        3. Rank nodes by the S4 score (intent-semantic + density blend); with no
-           intent this is exactly the previous density-only ordering
-        4. Take top nodes (adaptive count)
-        5. Build one Agent per node
+        `_seat` builds the candidate pool from the question's fused chunks and
+        entity hits, scores it by query relevance, PageRank, grounding and the
+        actor filter, and seats `max_agents` of it through `SeatQueue`. One Agent
+        is then built per seat.
 
-        `intent` is the read-only S3 intent (None for older callers). Raises
-        `NoAgentsDerivableError` when the graph yields no candidate at all — an
+        Raises `NoAgentsDerivableError` when no candidate reaches the question. An
         empty roster is a failed job, not a debate with nobody in it.
 
-        `warnings` and `selection_rows` are optional caller-owned sinks the S4
-        degradation message and the full ranked decomposition (all rows, best
-        first — not just the ones cut into agents) are written to, so the run
-        result can explain the roster (S9).
+        `warnings` is an optional caller-owned sink for degradations. `decisions`
+        is an optional caller-owned sink for every candidate's seat decision.
+        `llm_client` runs the actor filter; without it every entity type counts as
+        an actor, and a warning says so.
 
         `distill=True` (the S5 gate, decided by the caller from the simulation
-        depth) makes ONE batched distillation call for the whole selection set
-        before any profile is built, feeding it the S3 stance axis and each
-        persona's S4 anchors; the returned `(description, perspective)` supplies
-        that persona's `bio`/`detailed_perspective`, with a per-persona template
-        fallback + warning. `False` (default) is exactly the pre-S5 path.
+        depth) makes ONE batched distillation call for the whole seated set
+        before any profile is built, feeding it the S3 stance axis; the returned
+        `(description, perspective)` supplies that persona's
+        `bio`/`detailed_perspective`, with a per-persona template fallback +
+        warning. `False` (default) is exactly the pre-S5 path.
         """
-        # Adaptive target: sqrt(n) * 4, capped at max_agents
-        search_limit = max_agents * 3
-        seeds = await self._ctx.find_relevant_entities(
-            query, dataset_id=dataset_id, limit=search_limit
+        seats = await self._seat(
+            query,
+            dataset_id=dataset_id,
+            max_agents=max_agents,
+            warnings=warnings,
+            llm_client=llm_client,
+            decisions=decisions,
         )
+        # Each seat's evidence is its node plus that node's one-hop neighbours. The
+        # whole list reaches the build and the distillation.
+        top_rows = [(candidate.name, evidence) for candidate, evidence in seats]
 
-        if not seeds:
-            raise NoAgentsDerivableError(
-                f"no agents derivable from graph: no candidate entities for query {query!r} "
-                f"in dataset {dataset_id!r}"
-            )
-
-        # Required nodes are the roster's candidates: one agent per node. The
-        # old path grouped by shared document provenance, so a single-document
-        # graph collapsed to one cluster — and one un-pairable agent.
-        required = await self._required_nodes(
-            seeds, dataset_id=dataset_id, limit=search_limit
-        )
-        target = min(max_agents, int(math.sqrt(len(required)) * 4))
-
-        # Ground each persona in its node's 1-hop subgraph, not one bare node.
-        subgraph = await self._subgraph_by_seed(
-            required, dataset_id=dataset_id, limit=search_limit
-        )
-        candidates = [
-            SelectionCandidate(
-                name=node.name,
-                text=self._candidate_text([node, *subgraph.get(node.id, [])]),
-                evidence=[node, *subgraph.get(node.id, [])],
-            )
-            for node in required
-        ]
-        rows = rank_candidates(candidates, intent, warnings=warnings)
-        if selection_rows is not None:
-            selection_rows.extend(rows)
-        # S9 visibility: expose the S4 decomposition the moment it exists, so the
-        # roster view builds ② before ③. Degradation mirrors `on_stage`: a
-        # raising emitter is logged and never breaks synthesis.
-        if on_selection is not None:
-            try:
-                await on_selection(list(rows))
-            except Exception as exc:
-                logger.warning("on_selection emitter failed: %s", exc)
-        # Pair each ranked row with its candidate's evidence — positionally aligned
-        # with `required` (same comprehension), so a row consumes its evidence from a
-        # per-name bucket in rank order and two rows sharing a name both survive.
-        # The whole evidence list (node + subgraph) reaches the build and distillation.
-        evidence_by_name: dict[str, list[list[EntityNode]]] = defaultdict(list)
-        for candidate in candidates:
-            evidence_by_name[candidate.name].append(list(candidate.evidence))
-        # S7: the seats go to the top rows across entity types, not the top rows
-        # of one type — `cap_by_type` owns that cut next to `rank_candidates`.
-        selected = cap_by_type(
-            rows, {node.name: node.label for node in required}, target
-        )
-        top_rows = [(row, evidence_by_name[row.name].pop(0)) for row in selected]
-
-        # S5: ONE batched distillation call for the whole selection set — the S3
-        # stance axis plus each row's anchors give every persona a question-aware
-        # voice. Only runs when the caller's depth gate asked for it; per-persona
-        # failures fall back to the deterministic template and warn (never raise).
+        # S5: ONE batched distillation call for the whole seated set — the S3
+        # stance axis gives every persona a question-aware voice. Only runs when
+        # the caller's depth gate asked for it; per-persona failures fall back to
+        # the deterministic template and warn (never raise).
         distilled: dict[str, tuple[str, str]] = {}
         if distill:
             # T3: the persona's OWN chunk text — the grounding the EVIDENCE block
@@ -154,11 +132,11 @@ class ProfileSynthesizer:
             distilled = await self._repo.distill_profiles(
                 personas=[
                     self._distillation_entry(
-                        row,
+                        name,
                         evidence,
                         self._own_source_snippets(evidence, snippets_by_chunk),
                     )
-                    for row, evidence in top_rows
+                    for name, evidence in top_rows
                 ],
                 query=query,
                 core_question=intent.core_question if intent is not None else "",
@@ -172,7 +150,7 @@ class ProfileSynthesizer:
         # so the pre-fetch cannot diverge from the per-profile lookups; a name
         # with no row keeps the node-properties fallback.
         nodes_by_name = await self._repo.fetch_nodes_by_names(
-            [row.name for row, _ in top_rows], dataset_id=dataset_id
+            [name for name, _ in top_rows], dataset_id=dataset_id
         )
         profiles: list[Agent] = []
         semaphore = asyncio.Semaphore(8)
@@ -285,10 +263,10 @@ class ProfileSynthesizer:
         completed_lock = asyncio.Lock()
 
         async def _build_and_notify(
-            row: SelectionRow, entity_evidence: list[EntityNode]
+            name: str, entity_evidence: list[EntityNode]
         ) -> Agent | None:
             nonlocal completed
-            profile = await _build_profile(row.name, entity_evidence)
+            profile = await _build_profile(name, entity_evidence)
             if profile is not None and on_profile is not None:
                 async with completed_lock:
                     completed += 1
@@ -304,7 +282,7 @@ class ProfileSynthesizer:
             return profile
 
         tasks = [
-            _build_and_notify(row, entity_evidence) for row, entity_evidence in top_rows
+            _build_and_notify(name, entity_evidence) for name, entity_evidence in top_rows
         ]
         results = await asyncio.gather(*tasks)
         profiles = [p for p in results if p is not None]
@@ -350,7 +328,12 @@ class ProfileSynthesizer:
                         "synthesize_from_names: %r has no graph node; skipped", name
                     )
                     return None
-                relevance = max(0.05, min(1.0, relevant.get(name, 0.33)))
+                if name not in relevant:
+                    logger.warning(
+                        "synthesize_from_names: %r has no relevance; skipped", name
+                    )
+                    return None
+                relevance = max(0.05, min(1.0, relevant[name]))
                 domain_tags = (
                     node.get("domain_tags")
                     if isinstance(node, dict)
@@ -457,38 +440,130 @@ class ProfileSynthesizer:
             return {}
         return grouped if isinstance(grouped, Mapping) else {}
 
-    async def _required_nodes(
-        self, seeds: list[EntityNode], dataset_id: str, limit: int
-    ) -> list[EntityNode]:
-        """The roster's candidate nodes: the seeds plus their one-hop entity
-        neighbours, deduped by (id, name). A missing method, a raising walk or
-        a non-list answer degrade to the seeds alone — logged, never raised.
-        """
-        required = list(seeds)
-        try:
-            walk = getattr(self._ctx, "find_connected_nodes", None)
-            neighbours = (
-                walk([seed.id for seed in seeds], dataset_id=dataset_id, limit=limit)
-                if callable(walk)
-                else []
-            )
-            if inspect.iscoroutine(neighbours):
-                neighbours = await neighbours
-            if not isinstance(neighbours, (list, tuple)):
-                neighbours = []
-        except Exception as exc:
-            logger.warning(
-                "node traversal failed; continuing with the seed nodes only: %s", exc
-            )
-            neighbours = []
+    async def _seat(
+        self,
+        query: str,
+        dataset_id: str,
+        max_agents: int,
+        warnings: list[str] | None,
+        llm_client: Any,
+        decisions: list[SeatDecision] | None,
+    ) -> list[tuple[Candidate, list[EntityNode]]]:
+        """Seat up to `max_agents` candidates for the question, best first.
 
-        seen = {(seed.id, seed.name) for seed in required}
-        for node in neighbours:
-            key = (node.id, node.name)
-            if key not in seen:
-                seen.add(key)
-                required.append(node)
-        return required
+        The pool is the entities the top fused chunks mention plus the entity
+        vector hits. Query relevance is the best fused chunk mentioning an entity;
+        PageRank spreads it over the graph. `SeatQueue` accepts each draw at once,
+        so the profile build that follows is the only step after seating.
+        """
+        search = await self._ctx.find_relevant_chunks(
+            query, dataset_id=dataset_id, limit=CHUNK_POOL
+        )
+        chunk_hits = {hit.chunk_id: hit for hit in [*search.vector, *search.fulltext]}
+        fused = rrf_fuse(
+            [[hit.chunk_id for hit in search.vector], [hit.chunk_id for hit in search.fulltext]]
+        )
+        top_chunks = sorted(fused, key=lambda chunk_id: (-fused[chunk_id], chunk_id))[:CHUNK_POOL]
+        peak = fused[top_chunks[0]] if top_chunks else 0.0
+
+        query_relevance: dict[str, float] = {}
+        chunk_count: dict[str, int] = defaultdict(int)
+        doc_ids: dict[str, set[str]] = defaultdict(set)
+        for chunk_id in top_chunks:
+            hit = chunk_hits[chunk_id]
+            for entity_id in hit.entity_ids:
+                relevance = fused[chunk_id] / peak
+                query_relevance[entity_id] = max(query_relevance.get(entity_id, 0.0), relevance)
+                chunk_count[entity_id] += 1
+                doc_ids[entity_id].add(hit.doc_id)
+
+        entity_hits = await self._ctx.find_relevant_entities(
+            query, dataset_id=dataset_id, limit=ENTITY_HITS
+        )
+        hit_by_id = {entity.id: entity for entity in entity_hits}
+        similarity_population = [entity.relevance_score for entity in entity_hits]
+
+        pool_ids = sorted(set(query_relevance) | set(hit_by_id))
+        unfetched = [entity_id for entity_id in pool_ids if entity_id not in hit_by_id]
+        fetched = (
+            await self._ctx.find_entities_by_ids(unfetched, dataset_id=dataset_id)
+            if unfetched
+            else []
+        )
+        nodes = {entity.id: entity for entity in fetched}
+        nodes.update(hit_by_id)
+        pool = [nodes[entity_id] for entity_id in pool_ids if entity_id in nodes]
+        if not any(query_relevance.get(node.id, 0.0) > 0 for node in pool):
+            raise NoAgentsDerivableError(NO_COVERAGE_MESSAGE)
+
+        neighbours = await self._subgraph_by_seed(
+            pool, dataset_id=dataset_id, limit=NEIGHBOURS_PER_SEED
+        )
+        edges = [(node.id, n.id) for node in pool for n in neighbours.get(node.id, [])]
+        seeds = {
+            node.id: query_relevance[node.id]
+            for node in pool
+            if query_relevance.get(node.id, 0.0) > 0
+        }
+        ppr = personalized_pagerank(adjacency(edges), seeds)
+
+        candidates = [
+            Candidate(
+                entity_id=node.id,
+                name=node.name,
+                type_label=_type_label(node),
+                query_relevance=query_relevance.get(node.id, 0.0),
+                entity_similarity=(
+                    percentile(node.relevance_score, similarity_population)
+                    if node.id in hit_by_id
+                    else 0.0
+                ),
+                ppr=ppr.get(node.id, 0.0),
+                doc_count=len(doc_ids.get(node.id, ())),
+                chunk_count=chunk_count.get(node.id, 0),
+                evidence_count=chunk_count.get(node.id, 0) + len(neighbours.get(node.id, [])),
+                vector=_embedding(node),
+            )
+            for node in pool
+        ]
+        candidates = await self._classify_actors(candidates, llm_client, warnings)
+
+        queue = SeatQueue(candidates, n=max_agents)
+        seats: list[tuple[Candidate, list[EntityNode]]] = []
+        while (drawn := queue.next()) is not None:
+            queue.accept(drawn)
+            node = nodes[drawn.entity_id]
+            seats.append((drawn, [node, *neighbours.get(node.id, [])]))
+        if decisions is not None:
+            decisions.extend(queue.decisions())
+        return seats
+
+    async def _classify_actors(
+        self,
+        candidates: list[Candidate],
+        llm_client: Any,
+        warnings: list[str] | None,
+    ) -> list[Candidate]:
+        """Mark each candidate actor or not, by its entity type label, in one call.
+
+        Without an LLM client every type counts as an actor, and the warning says
+        so. A candidate with no type label keeps the actor default.
+        """
+        labels = sorted({c.type_label for c in candidates if c.type_label})
+        if not labels:
+            return candidates
+        if llm_client is None:
+            if warnings is not None:
+                warnings.append(
+                    "actor filter skipped: no LLM client, every entity type counts as an actor"
+                )
+            return candidates
+        flags, degraded = await classify_actor_labels(llm_client, labels)
+        if degraded and warnings is not None:
+            warnings.append(
+                "actor filter: unclassified entity types count as actors"
+            )
+        return [replace(c, is_actor=flags.get(c.type_label, True)) for c in candidates]
 
     @staticmethod
     def _own_source_snippets(
@@ -509,15 +584,14 @@ class ProfileSynthesizer:
 
     def _distillation_entry(
         self,
-        row: SelectionRow,
+        name: str,
         evidence: list[EntityNode],
         source_snippets: list[str] | None = None,
     ) -> dict:
-        """One persona's S5 distillation input: identity, the grounding synthesis
+        """One persona's S5 distillation input: identity and the grounding synthesis
         already holds (the persona's real source snippets, node properties,
-        matched sectors, node summaries) and the S4 provenance anchors of its
-        selection row. No extra graph reads — the entry is name-keyed by
-        `row.name`, the same key profiles build under.
+        matched sectors, node summaries). No extra graph reads — the entry is
+        name-keyed, the same key profiles build under.
         """
         representative = (
             max(evidence, key=lambda e: e.relevance_score) if evidence else None
@@ -533,24 +607,11 @@ class ProfileSynthesizer:
             if isinstance(getattr(e, "summary", None), str) and e.summary.strip()
         ]
         return {
-            "name": row.name,
+            "name": name,
             "node": dict(properties) if isinstance(properties, dict) else {},
             "sector_results": self._build_sector_results(evidence),
             "evidence": list(source_snippets or []) + summaries,
-            "anchors": [dict(anchor) for anchor in row.anchors],
         }
-
-    @staticmethod
-    def _candidate_text(entities: list[EntityNode]) -> str:
-        """The S4 semantic text of a candidate: its entities' names, domain tags and summaries."""
-        parts: list[str] = []
-        for entity in entities:
-            parts.append(str(getattr(entity, "name", "") or ""))
-            parts.extend(
-                str(tag) for tag in (getattr(entity, "domain_tags", None) or [])
-            )
-            parts.append(str(getattr(entity, "summary", "") or ""))
-        return " ".join(part for part in parts if part)
 
     @staticmethod
     def _evidence_chunk_ids(evidence: list[EntityNode]) -> list[str]:

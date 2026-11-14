@@ -49,7 +49,7 @@ from src.simulation.debate_config import DebateConfig
 from src.simulation.llm_batch import BatchedLLMRunner
 from src.simulation.pair_turn import CommPair, RoundResult
 from src.simulation.profile_synthesizer import ProfileSynthesizer
-from src.simulation.relevance_matrix import SelectionRow
+from src.simulation.ranking import SeatDecision
 from src.simulation.round_runner import RoundRunner
 from src.simulation.society_memory import SocietyMemory, SocietySnapshot
 from src.simulation.topology import CommunicationTopology
@@ -97,9 +97,6 @@ class OrchestratedDebateResult:
     warnings: list[str]
     rounds_executed: int
     intent: Optional[QueryIntent] = None
-    #: S4 ranked decomposition (all candidates, best first) — the "why these
-    #: agents" answer the job payload renders; empty when selection could not run.
-    selection_rows: list[SelectionRow] = field(default_factory=list)
     #: Verdict payload for the UI (S9/§12.3 item 5) — additive, JSON-safe.
     confidence_score: Optional[float] = None
     cluster_details: Optional[dict[str, dict]] = None
@@ -158,6 +155,7 @@ class DebateOrchestrator:
         distill: bool = False,
         context: Optional[dict] = None,
         cancel_check: Optional[Callable[[], bool]] = None,
+        decisions: Optional[list[SeatDecision]] = None,
     ) -> OrchestratedDebateResult:
         """
         Run the full debate pipeline with WebSocket streaming.
@@ -187,17 +185,17 @@ class DebateOrchestrator:
         default — never cancels, so existing callers are unaffected; a True
         reading raises `DebateCancelled`, which the job boundary records as the
         run's terminal `cancelled` state.
+
+        `decisions` is the caller-owned sink for every candidate's seat decision
+        (best first). The caller reads it after the run. No `selection` event is
+        streamed: the roster UI's table still reads score fields that no longer
+        exist (Task 3.2 removes it).
         """
         warnings: list[str] = []
         all_turns: list = []
         profiles: List[Agent] = []
-        selection_rows: list[SelectionRow] = []
+        seat_sink: list[SeatDecision] = decisions if decisions is not None else []
         stage_index = await self._emit_stage(on_stage, 0, "intake", query=query)
-
-        async def _emit_selection(rows: list[SelectionRow]) -> None:
-            await ws_broadcast(
-                {"type": "selection", "rows": [asdict(row) for row in rows]}
-            )
 
         async def _emit_profile(profile: Agent, index: int, total: int) -> None:
             await ws_broadcast(
@@ -217,9 +215,9 @@ class DebateOrchestrator:
             max_agents=config.max_agents,
             intent=intent,
             warnings=warnings,
-            selection_rows=selection_rows,
+            decisions=seat_sink,
             distill=distill,
-            on_selection=_emit_selection,
+            llm_client=llm_client,
             on_profile=_emit_profile,
         )
         stage_index = await self._emit_stage(
@@ -510,7 +508,6 @@ class DebateOrchestrator:
             warnings=warnings,
             rounds_executed=len(rounds),
             intent=intent,
-            selection_rows=selection_rows,
             confidence_score=verdict.confidence_score if verdict else None,
             cluster_details=cluster_details,
             supporting_entities=list(verdict.supporting_entities) if verdict else [],
