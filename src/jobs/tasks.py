@@ -86,12 +86,15 @@ async def _debate_core(job_id: str, payload: dict[str, Any]) -> None:
     from src.simulation.debate_config import DebateConfig
     from src.simulation.orchestrator import DebateCancelled
 
+    # A legacy or malformed corpus id (pre-deploy `simulation_runtime`) fails the
+    # job here, before the reservation is read and before any graph is touched.
+    graph_id = str(uuid.UUID(payload["graph_id"]))
     await _assert_reservation(job_id)
     try:
         await debate_api._run_debate_async(
             job_id=job_id,
             query=payload["query"],
-            graph_id=payload["graph_id"],
+            graph_id=graph_id,
             config=DebateConfig(**payload["config"]),
             selected_domains=payload.get("selected_domains"),
             simulation_depth=payload.get("simulation_depth") or "standard",

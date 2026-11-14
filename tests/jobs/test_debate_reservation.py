@@ -28,7 +28,11 @@ pytestmark = [requires_db, pytest.mark.asyncio]
 
 ESTIMATE = 60
 _CONFIG = {"max_agents": 2, "max_rounds": 1}
-_PAYLOAD = {"query": "Should we tax carbon?", "config": _CONFIG}
+_PAYLOAD = {
+    "query": "Should we tax carbon?",
+    "config": _CONFIG,
+    "graph_id": str(uuid.uuid4()),
+}
 
 
 @pytest_asyncio.fixture

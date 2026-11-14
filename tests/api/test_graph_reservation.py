@@ -30,9 +30,6 @@ requires_db = pytest.mark.skipif(
 )
 pytestmark = [requires_db, pytest.mark.asyncio]
 
-# A fresh corpus id: ontology accepts an unknown corpus without writing a row.
-CORPUS = uuid.uuid4()
-
 
 @pytest_asyncio.fixture
 async def owner(db):
@@ -91,7 +88,7 @@ async def test_ontology_enqueue_is_402_when_the_pool_is_spent(owner, client):
             idempotency_key=uuid.uuid4().hex,
         )
 
-    response = await client.post(f"/simulate/ontology?dataset_id={CORPUS}", json=[])
+    response = await client.post(f"/simulate/ontology?dataset_id={uuid.uuid4()}", json=[])
 
     assert response.status_code == 402, response.text
     error = response.json()["error"]
@@ -101,7 +98,7 @@ async def test_ontology_enqueue_is_402_when_the_pool_is_spent(owner, client):
 
 async def test_ontology_enqueue_holds_min_graph_reserve_and_plan(owner, client):
     response = await client.post(
-        f"/simulate/ontology?dataset_id={CORPUS}", json=[]
+        f"/simulate/ontology?dataset_id={uuid.uuid4()}", json=[]
     )
     assert response.status_code == 202, response.text
     job_id = response.json()["job_id"]
@@ -136,7 +133,7 @@ async def test_ontology_enqueue_still_works_after_partial_use(owner, client):
             idempotency_key=uuid.uuid4().hex,
         )
 
-    response = await client.post(f"/simulate/ontology?dataset_id={CORPUS}", json=[])
+    response = await client.post(f"/simulate/ontology?dataset_id={uuid.uuid4()}", json=[])
 
     assert response.status_code == 202, response.text
     job_id = response.json()["job_id"]

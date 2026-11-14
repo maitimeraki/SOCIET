@@ -882,11 +882,9 @@ async def discover_ontology_async(
     user: User = Depends(current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    # Ontology can be the first call for a new corpus, before build_graph creates
-    # its row, so an unknown id passes without a write; a known one must be the
-    # caller's (the same 404 as every graph route).
-    if await db.get(Dataset, dataset_id) is not None:
-        await require_owned_dataset(db, user, dataset_id)
+    # Ontology can be the first call for a new corpus: it claims the row for the
+    # caller, exactly as build_graph does, so one rule covers both routes.
+    await _register_corpus(db, user, dataset_id, "")
     reservation = await _reserve_graph_job(db, user)
     job_id = await _enqueue_reserved(
         db,
