@@ -8,7 +8,7 @@ const USER = {
   created_at: '2026-01-01T00:00:00Z',
   role: 'user' as const,
   plan: 'free',
-  entitlements: { max_agents: 20, max_rounds: 4, units_remaining: 100, period_end: '2026-12-01T00:00:00Z' },
+  entitlements: { max_agents: 12, max_rounds: 4, units_remaining: 100, period_end: '2026-12-01T00:00:00Z' },
 }
 
 beforeEach(() => useAuthStore.setState({ status: 'unknown', user: null }))

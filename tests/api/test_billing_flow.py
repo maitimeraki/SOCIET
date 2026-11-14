@@ -240,7 +240,8 @@ async def test_the_billing_flow_shares_one_pool_and_keeps_internals_off_the_wire
                 job_id=debate_job_id,
             )
             released = await _release_job(factory, debate_job_id)
-            assert released == 55
+            # 48 reserved less the 5 settled against this job = 43 still held, released.
+            assert released == 43
             await run_doc.set_job_status(debate_job_id, "complete")
 
             after_debate = await _usage(client, bodies)

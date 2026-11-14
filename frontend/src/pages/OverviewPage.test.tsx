@@ -15,7 +15,7 @@ const STATS: BillingUsage = {
   units_remaining: 1800,
   period_start: '2026-10-01T00:00:00Z',
   period_end: '2026-11-01T00:00:00Z',
-  limits: { max_agents: 20, max_rounds: 4 },
+  limits: { max_agents: 12, max_rounds: 4 },
   billing_enabled: false,
 }
 

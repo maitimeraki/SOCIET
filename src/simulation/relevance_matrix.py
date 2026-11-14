@@ -62,10 +62,10 @@ class SelectionRow:
     `semantic` and `density` are the two components of `blended`
     (`SEMANTIC_WEIGHT*semantic + DENSITY_WEIGHT*density`); `density` is
     normalized to [0, 1] across the batch so the decomposition adds up as
-    documented. `anchors` are the
-    provenance anchors of the candidate's evidence — source node ids/names and
-    chunk ids where the row carries them, deduped and in evidence order — the
-    stable join key Phase 3 and Phase 4 use to link a row back to the graph.
+    documented. `anchors` are the provenance anchors of the candidate's
+    evidence — source node ids/names and chunk ids where the row carries
+    them, deduped and in evidence order — the stable join key Phase 3 and
+    Phase 4 use to link a row back to the graph.
     """
 
     name: str
