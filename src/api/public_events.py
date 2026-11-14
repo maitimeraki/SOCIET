@@ -46,18 +46,27 @@ _EVENT_KEYS: dict[str, frozenset[str]] = {
 }
 
 
-def _pick(source: Mapping[str, Any], keys: frozenset[str]) -> dict[str, Any]:
+def _pick(source: Any, keys: frozenset[str]) -> dict[str, Any]:
+    # Fail closed: anything that is not a mapping carries no keys at all.
+    if not isinstance(source, Mapping):
+        return {}
     return {k: v for k, v in source.items() if k in keys}
 
 
-def _narrow_intent(intent: Any) -> Any:
-    return _pick(intent, _INTENT_KEYS) if isinstance(intent, Mapping) else intent
+def _text(value: Any) -> str | None:
+    return value if isinstance(value, str) else None
 
 
-def _narrow_provenance(claims: Mapping[str, Any]) -> dict[str, list[dict[str, Any]]]:
+def _narrow_provenance(claims: Any) -> dict[str, list[dict[str, Any]]]:
     # Titles and breadcrumbs only: no document id, chunk id, span or quote.
+    if not isinstance(claims, Mapping):
+        return {}
     return {
-        claim: [{"title": link.get("title"), "breadcrumb": link.get("breadcrumb")} for link in links]
+        claim: [
+            {"title": _text(link.get("title")), "breadcrumb": _text(link.get("breadcrumb"))}
+            for link in (links if isinstance(links, (list, tuple)) else [])
+            if isinstance(link, Mapping)
+        ]
         for claim, links in claims.items()
     }
 
@@ -65,8 +74,8 @@ def _narrow_provenance(claims: Mapping[str, Any]) -> dict[str, list[dict[str, An
 def _narrow_verdict(source: Mapping[str, Any], keys: frozenset[str]) -> dict[str, Any]:
     out = _pick(source, keys)
     if "intent" in out:
-        out["intent"] = _narrow_intent(out["intent"])
-    if isinstance(out.get("provenance_by_claim"), Mapping):
+        out["intent"] = _pick(out["intent"], _INTENT_KEYS)
+    if "provenance_by_claim" in out:
         out["provenance_by_claim"] = _narrow_provenance(out["provenance_by_claim"])
     return out
 
@@ -85,11 +94,12 @@ def project_event(event: Mapping[str, Any]) -> dict[str, Any] | None:
         return _narrow_verdict(event, allowed)
     out = _pick(event, allowed)
     if kind == "intent":
-        out["intent"] = _narrow_intent(event.get("intent") or {})
+        out["intent"] = _pick(event.get("intent"), _INTENT_KEYS)
     elif kind == "selection":
-        out["rows"] = [_pick(row, _ROW_KEYS) for row in event.get("rows") or []]
+        rows = event.get("rows")
+        out["rows"] = [_pick(row, _ROW_KEYS) for row in rows] if isinstance(rows, list) else []
     elif kind == "agent":
-        out["profile"] = _pick(event.get("profile") or {}, _PROFILE_KEYS)
+        out["profile"] = _pick(event.get("profile"), _PROFILE_KEYS)
     return out
 
 

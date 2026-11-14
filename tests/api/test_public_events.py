@@ -9,6 +9,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from src.api.public_events import project_event, project_result
+from src.persona.models_persona import ProvenanceLink
 
 FORBIDDEN = ("chunk_id", "doc_id", "version_hash", "graph_snapshot", "source_evidence",
              "summary_provenance", "llm_model", "llm_provider", "REASONING", "anchors")
@@ -207,17 +208,21 @@ async def test_not_debatable_message_reaches_the_user():
 
 # --- fix round 1 ----------------------------------------------------------------
 
+# The link is the real model's dump, not a hand-made shape.
+_REAL_LINK = ProvenanceLink(
+    doc_id="DOC-XYZ", title="Memo", breadcrumb="Sec 1",
+    chunk_id=uuid.UUID("c0ffee00-0000-4000-8000-000000000001"),
+).model_dump(mode="json")
+
 COMPLETE_EVENT = {
     "type": "complete", "converged": True, "verdict": "Proceed.", "narrative": "n",
     "narrative_status": "ok", "final_stances": {"Kestra": "POSITIVE"}, "warnings": [],
     "rounds_executed": 2, "confidence_score": 0.7, "weight_share": 0.7, "contested": False,
-    "provenance_by_claim": {"Proceed.": [{"doc_id": "DOC-XYZ", "title": "Memo", "breadcrumb": "Sec 1",
-                                          "chunk_id": "CHUNK-XYZ", "spans": [[0, 9]],
-                                          "quote": "QUOTE-XYZ"}]},
+    "provenance_by_claim": {"Proceed.": [_REAL_LINK]},
     "cluster_details": {}, "supporting_entities": [], "opposing_entities": [],
     "dissenting_views": [], "evidence": [{"entity": "Acme", "claim": "claim text"}],
 }
-COMPLETE_LEAKS = ("DOC-XYZ", "CHUNK-XYZ", "QUOTE-XYZ", '"spans"')
+COMPLETE_LEAKS = ("DOC-XYZ", "c0ffee00-0000-4000-8000-000000000001")
 
 
 def test_complete_event_provenance_is_narrowed_like_the_result():
@@ -254,6 +259,7 @@ async def test_complete_event_leaks_no_provenance_ids_on_any_surface():
         "run doc (legacy row)": json.dumps(doc),
     }
     leaks = [(name, token) for name, text in surfaces.items() for token in COMPLETE_LEAKS if token in text]
+    assert append.called and ws.send_json.called and manager.buffer
     assert leaks == []
     assert doc["events"][0]["provenance_by_claim"] == {"Proceed.": [{"title": "Memo", "breadcrumb": "Sec 1"}]}
 
@@ -281,12 +287,12 @@ def test_debate_run_export_verdict_is_projected():
     assert "CHUNK-XYZ" not in json.dumps(out) and "DOC-XYZ" not in json.dumps(out)
 
 
-def test_graph_job_export_keeps_its_verdict_state():
+def test_build_graph_job_export_keeps_its_verdict_state():
     from src.jobs.tasks import _run_json
 
     state = {"stage": "done", "progress": 1.0, "result": {"ontology": {"classes": ["Person"]}}}
 
-    assert _run_json(_export_run(state), "graph")["verdict"] == state
+    assert _run_json(_export_run(state), "build_graph")["verdict"] == state
 
 
 @pytest.mark.parametrize("kind", [["complete"], {"type": "complete"}, None, 3])
@@ -294,3 +300,39 @@ def test_non_string_event_type_is_dropped_without_logging_its_payload(kind, capl
     with caplog.at_level(logging.WARNING):
         assert project_event({"type": kind, "verdict": "SECRET-PAYLOAD"}) is None
     assert "SECRET-PAYLOAD" not in caplog.text
+
+
+# --- fix round 3: fail closed on malformed shapes -------------------------------
+
+def test_non_mapping_intent_is_dropped_from_the_result():
+    assert project_result({"intent": "SECRET-INTENT", "verdict": "v"})["intent"] == {}
+
+
+def test_non_mapping_intent_is_dropped_from_the_intent_event():
+    assert project_event({"type": "intent", "intent": ["SECRET-INTENT"]}) == {"type": "intent", "intent": {}}
+
+
+def test_non_mapping_provenance_is_dropped_not_passed_through():
+    out = project_event({**COMPLETE_EVENT, "provenance_by_claim": [{"chunk_id": "CHUNK-XYZ"}]})
+    assert out["provenance_by_claim"] == {}
+    assert "CHUNK-XYZ" not in json.dumps(out)
+
+
+def test_malformed_links_are_dropped_without_raising():
+    out = project_result({"provenance_by_claim": {
+        "c": ["CHUNK-XYZ", None, {"title": "T", "breadcrumb": "B", "chunk_id": "CHUNK-XYZ"}],
+        "d": "CHUNK-XYZ",
+    }})
+    assert out["provenance_by_claim"] == {"c": [{"title": "T", "breadcrumb": "B"}], "d": []}
+
+
+def test_non_text_title_is_dropped_not_passed_through():
+    out = project_result({"provenance_by_claim": {"c": [{"title": {"chunk_id": "CHUNK-XYZ"}, "breadcrumb": "B"}]}})
+    assert out["provenance_by_claim"] == {"c": [{"title": None, "breadcrumb": "B"}]}
+
+
+def test_malformed_profile_and_rows_do_not_raise_or_pass_through():
+    agent = project_event({"type": "agent", "profile": "CHUNK-XYZ", "index": 1, "total": 2})
+    selection = project_event({"type": "selection", "rows": ["CHUNK-XYZ", None]})
+    assert agent["profile"] == {}
+    assert selection["rows"] == [{}, {}]
