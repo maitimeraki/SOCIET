@@ -139,7 +139,7 @@ async def _release_job(factory, job_id: str) -> int:
 @requires_db
 @pytest.mark.asyncio
 async def test_the_billing_flow_shares_one_pool_and_keeps_internals_off_the_wire(
-    db, bodies
+    db, bodies, owned_corpus
 ):
     factory = get_session_factory()
     period_start = None
@@ -149,6 +149,7 @@ async def test_the_billing_flow_shares_one_pool_and_keeps_internals_off_the_wire
         async with _client() as client:
             # 1. Signup (consent + age flags) → the free plan.
             user_id = await _signup(client, bodies)
+            corpus = await owned_corpus(user_id)
             usage = await _usage(client, bodies)
             assert usage["plan"] == "free"
             assert usage["units_total"] == get_plan("free").units == 1000
@@ -211,7 +212,7 @@ async def test_the_billing_flow_shares_one_pool_and_keeps_internals_off_the_wire
             #    released at job end.
             debate = await client.post(
                 "/api/v1/simulate/debate",
-                json={"query": "Should we expand into Europe?"},
+                json={"query": "Should we expand into Europe?", "graph_id": str(corpus)},
                 headers=_csrf(client),
             )
             bodies.append(debate.text)
@@ -263,7 +264,7 @@ async def test_the_billing_flow_shares_one_pool_and_keeps_internals_off_the_wire
 
             blocked = await client.post(
                 "/api/v1/simulate/debate",
-                json={"query": "Should we expand into Europe?"},
+                json={"query": "Should we expand into Europe?", "graph_id": str(corpus)},
                 headers=_csrf(client),
             )
             bodies.append(blocked.text)
@@ -274,7 +275,11 @@ async def test_the_billing_flow_shares_one_pool_and_keeps_internals_off_the_wire
 
             over_cap = await client.post(
                 "/api/v1/simulate/debate",
-                json={"query": "Should we expand into Europe?", "config": {"max_agents": 20}},
+                json={
+                    "query": "Should we expand into Europe?",
+                    "graph_id": str(corpus),
+                    "config": {"max_agents": 20},
+                },
                 headers=_csrf(client),
             )
             bodies.append(over_cap.text)

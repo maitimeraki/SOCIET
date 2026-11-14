@@ -135,10 +135,10 @@ async def test_a_corpus_owned_by_someone_else_is_the_uniform_404(client, account
     assert row.name == "Theirs"
 
 
-async def test_a_legacy_non_uuid_id_is_left_unregistered(client):
+async def test_a_legacy_non_uuid_id_is_refused_and_not_registered(client):
     response = await client.post(f"{BUILD}?dataset_id=simulation_runtime", json=[])
 
-    assert response.status_code == 202, response.text
+    assert response.status_code == 422, response.text
     async with get_session_factory()() as session:
         count = await session.scalar(
             select(func.count())

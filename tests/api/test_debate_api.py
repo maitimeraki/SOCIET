@@ -149,7 +149,8 @@ class TestRoutesThroughTheApp:
         assert (response.status_code, response.json()["status"]) == (200, "queued")
 
     def test_create_debate_rejects_a_blank_query(self, client):
-        assert client.post("/simulate/debate", json={"query": "   "}).status_code == 400
+        body = {"query": "   ", "graph_id": str(uuid.uuid4())}
+        assert client.post("/simulate/debate", json=body).status_code == 400
 
 
 class TestDebateRequest:
@@ -222,12 +223,13 @@ class TestDebateConfigRequest:
 
     def test_config_request_defaults(self):
         """Test DebateRequest defaults."""
+        graph_id = uuid.uuid4()
         request = DebateRequest(
             query="Test query?",
-            graph_id="test-graph",
+            graph_id=graph_id,
         )
         assert request.query == "Test query?"
-        assert request.graph_id == "test-graph"
+        assert request.graph_id == graph_id
         assert request.selected_domains == []
         assert isinstance(request.config, DebateConfigRequest)
 
@@ -235,6 +237,7 @@ class TestDebateConfigRequest:
         """Test DebateRequest validation."""
         request = DebateRequest(
             query="Test?",
+            graph_id=uuid.uuid4(),
             config=DebateConfigRequest(max_agents=10),
         )
         assert request.config.max_agents == 10
@@ -823,18 +826,18 @@ class TestSimulationDepth:
     """D3: the request carries the depth gate, defaulting to standard."""
 
     def test_depth_defaults_to_standard(self):
-        assert DebateRequest(query="q").simulation_depth == "standard"
+        assert DebateRequest(graph_id=uuid.uuid4(), query="q").simulation_depth == "standard"
 
     def test_depth_accepts_the_three_levels(self):
         for depth in ("shallow", "standard", "deep"):
             assert (
-                DebateRequest(query="q", simulation_depth=depth).simulation_depth
+                DebateRequest(graph_id=uuid.uuid4(), query="q", simulation_depth=depth).simulation_depth
                 == depth
             )
 
     def test_depth_rejects_unknown_values(self):
         with pytest.raises(Exception):
-            DebateRequest(query="q", simulation_depth="turbo")
+            DebateRequest(graph_id=uuid.uuid4(), query="q", simulation_depth="turbo")
 
 
 async def _run_with_depth(job_id: str, depth: str):
@@ -948,7 +951,7 @@ class TestSimulationDepthGate:
     @requires_db
     @pytest.mark.asyncio
     async def test_create_debate_threads_the_requested_depth_to_the_job(
-        self, db_client, job_owner, monkeypatch
+        self, db_client, job_owner, owned_corpus, monkeypatch
     ):
         """202 only after the queued run exists as a row (accept-time durability).
 
@@ -960,6 +963,7 @@ class TestSimulationDepthGate:
 
         monkeypatch.setenv("QUEUE_MODE", "inline")
         get_settings.cache_clear()
+        corpus = await owned_corpus(job_owner.id)
         job_id = None
         try:
             with patch(
@@ -967,7 +971,11 @@ class TestSimulationDepthGate:
             ) as runner:
                 response = await db_client.post(
                     "/simulate/debate",
-                    json={"query": "Should we tax carbon?", "simulation_depth": "deep"},
+                    json={
+                        "query": "Should we tax carbon?",
+                        "graph_id": str(corpus),
+                        "simulation_depth": "deep",
+                    },
                 )
                 job_id = response.json()["job_id"]
                 assert (await run_doc.read_run_head(job_id))["status"] == "queued"

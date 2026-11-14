@@ -199,13 +199,15 @@ async def test_completion_lands_verdict_and_confidence_on_the_runs_row(accounts)
 
 
 async def test_create_debate_persists_a_queued_row_at_accept(
-    client, accounts, monkeypatch
+    client, accounts, monkeypatch, owned_corpus
 ):
     owner, _ = accounts
     monkeypatch.setattr(debate_api, "_run_debate_async", AsyncMock())
+    corpus = await owned_corpus(owner.id)
 
     response = await client.post(
-        "/simulate/debate", json={"query": "Should we tax carbon?", "graph_id": "ds-1"}
+        "/simulate/debate",
+        json={"query": "Should we tax carbon?", "graph_id": str(corpus)},
     )
 
     assert response.status_code == 202, response.text

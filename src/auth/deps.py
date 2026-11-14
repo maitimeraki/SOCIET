@@ -13,7 +13,7 @@ from src.auth.cookies import SESSION_COOKIE
 from src.auth.service import redeem_ws_ticket
 from src.billing.entitlements import Entitlements, resolve_entitlements
 from src.db.engine import get_db, get_session_factory
-from src.db.models import User, UserSession
+from src.db.models import Dataset, User, UserSession
 
 
 class Role(str, Enum):
@@ -132,3 +132,17 @@ async def require_owner(resource_user_id: uuid.UUID | str | None, user: User) ->
     """
     if _as_uuid(resource_user_id) != user.id:
         raise HTTPException(status_code=404, detail="Not found.")
+
+
+async def require_owned_dataset(
+    db: AsyncSession, user: User, dataset_id: uuid.UUID
+) -> Dataset:
+    """The caller's dataset row, or the same 404 as `require_owner`.
+
+    Unknown and foreign are one answer: existence of another tenant's corpus is
+    never revealed. Every graph route that takes a dataset id goes through here.
+    """
+    dataset = await db.get(Dataset, dataset_id)
+    if dataset is None or dataset.user_id != user.id:
+        raise HTTPException(status_code=404, detail="Not found.")
+    return dataset

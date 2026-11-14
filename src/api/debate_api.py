@@ -30,12 +30,17 @@ from src.api.limits import limiter, service_available
 from src.audit import client_ip
 from src.audit import record as audit_record
 from src.auth.cookies import verify_csrf
-from src.auth.deps import current_user, require_owner, websocket_user
+from src.auth.deps import (
+    current_user,
+    require_owned_dataset,
+    require_owner,
+    websocket_user,
+)
 from src.billing import units as billing_units
 from src.billing.entitlements import resolve_entitlements
 from src.config.settings import get_settings
 from src.db.engine import get_db
-from src.db.models import Dataset, User
+from src.db.models import User
 from src.simulation.debate_config import DebateConfig
 
 logger = logging.getLogger(__name__)
@@ -63,7 +68,7 @@ class DebateConfigRequest(BaseModel):
 class DebateRequest(BaseModel):
     """Request to start a debate simulation."""
 
-    graph_id: str = Field(default="simulation_runtime", description="Graph/dataset ID")
+    graph_id: uuid.UUID = Field(..., description="The owned corpus (dataset) id")
     query: str = Field(..., description="Debate topic/question")
     corpus_label: Optional[str] = Field(
         default=None,
@@ -458,22 +463,9 @@ async def create_debate(
     if not body.query or not body.query.strip():
         raise HTTPException(status_code=400, detail="query is required")
 
-    # A corpus id in the request becomes a foreign key on the run, so it has to
-    # name a corpus this caller owns. A missing or foreign one is the same 404 —
-    # existence is never leaked — and the run insert cannot fail on the
-    # constraint afterwards. Ids that are not uuids are the legacy default and
-    # leave the column null (the same rule `run_doc` applies).
-    try:
-        corpus_id = uuid.UUID(body.graph_id)
-    except (AttributeError, TypeError, ValueError):
-        corpus_id = None
-    if corpus_id is not None:
-        corpus = await db.get(Dataset, corpus_id)
-        if corpus is None or corpus.user_id != user.id:
-            raise HTTPException(
-                status_code=404,
-                detail={"code": "not_found", "message": "Corpus not found."},
-            )
+    # The corpus becomes a foreign key on the run, so it must be one this caller
+    # owns; the run insert then cannot fail on the constraint afterwards.
+    await require_owned_dataset(db, user, body.graph_id)
 
     # The plan is the session user's row, never the body (§4): any plan/units
     # in the request is ignored, and only the plan's caps bound the work.
@@ -575,7 +567,7 @@ async def create_debate(
             {
                 "user_id": str(user.id),
                 "query": body.query,
-                "graph_id": body.graph_id,
+                "graph_id": str(body.graph_id),
                 "corpus_label": body.corpus_label,
                 "config": asdict(config),
                 "selected_domains": body.selected_domains,
@@ -631,7 +623,7 @@ async def create_debate(
             "user_id": str(user.id),
             "status": "queued",
             "query": body.query,
-            "graph_id": body.graph_id,
+            "graph_id": str(body.graph_id),
             "corpus_label": body.corpus_label,
             "config": asdict(config),
             "created_at": datetime.now(timezone.utc).isoformat(),

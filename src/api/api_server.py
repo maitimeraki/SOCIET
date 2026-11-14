@@ -37,7 +37,7 @@ from src.api.middleware import LoggingMiddleware, SecurityHeadersMiddleware
 from src.auth.cookies import verify_csrf
 from src.billing import units as billing_units
 from src.billing.entitlements import resolve_entitlements
-from src.auth.deps import current_user, require_owner
+from src.auth.deps import current_user, require_owned_dataset, require_owner
 from src.config.settings import get_settings
 from src.db.engine import get_db, get_engine
 from src.db.models import Dataset, User
@@ -799,35 +799,28 @@ async def run_normalize_job(job_id: str, dataset_id: str) -> None:
 
 
 async def _register_corpus(
-    db: AsyncSession, user_id: str, dataset_id: str, name: str
+    db: AsyncSession, user: User, dataset_id: uuid.UUID, name: str
 ) -> None:
-    """Give a corpus its ``datasets`` row.
+    """Give a corpus its ``datasets`` row, then confirm the caller owns it.
 
     The id is minted by the browser and reused as the graph id. Nothing else
     writes ``datasets``, yet ``runs.dataset_id`` carries a foreign key to it —
     without this row a decision convened over a fresh corpus fails on the run
-    insert. A non-uuid id is the legacy default and stays unregistered, the same
-    rule ``run_doc`` applies to the run's own column.
+    insert. The insert is a no-op for a corpus that exists, so a foreign corpus
+    is refused by the same owner check every graph route uses.
     """
-    try:
-        key = uuid.UUID(dataset_id)
-    except (AttributeError, TypeError, ValueError):
-        return
-    owner = uuid.UUID(str(user_id))
     await db.execute(
         pg_insert(Dataset)
         .values(
-            id=key, user_id=owner, name=name or "Untitled corpus", graph_id=str(key)
+            id=dataset_id,
+            user_id=user.id,
+            name=name or "Untitled corpus",
+            graph_id=str(dataset_id),
         )
         .on_conflict_do_nothing(index_elements=["id"])
     )
     await db.commit()
-    row = await db.get(Dataset, key)
-    if row is None or row.user_id != owner:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail={"code": "not_found", "message": "Corpus not found."},
-        )
+    row = await require_owned_dataset(db, user, dataset_id)
     if name and row.name != name:
         row.name = name
         await db.commit()
@@ -883,12 +876,17 @@ async def _enqueue_reserved(
 
 @simulate_router.post("/ontology", status_code=status.HTTP_202_ACCEPTED)
 async def discover_ontology_async(
-    dataset_id: str,
+    dataset_id: uuid.UUID,
     documents: List[GlobalInputDocument],
     request: Request,
     user: User = Depends(current_user),
     db: AsyncSession = Depends(get_db),
 ):
+    # Ontology can be the first call for a new corpus, before build_graph creates
+    # its row, so an unknown id passes without a write; a known one must be the
+    # caller's (the same 404 as every graph route).
+    if await db.get(Dataset, dataset_id) is not None:
+        await require_owned_dataset(db, user, dataset_id)
     reservation = await _reserve_graph_job(db, user)
     job_id = await _enqueue_reserved(
         db,
@@ -897,7 +895,7 @@ async def discover_ontology_async(
         "ontology",
         {
             "user_id": str(user.id),
-            "dataset_id": dataset_id,
+            "dataset_id": str(dataset_id),
             "documents": [doc.model_dump(mode="json") for doc in documents],
             "correlation_id": getattr(request.state, "correlation_id", None),
         },
@@ -907,7 +905,7 @@ async def discover_ontology_async(
 
 @simulate_router.post("/build_graph", status_code=status.HTTP_202_ACCEPTED)
 async def build_graph_async(
-    dataset_id: str,
+    dataset_id: uuid.UUID,
     documents: List[GlobalInputDocument],
     request: Request,
     ontology_job_id: Optional[str] = None,
@@ -924,7 +922,7 @@ async def build_graph_async(
 
     # The corpus becomes real here — its name and its owner — and the row has to
     # exist before any run can point at it (runs.dataset_id is a foreign key).
-    await _register_corpus(db, str(user.id), dataset_id, corpus_name)
+    await _register_corpus(db, user, dataset_id, corpus_name)
 
     reservation = await _reserve_graph_job(db, user)
     job_id = await _enqueue_reserved(
@@ -934,7 +932,7 @@ async def build_graph_async(
         "build_graph",
         {
             "user_id": str(user.id),
-            "dataset_id": dataset_id,
+            "dataset_id": str(dataset_id),
             "documents": [doc.model_dump(mode="json") for doc in documents],
             "ontology_job_id": ontology_job_id,
             "correlation_id": getattr(request.state, "correlation_id", None),
@@ -965,11 +963,12 @@ async def create_simulation(query: UserQuery, background_tasks: BackgroundTasks)
 
 @simulate_router.post("/normalize_graph", status_code=status.HTTP_202_ACCEPTED)
 async def normalize_graph(
-    dataset_id: str,
+    dataset_id: uuid.UUID,
     request: Request,
     user: User = Depends(current_user),
     db: AsyncSession = Depends(get_db),
 ):
+    await require_owned_dataset(db, user, dataset_id)
     reservation = await _reserve_graph_job(db, user)
     job_id = await _enqueue_reserved(
         db,
@@ -978,7 +977,7 @@ async def normalize_graph(
         "normalize_graph",
         {
             "user_id": str(user.id),
-            "dataset_id": dataset_id,
+            "dataset_id": str(dataset_id),
             "correlation_id": getattr(request.state, "correlation_id", None),
         },
     )

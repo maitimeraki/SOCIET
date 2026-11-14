@@ -91,7 +91,7 @@ async def _debate_core(job_id: str, payload: dict[str, Any]) -> None:
         await debate_api._run_debate_async(
             job_id=job_id,
             query=payload["query"],
-            graph_id=payload.get("graph_id") or "simulation_runtime",
+            graph_id=payload["graph_id"],
             config=DebateConfig(**payload["config"]),
             selected_domains=payload.get("selected_domains"),
             simulation_depth=payload.get("simulation_depth") or "standard",

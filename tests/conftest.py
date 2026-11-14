@@ -7,6 +7,7 @@ across loops.
 """
 
 import os
+import uuid
 
 # The suite must never trip a rate limit, and every ASGI test client shares the
 # 127.0.0.1 bucket. Set before any app import (conftest loads first; the limits
@@ -41,7 +42,7 @@ from sqlalchemy import delete
 
 from src.config.settings import get_settings
 from src.db.engine import get_engine, get_session_factory
-from src.db.models import User
+from src.db.models import Dataset, User
 
 # Auth tests create accounts under this domain; the fixture clears them before
 # and after each test so reruns never collide on the unique email.
@@ -77,6 +78,27 @@ async def db():
     from src.auth import service
 
     await service.close_redis()
+
+
+@pytest_asyncio.fixture
+async def owned_corpus():
+    """Make a `datasets` row owned by a user; returns `async (user_id) -> uuid`.
+
+    A debate names its corpus by `graph_id`, and the route accepts only a corpus
+    the caller owns, so each debate-posting test makes one for its own account.
+    Account teardown removes the row (`datasets.user_id` cascades).
+    """
+
+    async def _make(user_id) -> uuid.UUID:
+        corpus = uuid.uuid4()
+        async with get_session_factory()() as session:
+            session.add(
+                Dataset(id=corpus, user_id=uuid.UUID(str(user_id)), name="Test corpus")
+            )
+            await session.commit()
+        return corpus
+
+    return _make
 
 
 @pytest_asyncio.fixture

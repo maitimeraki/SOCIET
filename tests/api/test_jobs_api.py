@@ -103,8 +103,11 @@ def _error(response) -> dict:
     return response.json()["error"]
 
 
-async def test_the_per_user_cap_answers_429_with_a_retry_after(accounts, monkeypatch):
+async def test_the_per_user_cap_answers_429_with_a_retry_after(
+    accounts, monkeypatch, owned_corpus
+):
     owner, _ = accounts
+    corpus = await owned_corpus(owner)
     monkeypatch.setenv("MAX_JOBS_PER_USER", "3")
     from src.config.settings import get_settings
 
@@ -115,7 +118,8 @@ async def test_the_per_user_cap_answers_429_with_a_retry_after(accounts, monkeyp
 
         async with _client(owner, debate=True) as client:
             response = await client.post(
-                "/api/v1/simulate/debate", json={"query": "Should we tax carbon?"}
+                "/api/v1/simulate/debate",
+                json={"query": "Should we tax carbon?", "graph_id": str(corpus)},
             )
     finally:
         get_settings.cache_clear()
@@ -129,8 +133,11 @@ async def _never(*_args, **_kwargs) -> None:
     return None
 
 
-async def test_a_terminal_job_does_not_count_against_the_cap(accounts, monkeypatch):
+async def test_a_terminal_job_does_not_count_against_the_cap(
+    accounts, monkeypatch, owned_corpus
+):
     owner, _ = accounts
+    corpus = await owned_corpus(owner)
     monkeypatch.setenv("MAX_JOBS_PER_USER", "1")
     from src.api import debate_api
     from src.config.settings import get_settings
@@ -142,7 +149,8 @@ async def test_a_terminal_job_does_not_count_against_the_cap(accounts, monkeypat
         await _graph_row(owner, status="completed")
         async with _client(owner, debate=True) as client:
             response = await client.post(
-                "/api/v1/simulate/debate", json={"query": "Should we tax carbon?"}
+                "/api/v1/simulate/debate",
+                json={"query": "Should we tax carbon?", "graph_id": str(corpus)},
             )
     finally:
         get_settings.cache_clear()

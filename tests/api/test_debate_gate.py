@@ -81,7 +81,7 @@ async def account(db):
 
 
 @pytest_asyncio.fixture
-async def client(account, monkeypatch):
+async def client(account, monkeypatch, owned_corpus):
     """The real router in a minimal app; dispatch is a no-op, rows are real."""
     monkeypatch.setattr("src.jobs.queue._dispatch", lambda *args, **kwargs: None)
     app = FastAPI()
@@ -90,11 +90,13 @@ async def client(account, monkeypatch):
     app.dependency_overrides[current_user] = lambda: account
     transport = ASGITransport(app=app, client=("10.99.8.4", 5000))
     created: list[str] = []
+    corpus = await owned_corpus(account.id)
     try:
         async with AsyncClient(
             transport=transport, base_url="http://testserver"
         ) as http:
             http.created_jobs = created
+            http.graph_id = str(corpus)
             yield http
     finally:
         for job_id in created:
@@ -102,7 +104,7 @@ async def client(account, monkeypatch):
 
 
 async def _post(client, config: dict | None = None):
-    body = {"query": "Should we expand into Europe?"}
+    body = {"query": "Should we expand into Europe?", "graph_id": client.graph_id}
     if config is not None:
         body["config"] = config
     response = await client.post("/simulate/debate", json=body)

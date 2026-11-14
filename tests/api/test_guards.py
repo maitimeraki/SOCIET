@@ -431,14 +431,15 @@ async def test_ingest_files_is_guarded_on_both_mounts(client, accounts, path):
 @pytest.mark.asyncio
 @pytest.mark.parametrize("path", _both_mounts("/simulate/debate"))
 async def test_debate_enqueue_records_the_owner_on_both_mounts(
-    client, accounts, monkeypatch, path
+    client, accounts, monkeypatch, path, owned_corpus
 ):
     owner, _ = accounts
+    corpus = await owned_corpus(owner.id)
     monkeypatch.setattr(debate_api, "_run_debate_async", AsyncMock(return_value=None))
 
     response = await client.post(
         path,
-        json={"query": "Should we tax carbon?"},
+        json={"query": "Should we tax carbon?", "graph_id": str(corpus)},
         cookies=_cookie(owner),
         headers=_csrf(owner),
     )
@@ -685,21 +686,24 @@ async def test_graph_stream_accepts_the_session_cookie(accounts, path):
 
 @requires_db
 @pytest.mark.asyncio
-async def test_debate_enqueue_is_rate_limited(client, accounts, monkeypatch):
+async def test_debate_enqueue_is_rate_limited(
+    client, accounts, monkeypatch, owned_corpus
+):
     owner, _ = accounts
+    corpus = await owned_corpus(owner.id)
     monkeypatch.setattr(debate_api, "_run_debate_async", AsyncMock(return_value=None))
     monkeypatch.setenv("RATE_LIMIT_DEBATE_ENQUEUE", "1/minute")
     get_settings.cache_clear()
     try:
         first = await client.post(
             "/simulate/debate",
-            json={"query": "Should we tax carbon?"},
+            json={"query": "Should we tax carbon?", "graph_id": str(corpus)},
             cookies=_cookie(owner),
             headers=_csrf(owner),
         )
         second = await client.post(
             "/simulate/debate",
-            json={"query": "Should we tax carbon?"},
+            json={"query": "Should we tax carbon?", "graph_id": str(corpus)},
             cookies=_cookie(owner),
             headers=_csrf(owner),
         )
@@ -713,14 +717,17 @@ async def test_debate_enqueue_is_rate_limited(client, accounts, monkeypatch):
 
 @requires_db
 @pytest.mark.asyncio
-async def test_debate_enqueue_is_refused_while_degraded(client, accounts, monkeypatch):
+async def test_debate_enqueue_is_refused_while_degraded(
+    client, accounts, monkeypatch, owned_corpus
+):
     owner, _ = accounts
+    corpus = await owned_corpus(owner.id)
     # Set at boot by the lifespan probe; absent when the app is driven directly.
     monkeypatch.setattr(app.state, "degraded", True, raising=False)
 
     response = await client.post(
         "/simulate/debate",
-        json={"query": "Should we tax carbon?"},
+        json={"query": "Should we tax carbon?", "graph_id": str(corpus)},
         cookies=_cookie(owner),
         headers=_csrf(owner),
     )
