@@ -194,7 +194,7 @@ async def _write_usage(
                 await db.rollback()
                 raise
     except Exception as exc:
-        _fail(context, str(exc) or exc.__class__.__name__)
+        _fail(context, "usage could not be recorded")
         logger.exception(
             "could not settle LLM usage (%s, source=%s); metering failed, the "
             "next call will stop the job",

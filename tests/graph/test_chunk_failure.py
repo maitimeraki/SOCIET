@@ -218,14 +218,16 @@ class TestOneBadChunkAmongFour:
         assert len(good) == 3
         assert len(errors) == 1
         assert errors[0].chunk_id == FAILING_CHUNK
-        assert "provider 500" in errors[0].error
+        assert errors[0].error == "chunk extraction failed"
+        assert "provider 500" not in errors[0].error
 
         frames = await _frames_for(recorded)
         assert [f["type"] for f in frames].count("delta") == 3
         error_frames = [f for f in frames if f["type"] == "error"]
         assert len(error_frames) == 1
         assert error_frames[0]["chunk_id"] == FAILING_CHUNK
-        assert "provider 500" in error_frames[0]["message"]
+        assert error_frames[0]["message"] == "chunk extraction failed"
+        assert "provider 500" not in error_frames[0]["message"]
 
     @pytest.mark.asyncio
     async def test_bare_exception_still_yields_an_error_frame(self, monkeypatch):

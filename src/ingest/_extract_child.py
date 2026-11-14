@@ -49,8 +49,11 @@ def _extract(request: dict) -> dict:
         return {"ok": True, "document": document}
     except ExtractionError as exc:
         return {"ok": False, "detail": exc.detail}
-    except Exception as exc:  # noqa: BLE001 — the parent only ever sees JSON
-        return {"ok": False, "detail": f"extraction failed: {exc}"}
+    except Exception:  # noqa: BLE001 — the parent only ever sees JSON
+        import traceback
+
+        traceback.print_exc(file=sys.stderr)
+        return {"ok": False, "detail": "extraction failed"}
 
 
 def main() -> None:

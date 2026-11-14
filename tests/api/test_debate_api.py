@@ -1302,3 +1302,65 @@ class TestWSBufferReplay:
             "round",
             "complete",
         ]
+
+
+class TestMeteringStopAtTheDebateBoundary:
+    @pytest.mark.asyncio
+    async def test_a_metering_stop_surfaces_the_authored_message_only(self, caplog):
+        from src.billing.metering import MeteringError
+
+        job_id = f"metering-{uuid.uuid4()}"
+        secret = "SECRET-METERING-TEXT-5a7e"
+        config = DebateConfig(max_agents=5, max_rounds=1, max_new_agents_per_round=0)
+
+        llm = MagicMock()
+        llm.generate = AsyncMock(return_value=_INTENT_REPLY)
+        ctx = MagicMock()
+        ctx.__aenter__ = AsyncMock(return_value=ctx)
+        ctx.__aexit__ = AsyncMock(return_value=False)
+
+        profiler = MagicMock()
+        profiler.synthesize = AsyncMock(side_effect=MeteringError(f"metering failed: {secret}"))
+
+        messages: list = []
+        ws_manager = MagicMock()
+
+        async def capture(msg):
+            messages.append(msg)
+
+        ws_manager.broadcast = capture
+
+        _DEBATE_JOBS[job_id] = {
+            "job_id": job_id,
+            "status": "queued",
+            "query": "q",
+            "graph_id": "ds1",
+            "config": asdict(config),
+            "result": None,
+            "error": None,
+        }
+        try:
+            with (
+                patch("src.llm.client.LLMClient", return_value=llm),
+                patch("src.persona.graph_context.GraphContext", return_value=ctx),
+                patch("src.persona.repository.PersonaRepository"),
+                patch("src.simulation.profile_synthesizer.ProfileSynthesizer", return_value=profiler),
+                patch("src.simulation.topology.CommunicationTopology"),
+                patch("src.simulation.verdict.VerdictSynthesizer"),
+                patch("src.simulation.society_memory.SocietyMemory"),
+                patch("src.api.debate_api._DebateWSManager", return_value=ws_manager),
+            ):
+                await _run_debate_async(
+                    job_id=job_id, query="q", graph_id="ds1", config=config, selected_domains=None
+                )
+        finally:
+            job = _DEBATE_JOBS.pop(job_id, None)
+
+        authored = (
+            "This run stopped: the usage limit for this period was reached, or usage could not be recorded. "
+            "Check your usage, then try again."
+        )
+        assert job["status"] == "failed"
+        assert job["error"] == authored
+        assert secret not in json.dumps(messages)
+        assert secret in caplog.text

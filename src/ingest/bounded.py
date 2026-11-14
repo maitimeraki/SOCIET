@@ -66,7 +66,7 @@ def run_extraction(request: dict, *, timeout: int, max_output_bytes: int) -> dic
             [sys.executable, "-I", _CHILD],
             input=json.dumps(payload).encode("utf-8"),
             stdout=subprocess.PIPE,
-            stderr=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
             timeout=timeout,
         )
     except subprocess.TimeoutExpired as exc:
@@ -84,5 +84,6 @@ def run_extraction(request: dict, *, timeout: int, max_output_bytes: int) -> dic
             f"extraction failed (exit {proc.returncode})"
         ) from exc
     if not result.get("ok"):
+        logger.warning("extraction child reported a failure: %s", proc.stderr[-4000:].decode("utf-8", "replace"))
         raise BoundedExtractionError(result.get("detail") or "extraction failed")
     return result

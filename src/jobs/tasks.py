@@ -24,7 +24,8 @@ import time
 import uuid
 from typing import Any
 
-from src.api.public_events import RUN_FAILED_MESSAGE, project_result
+from src.api.public_events import METERING_STOPPED_MESSAGE, RUN_FAILED_MESSAGE, project_result
+from src.billing.metering import MeteringError
 from src.jobs.queue import (
     cancel_check,
     is_cancelled,
@@ -914,6 +915,10 @@ async def execute(kind: str, job_id: str, payload: dict[str, Any]) -> None:
             await _set_status(job_id, "cancelled")
             status = "cancelled"
             return
+        except MeteringError as exc:
+            logger.warning("job %s (%s) stopped by metering", job_id, kind, exc_info=exc)
+            await _set_status(job_id, "failed", error=METERING_STOPPED_MESSAGE)
+            raise
         except Exception as exc:
             logger.error("job %s (%s) failed: %s", job_id, kind, exc, exc_info=exc)
             await _set_status(job_id, "failed", error=RUN_FAILED_MESSAGE)

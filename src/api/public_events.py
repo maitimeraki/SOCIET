@@ -12,6 +12,11 @@ logger = logging.getLogger(__name__)
 # What a client sees when a run or job fails for a reason we did not author.
 # The exception text stays in the server log.
 RUN_FAILED_MESSAGE = "The run failed. Try again, or contact support with the run id."
+# What the owner sees when metering stops a run: the accounting state, authored here, never the raw reason.
+METERING_STOPPED_MESSAGE = (
+    "This run stopped: the usage limit for this period was reached, or usage could not be recorded. "
+    "Check your usage, then try again."
+)
 
 _INTENT_KEYS = frozenset({"core_question", "stance_axis", "direct_keywords", "latent_sectors",
                           "search_perspectives", "domain_tags", "entity_frame", "extraction_confidence"})

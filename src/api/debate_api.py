@@ -27,7 +27,12 @@ from src.api.errors import payment_required
 from src.api.graph_snapshot import read_snapshot as read_graph_snapshot
 from src.api.jobs_api import enqueue_or_http
 from src.api.limits import limiter, service_available
-from src.api.public_events import RUN_FAILED_MESSAGE, project_event, project_result
+from src.api.public_events import (
+    METERING_STOPPED_MESSAGE,
+    RUN_FAILED_MESSAGE,
+    project_event,
+    project_result,
+)
 from src.audit import client_ip
 from src.audit import record as audit_record
 from src.auth.cookies import verify_csrf
@@ -38,6 +43,7 @@ from src.auth.deps import (
     websocket_user,
 )
 from src.billing import units as billing_units
+from src.billing.metering import MeteringError
 from src.billing.entitlements import resolve_entitlements
 from src.config.settings import get_settings
 from src.db.engine import get_db
@@ -347,6 +353,10 @@ async def _run_debate_async(
         if isinstance(exc, (SocietyNotDebatableError, NoAgentsDerivableError)):
             # Messages these two are authored for the user.
             message = str(exc)
+        elif isinstance(exc, MeteringError):
+            # The owner's own billing state: an authored sentence, never the raw reason.
+            logger.warning("debate run %s stopped by metering", job_id, exc_info=exc)
+            message = METERING_STOPPED_MESSAGE
         else:
             logger.exception("debate run %s failed", job_id)
             message = RUN_FAILED_MESSAGE

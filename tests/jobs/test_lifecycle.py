@@ -70,7 +70,7 @@ async def test_a_successful_job_lands_completed(owner, monkeypatch):
     assert await _status(job_id) == "completed"
 
 
-async def test_a_raising_job_lands_failed_with_the_error_text(owner, monkeypatch):
+async def test_a_raising_job_lands_failed_with_the_fixed_message(owner, monkeypatch):
     job_id = await _queued_job(owner)
 
     async def core(_job_id, _payload):
@@ -82,7 +82,7 @@ async def test_a_raising_job_lands_failed_with_the_error_text(owner, monkeypatch
         await tasks.execute("normalize_graph", job_id, {"user_id": owner})
 
     doc = await run_doc.read_job_doc(job_id)
-    assert (doc["status"], doc["error"]) == ("failed", "neo4j unreachable")
+    assert (doc["status"], doc["error"]) == ("failed", "The run failed. Try again, or contact support with the run id.")
 
 
 async def test_a_job_over_its_timeout_lands_failed(owner, monkeypatch):

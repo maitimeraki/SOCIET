@@ -264,6 +264,21 @@ describe('runStore reopened-run map (replay = live)', () => {
     return { nodes, edges, labels }
   }
 
+  it('keeps the run dataset across the socket reset, so a run watched from its start seats its roster', async () => {
+    useGraphStore.setState({ nodes: {}, edges: {}, labels: [], version: 0 })
+    getRun.mockResolvedValue(doc({ dataset_id: DATASET, status: 'running', events: [] }))
+    getRunGraph.mockResolvedValue(CORPUS)
+    await useRunStore.getState().loadAndConnect('run-1')
+
+    // The socket opens (the reset runs), then the round-1 roster streams in.
+    const [, handlers] = connectRun.mock.calls[0]
+    handlers.onOpen()
+    handlers.onEvent(withoutSnapshot(EVENTS[0]))
+    flushFrame()
+
+    expect(Object.keys(useGraphStore.getState().nodes)).toContain(`${DATASET}:D. Weber`)
+  })
+
   it('a reopened run seats its experts from the run doc dataset when the profiles carry no snapshot', async () => {
     getRun.mockResolvedValue(doc({ dataset_id: DATASET, status: 'complete', events: EVENTS.map(withoutSnapshot) }))
     getRunGraph.mockResolvedValue(CORPUS)

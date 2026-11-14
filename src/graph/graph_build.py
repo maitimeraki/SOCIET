@@ -746,7 +746,7 @@ class GraphExtractionStage:
                             # A non-empty message is load-bearing: `if delta.error:` in
                             # the WS route treats "" as an ordinary delta. A bare
                             # `RuntimeError()` would otherwise be emitted as a `delta`.
-                            error=f"{type(last_exc).__name__}: {last_exc}",
+                            error="chunk extraction failed",
                         ),
                     )
                 return False

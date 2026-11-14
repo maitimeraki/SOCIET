@@ -54,7 +54,8 @@ export interface AgentProfile {
   instinct_tags?: string[]
   entity_affinity?: string[]
   communication_radius: number
-  summary_provenance: ProvenanceLink[]
+  /** Not sent by the allowlist; readers default it (`?? []`). */
+  summary_provenance?: ProvenanceLink[]
   confidence_breakdown: ConfidenceBreakdown
   graph_snapshot?: { dataset_id: string; ontology_id?: string | null; chunk_count: number; version_hash: string }
 }

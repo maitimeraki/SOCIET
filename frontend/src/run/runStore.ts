@@ -131,7 +131,10 @@ export const useRunStore = create<RunStoreState>((set, get) => {
     // put in the store (the corpus, which the event buffer never carries) must survive the refold.
     reset: () => {
       pending = [] // pre-open arrivals belong to the old connection; the refold replaces them
-      set((state) => ({ run: { ...initialState, runId: state.run.runId, config: state.run.config }, events: [] }))
+      set((state) => ({
+        run: { ...initialState, runId: state.run.runId, config: state.run.config, datasetId: state.run.datasetId },
+        events: [],
+      }))
     },
 
     /**
