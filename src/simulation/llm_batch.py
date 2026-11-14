@@ -50,7 +50,7 @@ class BatchedLLMRunner:
             except Exception as exc:
                 LLM_FAILURES.inc()
                 logger.error(f"LLM call failed for pair {prompt.pair_id}: {exc}")
-                return PairResult(pair_id=prompt.pair_id, response="", error=str(exc))
+                return PairResult(pair_id=prompt.pair_id, response="", error=type(exc).__name__)
 
     async def gather(
         self,

@@ -27,6 +27,7 @@ from src.api.errors import payment_required
 from src.api.graph_snapshot import read_snapshot as read_graph_snapshot
 from src.api.jobs_api import enqueue_or_http
 from src.api.limits import limiter, service_available
+from src.api.public_events import project_event, project_result
 from src.audit import client_ip
 from src.audit import record as audit_record
 from src.auth.cookies import verify_csrf
@@ -44,6 +45,12 @@ from src.db.models import User
 from src.simulation.debate_config import DebateConfig
 
 logger = logging.getLogger(__name__)
+
+# What a client sees when a run fails for a reason we did not author. The
+# exception text stays in the server log.
+_RUN_FAILED_MESSAGE = (
+    "The run failed. Try again, or contact support with the run id."
+)
 
 router = APIRouter(
     prefix="/simulate", tags=["debate"], dependencies=[Depends(verify_csrf)]
@@ -143,7 +150,7 @@ def _job_doc(job: dict) -> dict:
         "config": job.get("config"),
         "status": job.get("status"),
         "events": [],
-        "result": job.get("result"),
+        "result": project_result(job.get("result")),
         "error": job.get("error"),
     }
 
@@ -183,7 +190,8 @@ async def _run_debate_async(
     cancel_check: Optional[Callable[[], bool]] = None,
 ) -> None:
     """Background task to run debate and stream results via WebSocket."""
-    from src.simulation.orchestrator import DebateCancelled
+    from src.simulation.orchestrator import DebateCancelled, SocietyNotDebatableError
+    from src.simulation.relevance_matrix import NoAgentsDerivableError
 
     # Reuse the manager the job already holds: a client that connected before
     # the task started created and stored one (`stream_debate`), and replacing
@@ -342,14 +350,20 @@ async def _run_debate_async(
         # accumulated warnings; surface them with the error (broadcast → buffered
         # → persisted) so a failed run does not lose its diagnostics.
         warnings = list(getattr(exc, "warnings", []) or [])
+        if isinstance(exc, (SocietyNotDebatableError, NoAgentsDerivableError)):
+            # Messages these two are authored for the user.
+            message = str(exc)
+        else:
+            logger.exception("debate run %s failed", job_id)
+            message = _RUN_FAILED_MESSAGE
         async with _DEBATE_JOBS_LOCK:
             _DEBATE_JOBS.setdefault(job_id, {})["status"] = "failed"
-            _DEBATE_JOBS.setdefault(job_id, {})["error"] = str(exc)
+            _DEBATE_JOBS.setdefault(job_id, {})["error"] = message
 
         await ws_manager.broadcast(
             {
                 "type": "error",
-                "error": str(exc),
+                "error": message,
                 "warnings": warnings,
             }
         )
@@ -388,6 +402,9 @@ class _DebateWSManager:
             self.connections.append(ws)
 
     async def broadcast(self, data: Dict[str, Any]):
+        data = project_event(data)
+        if data is None:
+            return
         async with self._lock:
             self.buffer.append(data)
             connections = list(self.connections)
@@ -671,6 +688,8 @@ async def get_debate_doc(run_id: str, user: User = Depends(current_user)):
     if doc is None:
         raise HTTPException(status_code=404, detail="Run not found")
     await require_owner(doc.get("user_id"), user)
+    doc["events"] = [e for e in map(project_event, doc["events"]) if e]
+    doc["result"] = project_result(doc["result"])
     return doc
 
 
@@ -759,7 +778,7 @@ async def get_debate_status(job_id: str, user: User = Depends(current_user)):
     return DebateStatusResponse(
         job_id=job_id,
         status=head["status"],
-        result=head["result"],
+        result=project_result(head["result"]),
         error=head["error"],
     )
 

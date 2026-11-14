@@ -309,14 +309,7 @@ class RoundRunner:
 
         async for result in self._llm.gather(prompts):
             if self.ws_broadcast:
-                await self.ws_broadcast(
-                    {
-                        "type": "pair_turn",
-                        "pair_id": result.pair_id,
-                        "response": result.response,
-                        "error": result.error,
-                    }
-                )
+                await self.ws_broadcast({"type": "pair_turn", "pair_id": result.pair_id})
 
             meta = prompt_meta.get(result.pair_id)
             if meta is None or result.error:

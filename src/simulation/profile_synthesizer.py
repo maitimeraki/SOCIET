@@ -246,7 +246,7 @@ class ProfileSynthesizer:
                         )
                         if warnings is not None:
                             warnings.append(
-                                f"provenance write failed for persona {agent_name!r}: {exc}"
+                                f"provenance write failed for persona {agent_name!r} ({type(exc).__name__})"
                             )
 
                     # Topology prerequisite: without persona→entity links the
@@ -268,7 +268,7 @@ class ProfileSynthesizer:
                         )
                         if warnings is not None:
                             warnings.append(
-                                f"entity-link write failed for persona {agent_name!r}: {exc}"
+                                f"entity-link write failed for persona {agent_name!r} ({type(exc).__name__})"
                             )
 
                 # Build profile
