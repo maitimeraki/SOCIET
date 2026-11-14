@@ -65,3 +65,18 @@ def test_leading_whitespace_is_trimmed_from_the_first_span():
 def test_leading_whitespace_is_not_part_of_an_item():
     lead = ChunkRow("c7", "d", "T", "", "  Kestra raised prices.", 0.5)
     assert build_pack("Kestra", [], [lead], []).items[0].text == "Kestra raised prices."
+
+
+def test_a_real_name_with_a_blank_alias_still_matches_only_named_sentences():
+    mixed = ChunkRow("c8", "d", "T", "", "Orin cut prices. Kestra raised.", 1)
+    assert [i.text for i in build_pack("Kestra", ["  "], [mixed], []).items] == ["Kestra raised."]
+
+
+def test_a_name_at_word_forty_is_owned():
+    edge = ChunkRow("c9", "d", "T", "", "word " * 39 + "Kestra closes.", 0.5)
+    assert [i.text for i in build_pack("Kestra", [], [edge], []).items] == ["word " * 39 + "Kestra"]
+
+
+def test_a_name_at_word_forty_one_is_not_owned():
+    past = ChunkRow("c10", "d", "T", "", "word " * 40 + "Kestra closes.", 0.5)
+    assert build_pack("Kestra", [], [past], []).items == ()
