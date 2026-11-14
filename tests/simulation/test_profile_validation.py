@@ -1,5 +1,7 @@
 from dataclasses import replace
 
+import pytest
+
 from src.simulation.evidence import EvidenceItem, EvidencePack, RelationItem
 from src.simulation.profile_validation import (
     BIO_SIM_MAX,
@@ -36,9 +38,10 @@ def test_short_details_are_repairable():
     assert rejection.repairable
 def test_details_need_two_valid_markers():           assert "details" in reasons(draft(details=DETAILS.replace("[e2]", "[e1]")))
 def test_marker_to_unknown_id_is_rejected():         assert "details" in reasons(draft(details=DETAILS + " Extra [e7]."))
-def test_bio_must_use_a_term_from_the_pack():        assert "bio" in reasons(draft(bio="Something entirely unrelated to anything supplied " * 3))
-def test_bio_without_pack_term_is_rejected_at_valid_length():
-    assert "bio" in reasons(draft(bio="Something entirely unrelated to anything supplied " * 4))
+UNRELATED_BIO = "Something entirely unrelated to anything supplied " * 5   # 30 words, no pack term
+def bio_reasons(raw): return {r.reason for r in validate_profile(raw, PACK)[1] if r.field == "bio"}
+def test_bio_must_use_a_term_from_the_pack():        assert "bio uses no term from the evidence" in bio_reasons(draft(bio=UNRELATED_BIO))
+def test_bio_with_a_pack_term_passes_the_term_rule(): assert "bio" not in reasons(draft(bio=UNRELATED_BIO + " pricing"))
 def test_verbatim_copy_is_evidence_dumping():
     long_text = " ".join(f"word{i}" for i in range(30))              # a 30-word evidence sentence
     pack = EvidencePack(items=(replace(PACK.items[0], text=long_text),) + PACK.items[1:],
@@ -56,6 +59,11 @@ def test_identical_details_fail_the_8gram_check():
     a, b = ProfileDraft(**draft()), ProfileDraft(**draft())
     report = check_uniqueness({"A": a, "B": b}, {"A": (1.0, 0.0), "B": (0.0, 1.0)})
     assert report.max_details_sim > DETAILS_SIM_MAX and ("A", "B") in report.failing_pairs
+
+@pytest.mark.parametrize("vector_b", [(1.0,), (0.0, 0.0)])
+def test_mismatched_or_zero_bio_vectors_score_zero(vector_b):
+    report = check_uniqueness({"A": ProfileDraft(**draft()), "B": ProfileDraft(**draft())}, {"A": (1.0, 0.0), "B": vector_b})
+    assert report.max_bio_sim == 0.0
 
 def test_similar_bios_fail_the_cosine_check():
     a, b = ProfileDraft(**draft()), ProfileDraft(**draft(details=DETAILS.replace("pricing", "regulatory")))

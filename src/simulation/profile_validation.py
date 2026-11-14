@@ -6,7 +6,6 @@ single repair call may fix the draft; the caller decides whether to make that ca
 from __future__ import annotations
 
 import itertools
-import math
 import re
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
@@ -15,6 +14,7 @@ from typing import Literal
 from pydantic import BaseModel, Field, ValidationError
 
 from src.simulation.evidence import EvidencePack
+from src.simulation.ranking import cosine
 
 DETAILS_MIN, DETAILS_MAX = 1500, 2100
 BIO_SIM_MAX, DETAILS_SIM_MAX = 0.85, 0.10
@@ -39,6 +39,8 @@ class ProfileDraft(BaseModel):
     cites: dict[str, list[str]]
 
 
+# Internal diagnostics only (spec 4b): reasons and similarity numbers must never be
+# forwarded to a client, the WebSocket, run_events or runs.verdict.
 @dataclass(frozen=True)
 class Rejection:
     field: str
@@ -46,6 +48,8 @@ class Rejection:
     repairable: bool
 
 
+# Internal diagnostics only (spec 4b): similarity numbers and failing pairs must never be
+# forwarded to a client, the WebSocket, run_events or runs.verdict.
 @dataclass(frozen=True)
 class UniquenessReport:
     max_bio_sim: float
@@ -169,12 +173,6 @@ def validate_profile(raw: Mapping, pack: EvidencePack) -> tuple[ProfileDraft | N
     return (None if rejections else draft), rejections
 
 
-def _cosine(u: Sequence[float], v: Sequence[float]) -> float:
-    dot = sum(x * y for x, y in zip(u, v))
-    norm = math.hypot(*u) * math.hypot(*v)
-    return dot / norm if norm else 0.0
-
-
 def _jaccard(a: set, b: set) -> float:
     union = a | b
     return len(a & b) / len(union) if union else 0.0
@@ -186,7 +184,7 @@ def check_uniqueness(drafts: Mapping[str, ProfileDraft], bio_vectors: Mapping[st
     cited = {n: {cid for ids in drafts[n].cites.values() for cid in ids} for n in names}
     bio_sims, details_sims, cite_overlaps, failing = [], [], [], []
     for a, b in itertools.combinations(names, 2):
-        bio = _cosine(bio_vectors[a], bio_vectors[b])
+        bio = cosine(bio_vectors[a], bio_vectors[b])
         details = _jaccard(shingles[a], shingles[b])
         bio_sims.append(bio)
         details_sims.append(details)
