@@ -15,8 +15,10 @@ the job body maps them onto a readable job failure like any other.
 import json
 import logging
 import os
+import re
 import subprocess
 import sys
+import tempfile
 from importlib.util import find_spec
 
 from src.ingest.extract import ExtractionError
@@ -29,6 +31,11 @@ _CHILD = os.path.join(os.path.dirname(os.path.abspath(__file__)), "_extract_chil
 _RLIMIT_MEMORY_BYTES = 1024 * 1024 * 1024
 
 _rlimit_logged = False
+
+#: The child's stderr is logged as its last bytes only: a runaway child cannot
+#: make the worker hold or log its whole stream.
+_STDERR_TAIL_BYTES = 4000
+_CONTROL_CHARS = re.compile(r"[\x00-\x1f\x7f-\x9f]")
 
 
 class BoundedExtractionError(ExtractionError):
@@ -47,6 +54,14 @@ def _log_missing_rlimits_once() -> None:
     )
 
 
+def _stderr_tail(stream) -> str:
+    """The last few KB of the child's stderr, printable and on one line."""
+    stream.seek(0, os.SEEK_END)
+    stream.seek(max(0, stream.tell() - _STDERR_TAIL_BYTES))
+    text = stream.read(_STDERR_TAIL_BYTES).decode("utf-8", errors="replace")
+    return " ".join(_CONTROL_CHARS.sub(" ", text).split())
+
+
 def run_extraction(request: dict, *, timeout: int, max_output_bytes: int) -> dict:
     """Run one extraction in the isolated child; return its parsed result dict.
 
@@ -61,29 +76,31 @@ def run_extraction(request: dict, *, timeout: int, max_output_bytes: int) -> dic
         "rlimit_cpu_seconds": timeout,
         "max_output_bytes": max_output_bytes,
     }
-    try:
-        proc = subprocess.run(
-            [sys.executable, "-I", _CHILD],
-            input=json.dumps(payload).encode("utf-8"),
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            timeout=timeout,
-        )
-    except subprocess.TimeoutExpired as exc:
-        raise BoundedExtractionError(
-            f"extraction exceeded its {timeout}s limit"
-        ) from exc
-    if len(proc.stdout) > max_output_bytes:
-        raise BoundedExtractionError(
-            f"extraction output exceeded the {max_output_bytes} byte limit"
-        )
-    try:
-        result = json.loads(proc.stdout)
-    except (ValueError, UnicodeDecodeError) as exc:
-        raise BoundedExtractionError(
-            f"extraction failed (exit {proc.returncode})"
-        ) from exc
-    if not result.get("ok"):
-        logger.warning("extraction child reported a failure: %s", proc.stderr[-4000:].decode("utf-8", "replace"))
-        raise BoundedExtractionError(result.get("detail") or "extraction failed")
+    with tempfile.TemporaryFile() as child_stderr:
+        try:
+            proc = subprocess.run(
+                [sys.executable, "-I", _CHILD],
+                input=json.dumps(payload).encode("utf-8"),
+                stdout=subprocess.PIPE,
+                stderr=child_stderr,
+                timeout=timeout,
+            )
+        except subprocess.TimeoutExpired as exc:
+            raise BoundedExtractionError(
+                f"extraction exceeded its {timeout}s limit"
+            ) from exc
+        if len(proc.stdout) > max_output_bytes:
+            raise BoundedExtractionError(
+                f"extraction output exceeded the {max_output_bytes} byte limit"
+            )
+        try:
+            result = json.loads(proc.stdout)
+        except (ValueError, UnicodeDecodeError) as exc:
+            logger.warning("extraction child sent no result: %s", _stderr_tail(child_stderr))
+            raise BoundedExtractionError(
+                f"extraction failed (exit {proc.returncode})"
+            ) from exc
+        if not result.get("ok"):
+            logger.warning("extraction child reported a failure: %s", _stderr_tail(child_stderr))
+            raise BoundedExtractionError(result.get("detail") or "extraction failed")
     return result
