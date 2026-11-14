@@ -6,7 +6,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, List
 
-from src.graph.scope import entity_in_dataset
+from src.graph.scope import entity_in_dataset, path_in_dataset
 from src.simulation.pair_turn import ActivationCandidate, CommPair
 
 if TYPE_CHECKING:
@@ -155,7 +155,7 @@ class CommunicationTopology:
         radius = effective_radius
 
         cypher = f"""
-        MATCH (a:Persona)-[r1*1..{radius}]-(e)-[r2*1..{radius}]-(b:Persona)
+        MATCH p = (a:Persona)-[r1*1..{radius}]-(e)-[r2*1..{radius}]-(b:Persona)
         WHERE a.name IN $agent_names AND b.name IN $agent_names
           AND a <> b
           AND a.name < b.name
@@ -163,6 +163,7 @@ class CommunicationTopology:
           AND {entity_in_dataset("e")}
           AND coalesce(a.dataset_id, '') = $dataset_id
           AND coalesce(b.dataset_id, '') = $dataset_id
+          AND {path_in_dataset("p")}
         WITH a, b, count(DISTINCT e) AS shared_count,
              collect(DISTINCT e.name) AS shared_entities
         WHERE shared_count >= 1

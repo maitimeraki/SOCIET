@@ -10,7 +10,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from src.graph.scope import entity_in_dataset
+from src.graph.scope import entity_in_dataset, persona_or_entity_in_dataset
 from src.persona.repository import PersonaRepository
 
 
@@ -78,9 +78,36 @@ async def test_recent_memories_scope_the_agent_and_every_target(recorder):
     await _repo_on(recorder).fetch_recent_memories("Alice", dataset_id="ds-A")
 
     query, params = recorder.calls[0]
-    assert entity_in_dataset("n") in query
-    assert entity_in_dataset("m") in query
+    assert persona_or_entity_in_dataset("n") in query
+    assert persona_or_entity_in_dataset("m") in query
     assert params["dataset_id"] == "ds-A"
+
+
+@pytest.mark.asyncio
+async def test_recent_memories_never_match_an_entity_by_its_property(recorder):
+    """An entity carrying `dataset_id` but no DERIVED_FROM must not pass as a persona."""
+    await _repo_on(recorder).fetch_recent_memories("Alice", dataset_id="ds-A")
+
+    query, _ = recorder.calls[0]
+    # The property branch is Persona-only: no bare `dataset_id` test without the label.
+    assert "coalesce(n.dataset_id, '') = $dataset_id OR" not in query
+    assert "coalesce(m.dataset_id, '') = $dataset_id OR" not in query
+    assert "(n:Persona AND coalesce(n.dataset_id, '') = $dataset_id)" in query
+
+
+@pytest.mark.asyncio
+async def test_agent_node_fallback_scopes_persona_or_entity_to_the_dataset(recorder):
+    await _repo_on(recorder).fetch_agent_node_props("Alice", dataset_id="ds-A")
+
+    query, params = recorder.calls[0]
+    assert persona_or_entity_in_dataset("n") in query
+    assert params["dataset_id"] == "ds-A"
+
+
+@pytest.mark.asyncio
+async def test_agent_node_fallback_requires_dataset_id(recorder):
+    with pytest.raises(TypeError):
+        await _repo_on(recorder).fetch_agent_node_props("Alice")
 
 
 @pytest.mark.asyncio

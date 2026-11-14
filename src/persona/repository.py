@@ -21,7 +21,11 @@ from uuid import uuid4
 from llama_index.embeddings.ollama import OllamaEmbedding
 from neo4j import AsyncGraphDatabase
 
-from src.graph.scope import chunk_in_dataset, entity_in_dataset
+from src.graph.scope import (
+    chunk_in_dataset,
+    entity_in_dataset,
+    persona_or_entity_in_dataset,
+)
 from src.llm.config_llm import LLMConfig
 from src.logging.setup_logging import setup_logging
 from src.persona.agent import (
@@ -137,15 +141,22 @@ class PersonaRepository:
             logger.exception("Failed to read node properties")
             return {}
 
-    async def fetch_agent_node_props(self, name: str) -> Dict[str, Any] | None:
-        """Return all properties for a node with the given name and optional archetype label."""
-        # label_clause = self._label_clause(archetype_label)
-        query = """
-        MATCH (n {name: $name})
+    async def fetch_agent_node_props(
+        self, name: str, dataset_id: str
+    ) -> Dict[str, Any] | None:
+        """Return the properties of the node `name` in `dataset_id` (audit C1).
+
+        A Persona of the dataset, or an entity through its document.
+        """
+        query = f"""
+        MATCH (n {{name: $name}})
+        WHERE {persona_or_entity_in_dataset("n")}
         RETURN n LIMIT 1
         """
         async with self._driver.session(database=self._db) as session:
-            res = await session.run(cast(LiteralString, query), name=name)
+            res = await session.run(
+                cast(LiteralString, query), name=name, dataset_id=dataset_id
+            )
             row = await res.single()
         if not row:
             return None
@@ -162,10 +173,10 @@ class PersonaRepository:
         """
         query = f"""
             MATCH (n {{name: $name}})
-            WHERE coalesce(n.dataset_id, '') = $dataset_id OR {entity_in_dataset("n")}
+            WHERE {persona_or_entity_in_dataset("n")}
             OPTIONAL MATCH (n)-[r]->(m)
             WHERE m.name IS NOT NULL
-              AND (coalesce(m.dataset_id, '') = $dataset_id OR {entity_in_dataset("m")})
+              AND {persona_or_entity_in_dataset("m")}
             RETURN
             type(r) AS relation_type,
             m.name AS target_name,
@@ -407,7 +418,9 @@ class PersonaRepository:
             async with semaphore:
                 node = (
                     nodes_map.get(agent_name)
-                    or await self.fetch_agent_node_props(agent_name)
+                    or await self.fetch_agent_node_props(
+                        agent_name, dataset_id=dataset_id
+                    )
                     or {"name": agent_name}
                 )  # return Type: Dict[str, Any] where we fetch the node properties for the agent name, if not found we create a minimal dict with just the name to avoid None issues
                 metrics = await self.calculate_agent_metrics_and_context_for_llm(

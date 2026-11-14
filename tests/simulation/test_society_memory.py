@@ -491,5 +491,7 @@ async def test_snapshot_neighbours_scope_the_shared_entity_to_the_dataset():
     query, kwargs = next(
         (q, kw) for q, kw in session.calls if "collect(DISTINCT q.name)" in q
     )
-    assert entity_in_dataset("e") in query
+    assert "coalesce(p.dataset_id, '') = $dataset_id" in query  # speaker end
+    assert "coalesce(q.dataset_id, '') = $dataset_id" in query  # neighbour end
+    assert entity_in_dataset("e") in query  # the shared entity
     assert kwargs["dataset_id"] == "ds-A"

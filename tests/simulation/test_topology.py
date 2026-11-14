@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from src.graph.scope import entity_in_dataset
+from src.graph.scope import entity_in_dataset, path_in_dataset
 from src.persona.models_persona import (
     AgentProfile,
     ConfidenceBreakdown,
@@ -449,7 +449,29 @@ async def test_activation_scopes_candidates_and_the_opinion_run(recorder):
         max_new=2,
     )
 
-    assert len(recorder.calls) == 2  # mentions source and adjacency source
-    for query, params in recorder.calls:
-        assert entity_in_dataset("e") in query
-        assert params["dataset_id"] == "ds-A"
+    assert len(recorder.calls) == 2  # mentions source, then adjacency source
+    mentions, params_m = recorder.calls[0]
+    adjacency, params_a = recorder.calls[1]
+    assert "(o:Opinion {dataset_id: $dataset_id" in mentions  # the run's opinions
+    assert "coalesce(p.dataset_id, '') = $dataset_id" in mentions  # candidate
+    assert entity_in_dataset("e") in mentions  # the mentioned entity
+    assert "coalesce(p.dataset_id, '') = $dataset_id" in adjacency  # candidate
+    assert "coalesce(part.dataset_id, '') = $dataset_id" in adjacency  # participant
+    assert entity_in_dataset("e") in adjacency  # the shared entity
+    assert params_m["dataset_id"] == params_a["dataset_id"] == "ds-A"
+
+
+@pytest.mark.asyncio
+async def test_round_n_scopes_every_node_on_the_walk(
+    recorder, sample_profiles, debate_config
+):
+    """comm_radius > 1 lets the walk cross intermediate nodes; each must be in the dataset."""
+    topology = CommunicationTopology(recorder.driver, "neo4j")
+
+    await topology.compute_round_pairs(
+        sample_profiles, "ds-A", round_num=2, config=debate_config
+    )
+
+    query, _ = recorder.calls[0]
+    assert "MATCH p = (a:Persona)-[r1*1" in query  # the walk is a named path
+    assert path_in_dataset("p") in query
