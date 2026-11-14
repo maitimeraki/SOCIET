@@ -7,6 +7,7 @@ from src.simulation.profile_validation import (
     BIO_SIM_MAX,
     DETAILS_SIM_MAX,
     ProfileDraft,
+    Rejection,
     check_uniqueness,
     strip_markers,
     validate_profile,
@@ -69,3 +70,28 @@ def test_similar_bios_fail_the_cosine_check():
     a, b = ProfileDraft(**draft()), ProfileDraft(**draft(details=DETAILS.replace("pricing", "regulatory")))
     report = check_uniqueness({"A": a, "B": b}, {"A": (1.0, 0.0), "B": (1.0, 0.01)})
     assert report.max_bio_sim > BIO_SIM_MAX and ("A", "B") in report.failing_pairs
+
+
+UNCITED_CLAIM = "a sentence in details has no valid cite marker"
+
+
+def _sentence_gate(extra: str) -> list[Rejection]:
+    return [r for r in validate_profile(draft(details=f"{DETAILS} {extra}"), PACK)[1] if r.reason == UNCITED_CLAIM]
+
+
+def test_abbreviation_periods_do_not_split_a_cited_sentence():
+    assert _sentence_gate("Acme Inc. grew [e1]. Margins held [e2].") == []
+
+
+def test_decimal_points_do_not_split_a_cited_sentence():
+    assert _sentence_gate("Growth was 3.5 percent [e1].") == []
+
+
+@pytest.mark.parametrize("extra", [
+    "Revenue rose [e1]; pricing power is unproven; churn fell [e2].",
+    "Revenue rose [e1]\n\nPricing power is unproven",
+    "Revenue rose [e1].Pricing power is unproven",
+])
+def test_an_uncited_clause_is_rejected_as_repairable(extra):
+    rejected = _sentence_gate(extra)
+    assert rejected and rejected[0].repairable

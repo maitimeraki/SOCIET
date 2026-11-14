@@ -26,7 +26,9 @@ TERM_MIN_LEN = 5
 
 CITE_MARKER = re.compile(r"\[([^\[\]]+)\]")
 _MARKER_WITH_SPACE = re.compile(r"\s*\[[^\[\]]+\]")
-_SENTENCE_END = re.compile(r"[.!?](?:\s*\[[^\[\]]+\])*(?=\s|$)")
+_PARAGRAPH_BREAK = re.compile(r"\n\s*\n")
+_CLAUSE_END = re.compile(r"[.!?;](?:\s*\[[^\[\]]+\])*")
+_ABBREVIATION_TAIL = re.compile(r"(?:^|[\s(])(?:inc|ltd|corp|co|dr|mr|ms|st|vs|e\.g|i\.e|u\.s|approx)$", re.IGNORECASE)
 _WORD = re.compile(r"\w+")
 
 
@@ -63,14 +65,35 @@ def strip_markers(text: str) -> str:
     return _MARKER_WITH_SPACE.sub("", text).strip()
 
 
-def split_sentences(text: str) -> list[str]:
-    """Sentences of a details text. A cite marker written right after a sentence's end stays with it."""
+def _is_clause_end(paragraph: str, match: re.Match) -> bool:
+    punct = paragraph[match.start()]
+    if punct == ";":
+        return True
+    if punct == "." and _ABBREVIATION_TAIL.search(paragraph[:match.start()]):
+        return False
+    end = match.end()
+    if end == len(paragraph) or paragraph[end].isspace():
+        return True
+    return paragraph[end].isalpha() or paragraph[end] in "\"'("  # a digit after "." is a decimal, not a break
+
+
+def _split_paragraph(paragraph: str) -> list[str]:
     pieces, start = [], 0
-    for match in _SENTENCE_END.finditer(text):
-        pieces.append(text[start:match.end()].strip())
-        start = match.end()
-    pieces.append(text[start:].strip())
+    for match in _CLAUSE_END.finditer(paragraph):
+        if _is_clause_end(paragraph, match):
+            pieces.append(paragraph[start:match.end()].strip())
+            start = match.end()
+    pieces.append(paragraph[start:].strip())
     return [piece for piece in pieces if piece]
+
+
+def split_sentences(text: str) -> list[str]:
+    """Clauses of a details text: split at sentence ends, ';' and blank lines.
+
+    A cite marker written right after a clause's end stays with that clause, so each
+    piece must carry its own marker. Abbreviations ("Inc.", "e.g.") and decimals do not end a clause.
+    """
+    return [piece for paragraph in _PARAGRAPH_BREAK.split(text) for piece in _split_paragraph(paragraph)]
 
 
 def has_valid_marker(sentence: str, valid_ids: set[str]) -> bool:
