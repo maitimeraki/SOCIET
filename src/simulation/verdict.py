@@ -15,6 +15,7 @@ from src.simulation.pair_turn import (
     DebateVerdict,
     RoundResult,
 )
+from src.utils.json_extract import extract_json_object
 
 if TYPE_CHECKING:
     from src.llm.client import LLMClient
@@ -65,45 +66,10 @@ class Verdict(BaseModel):
     confidence: float = 0.0
 
 
-def _extract_json_object(raw: str) -> str | None:
-    """Return the first balanced `{...}` object in `raw`, or None.
-
-    Tolerates markdown fences and prose before/after the object (both are
-    common from a small model) by locating the first `{` and matching braces.
-    String-aware, so a brace inside a JSON string never ends the match early.
-    """
-    text = raw or ""
-    start = text.find("{")
-    if start == -1:
-        return None
-    depth = 0
-    in_string = False
-    escaped = False
-    for i in range(start, len(text)):
-        ch = text[i]
-        if in_string:
-            if escaped:
-                escaped = False
-            elif ch == "\\":
-                escaped = True
-            elif ch == '"':
-                in_string = False
-            continue
-        if ch == '"':
-            in_string = True
-        elif ch == "{":
-            depth += 1
-        elif ch == "}":
-            depth -= 1
-            if depth == 0:
-                return text[start : i + 1]
-    return None
-
-
 def _parse_verdict(raw: str) -> Verdict | None:
     """Repair-then-validate: extract the JSON object, then validate it. None
     when there is no parseable object or the answer came back empty."""
-    candidate = _extract_json_object(raw)
+    candidate = extract_json_object(raw)
     if candidate is None:
         return None
     try:

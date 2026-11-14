@@ -8,7 +8,7 @@ from typing import Sequence
 
 from src.billing import metering
 from src.llm.config_llm import get_llm_config
-from src.simulation.verdict import _extract_json_object
+from src.utils.json_extract import extract_json_object
 
 logger = logging.getLogger(__name__)
 
@@ -28,7 +28,7 @@ def _all_actors(labels: Sequence[str]) -> tuple[dict[str, bool], bool]:
 
 
 def _parse_flags(raw: str, labels: Sequence[str]) -> tuple[dict[str, bool], bool] | None:
-    candidate = _extract_json_object(raw)
+    candidate = extract_json_object(raw)
     if candidate is None:
         return None
     try:
