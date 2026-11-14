@@ -25,8 +25,22 @@ def _vectors():
     ]
 
 
-def test_statement_count_is_eleven():
-    assert len(_statements()) == 11
+def test_statement_count_is_thirteen():
+    assert len(_statements()) == 13
+
+
+def test_chunk_indexes_present():
+    from src.graph.neo4j_bootstrap import EMBEDDING_DIMENSIONS
+
+    statements = [cypher for cypher, _ in _statements()]
+    assert (
+        "CREATE FULLTEXT INDEX chunk_text IF NOT EXISTS FOR (c:Chunk) ON EACH [c.text]"
+        in statements
+    )
+    chunk_vectors = [c for c in statements if "CREATE VECTOR INDEX chunk_embeddings" in c]
+    assert len(chunk_vectors) == 1
+    assert "FOR (c:Chunk) ON (c.embedding)" in chunk_vectors[0]
+    assert f"`vector.dimensions`: {EMBEDDING_DIMENSIONS}" in chunk_vectors[0]
 
 
 def test_every_placeholder_has_a_param_and_every_param_is_used():
@@ -38,7 +52,7 @@ def test_vector_statements_use_literal_index_config():
     from src.graph.neo4j_bootstrap import EMBEDDING_DIMENSIONS
 
     vectors = _vectors()
-    assert len(vectors) == 2
+    assert len(vectors) == 3
     for cypher, params in vectors:
         assert "$" not in cypher, cypher
         assert params == {}, cypher

@@ -22,6 +22,10 @@ READS = {
         lambda ctx, **kw: ctx.find_relevant_entities("q", **kw),
         [entity_in_dataset("node")],
     ),
+    "find_relevant_chunks": (
+        lambda ctx, **kw: ctx.find_relevant_chunks("q", **kw),
+        [chunk_in_dataset("node")],
+    ),
     "find_connected_nodes": (
         lambda ctx, **kw: ctx.find_connected_nodes(["a"], **kw),
         [entity_in_dataset("seed"), entity_in_dataset("n")],

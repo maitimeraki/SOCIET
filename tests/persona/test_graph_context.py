@@ -1,7 +1,7 @@
 """Tests for GraphContext."""
 
 import os
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 from uuid import UUID
 
 import pytest
@@ -11,7 +11,14 @@ from dotenv import load_dotenv
 load_dotenv()
 
 from src.graph.config_graph import GraphConfig
-from src.persona.graph_context import EntityContext, EntityNode, GraphContext
+from src.graph.neo4j_bootstrap import ensure_schema
+from src.persona.graph_context import (
+    ChunkHit,
+    ChunkSearch,
+    EntityContext,
+    EntityNode,
+    GraphContext,
+)
 from src.persona.models_persona import ProvenanceLink
 
 DATASET_ID = "ds-test-graph-context"
@@ -554,3 +561,104 @@ async def test_find_connected_nodes_by_seed_empty_ids_run_no_query():
 
     assert await ctx.find_connected_nodes_by_seed([], "ds-A") == {}
     assert driver.queries == []
+
+
+# ---- Chunk retrieval: two dataset-scoped legs, fused by the caller (Task 1.2) ----
+
+
+def _chunk_ctx(rows, embed=None):
+    ctx, driver = _batch_ctx(lambda cypher, params: rows)
+    ctx.degraded = set()
+    ctx._get_embedding = embed or AsyncMock(return_value=[0.1, 0.2])
+    return ctx, driver
+
+
+def _hit_row(chunk_id, text="body"):
+    return {
+        "chunk_id": chunk_id,
+        "doc_id": "doc:1",
+        "doc_title": "T",
+        "section": "S",
+        "text": text,
+        "entity_ids": ["ds-A:Alpha"],
+    }
+
+
+@pytest.mark.asyncio
+async def test_find_relevant_chunks_returns_both_ranked_legs():
+    ctx, driver = _chunk_ctx([_hit_row("c1"), _hit_row("c2")])
+
+    search = await ctx.find_relevant_chunks("alpha", "ds-A", limit=5)
+
+    assert isinstance(search, ChunkSearch)
+    assert len(driver.queries) == 2  # the vector leg and the fulltext leg
+    assert [h.chunk_id for h in search.vector] == ["c1", "c2"]
+    assert [h.chunk_id for h in search.fulltext] == ["c1", "c2"]
+    assert search.vector[0] == ChunkHit(
+        chunk_id="c1",
+        doc_id="doc:1",
+        doc_title="T",
+        section="S",
+        text="body",
+        rank=1,
+        entity_ids=("ds-A:Alpha",),
+    )
+
+
+@pytest.mark.asyncio
+async def test_fulltext_leg_escapes_lucene_syntax_and_never_interpolates():
+    question = 'mergers: "EU" (AI) AND NOT x*'
+    ctx, driver = _chunk_ctx([])
+
+    await ctx.find_relevant_chunks(question, "ds-A", limit=5)
+
+    cypher, params = next(q for q in driver.queries if "fulltext" in q[0])
+    assert question not in cypher
+    assert params["search"] == "mergers EU AI x"
+
+
+@pytest.mark.asyncio
+async def test_embedding_failure_degrades_to_fulltext_only():
+    ctx, driver = _chunk_ctx(
+        [_hit_row("c1")], embed=AsyncMock(side_effect=RuntimeError("ollama down"))
+    )
+
+    search = await ctx.find_relevant_chunks("q", "ds-A", limit=5)
+
+    assert search.vector == []
+    assert [h.chunk_id for h in search.fulltext] == ["c1"]
+    assert "no_embeddings" in ctx.degraded
+    assert all("db.index.vector" not in q for q, _ in driver.queries)
+
+
+@pytest.mark.asyncio
+async def test_find_relevant_chunks_is_tenant_scoped_live(graph_ctx):
+    """A chunk of another dataset carrying the same text is never returned."""
+    probe = "tenantprobe zq7 mergers"
+    other = "ds-test-other-tenant"
+    await ensure_schema(graph_ctx._driver, graph_ctx._db)
+    async with graph_ctx._driver.session(database=graph_ctx._db) as session:
+        await session.run(
+            """
+            CREATE (:__Node__:Chunk {chunk_id: 'scope-probe-own', text: $text,
+                dataset_id: $own, document_anchor: 'doc:scope-own', title: 'own',
+                breadcrumb: 'b', _test: true}),
+              (:__Node__:Chunk {chunk_id: 'scope-probe-other', text: $text,
+                dataset_id: $other, document_anchor: 'doc:scope-other', title: 'other',
+                breadcrumb: 'b', _test: true})
+            """,
+            text=probe,
+            own=DATASET_ID,
+            other=other,
+        )
+        await session.run("CALL db.awaitIndexes(120)")
+    try:
+        search = await graph_ctx.find_relevant_chunks(probe, DATASET_ID, limit=10)
+    finally:
+        async with graph_ctx._driver.session(database=graph_ctx._db) as session:
+            await session.run("MATCH (c:Chunk) WHERE c._test = true DETACH DELETE c")
+
+    fulltext_ids = {h.chunk_id for h in search.fulltext}
+    assert "scope-probe-own" in fulltext_ids  # the query really ran
+    assert "scope-probe-other" not in fulltext_ids
+    assert "scope-probe-other" not in {h.chunk_id for h in search.vector}

@@ -5,6 +5,8 @@ Provides methods to retrieve relevant entities and their context from the Neo4j 
 
 import asyncio
 import inspect
+import logging
+import re
 from dataclasses import dataclass
 from typing import Any, Dict, List, LiteralString, Optional, cast
 from uuid import UUID, uuid4
@@ -14,10 +16,16 @@ from neo4j import AsyncGraphDatabase
 from pydantic import BaseModel, Field
 
 from src.graph.config_graph import GraphConfig
-from src.graph.neo4j_bootstrap import ENTITY_EMBEDDINGS_INDEX
+from src.graph.neo4j_bootstrap import (
+    CHUNK_EMBEDDINGS_INDEX,
+    CHUNK_TEXT_INDEX,
+    ENTITY_EMBEDDINGS_INDEX,
+)
 from src.graph.scope import chunk_in_dataset, entity_in_dataset
 from src.llm.config_llm import LLMConfig
 from src.persona.models_persona import ProvenanceLink
+
+logger = logging.getLogger(__name__)
 
 # The ollama clients default to httpx `timeout=None` (unbounded) — a stuck
 # localhost embed call would wait forever. 60 s is a generous bound for it.
@@ -25,6 +33,19 @@ _EMBED_TIMEOUT_SECONDS = 60
 
 # The vector index cannot pre-filter by dataset, so over-fetch and post-filter.
 VECTOR_OVERFETCH = 5
+
+# Lucene query syntax, and the AND/OR/NOT words it reads as operators. Stripped
+# from the user's question so it can never break or steer the fulltext query.
+_LUCENE_SPECIAL = re.compile(r'[+\-&|!(){}\[\]^"~*?:\\/]')
+_LUCENE_OPERATOR_WORDS = re.compile(r"\b(AND|OR|NOT)\b")
+
+# One column list for both chunk legs, so a hit has the same shape from either.
+_CHUNK_COLUMNS = (
+    "node.chunk_id AS chunk_id, node.document_anchor AS doc_id, "
+    "node.title AS doc_title, node.breadcrumb AS section, node.text AS text, "
+    "[(node)-[:MENTIONS]->(e:__Entity__) WHERE e.id IS NOT NULL AND "
+    f"{entity_in_dataset('e')} | e.id] AS entity_ids"
+)
 
 
 # Store/base labels carried by every graph node — never the entity's real type.
@@ -55,6 +76,52 @@ class EntityContext:
     provenance: List[ProvenanceLink]
 
 
+@dataclass(frozen=True)
+class ChunkHit:
+    """A source chunk from one retrieval leg. `rank` is its 1-based position there."""
+
+    chunk_id: str
+    doc_id: str
+    doc_title: str
+    section: str
+    text: str
+    rank: int
+    entity_ids: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class ChunkSearch:
+    """The two ranked chunk legs, unfused: the synthesizer fuses them."""
+
+    vector: List[ChunkHit]
+    fulltext: List[ChunkHit]
+
+
+def _lucene_terms(query: str) -> str:
+    """The question as plain fulltext terms: no Lucene syntax, no operator words."""
+    cleaned = _LUCENE_OPERATOR_WORDS.sub(" ", _LUCENE_SPECIAL.sub(" ", query))
+    return " ".join(cleaned.split())
+
+
+def _chunk_hits(rows: List[Dict[str, Any]]) -> List[ChunkHit]:
+    hits: List[ChunkHit] = []
+    for row in rows:
+        if not row.get("chunk_id"):
+            continue
+        hits.append(
+            ChunkHit(
+                chunk_id=str(row["chunk_id"]),
+                doc_id=row.get("doc_id") or "",
+                doc_title=row.get("doc_title") or "",
+                section=row.get("section") or "",
+                text=row.get("text") or "",
+                rank=len(hits) + 1,
+                entity_ids=tuple(row.get("entity_ids") or ()),
+            )
+        )
+    return hits
+
+
 # ---- GraphContext ----
 
 
@@ -71,6 +138,8 @@ class GraphContext:
             auth=(self.config.neo4j_username, self.config.neo4j_password),
         )
         self._db = self.config.neo4j_database
+        # Capabilities a read could not use this run, e.g. "no_embeddings".
+        self.degraded: set[str] = set()
         self._embed_model = OllamaEmbedding(
             model_name=LLMConfig.embedding_model,
             base_url=LLMConfig.ollama_base_url,
@@ -163,6 +232,75 @@ class GraphContext:
             for row in rows
             if row.get("node") is not None
         ]
+
+    async def find_relevant_chunks(
+        self, query: str, dataset_id: str, limit: int = 200
+    ) -> ChunkSearch:
+        """Dataset chunks for the query, as two ranked legs (fusion is the caller's).
+
+        The fulltext leg needs no embedding. If the query embedding fails, the
+        vector leg is dropped and "no_embeddings" is recorded in `degraded`.
+        """
+        fulltext = await self._fulltext_chunks(query, dataset_id, limit)
+        try:
+            query_vector = await self._get_embedding(query)
+        except Exception as exc:
+            logger.warning("Chunk vector leg skipped, no query embedding: %s", exc)
+            self.degraded.add("no_embeddings")
+            return ChunkSearch(vector=[], fulltext=fulltext)
+        vector = await self._vector_chunks(query_vector, dataset_id, limit)
+        return ChunkSearch(vector=vector, fulltext=fulltext)
+
+    async def _vector_chunks(
+        self, query_vector: List[float], dataset_id: str, limit: int
+    ) -> List[ChunkHit]:
+        cypher = f"""
+        CALL db.index.vector.queryNodes('{CHUNK_EMBEDDINGS_INDEX}', $fetch, $vector)
+        YIELD node, score
+        WHERE {chunk_in_dataset("node")}
+        RETURN {_CHUNK_COLUMNS}, score AS vector_score
+        ORDER BY vector_score DESC
+        LIMIT $limit
+        """
+        return await self._run_chunk_query(
+            cypher,
+            dataset_id,
+            vector=query_vector,
+            fetch=limit * VECTOR_OVERFETCH,
+            limit=limit,
+        )
+
+    async def _fulltext_chunks(
+        self, query: str, dataset_id: str, limit: int
+    ) -> List[ChunkHit]:
+        search = _lucene_terms(query)
+        if not search:
+            return []
+        cypher = f"""
+        CALL db.index.fulltext.queryNodes('{CHUNK_TEXT_INDEX}', $search, {{limit: $fetch}})
+        YIELD node, score
+        WHERE {chunk_in_dataset("node")}
+        RETURN {_CHUNK_COLUMNS}, score AS text_score
+        ORDER BY text_score DESC
+        LIMIT $limit
+        """
+        return await self._run_chunk_query(
+            cypher,
+            dataset_id,
+            search=search,
+            fetch=limit * VECTOR_OVERFETCH,
+            limit=limit,
+        )
+
+    async def _run_chunk_query(
+        self, cypher: str, dataset_id: str, **params: Any
+    ) -> List[ChunkHit]:
+        async with self._driver.session(database=self._db) as session:
+            result = await session.run(
+                cast(LiteralString, cypher), dataset_id=dataset_id, **params
+            )
+            rows = await result.data()
+        return _chunk_hits(rows)
 
     def _entity_from_node(self, node: Any, relevance_score: float) -> EntityNode:
         """One EntityNode from a Neo4j node — the single node-reading body the

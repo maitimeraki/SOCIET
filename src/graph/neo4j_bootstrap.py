@@ -60,6 +60,11 @@ EMBEDDING_SIMILARITY = "cosine"
 # (pinned in tests/graph/test_neo4j_bootstrap.py).
 ENTITY_EMBEDDINGS_INDEX = "entity"
 
+# Chunk retrieval indexes (`Chunk.text` fulltext, `Chunk.embedding` vector). The
+# pipeline writes a chunk embedding through llama-index's store, so both exist.
+CHUNK_TEXT_INDEX = "chunk_text"
+CHUNK_EMBEDDINGS_INDEX = "chunk_embeddings"
+
 
 def _statements() -> list[tuple[str, dict]]:
     """All schema statements, in dependency order.
@@ -123,6 +128,23 @@ def _statements() -> list[tuple[str, dict]]:
         (
             f"CREATE VECTOR INDEX {ENTITY_EMBEDDINGS_INDEX} IF NOT EXISTS "
             "FOR (n:__Entity__) ON (n.embedding) "
+            "OPTIONS { "
+            f"  indexConfig: {{ "
+            f"    `vector.dimensions`: {EMBEDDING_DIMENSIONS}, "
+            f"    `vector.similarity_function`: '{EMBEDDING_SIMILARITY}' "
+            "  } "
+            "}",
+            {},
+        ),
+        # ---- Chunk retrieval: fulltext on text, vector on the embedding ----
+        (
+            f"CREATE FULLTEXT INDEX {CHUNK_TEXT_INDEX} IF NOT EXISTS "
+            "FOR (c:Chunk) ON EACH [c.text]",
+            {},
+        ),
+        (
+            f"CREATE VECTOR INDEX {CHUNK_EMBEDDINGS_INDEX} IF NOT EXISTS "
+            "FOR (c:Chunk) ON (c.embedding) "
             "OPTIONS { "
             f"  indexConfig: {{ "
             f"    `vector.dimensions`: {EMBEDDING_DIMENSIONS}, "
@@ -201,6 +223,8 @@ def _statement_label(cypher: str) -> str:
         "INDEX opinion_round",
         "VECTOR INDEX persona_embeddings",
         "VECTOR INDEX entity IF NOT EXISTS",
+        "FULLTEXT INDEX chunk_text",
+        "VECTOR INDEX chunk_embeddings",
     ):
         if kw in cypher:
             return kw
