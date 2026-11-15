@@ -11,15 +11,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from src.persona.agent import (
-    Agent,
-    ConfidenceBreakdown,
-    DiscoveryType,
-    ExpertiseLevel,
-    GraphSnapshot,
-    PersonaIdentity,
-    Stance,
-)
+from src.persona.agent import Agent, Stance
 from src.simulation.debate_config import DebateConfig
 from src.simulation.llm_batch import BatchedLLMRunner
 from src.simulation.orchestrator import DebateOrchestrator
@@ -29,6 +21,7 @@ from src.simulation.round_runner import _build_user_prompt
 from src.simulation.society_memory import SocietyMemory, SocietySnapshot
 from src.simulation.topology import CommunicationTopology
 from src.simulation.verdict import VerdictSynthesizer
+from tests.agent_factory import slim_agent
 
 
 class FakeResult:
@@ -63,10 +56,7 @@ def _mem_with_rows(rows):
 
 
 def _agent(name: str) -> Agent:
-    return Agent(
-        identity=PersonaIdentity(name=name, archetype="x", communication_style="y"),
-        discovery_type=DiscoveryType.GRAPH_DISCOVERY,
-    )
+    return slim_agent(name)
 
 
 @pytest.mark.asyncio
@@ -254,19 +244,13 @@ def test_user_prompt_hides_prior_positions_in_round_one():
 
 
 def _profile(n: int, name: str) -> Agent:
-    return Agent(
+    return slim_agent(
+        name,
         agent_id=uuid.UUID(int=n),
-        identity=PersonaIdentity(name=name, archetype="E", communication_style="F"),
-        discovery_type=DiscoveryType.INTENT_DRIVEN,
-        expertise_level=ExpertiseLevel.TECHNICAL,
+        dataset_id="ds1",
         bio="b",
-        detailed_perspective="p",
-        domain_tags=["d"],
+        details_raw="p",
         confidence=0.7,
-        confidence_breakdown=ConfidenceBreakdown(
-            source_breadth=1, node_density=1, relationship_connectivity=0.5
-        ),
-        graph_snapshot=GraphSnapshot(dataset_id="ds1"),
     )
 
 

@@ -31,21 +31,14 @@ from src.api.debate_api import (
 from src.auth.deps import current_user
 from src.db.engine import get_session_factory
 from src.db.models import User
-from src.persona.agent import (
-    Agent,
-    ConfidenceBreakdown,
-    DiscoveryType,
-    ExpertiseLevel,
-    GraphSnapshot,
-    PersonaIdentity,
-    Stance,
-)
+from src.persona.agent import Agent, Stance
 from src.persona.graph_context import ChunkHit, ChunkSearch
 from src.simulation.debate_config import DebateConfig
 from src.simulation.orchestrator import OrchestratedDebateResult
 from src.simulation.pair_turn import CommPair, DebateVerdict, RoundResult
 from src.simulation.profile_generator import GenerationResult
 from src.simulation.profile_validation import ProfileDraft
+from tests.agent_factory import slim_agent
 
 if sys.platform == "win32":
     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
@@ -358,21 +351,13 @@ class TestDebateOrchestrator:
 
 
 def _stub_profile(name: str) -> Agent:
-    return Agent(
+    return slim_agent(
+        name,
         agent_id=uuid.uuid4(),
-        identity=PersonaIdentity(
-            name=name, archetype="Expert", communication_style="Formal"
-        ),
-        discovery_type=DiscoveryType.INTENT_DRIVEN,
-        expertise_level=ExpertiseLevel.TECHNICAL,
+        dataset_id="ds1",
         bio=f"{name} bio",
-        detailed_perspective=f"{name} perspective",
-        domain_tags=[f"{name}_domain"],
+        details_raw=f"{name} perspective",
         confidence=0.7,
-        confidence_breakdown=ConfidenceBreakdown(
-            source_breadth=1, node_density=1, relationship_connectivity=0.5
-        ),
-        graph_snapshot=GraphSnapshot(dataset_id="ds1"),
     )
 
 

@@ -6,15 +6,13 @@ an agent rebuts the real claim instead of a strawman. Round 1 has no opponent
 turn, so the block is omitted entirely and the stance line is unchanged.
 """
 
-from src.persona.agent import Agent, DiscoveryType, PersonaIdentity
+from src.persona.agent import Agent
 from src.simulation.round_runner import OPPONENT_STATEMENT_CHARS, _build_user_prompt
+from tests.agent_factory import slim_agent
 
 
 def _agent(name: str = "A") -> Agent:
-    return Agent(
-        identity=PersonaIdentity(name=name, archetype="x", communication_style="y"),
-        discovery_type=DiscoveryType.GRAPH_DISCOVERY,
-    )
+    return slim_agent(name)
 
 
 def _turn(name: str, content: str, stance: str = "NEGATIVE") -> dict:

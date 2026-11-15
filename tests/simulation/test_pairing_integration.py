@@ -10,7 +10,7 @@ unreachable; everything seeded is cleaned up by its unique dataset id.
 
 import os
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, patch
 from uuid import uuid4
 
 import pytest
@@ -20,7 +20,9 @@ from dotenv import load_dotenv
 from src.persona.graph_context import ChunkHit, ChunkSearch, EntityNode
 from src.persona.repository import PersonaRepository
 from src.simulation.debate_config import DebateConfig
+from src.simulation.profile_generator import GenerationResult
 from src.simulation.profile_synthesizer import ProfileSynthesizer
+from src.simulation.profile_validation import ProfileDraft
 from src.simulation.topology import CommunicationTopology
 
 load_dotenv()
@@ -63,10 +65,10 @@ async def test_synthesis_written_entity_links_produce_round1_pairs(live):
     def roster():
         return [
             SimpleNamespace(
-                identity=SimpleNamespace(name=agent_a), communication_radius=1
+                identity=SimpleNamespace(name=agent_a)
             ),
             SimpleNamespace(
-                identity=SimpleNamespace(name=agent_b), communication_radius=1
+                identity=SimpleNamespace(name=agent_b)
             ),
         ]
 
@@ -221,23 +223,39 @@ async def test_single_cell_graph_synthesizes_a_debatable_roster(live):
             async def find_connected_nodes_by_seed(self, node_ids, dataset_id, limit=10):
                 return {}
 
-        async def _stub_build(**kwargs):
-            return SimpleNamespace(identity=SimpleNamespace(name=kwargs["agent_name"]))
+            async def find_relations_for(self, entity_id, counterpart_ids, dataset_id, limit):
+                return []
 
-        repo.calculate_agent_metrics_and_context_for_llm = AsyncMock(return_value={})
-        repo.build_single_agent_profile_from_node = AsyncMock(side_effect=_stub_build)
+        async def _stub_generation(client, *, name, **_):
+            draft = ProfileDraft(
+                role=f"{name} role",
+                stance="positive",
+                strength=0.6,
+                bio=f"{name} bio",
+                details=f"{name} details",
+                confidence=0.7,
+                cites={},
+            )
+            return GenerationResult(draft=draft, rejections=[], attempts=1, latency_ms=0, model="stub")
+
         synth = ProfileSynthesizer(persona_repo=repo, graph_context=_SeededContext())
-
-        profiles = await synth.synthesize(query="q", dataset_id=ds, max_agents=10)
+        with (
+            patch(
+                "src.simulation.profile_synthesizer.generate_profile",
+                side_effect=_stub_generation,
+            ),
+            patch(
+                "src.simulation.profile_synthesizer.classify_actor_labels",
+                AsyncMock(return_value=({}, False)),
+            ),
+        ):
+            profiles = await synth.synthesize(
+                query="q", dataset_id=ds, max_agents=10, llm_client=object()
+            )
 
         assert sorted(p.identity.name for p in profiles) == sorted(names)
 
-        roster = [
-            SimpleNamespace(
-                identity=SimpleNamespace(name=p.identity.name), communication_radius=1
-            )
-            for p in profiles
-        ]
+        roster = [SimpleNamespace(identity=SimpleNamespace(name=p.identity.name)) for p in profiles]
         pairs = await topology.compute_round_pairs(
             roster,
             dataset_id=ds,

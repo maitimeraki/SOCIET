@@ -7,14 +7,10 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from src.graph.scope import entity_in_dataset, path_in_dataset
-from src.persona.agent import (
-    Agent,
-    ConfidenceBreakdown,
-    PersonaIdentity,
-)
 from src.simulation.debate_config import DebateConfig
 from src.simulation.pair_turn import CommPair
 from src.simulation.topology import CommunicationTopology
+from tests.agent_factory import slim_agent
 
 
 @pytest.fixture
@@ -49,63 +45,9 @@ def mock_driver():
 def sample_profiles():
     """Sample Agents for testing."""
     return [
-        Agent(
-            identity=PersonaIdentity(
-                name="Alice",
-                archetype="analyst",
-                communication_style="direct",
-            ),
-            discovery_type="intent_driven",
-            expertise_level="Technical",
-            domain_tags=["ai", "ml", "ethics"],
-            bio="AI researcher",
-            detailed_perspective="Focuses on AI safety",
-            confidence=0.8,
-            confidence_breakdown=ConfidenceBreakdown(
-                source_breadth=5,
-                node_density=10,
-                relationship_connectivity=0.7,
-            ),
-            summary_provenance=[],
-        ),
-        Agent(
-            identity=PersonaIdentity(
-                name="Bob",
-                archetype="strategist",
-                communication_style="collaborative",
-            ),
-            discovery_type="graph_discovery",
-            expertise_level="Strategic",
-            domain_tags=["ai", "policy", "governance"],
-            bio="Policy expert",
-            detailed_perspective="Focuses on AI governance",
-            confidence=0.7,
-            confidence_breakdown=ConfidenceBreakdown(
-                source_breadth=3,
-                node_density=8,
-                relationship_connectivity=0.5,
-            ),
-            summary_provenance=[],
-        ),
-        Agent(
-            identity=PersonaIdentity(
-                name="Charlie",
-                archetype="developer",
-                communication_style="technical",
-            ),
-            discovery_type="intent_driven",
-            expertise_level="Technical",
-            domain_tags=["ml", "engineering", "infrastructure"],
-            bio="ML engineer",
-            detailed_perspective="Focuses on ML systems",
-            confidence=0.9,
-            confidence_breakdown=ConfidenceBreakdown(
-                source_breadth=4,
-                node_density=12,
-                relationship_connectivity=0.8,
-            ),
-            summary_provenance=[],
-        ),
+        slim_agent("Alice", bio="AI researcher", details_raw="Focuses on AI safety", confidence=0.8),
+        slim_agent("Bob", bio="Policy expert", details_raw="Focuses on AI governance", confidence=0.7),
+        slim_agent("Charlie", bio="ML engineer", details_raw="Focuses on ML systems", confidence=0.9),
     ]
 
 

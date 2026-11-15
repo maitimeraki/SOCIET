@@ -211,9 +211,9 @@ async def test_roster_chain_holds_on_writer_shaped_graph(live):
         # (1) entity.triplet_source_id == chunk.id, and the `(c:Chunk {id}).text`
         # read holds on writer-shaped data: the seeded text is the evidence, and
         # the provenance the same write wired is the real document, not "None".
-        assert adv.source_evidence == [CHUNK_TEXT]
-        assert skep.source_evidence == [CHUNK_TEXT]
-        assert [p.doc_id for p in adv.summary_provenance] == [doc_anchor]
+        assert [e.text for e in adv.evidence] == [CHUNK_TEXT]
+        assert [e.text for e in skep.evidence] == [CHUNK_TEXT]
+        assert [e.doc_id for e in adv.evidence] == [doc_anchor]
 
         # (2) Task 1 Step 9 → Task 6: the derived stance is persisted and
         # readable on the Persona node, and the built Agent agrees (no drift).

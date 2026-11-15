@@ -49,19 +49,10 @@ class CommunicationTopology:
         Compute communication pairs for a debate round using Cypher.
 
         Round 1: Direct entity overlap via single-hop paths.
-        Round 2+: Expand path length to one cohort-wide radius: `max()` over
-                  every agent's own `communication_radius`, clamped to
-                  [1, `config.comm_radius`]. One wide-radius agent widens the
-                  path for every pair.
+        Round 2+: Expand path length to `config.comm_radius` hops (at least 1).
         """
         agent_names = [p.identity.name for p in profiles]
-        # One cohort-wide radius: the widest agent's own radius governs every
-        # pair, clamped to [1, config.comm_radius].
-        per_agent_radius = max(
-            (getattr(p, "communication_radius", 1) for p in profiles),
-            default=1,
-        )
-        effective_radius = max(1, min(int(per_agent_radius), int(config.comm_radius)))
+        effective_radius = max(1, int(config.comm_radius))
 
         async with self._driver.session(database=self._db) as session:
             if round_num == 1:
@@ -141,9 +132,7 @@ class CommunicationTopology:
         """Cypher for round 2+: multi-hop paths up to a single cohort-wide radius.
 
         The round emits one query for every pair, so there is one radius for the
-        whole cohort: `effective_radius` is `max()` over all agents' own
-        `communication_radius` (clamped to [1, config.comm_radius]) -- one
-        wide-radius agent widens the path for every pair.
+        whole cohort: `effective_radius` is `config.comm_radius` (at least 1).
 
         `effective_radius` is a Python int already clamped by the caller. We
         interpolate it via Cypher's `*1..N` syntax, which only accepts integers

@@ -10,13 +10,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from src.persona.agent import (
-    Agent,
-    ConfidenceBreakdown,
-    DiscoveryType,
-    ExpertiseLevel,
-    PersonaIdentity,
-)
+from src.persona.agent import Agent
 from src.simulation.llm_batch import BatchedLLMRunner
 from src.simulation.pair_turn import CommPair
 from src.simulation.round_runner import (
@@ -25,6 +19,7 @@ from src.simulation.round_runner import (
     _parse_response_stance,
     _split_reasoning_answer,
 )
+from tests.agent_factory import slim_agent
 
 DELIBERATION = (
     "REASONING: Bob argues margins collapse. I am tempted to oppose the move for that "
@@ -34,20 +29,7 @@ DELIBERATION = (
 
 
 def _agent(name: str) -> Agent:
-    return Agent(
-        identity=PersonaIdentity(
-            name=name, archetype="Expert", communication_style="Formal"
-        ),
-        discovery_type=DiscoveryType.INTENT_DRIVEN,
-        expertise_level=ExpertiseLevel.TECHNICAL,
-        bio=f"{name} bio",
-        detailed_perspective=f"{name} perspective",
-        domain_tags=["x"],
-        confidence=0.6,
-        confidence_breakdown=ConfidenceBreakdown(
-            source_breadth=1, node_density=1, relationship_connectivity=0.5
-        ),
-    )
+    return slim_agent(name, bio=f"{name} bio", details_raw=f"{name} perspective", confidence=0.6)
 
 
 # ------------------------------------------------------------------

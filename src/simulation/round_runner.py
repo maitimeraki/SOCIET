@@ -239,7 +239,7 @@ class RoundRunner:
         # Use the first profile's dataset_id so pair_ids are tenant-scoped.
         # All profiles in a debate share the same dataset_id; this guards
         # against collisions if two datasets ever share agent names.
-        dataset_id = profiles[0].graph_snapshot.dataset_id if profiles else "default"
+        dataset_id = profiles[0].dataset_id if profiles else "default"
 
         for pair in pairs:
             agent_a = profile_map.get(pair.agent_a)

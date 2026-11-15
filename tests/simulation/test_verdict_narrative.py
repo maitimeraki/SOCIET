@@ -16,18 +16,14 @@ import os
 import pytest
 
 from src.llm.config_llm import get_llm_config
-from src.persona.agent import (
-    Agent,
-    DiscoveryType,
-    ExpertiseLevel,
-    PersonaIdentity,
-)
+from src.persona.agent import Agent
 from src.simulation.pair_turn import AgentTurn, RoundResult
 from src.simulation.verdict import (
     VERDICT_JSON_REINFORCEMENT,
     VERDICT_MAX_ATTEMPTS,
     VerdictSynthesizer,
 )
+from tests.agent_factory import slim_agent
 
 # --- fixtures ---------------------------------------------------------------
 
@@ -48,16 +44,7 @@ def make_round(num: int, turns: list[AgentTurn]) -> RoundResult:
 
 
 def make_agent(name: str) -> Agent:
-    return Agent(
-        identity=PersonaIdentity(
-            name=name, archetype="Expert", communication_style="direct"
-        ),
-        discovery_type=DiscoveryType.GRAPH_DISCOVERY,
-        expertise_level=ExpertiseLevel.STRATEGIC,
-        conviction=1.0,
-        cior=1.0,
-        summary_provenance=[],
-    )
+    return slim_agent(name, strength=1.0)
 
 
 def two_agent_debate() -> tuple[list[RoundResult], list[Agent]]:

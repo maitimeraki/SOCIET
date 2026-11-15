@@ -14,15 +14,7 @@ import pytest
 import pytest_asyncio
 from dotenv import load_dotenv
 
-from src.persona.agent import (
-    Agent,
-    ConfidenceBreakdown,
-    DiscoveryType,
-    ExpertiseLevel,
-    GraphSnapshot,
-    PersonaIdentity,
-    Stance,
-)
+from src.persona.agent import Agent, Stance
 from src.persona.repository import PersonaRepository
 from src.simulation.debate_config import DebateConfig
 from src.simulation.llm_batch import BatchedLLMRunner
@@ -33,6 +25,7 @@ from src.simulation.round_runner import RoundRunner, _build_user_prompt
 from src.simulation.society_memory import SocietyMemory, SocietySnapshot
 from src.simulation.topology import CommunicationTopology
 from src.simulation.verdict import VerdictSynthesizer
+from tests.agent_factory import slim_agent
 
 load_dotenv()
 
@@ -99,21 +92,13 @@ def _entry(agent, weight, summary, round_no=1):
 
 
 def _agent(name: str) -> Agent:
-    return Agent(
+    return slim_agent(
+        name,
         agent_id=uuid.uuid4(),
-        identity=PersonaIdentity(
-            name=name, archetype="Expert", communication_style="Formal"
-        ),
-        discovery_type=DiscoveryType.INTENT_DRIVEN,
-        expertise_level=ExpertiseLevel.TECHNICAL,
+        dataset_id="ds1",
         bio=f"{name} bio",
-        detailed_perspective=f"{name} perspective",
-        domain_tags=["d"],
+        details_raw=f"{name} perspective",
         confidence=0.7,
-        confidence_breakdown=ConfidenceBreakdown(
-            source_breadth=1, node_density=1, relationship_connectivity=0.5
-        ),
-        graph_snapshot=GraphSnapshot(dataset_id="ds1"),
     )
 
 

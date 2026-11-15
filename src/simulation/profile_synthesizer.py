@@ -14,7 +14,7 @@ from typing import Any
 from uuid import uuid4
 
 from src.llm.config_llm import get_llm_config
-from src.persona.agent import Agent, DiscoveryType, PersonaIdentity, Stance
+from src.persona.agent import Agent, PersonaIdentity, Stance
 from src.persona.graph_context import EntityNode, GraphContext
 from src.persona.repository import PersonaRepository
 from src.simulation.actor_filter import classify_actor_labels
@@ -375,13 +375,7 @@ class ProfileSynthesizer:
         return Agent(
             node_id=drawn.entity_id,
             dataset_id=dataset_id,
-            identity=PersonaIdentity(
-                name=drawn.name,
-                archetype="",
-                communication_style="",
-                type_label=drawn.type_label,
-            ),
-            discovery_type=DiscoveryType.GRAPH_DISCOVERY,
+            identity=PersonaIdentity(name=drawn.name, type_label=drawn.type_label),
             role=draft.role,
             stance=Stance.parse(draft.stance),
             strength=draft.strength,

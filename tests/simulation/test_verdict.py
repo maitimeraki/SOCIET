@@ -105,11 +105,6 @@ class TestClusterByStance:
         clusters = cluster_by_stance(turns)
         assert len(clusters[Stance.ABSTAIN]) == 1
 
-    def test_ambivalent_names_no_wire_stance(self):
-        turns = [make_turn("a1", "Alice", Stance.AMBIVALENT, 0.7)]
-        clusters = cluster_by_stance(turns)
-        assert all(members == [] for members in clusters.values())
-
 
 class TestAbstainCarriesNoWeight:
     """ABSTAIN is a wire stance with zero weight: it never wins and never shifts a share."""
@@ -304,7 +299,6 @@ class TestSynthesize:
         assert Stance.POSITIVE in verdict.cluster_details
         assert Stance.NEGATIVE in verdict.cluster_details
         assert Stance.NEUTRAL in verdict.cluster_details
-        assert Stance.AMBIVALENT not in verdict.cluster_details  # no ambivalent turns
 
     def test_summary_contains_stance_and_score(self, fixture_rounds, fixture_profiles):
         synthesizer = VerdictSynthesizer()

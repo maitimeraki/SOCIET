@@ -71,7 +71,7 @@ async def _seed_shared_entity(repo, db, ds, entity):
 
 def _roster(*names):
     return [
-        SimpleNamespace(identity=SimpleNamespace(name=n), communication_radius=1)
+        SimpleNamespace(identity=SimpleNamespace(name=n))
         for n in names
     ]
 

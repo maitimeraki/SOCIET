@@ -11,15 +11,10 @@ import json
 
 import pytest
 
-from src.persona.agent import (
-    Agent,
-    DiscoveryType,
-    ExpertiseLevel,
-    PersonaIdentity,
-    Stance,
-)
+from src.persona.agent import Agent, Stance
 from src.simulation.pair_turn import AgentTurn, RoundResult
 from src.simulation.verdict import VerdictSynthesizer
+from tests.agent_factory import slim_agent
 
 # --- fixtures ---------------------------------------------------------------
 
@@ -43,16 +38,7 @@ def make_round(num: int, turns: list[AgentTurn]) -> RoundResult:
 
 
 def make_agent(name: str) -> Agent:
-    return Agent(
-        identity=PersonaIdentity(
-            name=name, archetype="Expert", communication_style="direct"
-        ),
-        discovery_type=DiscoveryType.GRAPH_DISCOVERY,
-        expertise_level=ExpertiseLevel.STRATEGIC,
-        conviction=1.0,
-        cior=1.0,
-        summary_provenance=[],
-    )
+    return slim_agent(name, strength=1.0)
 
 
 class _SpyLLM:

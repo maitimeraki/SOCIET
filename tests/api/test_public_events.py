@@ -19,8 +19,8 @@ FORBIDDEN = ("chunk_id", "doc_id", "version_hash", "graph_snapshot", "source_evi
 AGENT_EVENT = {
     "type": "agent", "index": 1, "total": 8,
     "profile": {
-        "agent_id": "a", "identity": {"name": "Kestra", "archetype": "x", "communication_style": "y"},
-        "bio": "b", "detailed_perspective": "d", "stance": "POSITIVE", "intensity": 0.5, "confidence": 0.5,
+        "name": "Kestra", "type": "Company", "role": "r", "stance": "POSITIVE", "strength": 0.5,
+        "bio": "b", "details": "d", "confidence": 0.5, "agent_id": "a",
         "summary_provenance": [ProvenanceLink(doc_id="d1", title="Memo", breadcrumb="Sec 1",
                                               chunk_id=_PROFILE_LINK_ID).model_dump(mode="json")],
         "graph_snapshot": {"dataset_id": "ds", "version_hash": "abc"},

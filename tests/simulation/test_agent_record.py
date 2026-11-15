@@ -86,6 +86,17 @@ def test_unknown_stance_raises_instead_of_becoming_neutral(value):
         Stance.parse(value)
 
 
+def test_stance_has_no_ambivalent_member():
+    assert "AMBIVALENT" not in Stance.__members__
+
+
+def test_agent_has_no_fabricated_defaults():
+    from src.persona.agent import Agent, PersonaIdentity
+
+    with pytest.raises(ValidationError):
+        Agent(identity=PersonaIdentity(name="X"))
+
+
 def test_stance_parse_trims_and_accepts_lowercase():
     assert Stance.parse("positive ") is Stance.POSITIVE
 
@@ -131,7 +142,7 @@ def test_view_strips_cite_markers_and_says_type_unknown_without_a_label():
 
     agent = _slim(
         details_raw="Claim one [e1]. Claim two [e2].",
-        identity=PersonaIdentity(name="A", archetype="x", communication_style="y", type_label=""),
+        identity=PersonaIdentity(name="A", type_label=""),
     )
     view = agent.view()
     assert "[e" not in view.details
