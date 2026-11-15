@@ -50,6 +50,18 @@ describe('the filed report is derived from folded run state (R57)', () => {
     expect(fallback?.reasoning).toEqual([verdict.summary])
   })
 
+  it('does not print a no-verdict summary twice either — the narrative is the summary', () => {
+    const verdict = STATE.verdict!
+    const noVerdict = reportFromState(
+      {
+        ...STATE,
+        verdict: { ...verdict, narrative: verdict.summary, narrativeStatus: 'no_verdict' },
+      },
+      STORED_AT,
+    )
+    expect(noVerdict?.reasoning).toEqual([verdict.summary])
+  })
+
   it('groups who held which view in STANCE_ORDER and drops empty groups', () => {
     expect(REPORT.whoHeldWhichView).toEqual([
       { position: 'POSITIVE', names: ['D. Weber', 'P. Silva'] },

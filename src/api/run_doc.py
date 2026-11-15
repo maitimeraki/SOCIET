@@ -40,9 +40,8 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from src.db.engine import get_session_factory
 from src.db.models import AgentRecordRow, Job, Run, RunEvent
-from src.persona.agent import Stance
 from src.simulation.agent_record import AgentView
-from src.simulation.turn_protocol import dominant_stance
+from src.simulation.turn_protocol import POSITION_STANCES, dominant_stance
 
 logger = logging.getLogger(__name__)
 
@@ -366,7 +365,12 @@ def _summarize(
 ) -> dict[str, Any]:
     result = run.verdict or {}
     clusters = result.get("cluster_details") or {}
-    weights = {Stance.parse(key): float(cluster.get("total_weight") or 0.0) for key, cluster in clusters.items()}
+    # Only the position stances are read off the stored clusters. A stored key this build no longer
+    # knows (a legacy stance word) is ignored, never parsed: one bad row must not fail the whole list.
+    weights = {
+        stance: float((clusters.get(stance.value) or {}).get("total_weight") or 0.0)
+        for stance in POSITION_STANCES
+    }
     dominant = dominant_stance(weights)
     verdict_stance = dominant.value if dominant is not None else None
     status = run.status

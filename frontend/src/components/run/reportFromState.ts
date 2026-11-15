@@ -41,10 +41,12 @@ export function reportFromState(state: RunState, filedAt: string | null): Report
 
 /**
  * The sheet's reasoning is prose: the summary, then the narrative's bodies — never its `##` marks.
- * A fallback narrative IS the summary (backend §17.3), so it is not printed a second time.
+ * A fallback narrative IS the summary (backend §17.3), and a no-verdict narrative is the summary too,
+ * so neither is printed a second time.
  */
 function reasoningOf(view: VerdictView): string[] {
-  const written = view.narrativeStatus === 'fallback' ? '' : view.narrative
+  const summaryIsNarrative = view.narrativeStatus === 'fallback' || view.narrativeStatus === 'no_verdict'
+  const written = summaryIsNarrative ? '' : view.narrative
   return [view.summary, ...splitSections(written).map((section) => section.body)].filter(Boolean)
 }
 

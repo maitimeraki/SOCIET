@@ -1927,7 +1927,20 @@ async def test_the_snapshot_consensus_carries_the_stance_value_and_its_round_spa
     synth = AsyncMock(spec=ProfileSynthesizer)
     topo = AsyncMock(spec=CommunicationTopology)
     society_memory = AsyncMock(spec=SocietyMemory)
-    snapshot = SocietySnapshot(round=0)
+    snapshot = SocietySnapshot(
+        round=0,
+        entries=[
+            {
+                "agent": "Bob",
+                "round": 1,
+                "stance": "POSITIVE",
+                "confidence": 0.7,
+                "weight": 0.35,
+                "summary": "Bob's round one argument.",
+                "entities": [],
+            }
+        ],
+    )
     society_memory.read_snapshot.return_value = snapshot
     society_memory.commit_round.return_value = _ok_receipt()
     synth.synthesize.return_value = [_make_profile(1, "Alice"), _make_profile(2, "Bob")]
@@ -1952,6 +1965,11 @@ async def test_the_snapshot_consensus_carries_the_stance_value_and_its_round_spa
     assert type(snapshot.consensus["stance"]) is str
     assert snapshot.consensus["stance"] == "POSITIVE"
     assert snapshot.consensus["rounds"] == 1
+    # The real round-2 snapshot, as the speaker's prompt renders it.
+    society = rr.execute_round.call_args_list[1].kwargs["society"]
+    text = society.to_prompt("Alice", "Bob")
+    assert "Consensus over the last 1 round: POSITIVE holds 100% of the weight." in text
+    assert "Stance." not in text
 
 
 @pytest.mark.asyncio
