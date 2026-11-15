@@ -1,7 +1,7 @@
 """PairTurn types shared across simulation modules."""
 
 from dataclasses import dataclass, field
-from typing import Dict, List, Tuple
+from typing import Any, Dict, List, Tuple
 
 from src.persona.agent import Stance
 from src.persona.models_persona import ProvenanceLink
@@ -85,13 +85,12 @@ class ClusterSummary:
 
 @dataclass
 class DebateVerdict:
-    """Final verdict with weighted synthesis."""
+    """Final verdict: the consensus numbers over the window, and the final report's stored fields."""
 
     overall_stance: Stance
     confidence_score: float
     supporting_entities: List[str]
     opposing_entities: List[str]
-    summary: str
     cluster_details: Dict[Stance, ClusterSummary]
     provenance_by_claim: Dict[str, List[ProvenanceLink]] = field(default_factory=dict)
     rounds_executed: int = 0
@@ -100,15 +99,6 @@ class DebateVerdict:
     weight_share: float = 0.0
     #: True when the dominant share is below the contested threshold (near-tie).
     contested: bool = False
-    #: Markdown answer assembled from the structured verdict (query-grounded).
-    #: Empty when synthesis fell back to `summary`.
-    narrative: str = ""
-    #: "no_verdict" when no position carries weight: no answer is written and `narrative` is the
-    #: no-verdict summary. "ok" when `narrative` is the query-grounded answer; "fallback" when it
-    #: degraded to `summary` (no client, or the answer-writer produced no
-    #: parseable JSON after bounded retries). Never silent.
-    narrative_status: str = "ok"
-    #: Per-cluster dissent rendered from the structured verdict.
-    dissenting_views: List[dict] = field(default_factory=list)
-    #: Cited entities/claims backing the answer.
-    evidence: List[dict] = field(default_factory=list)
+    #: The stored report fields (title, markdown, position, sources, source_refs, attempts,
+    #: checks, status); see verdict.write_board_report. Empty until the report is written.
+    report: Dict[str, Any] = field(default_factory=dict)

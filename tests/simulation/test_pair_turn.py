@@ -61,7 +61,6 @@ class TestDebateVerdictNewFields:
             confidence_score=0.5,
             supporting_entities=[],
             opposing_entities=[],
-            summary="test",
             cluster_details={},
         )
         assert verdict.provenance_by_claim == {}
@@ -75,7 +74,6 @@ class TestDebateVerdictNewFields:
             confidence_score=0.5,
             supporting_entities=[],
             opposing_entities=[],
-            summary="test",
             cluster_details={},
         )
         assert verdict.rounds_executed == 0
@@ -95,7 +93,6 @@ class TestDebateVerdictNewFields:
             confidence_score=0.8,
             supporting_entities=["e1"],
             opposing_entities=[],
-            summary="ok",
             cluster_details={},
             provenance_by_claim={"claim1": [link]},
             rounds_executed=5,

@@ -13,6 +13,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.api import run_doc
+from src.api.public_events import project_result
 from src.audit import client_ip
 from src.audit import record as audit_record
 from src.auth.cookies import verify_csrf
@@ -43,6 +44,9 @@ async def get_job(job_id: str, user: User = Depends(current_user)):
     if doc is None:
         raise HTTPException(status_code=404, detail="Job not found")
     await require_owner(doc.get("user_id"), user)
+    if doc.get("mode") == "debate":
+        # A debate's stored result carries backend-only keys: it is served through the allowlist only.
+        doc["result"] = project_result(doc.get("result"))
     result = doc.get("result")
     key = result.get("object_key") if isinstance(result, dict) else None
     # Only an export's own zip is downloadable: never presign an arbitrary

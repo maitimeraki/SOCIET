@@ -69,13 +69,12 @@ def _ok_receipt() -> dict:
     }
 
 
-def _make_verdict(summary: str = "Test verdict.") -> DebateVerdict:
+def _make_verdict() -> DebateVerdict:
     return DebateVerdict(
         overall_stance=Stance.POSITIVE,
         confidence_score=0.9,
         supporting_entities=[],
         opposing_entities=[],
-        summary=summary,
         cluster_details={},
         rounds_executed=1,
     )
@@ -167,7 +166,7 @@ async def test_five_step_flow():
         society_memory.read_snapshot.assert_not_awaited()
 
     assert isinstance(result, OrchestratedDebateResult)
-    assert result.verdict == "Test verdict."
+    assert result.report == {}
     assert result.rounds_executed == 3
 
     # F41.1: the commit receipt must be broadcast, not silently degraded
@@ -871,8 +870,8 @@ async def test_run_threads_intent_to_round_runner_and_result():
 
 
 @pytest.mark.asyncio
-async def test_run_threads_query_and_context_and_returns_the_narrative():
-    """T3: the run's query + user context reach synthesis; the narrative is returned."""
+async def test_run_threads_query_and_context_and_returns_the_report():
+    """The run's query + user context reach synthesis; the stored report fields are returned."""
     synth = AsyncMock(spec=ProfileSynthesizer)
     topo = AsyncMock(spec=CommunicationTopology)
     society_memory = AsyncMock(spec=SocietyMemory)
@@ -886,9 +885,16 @@ async def test_run_threads_query_and_context_and_returns_the_narrative():
     llm_runner.gather = MagicMock(side_effect=lambda *a, **kw: _AsyncEmptyIter())
     verdict_synth = MagicMock(spec=VerdictSynthesizer)
     verdict = _make_verdict()
-    verdict.narrative = "## Recommendation\nExpand, cautiously."
-    verdict.dissenting_views = [{"stance": "NEGATIVE", "view": "too soon"}]
-    verdict.evidence = [{"entity": "Steel tariffs", "claim": "raises cost"}]
+    verdict.report = {
+        "title": "Expand to Europe?",
+        "markdown": "# Expand to Europe?\n## Recommendation\nExpand, cautiously.",
+        "position": "POSITIVE",
+        "sources": {},
+        "source_refs": {},
+        "attempts": 1,
+        "checks": [],
+        "status": "produced",
+    }
     verdict_synth.asynthesize.return_value = verdict
 
     orch = _orch(synth, topo, society_memory, verdict_synth, llm_runner)
@@ -904,9 +910,7 @@ async def test_run_threads_query_and_context_and_returns_the_narrative():
     assert call_kwargs["query"] == "Should we expand to Europe?"
     assert "limited" in call_kwargs["scenario"]
 
-    assert result.narrative == "## Recommendation\nExpand, cautiously."
-    assert result.dissenting_views == [{"stance": "NEGATIVE", "view": "too soon"}]
-    assert result.evidence == [{"entity": "Steel tariffs", "claim": "raises cost"}]
+    assert result.report == verdict.report
 
 
 @pytest.mark.asyncio
@@ -919,9 +923,7 @@ async def test_run_without_context_still_synthesizes():
         DebateConfig(max_agents=5, max_rounds=1),
         AsyncMock(),
     )
-    assert (
-        result.narrative == orch._verdict_synthesizer.asynthesize.return_value.narrative
-    )
+    assert result.report == orch._verdict_synthesizer.asynthesize.return_value.report
 
 
 @pytest.mark.asyncio
@@ -1063,7 +1065,7 @@ async def test_no_emitter_and_failing_emitter_both_leave_the_run_intact():
         on_stage=exploding_emitter,
     )
     assert result.rounds_executed == 1
-    assert result.verdict == "Test verdict."
+    assert result.report == {}
 
 
 """P5: the run streams each built profile and the seated names, and the round's weights."""
@@ -1654,10 +1656,14 @@ _EVIDENCE_SENTENCES = sorted(
 _LEAK_MARKERS = (
     "chunk_id", "doc_id", "version_hash", "dossier_hash", "graph_snapshot", "summary_provenance",
     "source_evidence", "evidence", "REASONING", "[e1]", "llm_model", "anchors", "source_count",
+    "source_refs", "attempts", "checks",
 )
 # Markers a real run produces. The other six in _LEAK_MARKERS never occur in a run: they are
 # guarded by their per-marker removal cases, not by the positive control.
-_NATURAL_MARKERS = ("chunk_id", "doc_id", "dossier_hash", "evidence", "REASONING", "[e1]", "llm_model")
+_NATURAL_MARKERS = (
+    "chunk_id", "doc_id", "dossier_hash", "evidence", "REASONING", "[e1]", "llm_model",
+    "source_refs", "attempts", "checks",
+)
 _TURN_REPLY = (
     "REASONING: the memo's pricing section decides it, privately.\n"
     "ANSWER: POSITIVE. The pilot rollout timing decides it."
@@ -1692,13 +1698,15 @@ class _ReasoningLLM(FakeLLM):
 
 
 def _leak_verdict() -> DebateVerdict:
-    """The verdict as the synthesiser hands it over, with the raw fields a client must not see."""
+    """The verdict as the synthesiser hands it over: the consensus fields and the stored report.
+
+    The report carries the backend-only keys (source_refs, attempts, checks) a client must not see.
+    """
     return DebateVerdict(
         overall_stance=Stance.POSITIVE,
         confidence_score=0.9,
         supporting_entities=["Kestra"],
         opposing_entities=[],
-        summary="Kestra and Orbit back the Berlin pilot.",
         cluster_details={},
         provenance_by_claim={
             "The pilot is priced per seat": [
@@ -1711,14 +1719,16 @@ def _leak_verdict() -> DebateVerdict:
             ]
         },
         rounds_executed=2,
-        evidence=[
-            {
-                "entity": "Kestra",
-                "claim": "The pilot is priced per seat",
-                "quote": _EVIDENCE_SENTENCES[0],
-                "chunk_id": str(_LEAK_CHUNK_ID),
-            }
-        ],
+        report={
+            "title": "Should we enter Berlin?",
+            "markdown": "# Should we enter Berlin?\n## Recommendation\nPosition: POSITIVE, 90%, settled",
+            "position": "POSITIVE",
+            "sources": {"1": {"document": "Market memo", "section": "Pricing"}},
+            "source_refs": {"1": {"node_id": "kestra-node", "evidence_id": "e1"}},
+            "attempts": 2,
+            "checks": ["attempt 1: the Recommendation must come first"],
+            "status": "produced",
+        },
     )
 
 
@@ -1778,54 +1788,45 @@ def _as_text(payload) -> str:
 
 
 def _result_payload(run: SimpleNamespace) -> dict:
-    """The result as the job stores it: asdict, with the intent as model_dump (debate_api.py:403)."""
+    """The unprojected result, as debate_api builds it: asdict, the report's keys flat, the intent as model_dump."""
     payload = dataclasses.asdict(run.result)
+    payload.update(payload.pop("report"))
     payload["intent"] = run.result.intent.model_dump() if run.result.intent else None
     return payload
 
 
 def _projected(events: list[dict], result: dict) -> SimpleNamespace:
-    """The projected stream and result, as text per surface, plus the verdict's evidence list."""
+    """The projected stream and result, as text per surface, plus the report's public sources."""
     stream = [event for event in map(project_event, events) if event is not None]
     projected = project_result(result)
-    # `evidence` is a verdict key by contract (spec 4b): its items are narrowed to {entity, claim},
-    # which an exact assertion checks. Top-level keys named `evidence` (the verdict in the result and
-    # in a `complete` event) are renamed so the substring scan still covers every value they carry,
-    # while the permitted key name itself is not counted as a leak.
-    verdict_evidence = projected["evidence"]
     return SimpleNamespace(
         surfaces={
-            "stream": _as_text([_scan_keys(event) for event in stream]),
-            "result": _as_text(_scan_keys(projected)),
+            "stream": _as_text(stream),
+            "result": _as_text(projected),
         },
         stream=stream,
-        verdict_evidence=verdict_evidence,
+        verdict_sources=projected["sources"],
     )
 
 
-def _scan_keys(payload: dict) -> dict:
-    return {("verdict_claims" if key == "evidence" else key): value for key, value in payload.items()}
-
-
 _CANARY_CONTAINERS = ("profile", "intent")
-_CANARY_ITEMS = ("evidence", "dissenting_views")
 
 
 def _canaried(obj: dict, marker: str) -> dict:
     """A copy of one event or result dict with `marker` planted where the projection must drop it.
 
     It goes in as an unlisted top-level key with the marker as its value, and as an unlisted key
-    inside every dict the projection narrows (profile, intent, evidence and dissent items, links).
+    inside every dict the projection narrows (profile, intent, the report's sources, links).
     """
     out = copy.deepcopy(obj)
     out.setdefault(marker, marker)
     for key in _CANARY_CONTAINERS:
         if isinstance(out.get(key), dict):
             out[key][marker] = marker
-    for key in _CANARY_ITEMS:
-        for item in out.get(key) or []:
-            if isinstance(item, dict):
-                item[marker] = marker
+    if isinstance(out.get("sources"), dict):
+        for source in out["sources"].values():
+            if isinstance(source, dict):
+                source[marker] = marker
     for links in (out.get("provenance_by_claim") or {}).values():
         for link in links or []:
             if isinstance(link, dict):
@@ -1853,7 +1854,7 @@ async def _client_payloads(run: SimpleNamespace) -> SimpleNamespace:
     surfaces = {**projection.surfaces, "roster": _as_text(roster)}
     types = {event["profile"].get("type") for event in projection.stream if event["type"] == "agent"}
     types |= {view["type"] for view in roster}
-    return SimpleNamespace(surfaces=surfaces, verdict_evidence=projection.verdict_evidence, types=types)
+    return SimpleNamespace(surfaces=surfaces, verdict_sources=projection.verdict_sources, types=types)
 
 
 @pytest.mark.asyncio
@@ -1897,10 +1898,10 @@ async def test_seated_agents_carry_the_fixture_labels():
 
 
 @pytest.mark.asyncio
-async def test_verdict_evidence_keeps_only_entity_and_claim():
+async def test_sources_keep_only_document_and_section():
     payloads = await _client_payloads(await _run_leak_debate())
 
-    assert payloads.verdict_evidence == [{"entity": "Kestra", "claim": "The pilot is priced per seat"}]
+    assert payloads.verdict_sources == {"1": {"document": "Market memo", "section": "Pricing"}}
 
 
 @pytest.mark.asyncio

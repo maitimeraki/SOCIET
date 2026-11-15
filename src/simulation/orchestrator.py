@@ -60,7 +60,7 @@ from src.simulation.turn_protocol import (
     stance_weights,
     weighted_share,
 )
-from src.simulation.verdict import VerdictSynthesizer
+from src.simulation.verdict import VerdictSynthesizer, final_turns
 from src.utils.queryIntend import QueryIntent
 
 logger = logging.getLogger(__name__)
@@ -102,7 +102,6 @@ class OrchestratedDebateResult:
     """Result from orchestrated debate."""
 
     converged: bool
-    verdict: str
     final_stances: dict[str, str]
     warnings: list[str]
     rounds_executed: int
@@ -119,14 +118,9 @@ class OrchestratedDebateResult:
     #: Per-claim traceability (claim → provenance links), JSON-safe. Additive;
     #: None when no claim carried reachable provenance.
     provenance_by_claim: Optional[dict[str, list]] = None
-    #: Query-grounded answer markdown written by verdict synthesis (falls back
-    #: to `verdict`/summary when no LLM client or parse failure). Additive.
-    narrative: str = ""
-    #: "ok" when `narrative` is the LLM answer; "fallback" when it degraded to
-    #: the summary. Additive — lets the client tell the two apart.
-    narrative_status: str = "ok"
-    dissenting_views: list = field(default_factory=list)
-    evidence: list = field(default_factory=list)
+    #: The final report's stored fields (verdict.write_board_report): title, markdown, position,
+    #: sources, source_refs, attempts, checks, status. Empty when the verdict was not written.
+    report: dict = field(default_factory=dict)
 
 
 class DebateOrchestrator:
@@ -170,9 +164,9 @@ class DebateOrchestrator:
         """
         Run the full debate pipeline with WebSocket streaming.
 
-        `llm_client` is optional; when supplied the verdict summary is
-        produced by the LLM via `asynthesize` (no asyncio.run, no loop
-        collision). When omitted a deterministic template summary is used.
+        `llm_client` is optional; when supplied the final report is written by
+        the LLM via `asynthesize` (no asyncio.run, no loop collision). When
+        omitted no report is written: its status is "not_produced", with no text.
 
         `intent` is the S3 query intent extracted by the caller (the debate
         job path); it is read-only here and is threaded into the round
@@ -490,7 +484,7 @@ class DebateOrchestrator:
             threshold=config.convergence_threshold,
         )
 
-        # Step 3: Synthesize verdict (async path -- no asyncio.run collision)
+        # Step 3: the consensus verdict and the final report (async path -- no asyncio.run collision)
         verdict = await self._verdict_synthesizer.asynthesize(
             rounds=rounds,
             profiles=profiles,
@@ -498,6 +492,7 @@ class DebateOrchestrator:
             query=query,
             scenario=json.dumps(context) if context else "",
             run_id=dataset_id,
+            converged=converged,
         )
         cluster_details = None
         if verdict is not None and verdict.cluster_details:
@@ -521,19 +516,12 @@ class DebateOrchestrator:
 
         # Step 4: final stances, read from the same consensus window as the verdict. An agent
         # with no turn in that window has no position: ABSTAIN, never NEUTRAL.
-        window = consensus_window(rounds)
         final_stances: dict[str, str] = {}
-        for profile in profiles:
-            for turn in reversed(window):
-                if turn.agent_name == profile.identity.name:
-                    final_stances[profile.identity.name] = turn.stance
-                    break
-            else:
-                final_stances[profile.identity.name] = Stance.ABSTAIN.value
+        for name, turn in final_turns(rounds, profiles).items():
+            final_stances[name] = turn.stance if turn is not None else Stance.ABSTAIN.value
 
         return OrchestratedDebateResult(
             converged=converged,
-            verdict=verdict.summary if verdict else "Debate completed.",
             final_stances=final_stances,
             warnings=warnings,
             rounds_executed=len(rounds),
@@ -545,10 +533,7 @@ class DebateOrchestrator:
             weight_share=verdict.weight_share if verdict else None,
             contested=verdict.contested if verdict else None,
             provenance_by_claim=provenance_by_claim,
-            narrative=verdict.narrative if verdict else "",
-            narrative_status=verdict.narrative_status if verdict else "ok",
-            dissenting_views=verdict.dissenting_views if verdict else [],
-            evidence=verdict.evidence if verdict else [],
+            report=verdict.report if verdict else {},
         )
 
     async def _maybe_activate(

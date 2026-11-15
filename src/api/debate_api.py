@@ -34,6 +34,7 @@ from src.api.public_events import (
     RUN_FAILED_MESSAGE,
     project_event,
     project_result,
+    stored_result,
 )
 from src.audit import client_ip
 from src.audit import record as audit_record
@@ -63,7 +64,7 @@ from src.simulation.profile_generator import (
     typical_prompt_chars,
 )
 from src.simulation.profile_synthesizer import DRAW_SLACK, POOL_CAP
-from src.simulation.verdict import VERDICT_MAX_ATTEMPTS
+from src.simulation.verdict import REPORT_MAX_ATTEMPTS
 
 logger = logging.getLogger(__name__)
 
@@ -151,16 +152,6 @@ class RoundStreamEvent(BaseModel):
     turns: list[Dict[str, Any]]
 
 
-class DebateStreamComplete(BaseModel):
-    """WebSocket event when debate is complete."""
-
-    complete: bool = True
-    converged: bool
-    verdict: str
-    final_stances: Dict[str, str]
-    warnings: list[str]
-
-
 # In-process working state for live runs: the WebSocket managers and the
 # handoff between the run task and the routes. NOT the truth — rows are
 # (`run_doc`); every read below goes to the database.
@@ -180,7 +171,7 @@ def _job_doc(job: dict) -> dict:
         "config": job.get("config"),
         "status": job.get("status"),
         "events": [],
-        "result": project_result(job.get("result")),
+        "result": stored_result(job.get("result")),
         "error": job.get("error"),
     }
 
@@ -241,7 +232,7 @@ def debate_worst_case_units(*, agents: int, rounds: int, max_new_per_round: int,
     the admission reserve.
 
     Calls counted at their caps, one attempt per turn: intent (1); the pool's actor classification (one call per
-    ACTOR_BATCH labels, the pool keeps at most POOL_CAP candidates); verdict attempts (VERDICT_MAX_ATTEMPTS);
+    ACTOR_BATCH labels, the pool keeps at most POOL_CAP candidates); report attempts (REPORT_MAX_ATTEMPTS);
     the roster's draws, at most (agents + DRAW_SLACK) x CALLS_PER_DRAW; per round, activation's
     classification and its joiner draws; and per round two turns per pair, pairs capped by the request
     and by agents choose 2. Each call charged debate_worst_call_units(). Overruns of the hold are
@@ -256,7 +247,7 @@ def debate_worst_case_units(*, agents: int, rounds: int, max_new_per_round: int,
     calls = (
         1
         + math.ceil(POOL_CAP / ACTOR_BATCH)
-        + VERDICT_MAX_ATTEMPTS
+        + REPORT_MAX_ATTEMPTS
         + (agents + DRAW_SLACK) * CALLS_PER_DRAW
         + rounds * (per_round_activation + turns_per_round)
     )
@@ -284,6 +275,24 @@ def debate_reserve_units(*, agents: int, rounds: int, max_new_per_round: int, ma
         + rounds * 2 * max_pairs_per_round
     )
     return calls * UNITS_PER_CALL_TYPICAL
+
+
+def _verdict_payload(result) -> dict:
+    """The verdict fields of a finished run: the job result and the `complete` event share them."""
+    return {
+        "converged": result.converged,
+        "final_stances": result.final_stances,
+        "warnings": result.warnings,
+        "rounds_executed": result.rounds_executed,
+        "confidence_score": result.confidence_score,
+        "weight_share": result.weight_share,
+        "contested": result.contested,
+        "provenance_by_claim": result.provenance_by_claim,
+        "cluster_details": result.cluster_details,
+        "supporting_entities": result.supporting_entities,
+        "opposing_entities": result.opposing_entities,
+        **result.report,
+    }
 
 
 async def _run_debate_async(
@@ -411,47 +420,12 @@ async def _run_debate_async(
         async with _DEBATE_JOBS_LOCK:
             _DEBATE_JOBS[job_id]["status"] = "complete"
             _DEBATE_JOBS[job_id]["result"] = {
-                "converged": result.converged,
-                "verdict": result.verdict,
-                "narrative": result.narrative,
-                "narrative_status": result.narrative_status,
-                "final_stances": result.final_stances,
-                "warnings": result.warnings,
-                "rounds_executed": result.rounds_executed,
+                **_verdict_payload(result),
                 "intent": result.intent.model_dump() if result.intent else None,
-                "confidence_score": result.confidence_score,
-                "weight_share": result.weight_share,
-                "contested": result.contested,
-                "provenance_by_claim": result.provenance_by_claim,
-                "cluster_details": result.cluster_details,
-                "supporting_entities": result.supporting_entities,
-                "opposing_entities": result.opposing_entities,
-                "dissenting_views": result.dissenting_views,
-                "evidence": result.evidence,
             }
 
         # Send completion event (the verdict fields ride along — §12.3 item 5)
-        await ws_manager.broadcast(
-            {
-                "type": "complete",
-                "converged": result.converged,
-                "verdict": result.verdict,
-                "narrative": result.narrative,
-                "narrative_status": result.narrative_status,
-                "final_stances": result.final_stances,
-                "warnings": result.warnings,
-                "rounds_executed": result.rounds_executed,
-                "confidence_score": result.confidence_score,
-                "weight_share": result.weight_share,
-                "contested": result.contested,
-                "provenance_by_claim": result.provenance_by_claim,
-                "cluster_details": result.cluster_details,
-                "supporting_entities": result.supporting_entities,
-                "opposing_entities": result.opposing_entities,
-                "dissenting_views": result.dissenting_views,
-                "evidence": result.evidence,
-            }
-        )
+        await ws_manager.broadcast({"type": "complete", **_verdict_payload(result)})
 
     except DebateCancelled as exc:
         # Cancelled is terminal, not failed: mark the live state and let the

@@ -23,11 +23,15 @@ _INTENT_KEYS = frozenset({"core_question", "stance_axis", "direct_keywords", "la
 # The profile a client sees is AgentView (spec 4a) and nothing else.
 _PROFILE_KEYS = frozenset({"name", "type", "role", "stance", "strength", "bio", "details", "confidence"})
 # The verdict keys a client may see, shared by the `complete` event and the
-# stored or served result. One list: a key added here reaches both.
-_VERDICT_KEYS = frozenset({"converged", "verdict", "narrative", "narrative_status", "final_stances", "warnings",
-                           "rounds_executed", "confidence_score", "weight_share", "contested",
-                           "provenance_by_claim", "cluster_details", "supporting_entities",
-                           "opposing_entities", "dissenting_views", "evidence"})
+# served result. One list: a key added here reaches both. `sources` is the
+# report's public source map, narrowed to {document, section} in _narrow_sources.
+# `source_refs`, `attempts` and `checks` are backend-only: never in this list.
+_VERDICT_KEYS = frozenset({"converged", "final_stances", "warnings", "rounds_executed", "confidence_score",
+                           "weight_share", "contested", "provenance_by_claim", "cluster_details",
+                           "supporting_entities", "opposing_entities",
+                           "title", "markdown", "position", "sources", "status"})
+# Stored with the result but never served: the report's source refs, its attempts and its checks.
+_BACKEND_RESULT_KEYS = frozenset({"source_refs", "attempts", "checks"})
 _COMPLETE_KEYS = _VERDICT_KEYS | {"type"}
 _RESULT_KEYS = _VERDICT_KEYS | {"intent"}
 _EVENT_KEYS: dict[str, frozenset[str]] = {
@@ -73,14 +77,18 @@ def _narrow_provenance(claims: Any) -> dict[str, list[dict[str, Any]]]:
     }
 
 
-def _narrow_items(items: Any, keys: tuple[str, ...]) -> list[dict[str, str | None]]:
-    # LLM-produced list items: only the named text keys survive (quote, chunk id
-    # and anything else the model emitted stay behind).
-    if not isinstance(items, (list, tuple)):
-        return []
-    narrowed = [{k: _text(item.get(k)) for k in keys} for item in items if isinstance(item, Mapping)]
-    # An item with no surviving value carries nothing a reader can use.
-    return [item for item in narrowed if any(v is not None for v in item.values())]
+def _narrow_sources(sources: Any) -> dict[str, dict[str, str]]:
+    # Each source is exactly {document, section}, both strings. An entry that is not a mapping, or
+    # whose document or section is not a string, is dropped whole.
+    if not isinstance(sources, Mapping):
+        return {}
+    return {
+        str(number): {"document": source["document"], "section": source["section"]}
+        for number, source in sources.items()
+        if isinstance(source, Mapping)
+        and isinstance(source.get("document"), str)
+        and isinstance(source.get("section"), str)
+    }
 
 
 def _narrow_verdict(source: Mapping[str, Any], keys: frozenset[str]) -> dict[str, Any]:
@@ -89,10 +97,8 @@ def _narrow_verdict(source: Mapping[str, Any], keys: frozenset[str]) -> dict[str
         out["intent"] = _pick(out["intent"], _INTENT_KEYS)
     if "provenance_by_claim" in out:
         out["provenance_by_claim"] = _narrow_provenance(out["provenance_by_claim"])
-    if "evidence" in out:
-        out["evidence"] = _narrow_items(out["evidence"], ("entity", "claim"))
-    if "dissenting_views" in out:
-        out["dissenting_views"] = _narrow_items(out["dissenting_views"], ("stance", "view"))
+    if "sources" in out:
+        out["sources"] = _narrow_sources(out["sources"])
     return out
 
 
@@ -123,3 +129,14 @@ def project_result(result: Mapping[str, Any] | None) -> dict[str, Any] | None:
     if result is None:
         return None
     return _narrow_verdict(result, _RESULT_KEYS)
+
+
+def stored_result(result: Mapping[str, Any] | None) -> dict[str, Any] | None:
+    """The result as `runs.verdict` keeps it: the served keys, plus the backend-only report keys.
+
+    Serving always goes through project_result; this is the only place the backend-only keys are kept.
+    """
+    if result is None:
+        return None
+    kept = _pick(result, _BACKEND_RESULT_KEYS)
+    return {**(project_result(result) or {}), **kept}

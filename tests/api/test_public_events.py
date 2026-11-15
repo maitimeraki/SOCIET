@@ -8,7 +8,14 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from src.api.public_events import _PROFILE_KEYS, project_event, project_result
+from src.api.public_events import (
+    _BACKEND_RESULT_KEYS,
+    _PROFILE_KEYS,
+    _RESULT_KEYS,
+    project_event,
+    project_result,
+    stored_result,
+)
 from src.persona.models_persona import ProvenanceLink
 
 _PROFILE_LINK_ID = uuid.UUID("c0ffee00-0000-4000-8000-000000000002")
@@ -49,14 +56,24 @@ def test_unknown_event_types_are_dropped():
     assert project_event({"type": "debug_dump", "payload": "x"}) is None
 
 def test_result_drops_selection_and_chunk_ids():
-    out = project_result({"verdict": "v", "selection": [{"anchors": [1]}],
+    out = project_result({"converged": True, "selection": [{"anchors": [1]}],
                           "provenance_by_claim": {"c": [{"doc_id": "d", "title": "T", "breadcrumb": "B", "chunk_id": "x"}]}})
     assert "selection" not in out
     assert out["provenance_by_claim"] == {"c": [{"title": "T", "breadcrumb": "B"}]}
 
 def test_result_key_set_is_a_deliberate_allowlist():
-    out = project_result({"surprise": 1, "verdict": "v"})
-    assert out == {"verdict": "v"}
+    assert _RESULT_KEYS == frozenset({
+        "intent", "converged", "final_stances", "warnings", "rounds_executed", "confidence_score",
+        "weight_share", "contested", "provenance_by_claim", "cluster_details", "supporting_entities",
+        "opposing_entities", "title", "markdown", "position", "sources", "status",
+    })
+
+
+def test_result_drops_every_unlisted_key_and_the_backend_only_report_keys():
+    out = project_result({"surprise": 1, "source_refs": {"1": {"node_id": "N"}}, "attempts": 2,
+                          "checks": ["c"], "converged": True})
+    assert out == {"converged": True}
+    assert _BACKEND_RESULT_KEYS == frozenset({"source_refs", "attempts", "checks"})
 
 
 # --- the crossings: every one applies the same projector -----------------------
@@ -112,7 +129,7 @@ async def test_get_debate_doc_projects_stored_events_and_result():
     stored = {
         "user_id": str(user_id),
         "events": [AGENT_EVENT, {"type": "debug_dump"}],
-        "result": {"verdict": "v", "selection": [{"anchors": [1]}], "surprise": 1},
+        "result": {"converged": True, "selection": [{"anchors": [1]}], "surprise": 1},
     }
     with (
         patch("src.api.debate_api.run_doc.read_run_doc", new=AsyncMock(return_value=stored)),
@@ -121,7 +138,7 @@ async def test_get_debate_doc_projects_stored_events_and_result():
         doc = await get_debate_doc("run", user=_user(user_id))
 
     assert doc["events"] == [project_event(AGENT_EVENT)]
-    assert doc["result"] == {"verdict": "v"}
+    assert doc["result"] == {"converged": True}
 
 
 @pytest.mark.asyncio
@@ -133,7 +150,7 @@ async def test_get_debate_status_projects_result():
         "kind": "debate",
         "user_id": str(user_id),
         "status": "complete",
-        "result": {"verdict": "v", "selection": [{"anchors": [1]}]},
+        "result": {"converged": True, "selection": [{"anchors": [1]}]},
         "error": None,
     }
     with (
@@ -142,7 +159,7 @@ async def test_get_debate_status_projects_result():
     ):
         status = await get_debate_status("run", user=_user(user_id))
 
-    assert status.result == {"verdict": "v"}
+    assert status.result == {"converged": True}
 
 
 def test_persisted_run_result_is_projected_before_it_is_written():
@@ -150,10 +167,10 @@ def test_persisted_run_result_is_projected_before_it_is_written():
 
     job = {
         "job_id": "run",
-        "result": {"verdict": "v", "selection": [{"anchors": [1]}], "surprise": 1},
+        "result": {"converged": True, "selection": [{"anchors": [1]}], "surprise": 1},
     }
 
-    assert _job_doc(job)["result"] == {"verdict": "v"}
+    assert _job_doc(job)["result"] == {"converged": True}
 
 
 @pytest.mark.asyncio
@@ -218,17 +235,19 @@ _REAL_LINK = ProvenanceLink(
 ).model_dump(mode="json")
 
 COMPLETE_EVENT = {
-    "type": "complete", "converged": True, "verdict": "Proceed.", "narrative": "n",
-    "narrative_status": "ok", "final_stances": {"Kestra": "POSITIVE"}, "warnings": [],
+    "type": "complete", "converged": True, "final_stances": {"Kestra": "POSITIVE"}, "warnings": [],
     "rounds_executed": 2, "confidence_score": 0.7, "weight_share": 0.7, "contested": False,
     "provenance_by_claim": {"Proceed.": [_REAL_LINK]},
     "cluster_details": {}, "supporting_entities": [], "opposing_entities": [],
-    "dissenting_views": [{"stance": "NEGATIVE", "view": "view text", "quote": "Q-SECRET", "chunk_id": "X-SECRET"}],
-    "evidence": [{"entity": "Acme", "claim": "claim text", "quote": "Q-SECRET", "chunk_id": "X-SECRET"}],
+    "title": "Proceed?", "markdown": "# Proceed?\n## Recommendation\nPosition: POSITIVE, 70%, settled",
+    "position": "POSITIVE",
+    "sources": {"1": {"document": "Memo", "section": "Sec 1", "span": "Q-SECRET", "chunk_id": "X-SECRET"}},
+    "source_refs": {"1": {"node_id": "NODE-SECRET", "evidence_id": "EV-SECRET"}},
+    "attempts": 3, "checks": ["SECRET-CHECK"], "status": "produced",
 }
-COMPLETE_LEAKS = ("DOC-XYZ", "c0ffee00-0000-4000-8000-000000000001", "Q-SECRET", "X-SECRET")
-_NARROWED_EVIDENCE = [{"entity": "Acme", "claim": "claim text"}]
-_NARROWED_DISSENT = [{"stance": "NEGATIVE", "view": "view text"}]
+COMPLETE_LEAKS = ("DOC-XYZ", "c0ffee00-0000-4000-8000-000000000001", "Q-SECRET", "X-SECRET",
+                  "NODE-SECRET", "EV-SECRET", "SECRET-CHECK")
+_PUBLIC_SOURCES = {"1": {"document": "Memo", "section": "Sec 1"}}
 
 
 def test_complete_event_provenance_is_narrowed_like_the_result():
@@ -268,10 +287,10 @@ async def test_complete_event_leaks_no_provenance_ids_on_any_surface():
     assert append.called and ws.send_json.called and manager.buffer
     assert leaks == []
     assert doc["events"][0]["provenance_by_claim"] == {"Proceed.": [{"title": "Memo", "breadcrumb": "Sec 1"}]}
-    assert doc["events"][0]["evidence"] == _NARROWED_EVIDENCE
-    assert doc["events"][0]["dissenting_views"] == _NARROWED_DISSENT
-    assert json.loads(surfaces["live ws frame"])["evidence"] == _NARROWED_EVIDENCE
-    assert json.loads(surfaces["persisted run_events row"])["dissenting_views"] == _NARROWED_DISSENT
+    assert doc["events"][0]["sources"] == _PUBLIC_SOURCES
+    assert json.loads(surfaces["live ws frame"])["sources"] == _PUBLIC_SOURCES
+    assert json.loads(surfaces["persisted run_events row"])["sources"] == _PUBLIC_SOURCES
+    assert "attempts" not in doc["events"][0] and "checks" not in doc["events"][0]
 
 
 def _export_run(verdict):
@@ -288,18 +307,22 @@ def test_debate_run_export_verdict_is_projected():
     link = ProvenanceLink(doc_id="DOC-XYZ", title="T", breadcrumb="B",
                           chunk_id=uuid.UUID("c0ffee00-0000-4000-8000-000000000003")).model_dump(mode="json")
     run = _export_run({
-        "verdict": "v", "selection": [{"anchors": [1]}],
+        "converged": True, "selection": [{"anchors": [1]}],
         "provenance_by_claim": {"c": [link]},
-        "evidence": [{"entity": "Acme", "claim": "claim text", "quote": "Q-SECRET", "chunk_id": "X-SECRET"}],
-        "dissenting_views": [{"stance": "NEGATIVE", "view": "view text", "quote": "Q-SECRET"}],
+        "status": "produced", "title": "T", "markdown": "# T",
+        "sources": {"1": {"document": "T", "section": "B", "span": "Q-SECRET", "chunk_id": "X-SECRET"}},
+        "source_refs": {"1": {"node_id": "NODE-SECRET", "evidence_id": "EV-SECRET"}},
+        "attempts": 1, "checks": ["SECRET-CHECK"],
     })
 
     out = _run_json(run, "debate")
 
-    assert out["verdict"] == {"verdict": "v", "provenance_by_claim": {"c": [{"title": "T", "breadcrumb": "B"}]},
-                              "evidence": _NARROWED_EVIDENCE, "dissenting_views": _NARROWED_DISSENT}
+    assert out["verdict"] == {"converged": True, "provenance_by_claim": {"c": [{"title": "T", "breadcrumb": "B"}]},
+                              "status": "produced", "title": "T", "markdown": "# T",
+                              "sources": {"1": {"document": "T", "section": "B"}}}
     text = json.dumps(out)
-    assert not any(t in text for t in ("c0ffee00-0000-4000-8000-000000000003", "DOC-XYZ", "Q-SECRET", "X-SECRET"))
+    assert not any(t in text for t in ("c0ffee00-0000-4000-8000-000000000003", "DOC-XYZ", "Q-SECRET", "X-SECRET",
+                                       "NODE-SECRET", "EV-SECRET", "SECRET-CHECK"))
 
 
 def test_build_graph_job_export_keeps_its_verdict_state():
@@ -320,7 +343,7 @@ def test_non_string_event_type_is_dropped_without_logging_its_payload(kind, capl
 # --- fix round 3: fail closed on malformed shapes -------------------------------
 
 def test_non_mapping_intent_is_dropped_from_the_result():
-    assert project_result({"intent": "SECRET-INTENT", "verdict": "v"})["intent"] == {}
+    assert project_result({"intent": "SECRET-INTENT", "converged": True})["intent"] == {}
 
 
 def test_non_mapping_intent_is_dropped_from_the_intent_event():
@@ -351,50 +374,51 @@ def test_malformed_profile_does_not_raise_or_pass_through():
     assert agent["profile"] == {}
 
 
-# --- fix round 4: evidence and dissenting_views are LLM output ------------------
+# --- sources: the report's public source map, narrowed to {document, section} ---
 
-@pytest.mark.parametrize("key", ["evidence", "dissenting_views"])
-def test_llm_item_keys_are_narrowed_on_event_and_result(key):
-    items = [{"entity": "A", "claim": "c", "stance": "POSITIVE", "view": "v",
-              "quote": "Q-SECRET", "chunk_id": "X-SECRET", "doc_id": "D-SECRET"}]
-    for out in (project_event({"type": "complete", key: items}), project_result({key: items})):
-        assert "SECRET" not in json.dumps(out)
+def test_sources_keep_exactly_document_and_section():
+    out = project_result({"sources": {"1": {"document": "Memo", "section": "Sec 1", "span": "Q-SECRET",
+                                             "chunk_id": "X-SECRET", "node_id": "N-SECRET"}}})
+    assert out == {"sources": {"1": {"document": "Memo", "section": "Sec 1"}}}
 
 
-def test_evidence_and_dissent_keep_only_their_rendered_keys():
-    out = project_result({
-        "evidence": [{"entity": "A", "claim": "c", "quote": "Q"}],
-        "dissenting_views": [{"stance": "NEGATIVE", "view": "v", "entity": "A", "quote": "Q"}],
+def test_sources_are_narrowed_on_the_complete_event_too():
+    out = project_event({"type": "complete", "sources": {"1": {"document": "Memo", "section": "S",
+                                                                "span": "Q-SECRET"}}})
+    assert out["sources"] == {"1": {"document": "Memo", "section": "S"}}
+
+
+@pytest.mark.parametrize("sources", ["SECRET", None, 3, ["SECRET"]])
+def test_a_malformed_sources_map_is_empty(sources):
+    assert project_result({"sources": sources}) == {"sources": {}}
+
+
+def test_a_source_entry_that_is_not_a_mapping_or_not_text_is_dropped():
+    out = project_result({"sources": {
+        "1": "SECRET",
+        "2": {"document": 7, "section": "S", "span": "Q-SECRET"},
+        "3": {"document": "Memo", "section": None},
+        "4": {"document": "Memo", "section": "Sec 4"},
+    }})
+    assert out == {"sources": {"4": {"document": "Memo", "section": "Sec 4"}}}
+
+
+def test_stored_result_keeps_the_backend_only_keys_and_serves_the_public_ones():
+    stored = stored_result({
+        "converged": True, "status": "produced", "attempts": 2, "checks": ["attempt 1: x"],
+        "source_refs": {"1": {"node_id": "N", "evidence_id": "e1"}},
+        "sources": {"1": {"document": "Memo", "section": "Sec 1"}}, "surprise": 1,
     })
-    assert out == {"evidence": [{"entity": "A", "claim": "c"}],
-                   "dissenting_views": [{"stance": "NEGATIVE", "view": "v"}]}
-
-
-@pytest.mark.parametrize("key", ["evidence", "dissenting_views"])
-def test_malformed_llm_items_are_dropped(key):
-    assert project_result({key: ["SECRET", None, 3]}) == {key: []}
-    assert project_result({key: "SECRET"}) == {key: []}
-    assert project_result({key: None}) == {key: []}
-
-
-def test_non_text_evidence_values_are_dropped_not_passed_through():
-    out = project_result({"evidence": [{"entity": {"chunk_id": "X-SECRET"}, "claim": "c"}]})
-    assert "X-SECRET" not in json.dumps(out)
+    assert stored == {
+        "converged": True, "status": "produced", "attempts": 2, "checks": ["attempt 1: x"],
+        "source_refs": {"1": {"node_id": "N", "evidence_id": "e1"}},
+        "sources": {"1": {"document": "Memo", "section": "Sec 1"}},
+    }
 
 
 @pytest.mark.parametrize("event", [None, "complete", ["type"], 3])
 def test_non_mapping_event_is_dropped(event):
     assert project_event(event) is None
-
-
-def test_evidence_item_with_no_surviving_value_is_dropped():
-    out = project_result({"evidence": [{"entity": {"chunk_id": "X-SECRET"}, "claim": 3}]})
-    assert out == {"evidence": []}
-
-
-def test_dissenting_view_with_no_surviving_value_is_dropped():
-    out = project_event({"type": "complete", "dissenting_views": [{"stance": 1, "view": None}, {"stance": "NEG", "view": "keep"}]})
-    assert out["dissenting_views"] == [{"stance": "NEG", "view": "keep"}]
 
 
 def test_profile_allowlist_is_exactly_the_agent_view_keys():
@@ -415,3 +439,28 @@ def test_roster_projection_fails_closed_on_a_raw_key():
             "evidence": [{"chunk_id": "X-SECRET", "text": "Some customer text"}]}
     with pytest.raises(ValidationError):
         roster_views([view])
+
+
+@pytest.mark.asyncio
+async def test_get_job_serves_a_debate_result_only_through_the_allowlist():
+    from src.api import jobs_api
+
+    job_id, user_id = str(uuid.uuid4()), uuid.uuid4()
+    raw = {
+        "converged": True, "status": "produced", "markdown": "# T", "title": "T", "position": "POSITIVE",
+        "sources": {"1": {"document": "D", "section": "S"}},
+        "source_refs": {"1": {"node_id": "NODE-SECRET", "evidence_id": "EV-SECRET"}},
+        "attempts": 1, "checks": ["SECRET-CHECK"],
+    }
+    doc = {"job_id": job_id, "user_id": str(user_id), "mode": "debate", "status": "complete", "result": raw}
+    with (
+        patch("src.api.jobs_api.run_doc.read_job_doc", new=AsyncMock(return_value=doc)),
+        patch("src.api.jobs_api.require_owner", new=AsyncMock()),
+    ):
+        out = await jobs_api.get_job(job_id, user=SimpleNamespace(id=user_id))
+
+    served = json.dumps(out)
+    assert not any(token in served for token in ("NODE-SECRET", "EV-SECRET", "SECRET-CHECK"))
+    assert out["result"]["sources"] == {"1": {"document": "D", "section": "S"}}
+    assert out["result"]["status"] == "produced"
+    assert "source_refs" not in out["result"] and "attempts" not in out["result"]

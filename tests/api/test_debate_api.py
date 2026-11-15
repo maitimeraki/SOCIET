@@ -30,6 +30,7 @@ from src.api.debate_api import (
     router,
     stream_debate,
 )
+from src.api.public_events import project_result, stored_result
 from src.auth.deps import current_user
 from src.db.engine import get_session_factory
 from src.db.models import User
@@ -390,7 +391,6 @@ def _stub_verdict() -> DebateVerdict:
         confidence_score=0.9,
         supporting_entities=[],
         opposing_entities=[],
-        summary="Test verdict.",
         cluster_details={},
         rounds_executed=1,
     )
@@ -994,7 +994,6 @@ async def _run_with_depth(job_id: str, depth: str):
     repo = MagicMock()
     result = OrchestratedDebateResult(
         converged=False,
-        verdict="stub",
         final_stances={},
         warnings=[],
         rounds_executed=0,
@@ -1172,75 +1171,95 @@ async def _run_with_result(job_id: str, result: OrchestratedDebateResult):
     return job, ws_manager, orch_cls
 
 
-class TestDebateJobNarrative:
-    """T4: the query-grounded narrative rides the job result and the WS complete frame."""
+class TestDebateJobReport:
+    """The final report rides the job result and the WS complete frame; only the public keys are served."""
 
     @pytest.mark.asyncio
-    async def test_result_and_complete_carry_the_narrative(self):
-        job_id = f"narr-{uuid.uuid4()}"
+    async def test_result_and_complete_carry_the_produced_report(self):
+        job_id = f"report-{uuid.uuid4()}"
+        report = {
+            "title": "Enter Berlin?",
+            "markdown": "# Enter Berlin?\n## Recommendation\nPosition: POSITIVE, 80%, settled",
+            "position": "POSITIVE",
+            "sources": {"1": {"document": "Market memo", "section": "Pricing"}},
+            "source_refs": {"1": {"node_id": "kestra-node", "evidence_id": "e1"}},
+            "attempts": 1,
+            "checks": [],
+            "status": "produced",
+        }
         result = OrchestratedDebateResult(
             converged=True,
-            verdict="short summary",
             final_stances={},
             warnings=[],
             rounds_executed=1,
-            narrative="## Recommendation\nExpand, cautiously.",
-            dissenting_views=[{"stance": "NEGATIVE", "view": "too soon"}],
-            evidence=[{"entity": "Steel tariffs", "claim": "raises cost"}],
+            report=report,
         )
 
         job, ws_manager, _ = await _run_with_result(job_id, result)
 
         assert job["status"] == "complete"
-        # backward-compat: the short summary stays put.
-        assert job["result"]["verdict"] == "short summary"
-        assert job["result"]["narrative"] == "## Recommendation\nExpand, cautiously."
-        assert job["result"]["dissenting_views"] == [
-            {"stance": "NEGATIVE", "view": "too soon"}
-        ]
-        assert job["result"]["evidence"] == [
-            {"entity": "Steel tariffs", "claim": "raises cost"}
-        ]
-
+        assert job["result"]["markdown"] == report["markdown"]
+        assert job["result"]["status"] == "produced"
         complete_msg = next(
             call.args[0]
             for call in ws_manager.broadcast.call_args_list
             if call.args and call.args[0].get("type") == "complete"
         )
-        assert complete_msg["verdict"] == "short summary"
-        assert complete_msg["narrative"] == "## Recommendation\nExpand, cautiously."
-        assert complete_msg["dissenting_views"] == [
-            {"stance": "NEGATIVE", "view": "too soon"}
-        ]
-        assert complete_msg["evidence"] == [
-            {"entity": "Steel tariffs", "claim": "raises cost"}
-        ]
+        assert complete_msg["title"] == "Enter Berlin?"
+        assert complete_msg["markdown"] == report["markdown"]
+        assert complete_msg["sources"] == report["sources"]
 
     @pytest.mark.asyncio
-    async def test_result_and_complete_carry_the_narrative_status_flag(self):
-        """T7: the narrative fallback flag reaches the client, not just the log."""
-        job_id = f"narr-status-{uuid.uuid4()}"
+    async def test_served_result_drops_the_backend_only_keys_and_storage_keeps_them(self):
+        job_id = f"report-keys-{uuid.uuid4()}"
+        report = {
+            "title": "Enter Berlin?",
+            "markdown": "# Enter Berlin?",
+            "position": "POSITIVE",
+            "sources": {"1": {"document": "Market memo", "section": "Pricing"}},
+            "source_refs": {"1": {"node_id": "kestra-node", "evidence_id": "e1"}},
+            "attempts": 1,
+            "checks": [],
+            "status": "produced",
+        }
+        result = OrchestratedDebateResult(
+            converged=True, final_stances={}, warnings=[], rounds_executed=1, report=report
+        )
+
+        job, _, _ = await _run_with_result(job_id, result)
+
+        served = project_result(job["result"])
+        assert {"source_refs", "attempts", "checks"}.isdisjoint(served)
+        stored = stored_result(job["result"])
+        assert stored["source_refs"] == report["source_refs"]
+        assert stored["attempts"] == 1
+
+    @pytest.mark.asyncio
+    async def test_a_report_not_produced_stores_no_text_and_the_run_completes(self):
+        job_id = f"report-missing-{uuid.uuid4()}"
         result = OrchestratedDebateResult(
             converged=True,
-            verdict="short summary",
             final_stances={},
             warnings=[],
             rounds_executed=1,
-            narrative="short summary",
-            narrative_status="fallback",
+            report={
+                "title": None,
+                "markdown": None,
+                "position": "POSITIVE",
+                "sources": {},
+                "source_refs": {},
+                "attempts": 3,
+                "checks": [],
+                "status": "not_produced",
+            },
         )
 
-        job, ws_manager, _ = await _run_with_result(job_id, result)
+        job, _, _ = await _run_with_result(job_id, result)
 
         assert job["status"] == "complete"
-        assert job["result"]["narrative_status"] == "fallback"
-
-        complete_msg = next(
-            call.args[0]
-            for call in ws_manager.broadcast.call_args_list
-            if call.args and call.args[0].get("type") == "complete"
-        )
-        assert complete_msg["narrative_status"] == "fallback"
+        assert job["result"]["status"] == "not_produced"
+        assert job["result"]["markdown"] is None
+        assert job["result"]["title"] is None
 
     @pytest.mark.asyncio
     async def test_request_context_reaches_the_orchestrator(self):
@@ -1248,7 +1267,6 @@ class TestDebateJobNarrative:
         job_id = f"ctx-{uuid.uuid4()}"
         result = OrchestratedDebateResult(
             converged=False,
-            verdict="v",
             final_stances={},
             warnings=[],
             rounds_executed=0,

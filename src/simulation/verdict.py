@@ -1,4 +1,4 @@
-"""VerdictSynthesizer: consensus-weighted synthesis for debate verdicts."""
+"""VerdictSynthesizer: consensus-weighted numbers, and the final report written from them (spec §13)."""
 
 from __future__ import annotations
 
@@ -6,10 +6,8 @@ import logging
 import re
 from collections.abc import Iterable
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, Any, Literal
 from uuid import UUID
-
-from pydantic import BaseModel
 
 from src.llm.config_llm import get_llm_config
 from src.persona.agent import WIRE_STANCES, Agent, Stance
@@ -27,7 +25,6 @@ from src.simulation.turn_protocol import (
     stance_weights,
     weighted_share,
 )
-from src.utils.json_extract import extract_json_object
 
 if TYPE_CHECKING:
     from src.llm.client import LLMClient
@@ -57,77 +54,8 @@ def cluster_by_stance(turns: Iterable[AgentTurn]) -> dict[Stance, list[AgentTurn
     return clusters
 
 
-#: The summary of a debate with no consensus: no position in the window carries weight.
-NO_VERDICT_SUMMARY = "No verdict: no position carries weight."
-#: The narrative status of a no-verdict run: no answer was written, so there is no fallback.
-NO_VERDICT_STATUS = "no_verdict"
-
-# Step 9: bound the transcript the answer-writer prompt may carry. Bound the
-# input, never the answer — there is no character cap on the narrative itself.
-SUMMARY_TRANSCRIPT_MAX_TURNS = 40
-SUMMARY_TRANSCRIPT_MAX_CHARS = 16000
-
 # Step 7: a dominant share below this is a near-tie, not a mandate.
 CONTESTED_THRESHOLD = 0.6
-
-# Bounded latency budget for the answer-writer: the first call plus two
-# retries, each asking more strictly for bare JSON. After this the narrative
-# falls back to `summary` — flagged on the verdict, never silent. The model and
-# token budget come from LLMConfig (verdict_model / verdict_max_tokens).
-VERDICT_MAX_ATTEMPTS = 3
-
-# Appended to the prompt on retries: the previous reply was not valid JSON, so
-# the format constraint is restated explicitly.
-VERDICT_JSON_REINFORCEMENT = (
-    "\n\nYour previous reply was not valid JSON. Reply with ONLY the JSON "
-    "object — no markdown fences, no prose before or after it."
-)
-
-VERDICT_SYSTEM = (
-    "You are the analyst who answers the user's question from the debate below. "
-    "Reply with ONLY a JSON object, no prose, with keys: answer, reasoning, "
-    "constraints_and_risks, dissenting_views (list of {stance, view}), "
-    "evidence (list of {entity, claim}), confidence. Ground every claim in the "
-    "transcript and the cited entities; do not invent facts."
-)
-
-
-class Verdict(BaseModel):
-    """Structured analyst answer, validated at the boundary (spec §8.1, §8.6)."""
-
-    answer: str
-    reasoning: str
-    constraints_and_risks: str
-    dissenting_views: list[dict] = []
-    evidence: list[dict] = []
-    confidence: float = 0.0
-
-
-def _parse_verdict(raw: str) -> Verdict | None:
-    """Repair-then-validate: extract the JSON object, then validate it. None
-    when there is no parseable object or the answer came back empty."""
-    candidate = extract_json_object(raw)
-    if candidate is None:
-        return None
-    try:
-        parsed = Verdict.model_validate_json(candidate)
-    except Exception:
-        return None
-    return parsed if parsed.answer.strip() else None
-
-
-def _to_markdown(v: Verdict) -> str:
-    """Assemble the narrative markdown from the structured verdict fields."""
-    parts = [
-        f"## Recommendation\n{v.answer}",
-        f"## Reasoning\n{v.reasoning}",
-    ]
-    if v.constraints_and_risks:
-        parts.append(f"## Constraints & Risks\n{v.constraints_and_risks}")
-    # Dissent is rendered by the frontend as a structured list (plan T6), not
-    # prose here — emitting it in markdown too showed it twice.
-    parts.append(f"## Confidence\n{v.confidence:.2f}")
-    return "\n\n".join(parts)
 
 
 def _provenance_link(item: EvidenceItem) -> ProvenanceLink | None:
@@ -142,148 +70,12 @@ def _provenance_link(item: EvidenceItem) -> ProvenanceLink | None:
 
 
 class VerdictSynthesizer:
-    """Consensus-weighted synthesizer.
-
-    Reads `strength` and `confidence` directly from the canonical `Agent`.
-    """
-
-    async def asynthesize(
-        self,
-        rounds: list[RoundResult],
-        profiles: list[Agent],
-        llm_client: "LLMClient | None" = None,
-        query: str = "",
-        scenario: str = "",
-        run_id: str = "",
-    ) -> DebateVerdict:
-        """Async synthesis -- safe to call from any running event loop.
-
-        Always produces the deterministic template verdict; when a client is
-        given it additionally writes the query-grounded answer into
-        `narrative` (assembled from the structured `Verdict`). When the
-        answer-writer cannot produce parseable JSON after bounded retries + a
-        repair pass — or no client was given — the narrative degrades to
-        `summary` and `narrative_status` is set to `"fallback"` (flagged, and
-        logged with the run/query, never silent).
-        """
-        verdict = self.synthesize(rounds=rounds, profiles=profiles, llm_client=None)
-        if verdict.overall_stance is Stance.ABSTAIN:
-            # No position carries weight: there is no answer to write, so the answer-writer is not called.
-            verdict.narrative = verdict.summary
-            verdict.narrative_status = NO_VERDICT_STATUS
-            return verdict
-        parsed = None
-        if llm_client is not None:
-            parsed = await self._allm_verdict(
-                llm_client, verdict, consensus_window(rounds), query, scenario
-            )
-        if parsed is not None:
-            verdict.dissenting_views = parsed.dissenting_views
-            verdict.evidence = parsed.evidence
-            verdict.narrative = _to_markdown(parsed)
-            return verdict
-        verdict.narrative = verdict.summary
-        verdict.narrative_status = "fallback"
-        logger.warning(
-            "verdict narrative degraded to the summary (run=%s, query=%r): %s",
-            run_id or "(none)",
-            query[:120],
-            (
-                "no LLM client given"
-                if llm_client is None
-                else "answer-writer produced no parseable JSON after retries"
-            ),
-        )
-        return verdict
-
-    async def _allm_verdict(
-        self,
-        llm_client: "LLMClient",
-        verdict: DebateVerdict,
-        turns: list[AgentTurn],
-        query: str,
-        scenario: str,
-    ) -> Verdict | None:
-        """Strict-JSON answer-writer -- no asyncio.run, no loop collision.
-
-        The prompt carries the query and the bounded transcript, not just the
-        aggregates, so the answer addresses the question from the argument.
-        Bounded retries (VERDICT_MAX_ATTEMPTS total calls): each retry restates
-        the bare-JSON constraint, and every reply goes through the repair pass in
-        `_parse_verdict`. Returns None only once every attempt has failed, so the
-        caller can flag the fallback.
-        """
-        transcript, turns_used = self._render_transcript(turns)
-        contested_note = " -- contested" if verdict.contested else ""
-        user_prompt = (
-            f"QUESTION: {query or '(none)'}\n"
-            f"SCENARIO CONTEXT: {scenario or '(none)'}\n"
-            f"Overall stance: {verdict.overall_stance.value} "
-            f"(share {verdict.weight_share:.2f}{contested_note})\n"
-            f"Supporting entities: {verdict.supporting_entities[:10]}\n"
-            f"Opposing entities: {verdict.opposing_entities[:10]}\n\n"
-            f"DEBATE TRANSCRIPT (last {turns_used} turns):\n{transcript}"
-        )
-        cfg = get_llm_config()
-        from src.billing import metering
-
-        for attempt in range(1, VERDICT_MAX_ATTEMPTS + 1):
-            prompt = (
-                user_prompt
-                if attempt == 1
-                else user_prompt + VERDICT_JSON_REINFORCEMENT
-            )
-            try:
-                with metering.source_scope("verdict"):
-                    raw = await llm_client.generate(
-                        system_prompt=VERDICT_SYSTEM,
-                        user_prompt=prompt,
-                        temperature=0.4,
-                        max_tokens=cfg.verdict_max_tokens,
-                        model=cfg.verdict_model,
-                    )
-            except metering.MeteringError:
-                # Accounting already failed: stop the job instead of retrying
-                # into a deterministic fallback verdict (R9).
-                raise
-            except Exception:
-                logger.exception(
-                    "verdict answer-writer attempt %d/%d raised",
-                    attempt,
-                    VERDICT_MAX_ATTEMPTS,
-                )
-                continue
-            parsed = _parse_verdict(raw)
-            if parsed is not None:
-                return parsed
-            logger.warning(
-                "verdict answer-writer attempt %d/%d returned no parseable JSON",
-                attempt,
-                VERDICT_MAX_ATTEMPTS,
-            )
-        return None
-
-    @staticmethod
-    def _render_transcript(turns: list[AgentTurn]) -> tuple[str, int]:
-        """Bounded transcript for the summary prompt: the last-N turns within a
-        total char cap, newest-first so the most recent argument is never the
-        one dropped. Returns (text, turns_included)."""
-        lines: list[str] = []
-        budget = SUMMARY_TRANSCRIPT_MAX_CHARS
-        for turn in reversed(turns[-SUMMARY_TRANSCRIPT_MAX_TURNS:]):
-            line = f"[{turn.stance}] {turn.agent_name}: {turn.content}"
-            if len(line) > budget:
-                break
-            lines.append(line)
-            budget -= len(line)
-        lines.reverse()
-        return "\n".join(lines), len(lines)
+    """Consensus-weighted synthesizer, and the report written from its board."""
 
     def synthesize(
         self,
         rounds: list[RoundResult],
         profiles: list[Agent],
-        llm_client: "LLMClient | None" = None,
     ) -> DebateVerdict:
         """The verdict over the consensus window (the last two rounds).
 
@@ -317,7 +109,6 @@ class VerdictSynthesizer:
                 confidence_score=0.0,
                 supporting_entities=[],
                 opposing_entities=[],
-                summary=NO_VERDICT_SUMMARY,
                 cluster_details=cluster_details,
                 rounds_executed=len(rounds),
                 weight_share=0.0,
@@ -356,26 +147,46 @@ class VerdictSynthesizer:
                         if link is not None and link not in links:
                             links.append(link)
 
-        dominant_count = cluster_details[overall_stance].count
-        dominant_pct = dominant_count / len(window) * 100
-
-        summary = (
-            f"The debate concluded with {dominant_pct:.0f}% of turns expressing "
-            f"{overall_stance.value} stance. Confidence score: {confidence_score:.2f}."
-        )
-
         return DebateVerdict(
             overall_stance=overall_stance,
             confidence_score=confidence_score,
             supporting_entities=list(set(supporting))[:10],
             opposing_entities=list(set(opposing))[:10],
-            summary=summary,
             cluster_details=cluster_details,
             provenance_by_claim=provenance_by_claim,
             rounds_executed=len(rounds),
             weight_share=weight_share,
             contested=contested,
         )
+
+    async def asynthesize(
+        self,
+        rounds: list[RoundResult],
+        profiles: list[Agent],
+        llm_client: "LLMClient | None" = None,
+        query: str = "",
+        scenario: str = "",
+        run_id: str = "",
+        converged: bool = False,
+    ) -> DebateVerdict:
+        """The consensus verdict, with the final report in `report`.
+
+        The report is written by the LLM from the board facts and the bundle, and checked in
+        code. Without a client, or when every attempt fails, `report` says "not_produced" and
+        carries no text: nothing is written in its place.
+        """
+        verdict = self.synthesize(rounds=rounds, profiles=profiles)
+        verdict.report = await write_board_report(
+            llm_client,
+            rounds=rounds,
+            profiles=profiles,
+            query=query,
+            scenario=scenario,
+            converged=converged,
+        )
+        if verdict.report["status"] == NOT_PRODUCED:
+            logger.warning("final report not produced (run=%s)", run_id or "(none)")
+        return verdict
 
 
 # --- The final report (spec §13): board facts, code checks, the LLM report writer.
@@ -388,6 +199,14 @@ REPORT_AGAINST_LINES = (5, 6)
 REPORT_POINT_PARTS = ("Point", "Against", "Opinion", "Result")
 REPORT_TAGS = ("(from the documents)", "(judgement)")
 NO_POSITION_WORD = "NO POSITION"
+
+#: The stored `status` of a report: written and checked, or not produced (no text stored).
+PRODUCED = "produced"
+NOT_PRODUCED = "not_produced"
+
+SETTLED = "settled"
+NOT_SETTLED_ROUND_LIMIT = "not settled (round limit)"
+NO_AGREEMENT_GAP = "no agreement above the convergence threshold"
 
 REPORT_SYSTEM = (
     "You write the final report of a debate board on the user's QUESTION. "
@@ -691,7 +510,168 @@ async def write_report(
             previous = check_report(markdown, facts, source_ids)
             if not previous:
                 return ReportResult(markdown=markdown, attempts=attempt, checks=checks)
-            logger.warning("report attempt %d/%d failed its checks", attempt, REPORT_MAX_ATTEMPTS)
+            logger.warning(
+                "report attempt %d/%d failed its checks: %s",
+                attempt,
+                REPORT_MAX_ATTEMPTS,
+                "; ".join(previous),
+            )
         checks.extend(f"attempt {attempt}: {error}" for error in previous)
     logger.warning("report not produced after %d attempts", REPORT_MAX_ATTEMPTS)
     return None
+
+
+def final_turns(rounds: list[RoundResult], profiles: list[Agent]) -> dict[str, AgentTurn | None]:
+    """Each seated agent's last turn in the consensus window; None when it has none there."""
+    last: dict[str, AgentTurn] = {}
+    for turn in consensus_window(rounds):
+        last[turn.agent_name] = turn
+    return {p.identity.name: last.get(p.identity.name) for p in profiles}
+
+
+def _final_stance(turn: AgentTurn) -> Stance:
+    """A turn's stance on the wire; a turn that names none counts as ABSTAIN, never NEUTRAL."""
+    stance = wire_stance(turn.stance)
+    return Stance.ABSTAIN if stance is None else stance
+
+
+def board_facts(rounds: list[RoundResult], profiles: list[Agent], converged: bool) -> BoardFacts:
+    """The board's facts: the consensus position and share, the room, the state and the gaps.
+
+    The position and share are `weighted_share` over the consensus window. The room counts each
+    seated agent's final stance; an agent with no turn in the window is ABSTAIN. Gaps are
+    mechanical: one line per abstaining agent, and the threshold line when the board is not settled.
+    """
+    share = weighted_share(consensus_window(rounds), {p.identity.name: p for p in profiles})
+    room = {stance.value: 0 for stance in WIRE_STANCES}
+    gaps: list[str] = []
+    for name, turn in final_turns(rounds, profiles).items():
+        stance = Stance.ABSTAIN if turn is None else _final_stance(turn)
+        room[stance.value] += 1
+        if stance is Stance.ABSTAIN:
+            gaps.append(f"{name} took no position")
+    if not converged:
+        gaps.append(NO_AGREEMENT_GAP)
+    return BoardFacts(
+        position=share[0] if share is not None else None,
+        share=share[1] if share is not None else 0.0,
+        room=room,
+        state=SETTLED if converged else NOT_SETTLED_ROUND_LIMIT,
+        gaps=gaps,
+    )
+
+
+def build_report_bundle(
+    rounds: list[RoundResult],
+    profiles: list[Agent],
+    query: str,
+    scenario: str,
+) -> tuple[ReportBundle, dict[str, dict[str, str]]]:
+    """The bundle the report reads, and the backend-only source refs for its [n] ids.
+
+    A source is one evidence item of one seated agent: (node_id, evidence_id), since evidence ids
+    are per agent. Numbers are assigned in order of first appearance: the final answers in seat
+    order, then the switches in round order. Span text goes to the bundle's sources, never to
+    the public map.
+    """
+    by_name = {p.identity.name: p for p in profiles}
+    finals = final_turns(rounds, profiles)
+    numbers: dict[tuple[str, str], str] = {}
+    sources: dict[str, ReportSource] = {}
+    refs: dict[str, dict[str, str]] = {}
+
+    def number(speaker: Agent, cite: str) -> str | None:
+        key = (speaker.node_id, cite)
+        if key not in numbers:
+            item = next((i for i in speaker.evidence if i.id == cite), None)
+            if item is None:
+                return None
+            n = str(len(numbers) + 1)
+            numbers[key] = n
+            sources[n] = ReportSource(document=item.doc_title, section=item.section, text=item.text)
+            refs[n] = {"node_id": speaker.node_id, "evidence_id": item.id}
+        return numbers[key]
+
+    def cited(speaker: Agent, cites: Iterable[str]) -> tuple[str, ...]:
+        found = (number(speaker, cite) for cite in cites)
+        return tuple(dict.fromkeys(n for n in found if n is not None))
+
+    citizens: list[Citizen] = []
+    for profile in profiles:
+        turn = finals[profile.identity.name]
+        if turn is None:
+            citizens.append(Citizen(profile.identity.name, Stance.ABSTAIN, "", ()))
+            continue
+        citizens.append(
+            Citizen(profile.identity.name, _final_stance(turn), turn.content, cited(profile, turn.cites))
+        )
+
+    switches: list[str] = []
+    held: dict[str, str] = {}
+    cited_before: dict[str, set[str]] = {}
+    for round_num, round_result in enumerate(rounds, start=1):
+        last_turn: dict[str, AgentTurn] = {}
+        for turn in round_result.turns:
+            last_turn[turn.agent_name] = turn
+        for name, turn in last_turn.items():
+            previous = held.get(name)
+            if previous is not None and previous != turn.stance:
+                new_cites = [c for c in turn.cites if c not in cited_before.get(name, set())]
+                speaker = by_name.get(name)
+                cited_now = cited(speaker, new_cites) if speaker is not None else ()
+                line = f"Round {round_num}: {name} moved from {previous} to {turn.stance}"
+                if cited_now:
+                    line += ", citing " + ", ".join(f"[{n}]" for n in cited_now)
+                switches.append(line)
+            held[name] = turn.stance
+        for turn in round_result.turns:
+            cited_before.setdefault(turn.agent_name, set()).update(turn.cites)
+
+    bundle = ReportBundle(
+        question=query, context=scenario, citizens=citizens, switches=switches, sources=sources
+    )
+    return bundle, refs
+
+
+async def write_board_report(
+    client: "LLMClient | None",
+    *,
+    rounds: list[RoundResult],
+    profiles: list[Agent],
+    query: str,
+    scenario: str,
+    converged: bool,
+) -> dict[str, Any]:
+    """The report's stored fields, for `runs.verdict`.
+
+    `title`, `markdown`, `sources` and `attempts`/`checks` come from the written report; `source_refs`
+    is backend-only and never served. A report that was not produced stores no text, title,
+    sources or refs; its position is still the board's. `position` is the board position word, or None.
+    """
+    facts = board_facts(rounds, profiles, converged)
+    bundle, source_refs = build_report_bundle(rounds, profiles, query, scenario)
+    position = facts.position.value if facts.position is not None else None
+    result = None
+    if client is not None:
+        result = await write_report(client, bundle, facts, set(bundle.sources))
+    if result is None:
+        return {
+            "title": None,
+            "markdown": None,
+            "position": position,
+            "sources": {},
+            "source_refs": {},
+            "attempts": REPORT_MAX_ATTEMPTS if client is not None else 0,
+            "checks": [],
+            "status": NOT_PRODUCED,
+        }
+    return {
+        "title": result.markdown.splitlines()[0][2:].strip(),
+        "markdown": result.markdown,
+        "position": position,
+        "sources": {n: {"document": s.document, "section": s.section} for n, s in bundle.sources.items()},
+        "source_refs": source_refs,
+        "attempts": result.attempts,
+        "checks": result.checks,
+        "status": PRODUCED,
+    }

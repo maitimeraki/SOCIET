@@ -67,7 +67,6 @@ class TestVerdictSynthesizerFromRound:
         assert verdict.cluster_details[Stance.NEGATIVE].count == 2
 
         assert verdict.rounds_executed == 1
-        assert verdict.summary != ""
 
     def test_empty_rounds_returns_no_verdict(self):
         synthesizer = VerdictSynthesizer()

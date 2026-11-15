@@ -265,7 +265,6 @@ def _orchestrator(sm: AsyncMock) -> DebateOrchestrator:
         confidence_score=0.9,
         supporting_entities=[],
         opposing_entities=[],
-        summary="v",
         cluster_details={},
         rounds_executed=1,
     )

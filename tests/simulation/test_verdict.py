@@ -1,34 +1,14 @@
 """Tests for VerdictSynthesizer."""
 
-import json
 import math
-from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
 from src.persona.agent import WIRE_STANCES, Stance
-from src.simulation.pair_turn import AgentTurn, DebateVerdict, RoundResult
+from src.simulation.pair_turn import AgentTurn, RoundResult
 from src.simulation.turn_protocol import stance_weights
-from src.simulation.verdict import (
-    NO_VERDICT_STATUS,
-    NO_VERDICT_SUMMARY,
-    VerdictSynthesizer,
-    cluster_by_stance,
-)
+from src.simulation.verdict import VerdictSynthesizer, cluster_by_stance
 from tests.agent_factory import slim_agent
-
-
-def test_debate_verdict_has_narrative():
-    v = DebateVerdict(
-        overall_stance=Stance.NEUTRAL,
-        confidence_score=0.0,
-        supporting_entities=[],
-        opposing_entities=[],
-        summary="s",
-        cluster_details={},
-        narrative="## Recommendation\nYes.",
-    )
-    assert v.narrative.startswith("## Recommendation")
 
 
 def make_profile(name: str, confidence: float = 0.5):
@@ -56,23 +36,6 @@ def make_turn(
 
 def make_round(num: int, turns: list[AgentTurn]) -> RoundResult:
     return RoundResult(round_num=num, turns=turns, pairs=[])
-
-
-class TestRenderTranscript:
-    """The answer-writer's transcript carries each stated answer, never the private reasoning."""
-
-    def test_transcript_carries_the_answer_and_no_reasoning(self):
-        synth = VerdictSynthesizer()
-        turn = AgentTurn(
-            agent_id="a1",
-            agent_name="Alice",
-            content="I support it.",
-            stance="POSITIVE",
-            confidence=0.8,
-            strength=0.5,
-        )
-        text, _ = synth._render_transcript([turn])
-        assert text == "[POSITIVE] Alice: I support it."
 
 
 class TestClusterByStance:
@@ -122,7 +85,6 @@ class TestAbstainCarriesNoWeight:
         rounds = [make_round(1, [make_turn("a1", "Alice", "ABSTAIN", 1.0)])]
         verdict = VerdictSynthesizer().synthesize(rounds, [make_profile("Alice")])
         assert verdict.overall_stance is Stance.ABSTAIN
-        assert verdict.summary == NO_VERDICT_SUMMARY
         assert verdict.weight_share == 0.0
 
     def test_abstain_weighs_zero_in_the_stance_weights(self):
@@ -195,13 +157,11 @@ class TestSynthesize:
     def test_empty_rounds_is_no_verdict_not_neutral(self):
         verdict = VerdictSynthesizer().synthesize([], [])
         assert verdict.overall_stance is Stance.ABSTAIN
-        assert verdict.summary == NO_VERDICT_SUMMARY
         assert verdict.confidence_score == 0.0
 
     def test_empty_turns_is_no_verdict_not_neutral(self):
         verdict = VerdictSynthesizer().synthesize([make_round(1, [])], [])
         assert verdict.overall_stance is Stance.ABSTAIN
-        assert verdict.summary == NO_VERDICT_SUMMARY
 
     def test_overall_stance_is_the_max_weight_cluster_in_the_window(
         self, fixture_rounds, fixture_profiles
@@ -256,12 +216,6 @@ class TestSynthesize:
         assert Stance.NEGATIVE in verdict.cluster_details
         assert Stance.NEUTRAL in verdict.cluster_details
 
-    def test_summary_contains_stance_and_score(self, fixture_rounds, fixture_profiles):
-        verdict = VerdictSynthesizer().synthesize(fixture_rounds, fixture_profiles)
-        assert "POSITIVE" in verdict.summary
-        assert "Confidence score" in verdict.summary
-
-
 class TestMissingProfileFailsClosed:
     """A speaker absent from the profiles is a broken run: the verdict raises, it never guesses."""
 
@@ -280,43 +234,3 @@ class TestMissingProfileFailsClosed:
         rounds = [make_round(1, [make_turn("a1", "Alice", "POSITIVE", 0.5, strength=0.8)])]
         verdict = VerdictSynthesizer().synthesize(rounds, [make_profile("Alice", confidence=0.5)])
         assert math.isclose(verdict.cluster_details[Stance.POSITIVE].total_weight, 0.4)
-
-
-def _answer_writer() -> MagicMock:
-    llm = MagicMock()
-    llm.generate = AsyncMock(
-        return_value=json.dumps({"answer": "Expand.", "reasoning": "Because.", "constraints_and_risks": ""})
-    )
-    return llm
-
-
-@pytest.mark.asyncio
-async def test_no_verdict_skips_the_answer_writer_and_says_so():
-    llm = _answer_writer()
-    rounds = [make_round(1, [make_turn("a1", "Alice", "ABSTAIN", 1.0)])]
-    verdict = await VerdictSynthesizer().asynthesize(
-        rounds, [make_profile("Alice")], llm_client=llm
-    )
-    llm.generate.assert_not_awaited()
-    assert verdict.narrative == NO_VERDICT_SUMMARY
-    assert verdict.narrative_status == NO_VERDICT_STATUS
-
-
-@pytest.mark.asyncio
-async def test_the_answer_writer_reads_only_the_consensus_window():
-    llm = _answer_writer()
-    rounds = [
-        make_round(1, [make_turn("a1", "Alice", "POSITIVE", 0.9)]),
-        make_round(2, [make_turn("a2", "Bob", "NEGATIVE", 0.8)]),
-        make_round(3, [make_turn("a3", "Carol", "NEGATIVE", 0.7)]),
-    ]
-    profiles = [
-        make_profile("Alice", confidence=0.9),
-        make_profile("Bob", confidence=0.8),
-        make_profile("Carol", confidence=0.7),
-    ]
-    await VerdictSynthesizer().asynthesize(rounds, profiles, llm_client=llm)
-    prompt = llm.generate.call_args.kwargs["user_prompt"]
-    assert "Content from Alice" not in prompt
-    assert "Content from Bob" in prompt
-    assert "Content from Carol" in prompt
