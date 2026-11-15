@@ -148,8 +148,10 @@ class SeatQueue:
     exceed n whatever order the draws resolve in. unseat frees a seat again. Task 1.5
     callers must dedupe by entity_id before building the queue."""
 
-    def __init__(self, candidates: Iterable[Candidate], n: int):
+    def __init__(self, candidates: Iterable[Candidate], n: int, max_draws: int | None = None):
         self._n = n
+        self._max_draws = max_draws
+        self._issued = 0
         self._seated: list[Candidate] = []
         self._pool: list[Candidate] = []
         self._drawn: dict[str, Candidate] = {}
@@ -197,7 +199,13 @@ class SeatQueue:
         however the open draws resolve.
         """
         drawn: list[Candidate] = []
-        while len(drawn) < k and self._pool and len(self._seated) + len(self._drawn) < self._n:
+        while (
+            len(drawn) < k
+            and self._pool
+            and len(self._seated) + len(self._drawn) < self._n
+            and (self._max_draws is None or self._issued < self._max_draws)
+        ):
+            self._issued += 1
             best = min(self._pool, key=lambda c: (-(score(c) - MMR_LAMBDA * self._penalty(c)), c.name, c.entity_id))
             self._pool.remove(best)
             self._drawn[best.entity_id] = best

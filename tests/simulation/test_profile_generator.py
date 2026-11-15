@@ -6,9 +6,22 @@ import pytest
 from src.billing import metering
 from src.billing.metering import MeteringError
 from src.llm.config_llm import get_llm_config
-from src.simulation.evidence import EvidenceItem, EvidencePack, RelationItem
-from src.simulation.profile_generator import build_prompt, generate_profile, judge_support
-from src.simulation.profile_validation import validate_profile
+from src.simulation.evidence import (
+    MAX_OWN,
+    MAX_RELATIONS,
+    EvidenceItem,
+    EvidencePack,
+    RelationItem,
+)
+from src.simulation.profile_generator import (
+    MAX_ALIASES,
+    _judge_prompt,
+    build_prompt,
+    generate_profile,
+    judge_support,
+    prompt_char_bound,
+)
+from src.simulation.profile_validation import Rejection, validate_profile
 
 ARGS = dict(
     question="Should we enter Berlin?",
@@ -293,3 +306,26 @@ async def test_a_sentence_without_a_valid_cite_never_reaches_the_judge(pack, dra
     kept, _ = await judge_support(client, bare, pack)
     assert "bare claim" not in client.users[0]
     assert kept is not None and "bare claim" not in kept.details
+
+
+def test_worst_case_profile_and_judge_prompts_fit_the_char_bound():
+    """Renders the largest prompts the caps allow and checks each against prompt_char_bound()."""
+    big = "t" * 120
+    items = tuple(
+        EvidenceItem(f"e{i}", f"c{i}", f"d{i}", big, big, (0, 400), "x" * 400, "own", 0.5)
+        for i in range(MAX_OWN)
+    )
+    relations = tuple(RelationItem(f"r{i}", big, "out", f"n{i}", big, f"c{i}") for i in range(MAX_RELATIONS))
+    pack = EvidencePack(items, relations, doc_count=MAX_OWN, chunk_count=MAX_OWN)
+    rejections = [Rejection("field", big, False) for _ in range(12)]
+    profile_system, profile_user = build_prompt(
+        big, big, big, [big] * MAX_ALIASES, big, pack, rejections, taken=["a"] * 1050
+    )
+    marked = [(i, "x[e1]") for i in range(420)]
+    judge_system, judge_user = _judge_prompt(marked, pack, big)
+
+    bound = prompt_char_bound()
+    assert (len(profile_system) + len(profile_user) <= bound, len(judge_system) + len(judge_user) <= bound) == (
+        True,
+        True,
+    )

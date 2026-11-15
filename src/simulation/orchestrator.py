@@ -574,6 +574,7 @@ class DebateOrchestrator:
                         c.agent_name: min(1.0, len(c.shared_entities) / 3.0)
                         for c in candidates
                     },
+                    roster=profiles,
                     intent=intent,
                     warnings=warnings,
                     llm_client=llm_client,

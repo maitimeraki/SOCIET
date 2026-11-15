@@ -17,6 +17,7 @@ from dataclasses import dataclass, replace
 from typing import Any
 from uuid import uuid4
 
+from src.billing.metering import MeteringError
 from src.llm.config_llm import get_llm_config
 from src.persona.agent import Agent, PersonaIdentity, Stance
 from src.persona.graph_context import EntityNode, GraphContext
@@ -42,6 +43,7 @@ from src.simulation.evidence import (
     build_pack,
 )
 from src.simulation.profile_generator import (
+    MAX_ALIASES,
     PROFILE_PROMPT_VERSION,
     PROFILE_TEMPERATURE,
     GenerationResult,
@@ -63,6 +65,7 @@ from src.simulation.ranking import (
     percentile,
     personalized_pagerank,
     rrf_fuse,
+    score,
 )
 from src.utils.queryIntend import QueryIntent
 
@@ -74,6 +77,10 @@ CHUNK_POOL = 200
 ENTITY_HITS = 100
 #: Graph neighbours read per pool entity (PPR edges), strongest first.
 NEIGHBOURS_PER_SEED = 25
+#: Draws beyond the seat count that a run may make: bounds the profile calls, since a rejected draw costs calls.
+DRAW_SLACK = 2
+#: Candidates the pool keeps, best first: bounds the actor-classification calls per run.
+POOL_CAP = 300
 #: Neighbours that count as a candidate's evidence and reach its pack's relations.
 #: evidence_count counts these capped neighbours, not the pack's own items (which build_pack caps at 12).
 NEIGHBOUR_CAP = 5
@@ -90,7 +97,7 @@ def _aliases(node: EntityNode) -> list[str]:
     raw = node.properties.get("aliases")
     if not isinstance(raw, (list, tuple)):
         return []
-    return [str(alias).strip() for alias in raw if str(alias).strip()]
+    return [str(alias).strip() for alias in raw if str(alias).strip()][:MAX_ALIASES]
 
 
 def _distinct_by_id(entities: list[EntityNode], own_id: str) -> list[EntityNode]:
@@ -217,14 +224,21 @@ def _rejection_reason(generated: GenerationResult) -> str:
 async def _gather_in_order(awaitables: Sequence[Awaitable[_Attempt]]) -> list[_Attempt]:
     """Run one batch concurrently and return the results in input order.
 
-    The first failure cancels the rest and is raised, so no call outlives the batch.
+    A MeteringError from any member is raised as soon as it completes, whatever failed before it;
+    the rest of the batch is cancelled. Otherwise the batch settles and the first failure in draw
+    order is raised. Either way no call outlives the batch.
     """
     tasks = [asyncio.ensure_future(awaitable) for awaitable in awaitables]
+    pending = set(tasks)
     try:
-        await asyncio.wait(tasks, return_when=asyncio.FIRST_EXCEPTION)
-        for task in tasks:
-            if task.done() and not task.cancelled() and task.exception() is not None:
-                raise task.exception()
+        while pending:
+            done, pending = await asyncio.wait(pending, return_when=asyncio.FIRST_COMPLETED)
+            for task in done:
+                if not task.cancelled() and isinstance(task.exception(), MeteringError):
+                    raise task.exception()
+        failures = [task.exception() for task in tasks if not task.cancelled() and task.exception() is not None]
+        if failures:
+            raise failures[0]
         return [task.result() for task in tasks]
     finally:
         for task in tasks:
@@ -232,17 +246,32 @@ async def _gather_in_order(awaitables: Sequence[Awaitable[_Attempt]]) -> list[_A
         await asyncio.gather(*tasks, return_exceptions=True)
 
 
-def _uniqueness(seats: Sequence[_Seat]) -> UniquenessReport:
-    """The roster's uniqueness report. Seats are keyed by their index, so pairs come back as index pairs."""
-    drafts = {str(i): seat.attempt.generated.draft for i, seat in enumerate(seats)}
-    vectors = {str(i): seat.attempt.vector for i, seat in enumerate(seats)}
-    return check_uniqueness(drafts, vectors)
+Entry = tuple[ProfileDraft, tuple[float, ...]]
 
 
-def _duplicate_pairs(seats: Sequence[_Seat]) -> list[tuple[int, int]]:
-    """Index pairs (earlier, later) of seats that are too alike, earliest first."""
-    report = _uniqueness(seats)
-    return sorted((min(int(a), int(b)), max(int(a), int(b))) for a, b in report.failing_pairs)
+def _entries(fixed: Sequence[Entry], seats: Sequence["_Seat"]) -> list[Entry]:
+    """Roster entries for the uniqueness check: the fixed roster members first, then the seats."""
+    return [*fixed, *((seat.attempt.generated.draft, seat.attempt.vector) for seat in seats)]
+
+
+def _uniqueness(seats: Sequence["_Seat"], fixed: Sequence[Entry] = ()) -> UniquenessReport:
+    """The uniqueness report over the fixed roster and the seats. Entries are keyed by their index."""
+    entries = _entries(fixed, seats)
+    return check_uniqueness(
+        {str(i): draft for i, (draft, _) in enumerate(entries)},
+        {str(i): vector for i, (_, vector) in enumerate(entries)},
+    )
+
+
+def _duplicate_pairs(seats: Sequence["_Seat"], fixed: Sequence[Entry] = ()) -> list[tuple[int, int]]:
+    """Index pairs (earlier, later) of too-alike entries that involve a seat, earliest first.
+
+    The fixed roster precedes every seat, so a pair's later entry is a seat. Two fixed members
+    are never settled here: the roster was settled before the joiners were seated.
+    """
+    report = _uniqueness(seats, fixed)
+    pairs = [(min(int(a), int(b)), max(int(a), int(b))) for a, b in report.failing_pairs]
+    return sorted(pair for pair in pairs if pair[1] >= len(fixed))
 
 
 class ProfileSynthesizer:
@@ -269,11 +298,12 @@ class ProfileSynthesizer:
 
         Each drawn candidate gets a pack of its own chunks and relations, one generation
         call and a support judge. A profile that fails is rejected and its seat is redrawn.
-        Profiles are generated `llm_concurrency` at a time. Duplicate profiles are settled
-        before anything is persisted or emitted.
+        Profiles are generated `llm_concurrency` at a time. Draws stop at `max_agents +
+        DRAW_SLACK`, which bounds the profile calls. Duplicate profiles are settled before
+        anything is persisted or emitted.
 
-        Raises `NoAgentsDerivableError` when no candidate reaches the question, or when every
-        drawn candidate's profile failed. An empty roster with nothing drawn returns [].
+        Raises `NoAgentsDerivableError` when no candidate reaches the question, or when no
+        profile could be seated. An empty roster with nothing drawn returns [].
 
         `records`, `decisions` and `warnings` are caller-owned sinks. `records` holds one
         AgentRecord per candidate that reached generation, published or rejected.
@@ -286,9 +316,9 @@ class ProfileSynthesizer:
             logger.info("MMR diversity penalty off: no entity embeddings in the candidate pool")
 
         run = _Run(query, dataset_id, intent.stance_axis if intent is not None else "", llm_client)
-        queue = SeatQueue(pool.candidates, n=max_agents)
+        queue = SeatQueue(pool.candidates, n=max_agents, max_draws=max_agents + DRAW_SLACK)
         latest: dict[str, _Attempt] = {}
-        seats = await self._roster(queue, pool, run, width, latest)
+        seats = await self._roster(queue, pool, run, width, latest, fixed=())
 
         for index, seat in enumerate(seats, start=1):
             await self._persist_links(seat.agent, dataset_id, warnings)
@@ -311,7 +341,7 @@ class ProfileSynthesizer:
             )
         if latest and not seats:
             raise NoAgentsDerivableError(
-                "no profile could be seated: every drawn candidate failed profile generation or validation"
+                "no profile could be seated (every drawn candidate was rejected)"
             )
         return [seat.agent for seat in seats]
 
@@ -322,6 +352,7 @@ class ProfileSynthesizer:
         dataset_id: str,
         relevance_by_name: dict[str, float] | None = None,
         *,
+        roster: Sequence[Agent] = (),
         intent: QueryIntent | None = None,
         warnings: list[str] | None = None,
         llm_client: Any = None,
@@ -329,8 +360,9 @@ class ProfileSynthesizer:
     ) -> list[Agent]:
         """Seat the activation joiners named in `names`, through the same path as a roster member.
 
-        Each joiner is drawn, generated, validated and checked for uniqueness against the other
-        joiners. A joiner that cannot be seated is absent from the result; the caller warns.
+        Each joiner is drawn, generated, validated and checked for uniqueness against the roster
+        and the other joiners. Only a joiner is ever regenerated or unseated: a roster member is
+        fixed. A joiner that cannot be seated is absent from the result; the caller warns.
         """
         wanted = list(dict.fromkeys(names))
         if not wanted:
@@ -338,12 +370,33 @@ class ProfileSynthesizer:
         if llm_client is None:
             raise ValueError("joiner seating needs an llm_client")
         width = llm_concurrency or DebateConfig().llm_concurrency
+        fixed = [await self._fixed_entry(agent) for agent in roster]
         pool = await self._joiner_pool(wanted, query, dataset_id, relevance_by_name or {}, warnings, llm_client)
         run = _Run(query, dataset_id, intent.stance_axis if intent is not None else "", llm_client)
-        seats = await self._roster(SeatQueue(pool.candidates, n=len(wanted)), pool, run, width, {})
+        queue = SeatQueue(pool.candidates, n=len(wanted), max_draws=len(wanted) + DRAW_SLACK)
+        seats = await self._roster(queue, pool, run, width, {}, fixed=fixed)
         for seat in seats:
             await self._persist_links(seat.agent, dataset_id, warnings)
         return [seat.agent for seat in seats]
+
+    async def _fixed_entry(self, agent: Agent) -> Entry:
+        """A roster member as a fixed uniqueness entry. Its bio must embed usably: otherwise the joiners cannot be checked."""
+        draft = ProfileDraft.model_construct(
+            role=agent.role,
+            stance=agent.stance.value.lower(),
+            strength=agent.strength,
+            bio=agent.bio,
+            details=agent.details_raw,
+            confidence=agent.confidence,
+            cites=dict(agent.cites),
+        )
+        vector = await self._embed(agent.bio)
+        if not _usable_vector(vector):
+            raise ValueError("roster bio embedding unusable: joiners cannot be checked for uniqueness")
+        return draft, vector
+
+    async def _embed(self, text: str) -> tuple[float, ...]:
+        return tuple(float(x) for x in await self._ctx._get_embedding(text))
 
     async def _roster(
         self,
@@ -352,12 +405,13 @@ class ProfileSynthesizer:
         run: _Run,
         width: int,
         latest: dict[str, _Attempt],
+        fixed: Sequence[Entry],
     ) -> list[_Seat]:
         """Fill the seats, settle duplicates, and refill any seat a duplicate freed, until the roster is unique."""
         seats: list[_Seat] = []
         while True:
             await self._fill(queue, pool, run, width, seats, latest)
-            if not await self._deduplicate(queue, run, seats, latest):
+            if not await self._deduplicate(queue, run, seats, latest, fixed):
                 return seats
 
     async def _fill(
@@ -408,28 +462,32 @@ class ProfileSynthesizer:
         run: _Run,
         seats: list[_Seat],
         latest: dict[str, _Attempt],
+        fixed: Sequence[Entry],
     ) -> bool:
-        """Settle every too-alike pair: regenerate the later seat once, then unseat it if still too alike.
+        """Settle every too-alike pair that involves a seat: regenerate the later seat once, then unseat it if still too alike.
 
         Returns True when a seat was freed and the roster needs refilling.
         """
         freed = False
-        while (pairs := _duplicate_pairs(seats)):
-            earlier, later = seats[pairs[0][0]], seats[pairs[0][1]]
+        while pairs := _duplicate_pairs(seats, fixed):
+            entries = _entries(fixed, seats)
+            earlier_index, later_index = pairs[0]
+            earlier = entries[earlier_index][0]
+            later = seats[later_index - len(fixed)]
             if later.regenerated:
                 self._unseat(queue, seats, later, "too alike to a seated profile")
                 freed = True
-                continue
-            later.regenerated = True
-            taken = split_sentences(strip_markers(earlier.agent.details))
-            prior = later.attempt
-            attempt = await self._generate(prior.candidate, prior.aliases, prior.pack, run, taken=taken)
-            latest[later.candidate.entity_id] = attempt
-            if attempt.agent is None:
-                self._unseat(queue, seats, later, attempt.rejected_reason)
-                freed = True
             else:
-                later.attempt = attempt
+                later.regenerated = True
+                taken = split_sentences(strip_markers(earlier.details))
+                prior = later.attempt
+                attempt = await self._generate(prior.candidate, prior.aliases, prior.pack, run, taken=taken)
+                latest[later.candidate.entity_id] = attempt
+                if attempt.agent is None:
+                    self._unseat(queue, seats, later, attempt.rejected_reason)
+                    freed = True
+                else:
+                    later.attempt = attempt
         return freed
 
     @staticmethod
@@ -486,6 +544,7 @@ class ProfileSynthesizer:
             )
             for node in pool
         ]
+        candidates = sorted(candidates, key=lambda c: (-score(c), c.name, c.entity_id))[:POOL_CAP]
         candidates = await self._classify_actors(candidates, llm_client, warnings)
         return _Pool(candidates=candidates, nodes=nodes, neighbours=neighbours, chunk_rows=evidence.chunk_rows)
 
@@ -599,7 +658,7 @@ class ProfileSynthesizer:
         if generated.draft is None:
             return _Attempt(drawn, run.axis, aliases, pack, generated, None, (), _rejection_reason(generated))
         agent = self._agent(drawn, run.dataset_id, generated.draft, pack)
-        vector = tuple(float(x) for x in await self._ctx._get_embedding(agent.bio))
+        vector = await self._embed(agent.bio)
         if not _usable_vector(vector):
             return _Attempt(drawn, run.axis, aliases, pack, generated, None, (), "bio embedding unusable")
         return _Attempt(drawn, run.axis, aliases, pack, generated, agent, vector, "")
@@ -665,7 +724,7 @@ class ProfileSynthesizer:
             except Exception as exc:
                 logger.warning("%s write failed for persona %r: %s", label, name, exc)
                 if warnings is not None:
-                    warnings.append(f"{label} write failed for persona {name!r} ({type(exc).__name__})")
+                    warnings.append(f"{label} write failed")
 
     @staticmethod
     async def _notify(

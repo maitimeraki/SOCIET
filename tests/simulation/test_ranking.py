@@ -144,6 +144,12 @@ def test_a_batch_draw_spreads_its_picks_away_from_each_other():
     assert [d.name for d in q.draw(2)] == ["A", "Other"]
 
 
+def test_draws_stop_at_max_draws_even_with_seats_free():
+    q = SeatQueue([cand("A", ppr=0.9), cand("B", ppr=0.8), cand("C", ppr=0.7)], n=3, max_draws=2)
+    assert len(q.draw(3)) == 2
+    assert q.draw(1) == []
+
+
 def test_unseat_frees_the_seat_and_renumbers_the_rest():
     a, b = cand("A", ppr=0.9), cand("B", ppr=0.8)
     q = SeatQueue([a, b], n=2)

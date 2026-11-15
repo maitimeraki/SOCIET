@@ -4,6 +4,7 @@ Debate API: Async debate simulation with streaming support.
 
 import asyncio
 import logging
+import math
 import time
 import uuid
 from dataclasses import asdict
@@ -48,8 +49,16 @@ from src.billing.metering import MeteringError
 from src.config.settings import get_settings
 from src.db.engine import get_db
 from src.db.models import User
+from src.llm.config_llm import get_llm_config
+from src.simulation.actor_filter import ACTOR_BATCH, TOKENS_PER_LABEL
 from src.simulation.debate_config import DebateConfig
-from src.simulation.profile_generator import CALLS_PER_SEAT
+from src.simulation.profile_generator import (
+    CALLS_PER_DRAW,
+    JUDGE_MAX_TOKENS,
+    prompt_char_bound,
+)
+from src.simulation.profile_synthesizer import DRAW_SLACK, POOL_CAP
+from src.simulation.verdict import VERDICT_MAX_ATTEMPTS
 
 logger = logging.getLogger(__name__)
 
@@ -178,6 +187,49 @@ async def _ensure_live_job(job_id: str) -> dict:
         "result": doc.get("result"),
         "error": doc.get("error"),
     }
+
+
+def debate_call_units() -> int:
+    """Units one debate model call settles at most: its prompt-character bound and the largest completion cap."""
+    cfg = get_llm_config()
+    max_completion = max(
+        cfg.profile_max_tokens,
+        cfg.verdict_max_tokens,
+        cfg.max_output_tokens,
+        JUDGE_MAX_TOKENS,
+        TOKENS_PER_LABEL * ACTOR_BATCH,
+    )
+    return billing_units.units_for_tokens(prompt_char_bound(), max_completion)
+
+
+def debate_reserve_units(*, agents: int, rounds: int, max_new_per_round: int, max_pairs_per_round: int) -> int:
+    """Worst-case units a debate run can settle, reserved before it starts.
+
+    Calls, counted at their caps: the intent call; the pool's actor classification (one call
+    per ACTOR_BATCH labels, the pool holds at most POOL_CAP candidates); the verdict attempts;
+    the roster's draws, each at most CALLS_PER_DRAW calls (generation, judge, repairs, one
+    uniqueness regeneration), with at most agents + DRAW_SLACK draws; per round, activation's
+    classification and its joiner draws; and per round two turns for each pair, pairs capped by
+    the request and by agents choose 2.
+
+    Units: each call settles ceil(tokens / unit_tokens). A call's tokens are bounded by its prompt
+    characters (prompt_char_bound, one token per character as the assumption) plus the largest
+    completion cap, so every call is charged that same bound.
+    """
+    per_round_activation = (
+        math.ceil(max_new_per_round / ACTOR_BATCH) + (max_new_per_round + DRAW_SLACK) * CALLS_PER_DRAW
+        if max_new_per_round > 0
+        else 0
+    )
+    turns_per_round = 2 * min(max_pairs_per_round, agents * (agents - 1) // 2)
+    calls = (
+        1
+        + math.ceil(POOL_CAP / ACTOR_BATCH)
+        + VERDICT_MAX_ATTEMPTS
+        + (agents + DRAW_SLACK) * CALLS_PER_DRAW
+        + rounds * (per_round_activation + turns_per_round)
+    )
+    return calls * debate_call_units()
 
 
 async def _run_debate_async(
@@ -546,9 +598,12 @@ async def create_debate(
             meta={"requested": requested_values, "applied": applied},
         )
 
-    # §4: agents × rounds LLM-pair calls × the two turns in a pair, plus each seat's profile
-    # calls (CALLS_PER_SEAT) and the one actor-classification call per run.
-    estimate = agents * rounds * 2 + agents * CALLS_PER_SEAT + 1
+    estimate = debate_reserve_units(
+        agents=agents,
+        rounds=rounds,
+        max_new_per_round=body.config.max_new_agents_per_round,
+        max_pairs_per_round=pairs,
+    )
     # `reserve_units` rolls back on refusal, which expires the session's ORM
     # objects; capture the identity before the call so the 402 path can audit
     # it without a lazy load on an async session.

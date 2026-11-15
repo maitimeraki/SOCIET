@@ -26,7 +26,6 @@ from src.billing.plans import get_plan, get_plans
 from src.billing.units import _calendar_month_bounds
 from src.db.engine import get_session_factory
 from src.db.models import AuditLog, Job, UsageEvent, UsagePeriod, User
-from src.simulation.profile_generator import CALLS_PER_SEAT
 
 if sys.platform == "win32":
     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
@@ -161,13 +160,13 @@ async def test_omitted_config_uses_the_eight_seat_default_and_reserves_the_plan(
     assert doc["config"]["max_pairs_per_round"] == 8
 
     job = await _job_row(job_id)
-    plan = get_plan("free")
-    # 8 default seats (under the free cap of 10) * 3 rounds (clamped from 5) * 2 turns,
-    # plus 8 seats * CALLS_PER_SEAT profile calls and the one classification call
-    assert job.reserved_units == 8 * plan.max_rounds * 2 + 8 * CALLS_PER_SEAT + 1 == 48 + 64 + 1
+    # 8 seats (under the free cap of 10), 3 rounds (clamped from 5), 2 turns per pair
+    # at 8 pairs per round: calls = 7 base + (8+2)*8 roster + 3*(1 + (2+2)*8) activation
+    # + 3*2*8 turns = 234 calls; 234 * 36 units per call = 8424.
+    assert job.reserved_units == 8424
     expected_start, _ = _calendar_month_bounds(datetime.datetime.now(datetime.UTC))
     assert job.reserved_period_start == expected_start
-    assert await _balance(account.id) == (0, 48)
+    assert await _balance(account.id) == (0, 8424)
 
 
 async def test_default_seats_are_clamped_to_the_plan_cap_and_reserved(
@@ -188,8 +187,9 @@ async def test_default_seats_are_clamped_to_the_plan_cap_and_reserved(
     assert doc["config"]["max_pairs_per_round"] == 6
 
     job = await _job_row(job_id)
-    assert job.reserved_units == 6 * 3 * 2 + 6 * CALLS_PER_SEAT + 1 == 36 + 48 + 1
-    assert await _balance(account.id) == (0, 85)
+    # 6 seats, 3 rounds, 6 pairs: 7 + (6+2)*8 + 3*(1 + (2+2)*8) + 3*2*6 = 206 calls; 206 * 36 = 7416.
+    assert job.reserved_units == 7416
+    assert await _balance(account.id) == (0, 7416)
 
     clamps = await _plan_clamp_audits(account.id)
     assert len(clamps) == 1

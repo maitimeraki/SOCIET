@@ -14,6 +14,8 @@ import re
 from dataclasses import dataclass
 
 MAX_OWN, MAX_RELATIONS, MAX_WORDS = 12, 8, 40
+# Characters of one evidence item's text: the prompt-size bound behind the debate's billing reserve.
+MAX_ITEM_CHARS = 400
 _SENTENCE_BREAK = re.compile(r"(?<=[.!?])\s+(?=[A-Z0-9\"'(])")
 _NEVER = re.compile(r"(?!)")
 
@@ -90,7 +92,7 @@ def build_pack(name: str, aliases: list[str], chunks: list[ChunkRow], relations:
     items: list[EvidenceItem] = []
     for chunk in ranked:
         for start, end in sentence_spans(chunk.text):
-            end = _clip(chunk.text, start, end)
+            end = min(_clip(chunk.text, start, end), start + MAX_ITEM_CHARS)
             if not pattern.search(chunk.text[start:end]):
                 continue
             items.append(EvidenceItem(f"e{len(items) + 1}", chunk.chunk_id, chunk.doc_id, chunk.doc_title,
