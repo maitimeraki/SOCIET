@@ -5,9 +5,9 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from src.persona.agent import Stance
+from src.persona.agent import WIRE_STANCES, Stance
 from src.simulation.pair_turn import AgentTurn, DebateVerdict, RoundResult
-from src.simulation.verdict import VerdictSynthesizer
+from src.simulation.verdict import VerdictSynthesizer, cluster_by_stance, count_weights
 
 
 def test_debate_verdict_has_narrative():
@@ -92,32 +92,81 @@ class TestRenderTranscript:
         assert len(text) <= 16_000 + len("[POSITIVE] Alice: answer\n  (reasoning: )")
 
 
-class TestClusterOpinions:
-    """Unit tests for _cluster_opinions."""
+class TestClusterByStance:
+    """Unit tests for cluster_by_stance: wire stances only, never a silent NEUTRAL."""
 
     def test_clusters_positive_negative(self):
-        synthesizer = VerdictSynthesizer()
         turns = [
             make_turn("a1", "Alice", "POSITIVE", 0.8),
             make_turn("a2", "Bob", "NEGATIVE", 0.6),
         ]
-        clusters = synthesizer._cluster_opinions(turns)
+        clusters = cluster_by_stance(turns)
         assert len(clusters[Stance.POSITIVE]) == 1
         assert len(clusters[Stance.NEGATIVE]) == 1
         assert clusters[Stance.NEUTRAL] == []
-        assert clusters[Stance.AMBIVALENT] == []
+        assert clusters[Stance.ABSTAIN] == []
 
-    def test_clusters_unknown_stance_falls_back_to_neutral(self):
-        synthesizer = VerdictSynthesizer()
+    def test_unknown_stance_is_counted_in_no_cluster(self):
         turns = [make_turn("a1", "Alice", "UNKNOWN_STANCE", 0.5)]
-        clusters = synthesizer._cluster_opinions(turns)
-        assert len(clusters[Stance.NEUTRAL]) == 1
+        clusters = cluster_by_stance(turns)
+        assert all(members == [] for members in clusters.values())
 
-    def test_clusters_stance_object(self):
-        synthesizer = VerdictSynthesizer()
+    def test_abstain_is_clustered_as_its_own_stance(self):
+        turns = [make_turn("a1", "Alice", "ABSTAIN", 0.7)]
+        clusters = cluster_by_stance(turns)
+        assert len(clusters[Stance.ABSTAIN]) == 1
+
+    def test_ambivalent_names_no_wire_stance(self):
         turns = [make_turn("a1", "Alice", Stance.AMBIVALENT, 0.7)]
-        clusters = synthesizer._cluster_opinions(turns)
-        assert len(clusters[Stance.AMBIVALENT]) == 1
+        clusters = cluster_by_stance(turns)
+        assert all(members == [] for members in clusters.values())
+
+
+class TestAbstainCarriesNoWeight:
+    """ABSTAIN is a wire stance with zero weight: it never wins and never shifts a share."""
+
+    def test_abstain_turns_do_not_win_the_race(self):
+        rounds = [
+            make_round(
+                1,
+                [
+                    make_turn("a1", "Alice", "ABSTAIN", 1.0),
+                    make_turn("a2", "Bob", "ABSTAIN", 1.0),
+                    make_turn("a3", "Carol", "POSITIVE", 0.4),
+                ],
+            )
+        ]
+        verdict = VerdictSynthesizer().synthesize(rounds, [])
+        assert verdict.overall_stance is Stance.POSITIVE
+
+    def test_all_abstain_never_names_abstain_the_overall_stance(self):
+        rounds = [make_round(1, [make_turn("a1", "Alice", "ABSTAIN", 1.0)])]
+        verdict = VerdictSynthesizer().synthesize(rounds, [])
+        assert verdict.overall_stance is not Stance.ABSTAIN
+
+    def test_abstain_weight_is_zero_with_and_without_profiles(self):
+        synthesizer = VerdictSynthesizer()
+        clusters = cluster_by_stance([make_turn("a1", "Alice", "ABSTAIN", 0.9)])
+        with_profile = synthesizer._calibrate_cior(
+            clusters, {"Alice": make_profile("Alice", conviction=1.0, cior=1.0)}
+        )
+        without_profile = synthesizer._calibrate_cior(clusters, {})
+        assert with_profile[Stance.ABSTAIN] == 0.0
+        assert without_profile[Stance.ABSTAIN] == 0.0
+
+    def test_weight_key_set_is_identical_with_and_without_profiles(self):
+        synthesizer = VerdictSynthesizer()
+        clusters = cluster_by_stance(
+            [
+                make_turn("a1", "Alice", "POSITIVE", 0.5),
+                make_turn("a2", "Bob", "ABSTAIN", 0.5),
+            ]
+        )
+        with_profile = synthesizer._calibrate_cior(
+            clusters, {"Alice": make_profile("Alice")}
+        )
+        without_profile = count_weights(clusters)
+        assert set(with_profile) == set(without_profile) == set(WIRE_STANCES)
 
 
 class TestCalibrateCIOR:

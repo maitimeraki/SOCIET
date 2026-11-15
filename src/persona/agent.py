@@ -57,6 +57,16 @@ class Stance(str, Enum):
         return cls(value.strip().upper())
 
 
+#: The stances a turn can carry on the wire and in weight dicts. ABSTAIN is in,
+#: AMBIVALENT is not: a turn naming anything else has no stance this turn.
+WIRE_STANCES: tuple[Stance, ...] = (
+    Stance.POSITIVE,
+    Stance.NEGATIVE,
+    Stance.NEUTRAL,
+    Stance.ABSTAIN,
+)
+
+
 class DiscoveryType(str, Enum):
     INTENT_DRIVEN = "intent_driven"
     GRAPH_DISCOVERY = "graph_discovery"

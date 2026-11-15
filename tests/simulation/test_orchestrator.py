@@ -1071,7 +1071,7 @@ async def test_round_events_carry_consensus_weights():
         Stance.POSITIVE: 60.0,
         Stance.NEGATIVE: 40.0,
         Stance.NEUTRAL: 0.0,
-        Stance.AMBIVALENT: 0.0,
+        Stance.ABSTAIN: 0.0,
     }
     society_memory.commit_round.return_value = _ok_receipt()
 
@@ -1184,7 +1184,7 @@ async def test_convergence_stage_carries_share_and_threshold():
         Stance.POSITIVE: 60.0,
         Stance.NEGATIVE: 40.0,
         Stance.NEUTRAL: 0.0,
-        Stance.AMBIVALENT: 0.0,
+        Stance.ABSTAIN: 0.0,
     }
     society_memory.commit_round.return_value = _ok_receipt()
 

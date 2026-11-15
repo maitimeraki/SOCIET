@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Iterable
 from typing import TYPE_CHECKING, List
 
 from pydantic import BaseModel
 
 from src.llm.config_llm import get_llm_config
-from src.persona.agent import SYNTHETIC_PROVENANCE_PREFIX, Agent, Stance
+from src.persona.agent import SYNTHETIC_PROVENANCE_PREFIX, WIRE_STANCES, Agent, Stance
 from src.simulation.pair_turn import (
     AgentTurn,
     ClusterSummary,
@@ -21,6 +22,36 @@ if TYPE_CHECKING:
     from src.llm.client import LLMClient
 
 logger = logging.getLogger(__name__)
+
+
+def wire_stance(value: object) -> Stance | None:
+    """A turn's stance on the wire, or None when it names no wire stance.
+
+    None means the turn has no stance this turn: it is counted nowhere, and it
+    is never filed under NEUTRAL.
+    """
+    try:
+        stance = Stance.parse(value)
+    except ValueError:
+        return None
+    return stance if stance in WIRE_STANCES else None
+
+
+def cluster_by_stance(turns: Iterable[AgentTurn]) -> dict[Stance, list[AgentTurn]]:
+    clusters: dict[Stance, list[AgentTurn]] = {s: [] for s in WIRE_STANCES}
+    for turn in turns:
+        stance = wire_stance(turn.stance)
+        if stance is not None:
+            clusters[stance].append(turn)
+    return clusters
+
+
+def count_weights(clusters: dict[Stance, list[AgentTurn]]) -> dict[Stance, float]:
+    """Profile-free weights: one per turn. ABSTAIN carries no weight."""
+    return {
+        stance: 0.0 if stance is Stance.ABSTAIN else float(len(clusters.get(stance, [])))
+        for stance in WIRE_STANCES
+    }
 
 # Step 9: bound the transcript the answer-writer prompt may carry. Bound the
 # input, never the answer — there is no character cap on the narrative itself.
@@ -254,7 +285,7 @@ class VerdictSynthesizer:
                 contested=False,
             )
 
-        clusters = self._cluster_opinions(all_turns)
+        clusters = cluster_by_stance(all_turns)
         profile_map = {p.identity.name: p for p in profiles}
 
         warned_missing: set[str] = set()
@@ -303,12 +334,10 @@ class VerdictSynthesizer:
         opposing: list[str] = []
         provenance_by_claim: dict[str, list] = {}
         for turn in all_turns:
-            try:
-                turn_stance = (
-                    Stance(turn.stance) if isinstance(turn.stance, str) else turn.stance
-                )
-            except ValueError:
-                turn_stance = Stance.NEUTRAL
+            turn_stance = wire_stance(turn.stance)
+            # No stance this turn, or ABSTAIN: the turn takes no side in the race.
+            if turn_stance is None or turn_stance is Stance.ABSTAIN:
+                continue
             if turn_stance == overall_stance:
                 supporting.extend(turn.references)
             else:
@@ -358,25 +387,6 @@ class VerdictSynthesizer:
             contested=contested,
         )
 
-    def _cluster_opinions(
-        self, turns: list[AgentTurn]
-    ) -> dict[Stance, list[AgentTurn]]:
-        clusters: dict[Stance, list[AgentTurn]] = {
-            Stance.POSITIVE: [],
-            Stance.NEGATIVE: [],
-            Stance.NEUTRAL: [],
-            Stance.AMBIVALENT: [],
-        }
-        for turn in turns:
-            try:
-                stance = (
-                    Stance(turn.stance) if isinstance(turn.stance, str) else turn.stance
-                )
-            except ValueError:
-                stance = Stance.NEUTRAL
-            clusters[stance].append(turn)
-        return clusters
-
     @staticmethod
     def _warn_missing_profile(agent_name: str, warned: set[str]) -> None:
         """One warning per agent per synthesis: the speaker is absent from profile_map."""
@@ -403,9 +413,13 @@ class VerdictSynthesizer:
         dissenter (cior = -1) keeps half weight instead of dropping to zero.
         """
         warned = set() if warned is None else warned
-        weights: dict[Stance, float] = {s: 0.0 for s in Stance}
+        weights: dict[Stance, float] = {s: 0.0 for s in WIRE_STANCES}
         for stance, turns in clusters.items():
             cluster_weight = 0.0
+            if stance is Stance.ABSTAIN:
+                # ABSTAIN never carries weight, so it can never win the race.
+                weights[stance] = cluster_weight
+                continue
             for turn in turns:
                 profile = profile_map.get(turn.agent_name)
                 if profile is not None:

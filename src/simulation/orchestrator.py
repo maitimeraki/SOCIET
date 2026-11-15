@@ -53,7 +53,11 @@ from src.simulation.ranking import SeatDecision
 from src.simulation.round_runner import RoundRunner
 from src.simulation.society_memory import SocietyMemory, SocietySnapshot
 from src.simulation.topology import CommunicationTopology
-from src.simulation.verdict import VerdictSynthesizer
+from src.simulation.verdict import (
+    VerdictSynthesizer,
+    cluster_by_stance,
+    count_weights,
+)
 from src.utils.queryIntend import QueryIntent
 
 logger = logging.getLogger(__name__)
@@ -656,30 +660,16 @@ class DebateOrchestrator:
         self, rounds: list[RoundResult], profiles: List[Agent]
     ) -> Optional[tuple[str, float]]:
         """(dominant stance, weight share) via CIOR weights. None when no turns."""
-        clusters: dict[Stance, list] = {
-            Stance.POSITIVE: [],
-            Stance.NEGATIVE: [],
-            Stance.NEUTRAL: [],
-            Stance.AMBIVALENT: [],
-        }
-        for turn in (t for rnd in rounds for t in rnd.turns):
-            try:
-                stance = (
-                    Stance(turn.stance) if isinstance(turn.stance, str) else turn.stance
-                )
-                clusters[stance].append(turn)
-            except ValueError:
-                clusters[Stance.NEUTRAL].append(turn)
+        clusters = cluster_by_stance(t for rnd in rounds for t in rnd.turns)
         total_turns = sum(len(v) for v in clusters.values())
         if total_turns == 0:
             return None
         if profiles:
             profile_map = {p.identity.name: p for p in profiles}
             weights = self._verdict_synthesizer._calibrate_cior(clusters, profile_map)
-            total = sum(weights.values())
         else:
-            weights = {s: len(v) for s, v in clusters.items()}
-            total = float(total_turns)
+            weights = count_weights(clusters)
+        total = sum(weights.values())
         if total <= 0:
             return None
         dominant = max(weights, key=lambda s: weights[s])
@@ -693,24 +683,9 @@ class DebateOrchestrator:
         self, round_result: RoundResult, profiles: List[Agent]
     ) -> Optional[dict[str, float]]:
         """Normalized CIOR weight share per stance for one round (sums to 1). None when no turns."""
-        clusters: dict[Stance, list] = {
-            Stance.POSITIVE: [],
-            Stance.NEGATIVE: [],
-            Stance.NEUTRAL: [],
-            Stance.AMBIVALENT: [],
-        }
-        for turn in round_result.turns:
-            try:
-                stance = (
-                    Stance(turn.stance) if isinstance(turn.stance, str) else turn.stance
-                )
-                clusters[stance].append(turn)
-            except ValueError:
-                clusters[Stance.NEUTRAL].append(turn)
+        clusters = cluster_by_stance(round_result.turns)
         if not profiles:
-            weights: dict[Stance, float] = {
-                stance: float(len(turns)) for stance, turns in clusters.items()
-            }
+            weights: dict[Stance, float] = count_weights(clusters)
         else:
             profile_map = {p.identity.name: p for p in profiles}
             weights = dict(
