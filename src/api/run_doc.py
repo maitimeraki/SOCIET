@@ -455,13 +455,13 @@ async def list_run_summaries(
 
 
 async def write_agent_records(run_id: str, records: Sequence[BaseModel]) -> None:
-    """Upsert a batch of a run's agent records, keyed by (run_id, node_id).
+    """Insert a batch of a run's agent records, keyed by (run_id, node_id). Insert-only.
 
-    A repeated write of the same records changes nothing. A later record for the same
-    node replaces the earlier one: a candidate rejected at synthesis can be seated later
-    as an activation joiner, and the later record is the true one. Earlier batches of the
-    run are never touched. The stored record's run_id is the owning run, whatever the
-    synthesizer minted.
+    The runtime role holds SELECT and INSERT on this table and no UPDATE (scripts/db_roles.sql),
+    so the write is ON CONFLICT DO NOTHING. A node already stored keeps its first record, and a
+    conflict is not a failure. The orchestrator makes this safe: a node tried in a run (published
+    or rejected) is never drawn again as a joiner. The stored record's run_id is the owning run,
+    whatever the synthesizer minted.
     """
     key = _as_uuid(run_id)
     if key is None:
@@ -483,18 +483,17 @@ async def write_agent_records(run_id: str, records: Sequence[BaseModel]) -> None
     if not rows:
         return
     async with get_session_factory()() as session:
-        statement = pg_insert(AgentRecordRow).values(rows)
         await session.execute(
-            statement.on_conflict_do_update(
-                index_elements=["run_id", "node_id"],
-                set_={
-                    "status": statement.excluded.status,
-                    "seat": statement.excluded.seat,
-                    "record": statement.excluded.record,
-                },
-            )
+            pg_insert(AgentRecordRow)
+            .values(rows)
+            .on_conflict_do_nothing(index_elements=["run_id", "node_id"])
         )
         await session.commit()
+
+
+def roster_views(view_rows: Sequence[dict[str, Any]]) -> list[AgentView]:
+    """Project the rows of read_roster: each is the stored `view` JSON (record -> 'view')."""
+    return [AgentView.model_validate(row) for row in view_rows]
 
 
 async def read_roster(run_id: str, owner_id: uuid.UUID | str) -> list[AgentView]:
@@ -527,7 +526,7 @@ async def read_roster(run_id: str, owner_id: uuid.UUID | str) -> list[AgentView]
             .scalars()
             .all()
         )
-    return [AgentView.model_validate(record["view"]) for record in records]
+    return roster_views(records)
 
 
 async def read_agent_record(run_id: str, node_id: str) -> Optional[dict[str, Any]]:

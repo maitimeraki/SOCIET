@@ -375,7 +375,7 @@ class ProfileSynthesizer:
         for seat in seats:
             await self._persist_links(seat.agent, dataset_id, warnings)
         if records is not None:
-            self._emit_records(records, queue, query, latest, seats, seat_offset)
+            self._emit_records(records, queue, query, latest, seats, seat_offset, fixed)
         return [seat.agent for seat in seats]
 
     async def _fixed_entry(self, agent: Agent) -> Entry:
@@ -751,9 +751,14 @@ class ProfileSynthesizer:
         latest: dict[str, _Attempt],
         seats: list[_Seat],
         seat_offset: int = 0,
+        fixed: Sequence[Entry] = (),
     ) -> None:
-        """Append one record per candidate that reached generation, with the final roster's uniqueness."""
-        report = _uniqueness(seats)
+        """Append one record per candidate that reached generation, with the final roster's uniqueness.
+
+        `fixed` is the roster a joiner is checked against, so a joiner's report includes its
+        similarity to the roster members, not only to the other joiners.
+        """
+        report = _uniqueness(seats, fixed)
         info = UniquenessInfo(
             max_bio_sim=report.max_bio_sim,
             max_details_sim=report.max_details_sim,

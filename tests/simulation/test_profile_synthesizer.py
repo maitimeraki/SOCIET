@@ -917,3 +917,26 @@ async def test_a_failed_link_write_warning_names_no_exception_class():
     await _run(_synth([KESTRA], repo=repo), max_agents=1, warnings=warnings)
 
     assert warnings == ["provenance write failed"]
+
+
+@pytest.mark.asyncio
+async def test_a_joiner_record_reports_its_similarity_to_the_roster():
+    import math
+
+    # Kestra and Lumen embed at a cosine of 0.5: under the duplicate threshold, so Lumen is
+    # seated first time, and the only pair the record can report is Lumen against Kestra.
+    width = get_llm_config().embedding_dimensions
+
+    def embed(text: str) -> list[float]:
+        head = [1.0, 0.0] if "Kestra" in text else [1.0, math.sqrt(3.0)]
+        return head + [0.0] * (width - 2)
+
+    synth = _synth([KESTRA, LUMEN], graph=FakeGraph([KESTRA, LUMEN], embedding=embed))
+    roster = await _run(synth, max_agents=1)
+    records: list = []
+
+    agents = await _join(synth, ["Lumen"], roster=roster, records=records)
+
+    joiner = next(r for r in records if r.node.name == "Lumen")
+    assert [a.identity.name for a in agents] == ["Lumen"]
+    assert joiner.uniqueness.max_bio_sim == pytest.approx(0.5)

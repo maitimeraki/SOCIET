@@ -205,6 +205,7 @@ class DebateOrchestrator:
         profiles: List[Agent] = []
         seat_sink: list[SeatDecision] = decisions if decisions is not None else []
         profile_records: list[AgentRecord] = []
+        tried_names: set[str] = set()
         stage_index = await self._emit_stage(on_stage, 0, "intake", query=query)
 
         async def _emit_profile(profile: Agent, index: int, total: int) -> None:
@@ -233,7 +234,7 @@ class DebateOrchestrator:
                 llm_concurrency=config.llm_concurrency,
             )
         finally:
-            await self._store_records(on_records, profile_records)
+            await self._store_records(on_records, profile_records, tried_names)
         stage_index = await self._emit_stage(
             on_stage, stage_index, "synthesis", agents=len(profiles)
         )
@@ -288,6 +289,7 @@ class DebateOrchestrator:
                         intent=intent,
                         llm_client=llm_client,
                         on_records=on_records,
+                        tried_names=tried_names,
                     )
                     continue
 
@@ -432,6 +434,7 @@ class DebateOrchestrator:
                     intent=intent,
                     llm_client=llm_client,
                     on_records=on_records,
+                    tried_names=tried_names,
                 )
 
                 if self._check_convergence(rounds, profiles, config=config):
@@ -550,6 +553,7 @@ class DebateOrchestrator:
         intent: Optional[QueryIntent],
         llm_client: Any,
         on_records: Optional[Callable[[list[AgentRecord]], Awaitable[None]]] = None,
+        tried_names: set[str],
     ) -> None:
         """Pull related non-participants in (they debate from next round).
 
@@ -571,6 +575,10 @@ class DebateOrchestrator:
                     config.max_new_agents_per_round, config.max_agents - len(profiles)
                 ),
             )
+            # ponytail: the topology query applies max_new before this filter, so a tried
+            # node ranked high can leave fewer than max_new candidates. Add an excluded-names
+            # parameter to the Cypher if that starves activation.
+            candidates = [c for c in candidates if c.agent_name not in tried_names]
             if candidates:
                 names = [c.agent_name for c in candidates]
                 joiner_records: list[AgentRecord] = []
@@ -592,7 +600,7 @@ class DebateOrchestrator:
                         seat_offset=len(profiles),
                     )
                 finally:
-                    await self._store_records(on_records, joiner_records)
+                    await self._store_records(on_records, joiner_records, tried_names)
                 seated = {p.identity.name for p in new_profiles}
                 warnings.extend(
                     JOINER_NOT_PROFILED for name in names if name not in seated
@@ -624,8 +632,14 @@ class DebateOrchestrator:
     async def _store_records(
         on_records: Optional[Callable[[list[AgentRecord]], Awaitable[None]]],
         batch: list[AgentRecord],
+        tried_names: set[str],
     ) -> None:
-        """Hand one batch of records to the caller's seam. Nothing to do when there is none."""
+        """Hand one batch to the caller's seam, and mark its nodes as tried for the rest of the run.
+
+        A node tried once (published or rejected) is never drawn again as a joiner. The store is
+        insert-only, so a second record for the same node would be dropped rather than kept.
+        """
+        tried_names.update(record.node.name for record in batch)
         if on_records is not None and batch:
             await on_records(list(batch))
 

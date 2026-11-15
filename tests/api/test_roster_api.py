@@ -17,6 +17,7 @@ import pytest_asyncio
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import delete, func, select
+from sqlalchemy.dialects import postgresql
 
 import src.api.run_doc as run_doc
 from src import audit
@@ -186,6 +187,85 @@ async def test_a_failed_audit_write_returns_no_record(monkeypatch):
             await http.get(f"/operator/runs/{uuid.uuid4()}/agents/n1")
 
 
+class _Rows:
+    def __init__(self, rows):
+        self._rows = rows
+
+    def all(self):
+        return self._rows
+
+
+class _Result:
+    def __init__(self, rows):
+        self._rows = rows
+
+    def scalars(self):
+        return _Rows(self._rows)
+
+
+class _FakeSession:
+    """Captures each statement the repository sends and answers with canned rows."""
+
+    def __init__(self, statements, rows=()):
+        self._statements = statements
+        self._rows = list(rows)
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *exc):
+        return False
+
+    async def execute(self, statement):
+        self._statements.append(statement)
+        return _Result(self._rows)
+
+    async def commit(self):
+        return None
+
+
+def _fake_factory(monkeypatch, statements, rows=()):
+    monkeypatch.setattr(run_doc, "get_session_factory", lambda: (lambda: _FakeSession(statements, rows)))
+
+
+async def test_the_roster_projection_accepts_the_view_rows_the_query_returns():
+    # The SQL selects record -> 'view', so each row is already the AgentView dict.
+    row = agent_record("n1", name="First").view.model_dump(mode="json")
+    roster = run_doc.roster_views([row])
+    assert [(view.name, set(view.model_dump())) for view in roster] == [("First", VIEW_KEYS)]
+
+
+async def test_the_projection_refuses_a_whole_record_row():
+    # A whole record is not a view: AgentView forbids the extra keys, so a regression that
+    # selects the full record fails here instead of leaking evidence through the roster.
+    with pytest.raises(ValueError):
+        run_doc.roster_views([agent_record("n1").model_dump(mode="json")])
+
+
+async def test_read_roster_sends_the_view_path_and_projects_the_rows(monkeypatch):
+    statements: list = []
+    row = agent_record("n1", name="First").view.model_dump(mode="json")
+    _fake_factory(monkeypatch, statements, rows=[row])
+
+    roster = await run_doc.read_roster(str(uuid.uuid4()), uuid.uuid4())
+
+    compiled = statements[0].compile(dialect=postgresql.dialect())
+    assert "record -> " in str(compiled)
+    assert {"view", "published"} <= set(compiled.params.values())
+    assert [view.name for view in roster] == ["First"]
+
+
+async def test_the_record_write_is_insert_only(monkeypatch):
+    statements: list = []
+    _fake_factory(monkeypatch, statements)
+
+    await run_doc.write_agent_records(str(uuid.uuid4()), [agent_record("n1")])
+
+    sql = str(statements[0].compile(dialect=postgresql.dialect()))
+    assert "ON CONFLICT (run_id, node_id) DO NOTHING" in sql
+    assert "DO UPDATE" not in sql
+
+
 class _DownSession:
     """A session whose audit insert fails, as when the database is unreachable."""
 
@@ -309,12 +389,12 @@ async def test_a_seated_joiner_follows_the_initial_seats_and_a_rejected_one_is_a
 
 
 @requires_db
-async def test_a_later_record_for_the_same_node_replaces_the_rejected_one(owner):
+async def test_a_repeated_node_keeps_its_first_record(owner):
     run_id = await _run_for(owner.id)
     await run_doc.write_agent_records(run_id, [agent_record("n1", run_id=run_id, status="rejected")])
     await run_doc.write_agent_records(run_id, [agent_record("n1", run_id=run_id, seat=3, name="Later")])
     roster = await run_doc.read_roster(run_id, owner.id)
-    assert [view.name for view in roster] == ["Later"]
+    assert roster == []
 
 
 @requires_db

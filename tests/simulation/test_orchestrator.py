@@ -1489,6 +1489,11 @@ async def test_a_self_history_failure_warns_without_an_exception_class():
     )
 
 
+def _rec(name: str, status: str = "published"):
+    """A stand-in record: the orchestrator reads only node.name, the seam only passes it on."""
+    return SimpleNamespace(node=SimpleNamespace(name=name), status=status)
+
+
 def _seam_orchestrator(synth, topo=None):
     return DebateOrchestrator(
         profile_synthesizer=synth,
@@ -1506,7 +1511,7 @@ async def test_records_reach_the_seam_even_when_synthesis_raises():
     synth = AsyncMock(spec=ProfileSynthesizer)
 
     async def synthesize_then_fail(**kwargs):
-        kwargs["records"].append("rejected-record")
+        kwargs["records"].append(_rec("Lumen", "rejected"))
         raise NoAgentsDerivableError("no profile could be seated")
 
     synth.synthesize.side_effect = synthesize_then_fail
@@ -1518,7 +1523,7 @@ async def test_records_reach_the_seam_even_when_synthesis_raises():
         )
 
     on_records.assert_awaited_once()
-    assert on_records.await_args.args[0] == ["rejected-record"]
+    assert [r.node.name for r in on_records.await_args.args[0]] == ["Lumen"]
 
 
 @pytest.mark.asyncio
@@ -1532,11 +1537,11 @@ async def test_each_joiner_batch_reaches_the_seam_with_the_seats_already_taken()
     society_memory.commit_round.return_value = _ok_receipt()
 
     async def synthesize(**kwargs):
-        kwargs["records"].append("initial-record")
+        kwargs["records"].append(_rec("Alice"))
         return [_make_profile(1, "Alice"), _make_profile(2, "Bob")]
 
     async def synthesize_from_names(**kwargs):
-        kwargs["records"].append("joiner-record")
+        kwargs["records"].append(_rec("Carol"))
         return [_make_profile(3, "Carol")]
 
     synth.synthesize.side_effect = synthesize
@@ -1562,8 +1567,56 @@ async def test_each_joiner_batch_reaches_the_seam_with_the_seats_already_taken()
         "test query", "ds1", DebateConfig(max_agents=5, max_rounds=1), AsyncMock(), on_records=on_records
     )
 
-    assert [call.args[0] for call in on_records.await_args_list] == [
-        ["initial-record"],
-        ["joiner-record"],
+    assert [[r.node.name for r in call.args[0]] for call in on_records.await_args_list] == [
+        ["Alice"],
+        ["Carol"],
     ]
     assert synth.synthesize_from_names.await_args.kwargs["seat_offset"] == 2
+
+
+@pytest.mark.asyncio
+async def test_a_node_tried_in_the_initial_synthesis_is_not_drawn_as_a_joiner():
+    synth = AsyncMock(spec=ProfileSynthesizer)
+    topo = AsyncMock(spec=CommunicationTopology)
+    llm_runner = MagicMock(spec=BatchedLLMRunner)
+    verdict_synth = MagicMock(spec=VerdictSynthesizer)
+    society_memory = AsyncMock(spec=SocietyMemory)
+    society_memory.read_snapshot.return_value = SocietySnapshot(round=0)
+    society_memory.commit_round.return_value = _ok_receipt()
+
+    def record(name: str, status: str):
+        return SimpleNamespace(node=SimpleNamespace(name=name), status=status)
+
+    async def synthesize(**kwargs):
+        kwargs["records"].extend([record("Lumen", "rejected"), record("Alice", "published")])
+        return [_make_profile(1, "Alice"), _make_profile(2, "Bob")]
+
+    async def synthesize_from_names(**kwargs):
+        kwargs["records"].extend(record(name, "published") for name in kwargs["names"])
+        return [_make_profile(3, name) for name in kwargs["names"]]
+
+    synth.synthesize.side_effect = synthesize
+    synth.synthesize_from_names.side_effect = synthesize_from_names
+    topo.compute_round_pairs.return_value = [
+        CommPair(agent_a="Alice", agent_b="Bob", shared_entities=[], score=0.5)
+    ]
+    # The topology returns the rejected node again, as a graph neighbour of the debate would.
+    topo.find_activation_candidates.return_value = [
+        SimpleNamespace(agent_name="Lumen", shared_entities=[], reason="linked"),
+        SimpleNamespace(agent_name="Carol", shared_entities=[], reason="linked"),
+    ]
+    verdict_synth.asynthesize.return_value = _make_verdict()
+    llm_runner.gather = MagicMock(return_value=_AsyncEmptyIter())
+    on_records = AsyncMock()
+
+    await DebateOrchestrator(
+        profile_synthesizer=synth,
+        topology=topo,
+        llm_runner=llm_runner,
+        verdict_synthesizer=verdict_synth,
+        society_memory=society_memory,
+    ).run("test query", "ds1", DebateConfig(max_agents=5, max_rounds=1), AsyncMock(), on_records=on_records)
+
+    assert synth.synthesize_from_names.await_args.kwargs["names"] == ["Carol"]
+    handed = [[r.node.name for r in call.args[0]] for call in on_records.await_args_list]
+    assert handed == [["Lumen", "Alice"], ["Carol"]]
