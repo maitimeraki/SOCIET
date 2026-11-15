@@ -19,6 +19,7 @@ from src.llm.config_llm import get_llm_config
 from src.persona.agent import Stance
 from src.persona.graph_context import ChunkHit, ChunkSearch, EntityNode, RelationHit
 from src.simulation.evidence import MAX_RELATIONS
+from src.simulation.profile_generator import CALLS_PER_SEAT
 from src.simulation.profile_synthesizer import NEIGHBOUR_CAP, ProfileSynthesizer
 from src.simulation.ranking import NoAgentsDerivableError
 
@@ -68,6 +69,7 @@ class FakeLLM:
         self.regenerations = 0
         self.in_flight = 0
         self.max_in_flight = 0
+        self.calls = 0
 
     async def generate(self, system_prompt, user_prompt, **kwargs):
         self.in_flight += 1
@@ -78,6 +80,7 @@ class FakeLLM:
             self.in_flight -= 1
 
     async def _answer(self, system_prompt, user_prompt, **kwargs):
+        self.calls += 1
         if self.scope_stack is not None:
             self.scopes_seen.append(list(self.scope_stack))
         if self.raises is not None:
@@ -191,6 +194,9 @@ class FakeGraph:
 
     async def find_entities_by_ids(self, entity_ids, dataset_id):
         return [self.entities[i] for i in entity_ids if i in self.entities]
+
+    async def find_entities_by_names(self, names, dataset_id):
+        return [e for e in self.entities.values() if e.name in names]
 
     async def find_connected_nodes_by_seed(self, node_ids, dataset_id, limit=10):
         return {i: self._neighbours.get(i, []) for i in node_ids}
@@ -563,15 +569,50 @@ async def test_synthesize_refuses_to_run_without_an_llm_client():
         await _synth([KESTRA]).synthesize(QUESTION, dataset_id="ds-A", max_agents=1)
 
 
+# ---- joiners: activation seats them through the roster's path --------------------------------
+
+
+async def _join(synth, names, llm=None, **kwargs):
+    return await synth.synthesize_from_names(
+        names, QUESTION, "ds-A", llm_client=llm or FakeLLM(), **kwargs
+    )
+
+
 @pytest.mark.asyncio
-async def test_joiners_are_refused_until_task_2_6b():
-    with pytest.raises(NotImplementedError, match="2.6b"):
-        await _synth([KESTRA]).synthesize_from_names(["Kestra"], QUESTION, dataset_id="ds-A")
+async def test_a_joiner_is_seated_with_a_generated_profile():
+    agents = await _join(_synth([KESTRA, LUMEN]), ["Kestra"])
+
+    assert ([a.identity.name for a in agents], agents[0].details_raw.startswith("Kestra point 0")) == (
+        ["Kestra"],
+        True,
+    )
+
+
+@pytest.mark.asyncio
+async def test_a_joiner_that_fails_to_seat_is_absent_from_the_result():
+    agents = await _join(_synth([KESTRA, LUMEN]), ["Kestra", "Lumen"], FakeLLM(fail={"Lumen"}))
+
+    assert [a.identity.name for a in agents] == ["Kestra"]
+
+
+@pytest.mark.asyncio
+async def test_joiners_need_an_llm_client():
+    with pytest.raises(ValueError, match="llm_client"):
+        await _synth([KESTRA]).synthesize_from_names(["Kestra"], QUESTION, "ds-A")
 
 
 @pytest.mark.asyncio
 async def test_an_empty_joiner_list_is_a_no_op():
-    assert await _synth([KESTRA]).synthesize_from_names([], QUESTION, dataset_id="ds-A") == []
+    assert await _synth([KESTRA]).synthesize_from_names([], QUESTION, "ds-A") == []
+
+
+@pytest.mark.asyncio
+async def test_the_calls_a_run_makes_stay_within_its_reserve():
+    llm = _duplicate_bio_llm()
+
+    await _run(_synth([KESTRA, LUMEN]), llm, max_agents=2)
+
+    assert llm.calls <= 1 + 2 * CALLS_PER_SEAT
 
 
 # ---- uniqueness: a too-alike seated profile is regenerated once, then unseated ----------------

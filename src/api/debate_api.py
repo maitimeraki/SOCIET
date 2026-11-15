@@ -49,6 +49,7 @@ from src.config.settings import get_settings
 from src.db.engine import get_db
 from src.db.models import User
 from src.simulation.debate_config import DebateConfig
+from src.simulation.profile_generator import CALLS_PER_SEAT
 
 logger = logging.getLogger(__name__)
 
@@ -545,8 +546,9 @@ async def create_debate(
             meta={"requested": requested_values, "applied": applied},
         )
 
-    # §4: agents × rounds LLM-pair calls × the two turns in a pair.
-    estimate = agents * rounds * 2
+    # §4: agents × rounds LLM-pair calls × the two turns in a pair, plus each seat's profile
+    # calls (CALLS_PER_SEAT) and the one actor-classification call per run.
+    estimate = agents * rounds * 2 + agents * CALLS_PER_SEAT + 1
     # `reserve_units` rolls back on refusal, which expires the session's ORM
     # objects; capture the identity before the call so the 402 path can audit
     # it without a lazy load on an async session.

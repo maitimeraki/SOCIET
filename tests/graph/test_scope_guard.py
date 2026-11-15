@@ -54,6 +54,10 @@ READS = {
             "(m:Chunk AND " + chunk_in_dataset("m") + ")",
         ],
     ),
+    "find_entities_by_names": (
+        lambda ctx, **kw: ctx.find_entities_by_names(["a"], **kw),
+        [entity_in_dataset("n")],
+    ),
     "find_relations_for": (
         lambda ctx, **kw: ctx.find_relations_for("a", ["b"], **kw),
         [entity_in_dataset("seed"), entity_in_dataset("n"), chunk_in_dataset("ch")],

@@ -40,6 +40,8 @@ JUDGE_MAX_TOKENS = 600
 PROFILE_SOURCE = "debate"
 MAX_ATTEMPTS = 2
 JUDGE_ATTEMPTS = 2
+#: Model calls one seat can cost at most: a generation and one uniqueness regeneration, each with its repair and judge calls.
+CALLS_PER_SEAT = 2 * (MAX_ATTEMPTS + JUDGE_ATTEMPTS)
 
 _MARKUP = re.compile(r'[<>"]')
 

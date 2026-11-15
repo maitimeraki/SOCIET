@@ -124,6 +124,39 @@ def _usable_vector(vector: tuple[float, ...]) -> bool:
     )
 
 
+@dataclass(frozen=True)
+class _ChunkEvidence:
+    """What the question's chunks say about each entity: relevance, counts, and the rows a pack is built from."""
+
+    query_relevance: dict[str, float]
+    chunk_count: dict[str, int]
+    doc_ids: dict[str, set[str]]
+    chunk_rows: dict[str, list[ChunkRow]]
+
+
+def _candidate(
+    node: EntityNode,
+    evidence: _ChunkEvidence,
+    neighbours: list[EntityNode],
+    *,
+    similarity: float,
+    ppr: float,
+) -> Candidate:
+    chunks = evidence.chunk_count.get(node.id, 0)
+    return Candidate(
+        entity_id=node.id,
+        name=node.name,
+        type_label=_type_label(node),
+        query_relevance=evidence.query_relevance.get(node.id, 0.0),
+        entity_similarity=similarity,
+        ppr=ppr,
+        doc_count=len(evidence.doc_ids.get(node.id, ())),
+        chunk_count=chunks,
+        evidence_count=chunks + len(neighbours[:NEIGHBOUR_CAP]),
+        vector=_embedding(node),
+    )
+
+
 @dataclass
 class _Pool:
     """The ranked candidates and the per-entity inputs a profile pack is built from."""
@@ -288,17 +321,29 @@ class ProfileSynthesizer:
         query: str,
         dataset_id: str,
         relevance_by_name: dict[str, float] | None = None,
+        *,
+        intent: QueryIntent | None = None,
+        warnings: list[str] | None = None,
+        llm_client: Any = None,
+        llm_concurrency: int | None = None,
     ) -> list[Agent]:
-        """Joiner seating for activation. Not built yet.
+        """Seat the activation joiners named in `names`, through the same path as a roster member.
 
-        A joiner has to pass the same seat, generate and validate path as a roster member.
-        That is task 2.6b. Until then this refuses rather than build a template Agent.
+        Each joiner is drawn, generated, validated and checked for uniqueness against the other
+        joiners. A joiner that cannot be seated is absent from the result; the caller warns.
         """
-        if not names:
+        wanted = list(dict.fromkeys(names))
+        if not wanted:
             return []
-        raise NotImplementedError(
-            "joiner seating lands in task 2.6b: activation cannot seat a generated profile yet"
-        )
+        if llm_client is None:
+            raise ValueError("joiner seating needs an llm_client")
+        width = llm_concurrency or DebateConfig().llm_concurrency
+        pool = await self._joiner_pool(wanted, query, dataset_id, relevance_by_name or {}, warnings, llm_client)
+        run = _Run(query, dataset_id, intent.stance_axis if intent is not None else "", llm_client)
+        seats = await self._roster(SeatQueue(pool.candidates, n=len(wanted)), pool, run, width, {})
+        for seat in seats:
+            await self._persist_links(seat.agent, dataset_id, warnings)
+        return [seat.agent for seat in seats]
 
     async def _roster(
         self,
@@ -400,6 +445,82 @@ class ProfileSynthesizer:
         llm_client: Any,
     ) -> _Pool:
         """Build and rank the candidate pool for the question. Raises when none reaches it."""
+        evidence = await self._chunk_evidence(query, dataset_id)
+        entity_hits = await self._ctx.find_relevant_entities(query, dataset_id=dataset_id, limit=ENTITY_HITS)
+        hit_by_id = {entity.id: entity for entity in entity_hits}
+        similarity_population = [entity.relevance_score for entity in entity_hits]
+
+        pool_ids = sorted(set(evidence.query_relevance) | set(hit_by_id))
+        unfetched = [entity_id for entity_id in pool_ids if entity_id not in hit_by_id]
+        fetched = (
+            await self._ctx.find_entities_by_ids(unfetched, dataset_id=dataset_id) if unfetched else []
+        )
+        nodes = {entity.id: entity for entity in fetched}
+        nodes.update(hit_by_id)
+        pool = [nodes[entity_id] for entity_id in pool_ids if entity_id in nodes]
+        if not any(evidence.query_relevance.get(node.id, 0.0) > 0 for node in pool):
+            raise NoAgentsDerivableError(NO_COVERAGE_MESSAGE)
+
+        grouped = await self._ctx.find_connected_nodes_by_seed(
+            [node.id for node in pool], dataset_id=dataset_id, limit=NEIGHBOURS_PER_SEED
+        )
+        neighbours = {node.id: _distinct_by_id(grouped.get(node.id, []), node.id) for node in pool}
+        # Undirected, one edge per pair: a pool-to-pool edge arrives from both ends.
+        edges = sorted({tuple(sorted((node.id, n.id))) for node in pool for n in neighbours[node.id]})
+        seeds = {
+            node.id: evidence.query_relevance[node.id]
+            for node in pool
+            if evidence.query_relevance.get(node.id, 0.0) > 0
+        }
+        ppr = personalized_pagerank(adjacency(edges), seeds)
+
+        candidates = [
+            _candidate(
+                node,
+                evidence,
+                neighbours[node.id],
+                similarity=(
+                    percentile(node.relevance_score, similarity_population) if node.id in hit_by_id else 0.0
+                ),
+                ppr=ppr.get(node.id, 0.0),
+            )
+            for node in pool
+        ]
+        candidates = await self._classify_actors(candidates, llm_client, warnings)
+        return _Pool(candidates=candidates, nodes=nodes, neighbours=neighbours, chunk_rows=evidence.chunk_rows)
+
+    async def _joiner_pool(
+        self,
+        names: list[str],
+        query: str,
+        dataset_id: str,
+        relevance_by_name: dict[str, float],
+        warnings: list[str] | None,
+        llm_client: Any,
+    ) -> _Pool:
+        """The activation joiners as candidates: their own chunks, capped neighbours and actor flag.
+
+        Activation's shared-entity share stands in for the PPR score the question pool has.
+        """
+        nodes = {node.id: node for node in await self._ctx.find_entities_by_names(names, dataset_id=dataset_id)}
+        evidence = await self._chunk_evidence(query, dataset_id)
+        grouped = (
+            await self._ctx.find_connected_nodes_by_seed(
+                sorted(nodes), dataset_id=dataset_id, limit=NEIGHBOURS_PER_SEED
+            )
+            if nodes
+            else {}
+        )
+        neighbours = {entity_id: _distinct_by_id(grouped.get(entity_id, []), entity_id) for entity_id in nodes}
+        candidates = [
+            _candidate(node, evidence, neighbours[node.id], similarity=0.0, ppr=relevance_by_name.get(node.name, 0.0))
+            for node in nodes.values()
+        ]
+        candidates = await self._classify_actors(candidates, llm_client, warnings)
+        return _Pool(candidates=candidates, nodes=nodes, neighbours=neighbours, chunk_rows=evidence.chunk_rows)
+
+    async def _chunk_evidence(self, query: str, dataset_id: str) -> _ChunkEvidence:
+        """Per-entity evidence from the question's fused top chunks: relevance, counts and the rows a pack is built from."""
         search = await self._ctx.find_relevant_chunks(query, dataset_id=dataset_id, limit=CHUNK_POOL)
         chunk_hits = {hit.chunk_id: hit for hit in [*search.vector, *search.fulltext]}
         fused = rrf_fuse(
@@ -422,53 +543,10 @@ class ProfileSynthesizer:
                 chunk_rows[entity_id].append(
                     ChunkRow(hit.chunk_id, hit.doc_id, hit.doc_title, hit.section, hit.text, fused[chunk_id])
                 )
-
-        entity_hits = await self._ctx.find_relevant_entities(query, dataset_id=dataset_id, limit=ENTITY_HITS)
-        hit_by_id = {entity.id: entity for entity in entity_hits}
-        similarity_population = [entity.relevance_score for entity in entity_hits]
-
-        pool_ids = sorted(set(query_relevance) | set(hit_by_id))
-        unfetched = [entity_id for entity_id in pool_ids if entity_id not in hit_by_id]
-        fetched = (
-            await self._ctx.find_entities_by_ids(unfetched, dataset_id=dataset_id) if unfetched else []
-        )
-        nodes = {entity.id: entity for entity in fetched}
-        nodes.update(hit_by_id)
-        pool = [nodes[entity_id] for entity_id in pool_ids if entity_id in nodes]
-        if not any(query_relevance.get(node.id, 0.0) > 0 for node in pool):
-            raise NoAgentsDerivableError(NO_COVERAGE_MESSAGE)
-
-        grouped = await self._ctx.find_connected_nodes_by_seed(
-            [node.id for node in pool], dataset_id=dataset_id, limit=NEIGHBOURS_PER_SEED
-        )
-        neighbours = {node.id: _distinct_by_id(grouped.get(node.id, []), node.id) for node in pool}
-        # Undirected, one edge per pair: a pool-to-pool edge arrives from both ends.
-        edges = sorted({tuple(sorted((node.id, n.id))) for node in pool for n in neighbours[node.id]})
-        seeds = {node.id: query_relevance[node.id] for node in pool if query_relevance.get(node.id, 0.0) > 0}
-        ppr = personalized_pagerank(adjacency(edges), seeds)
-
-        candidates = [
-            Candidate(
-                entity_id=node.id,
-                name=node.name,
-                type_label=_type_label(node),
-                query_relevance=query_relevance.get(node.id, 0.0),
-                entity_similarity=(
-                    percentile(node.relevance_score, similarity_population) if node.id in hit_by_id else 0.0
-                ),
-                ppr=ppr.get(node.id, 0.0),
-                doc_count=len(doc_ids.get(node.id, ())),
-                chunk_count=chunk_count.get(node.id, 0),
-                evidence_count=chunk_count.get(node.id, 0) + len(neighbours[node.id][:NEIGHBOUR_CAP]),
-                vector=_embedding(node),
-            )
-            for node in pool
-        ]
-        candidates = await self._classify_actors(candidates, llm_client, warnings)
-        return _Pool(
-            candidates=candidates,
-            nodes=nodes,
-            neighbours=neighbours,
+        return _ChunkEvidence(
+            query_relevance=query_relevance,
+            chunk_count=dict(chunk_count),
+            doc_ids=dict(doc_ids),
             chunk_rows={entity_id: list(rows) for entity_id, rows in chunk_rows.items()},
         )
 

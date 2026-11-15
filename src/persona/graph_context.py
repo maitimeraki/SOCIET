@@ -480,6 +480,35 @@ class GraphContext:
             if row.get("n") is not None
         ]
 
+    async def find_entities_by_names(self, names: List[str], dataset_id: str) -> List[EntityNode]:
+        """Dataset entities with the given names (activation joiners), in one read.
+
+        Unscored: relevance is 0.0. Names are matched exactly, as the activation read reports them.
+        """
+        wanted = [str(name) for name in names if str(name or "").strip()]
+        if not wanted:
+            return []
+
+        cypher = f"""
+        MATCH (n:__Entity__)
+        WHERE n.name IN $names AND NOT n:Chunk
+          AND {entity_in_dataset("n")}
+        RETURN n
+        """
+        async with self._driver.session(database=self._db) as session:
+            result = await session.run(
+                cast(LiteralString, cypher),
+                names=wanted,
+                dataset_id=dataset_id,
+            )
+            rows = await result.data()
+
+        return [
+            self._entity_from_node(row.get("n"), 0.0)
+            for row in rows
+            if row.get("n") is not None
+        ]
+
     async def find_relations_for(
         self,
         entity_id: str,

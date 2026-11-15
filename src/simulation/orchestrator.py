@@ -63,6 +63,9 @@ from src.utils.queryIntend import QueryIntent
 
 logger = logging.getLogger(__name__)
 
+#: The one warning a joiner that fails to seat produces. It names no exception and no internals.
+JOINER_NOT_PROFILED = "a joining participant could not be profiled"
+
 #: Async callable that delivers one stage event; see the module docstring.
 StageEmitter = Callable[[dict[str, Any]], Awaitable[None]]
 
@@ -273,6 +276,8 @@ class DebateOrchestrator:
                         config=config,
                         warnings=warnings,
                         ws_broadcast=ws_broadcast,
+                        intent=intent,
+                        llm_client=llm_client,
                     )
                     continue
 
@@ -419,6 +424,8 @@ class DebateOrchestrator:
                     config=config,
                     warnings=warnings,
                     ws_broadcast=ws_broadcast,
+                    intent=intent,
+                    llm_client=llm_client,
                 )
 
                 if self._check_convergence(rounds, profiles, config=config):
@@ -534,6 +541,8 @@ class DebateOrchestrator:
         config: DebateConfig,
         warnings: list[str],
         ws_broadcast: Callable[[dict[str, Any]], Awaitable[None]],
+        intent: Optional[QueryIntent],
+        llm_client: Any,
     ) -> None:
         """Pull related non-participants in (they debate from next round).
 
@@ -556,14 +565,23 @@ class DebateOrchestrator:
                 ),
             )
             if candidates:
+                names = [c.agent_name for c in candidates]
                 new_profiles = await self._profile_synthesizer.synthesize_from_names(
-                    names=[c.agent_name for c in candidates],
+                    names=names,
                     query=query,
                     dataset_id=dataset_id,
                     relevance_by_name={
                         c.agent_name: min(1.0, len(c.shared_entities) / 3.0)
                         for c in candidates
                     },
+                    intent=intent,
+                    warnings=warnings,
+                    llm_client=llm_client,
+                    llm_concurrency=config.llm_concurrency,
+                )
+                seated = {p.identity.name for p in new_profiles}
+                warnings.extend(
+                    JOINER_NOT_PROFILED for name in names if name not in seated
                 )
                 # Every candidate may be unresolvable (synthesize_from_names
                 # returns []): then the roster did not grow, so no activation
@@ -586,9 +604,7 @@ class DebateOrchestrator:
             raise
         except Exception as exc:
             logger.warning("Round %s: activation failed", round_num, exc_info=exc)
-            warnings.append(
-                f"Round {round_num}: activation failed ({type(exc).__name__})"
-            )
+            warnings.append(f"Round {round_num}: activation failed")
 
     async def _with_self_history(
         self,
