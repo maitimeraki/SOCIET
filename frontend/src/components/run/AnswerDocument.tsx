@@ -77,6 +77,10 @@ export function answerSections({ view, corpusMissing }: AnswerInput): AnswerSect
 
 /** A written answer when there is one; when the payload marks a fallback, the aggregates and the notice. */
 function answerParts(view: VerdictView): AnswerSection[] {
+  // No position carries weight: no answer was written, and the summary says so.
+  if (view.narrativeStatus === 'no_verdict') {
+    return [{ heading: OUTCOME_HEADING, blocks: [{ kind: 'text', text: view.summary }] }]
+  }
   if (view.narrative.trim() && view.narrativeStatus !== 'fallback') {
     return splitSections(view.narrative).map((section) => ({
       heading: section.heading || ANSWER_HEADING,
@@ -172,7 +176,8 @@ export default function AnswerDocument({
   // and the auth page's right column render — so the three surfaces rhyme by construction (§14.3).
   const filed: FiledDecision = {
     question,
-    position: view.stance,
+    // No position carries weight: the sheet says ABSTAIN, the same state the server files.
+    position: view.stance ?? 'ABSTAIN',
     share: view.confidence,
     caseAgainst: view.dissentingViews[0]?.view ?? 'No dissent was recorded.',
     sources: corpusMissing ? 'The material behind this decision is no longer available.' : undefined,

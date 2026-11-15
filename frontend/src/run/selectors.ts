@@ -1,8 +1,15 @@
 import type { AgentView, ClusterSummary, DissentingView, EvidenceItem, Stance, TurnInfo } from './events'
 import { asStance } from './events'
-import type { RunRound, RunState } from './reducer'
+import type { RunState } from './reducer'
 
+/** The display order of the stances (legend, tape segments, grouped lists). */
 export const STANCE_ORDER: Stance[] = ['POSITIVE', 'NEUTRAL', 'ABSTAIN', 'NEGATIVE']
+
+/**
+ * The one tie-break for a dominant position, shared with the server (turn_protocol.dominant_stance):
+ * a tie goes to the first of these. Display order (STANCE_ORDER) does not decide a verdict.
+ */
+export const POSITION_TIE_ORDER: Stance[] = ['POSITIVE', 'NEGATIVE', 'NEUTRAL']
 
 // ---------------------------------------------------------------------------
 // Roster (profile creation) — the ①→④ sequence state
@@ -75,29 +82,17 @@ export function currentRound(state: RunState): number {
 
 export interface TapeTick {
   round: number
-  weights: Record<Stance, number>
+  /** Null when the pass carries no consensus (no position in its window): no shares are shown. */
+  weights: Record<Stance, number> | null
   dominant: { stance: string; weightShare: number } | null
 }
 
 export function convergenceSeries(state: RunState): TapeTick[] {
   return state.rounds.map((round) => ({
     round: round.round,
-    weights: round.consensus?.weights ?? fallbackWeights(round),
+    weights: round.consensus?.weights ?? null,
     dominant: round.consensus ? { stance: round.consensus.stance, weightShare: round.consensus.weight_share } : null,
   }))
-}
-
-/** Pre-consensus runs: approximate the round's shares from turn counts (equal weight per turn). */
-function fallbackWeights(round: RunRound): Record<Stance, number> {
-  const counts: Record<Stance, number> = { POSITIVE: 0, NEUTRAL: 0, NEGATIVE: 0, ABSTAIN: 0 }
-  for (const turn of round.turns) counts[asStance(turn.stance)] += 1
-  const total = round.turns.length || 1
-  return {
-    POSITIVE: counts.POSITIVE / total,
-    NEUTRAL: counts.NEUTRAL / total,
-    ABSTAIN: counts.ABSTAIN / total,
-    NEGATIVE: counts.NEGATIVE / total,
-  }
 }
 
 export function rosterById(state: RunState): Map<string, AgentView> {
@@ -148,7 +143,8 @@ export function streamItems(state: RunState): StreamItem[] {
 // ---------------------------------------------------------------------------
 
 export interface VerdictView {
-  stance: Stance
+  /** Null when no position carries weight: there is no verdict stance. */
+  stance: Stance | null
   confidence: number | null
   converged: boolean
   summary: string
@@ -163,19 +159,27 @@ export interface VerdictView {
   warnings: string[]
 }
 
+/** The dominant stance by weight, the server's rule: ties in POSITION_TIE_ORDER, and null with no weight. */
+export function dominantStance(clusters: ClusterSummary[]): Stance | null {
+  let best: ClusterSummary | null = null
+  for (const stance of POSITION_TIE_ORDER) {
+    const cluster = clusters.find((entry) => entry.stance === stance)
+    if (cluster && cluster.total_weight > 0 && (best === null || cluster.total_weight > best.total_weight)) best = cluster
+  }
+  return best?.stance ?? null
+}
+
 export function verdictView(state: RunState): VerdictView | null {
   const verdict = state.verdict
   if (!verdict) return null
   const clusters = verdict.clusters
     ? STANCE_ORDER.map((stance) => verdict.clusters![stance]).filter((cluster): cluster is ClusterSummary => Boolean(cluster))
     : []
-  const stance =
-    clusters.length > 0
-      ? clusters.reduce((best, cluster) => (cluster.total_weight > best.total_weight ? cluster : best)).stance
-      : dominantFromFinalStances(verdict.finalStances)
+  const stance = dominantStance(clusters)
   return {
     stance,
-    confidence: verdict.confidence,
+    // No stance means no share: the filed confidence belongs to a verdict that exists.
+    confidence: stance === null ? null : verdict.confidence,
     converged: verdict.converged,
     summary: verdict.summary,
     narrative: verdict.narrative,
@@ -190,8 +194,3 @@ export function verdictView(state: RunState): VerdictView | null {
   }
 }
 
-function dominantFromFinalStances(finalStances: Record<string, string>): Stance {
-  const counts: Record<Stance, number> = { POSITIVE: 0, NEUTRAL: 0, NEGATIVE: 0, ABSTAIN: 0 }
-  for (const value of Object.values(finalStances)) counts[asStance(value)] += 1
-  return STANCE_ORDER.reduce((best, stance) => (counts[stance] > counts[best] ? stance : best))
-}

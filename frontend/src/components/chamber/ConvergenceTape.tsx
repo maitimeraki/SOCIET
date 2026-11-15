@@ -42,14 +42,23 @@ export default function ConvergenceTape({
         <div className="space-y-2">
           {ticks.length === 0 && <p className="text-body text-ink-3">Waiting for pass 1…</p>}
           {ticks.map((tick) => {
-            const present = STANCE_ORDER.filter((stance) => (tick.weights[stance] ?? 0) > 0)
+            const weights = tick.weights
+            if (!weights) {
+              return (
+                <div key={tick.round} className="flex items-center gap-3">
+                  <span className="tnum w-6 font-mono text-micro text-ink-3">P{tick.round}</span>
+                  <p className="text-micro text-ink-3">No position carries weight in this pass.</p>
+                </div>
+              )
+            }
+            const present = STANCE_ORDER.filter((stance) => (weights[stance] ?? 0) > 0)
             return (
               <div key={tick.round}>
                 <div className="flex items-center gap-3">
                   <span className="tnum w-6 font-mono text-micro text-ink-3">P{tick.round}</span>
                   <div className="flex h-3 flex-1 overflow-hidden rounded-xs" aria-hidden="true">
                     {STANCE_ORDER.map((stance, index) => {
-                      const share = tick.weights[stance] ?? 0
+                      const share = weights[stance] ?? 0
                       if (share <= 0) return null
                       return (
                         <div
@@ -69,7 +78,7 @@ export default function ConvergenceTape({
                     <li key={stance} className="flex items-center gap-1.5">
                       <PositionMark position={stance} size="sm" ground="light" />
                       <span className="tnum font-mono text-micro text-ink-3">
-                        {fmtPct(tick.weights[stance] ?? 0)}
+                        {fmtPct(weights[stance] ?? 0)}
                       </span>
                     </li>
                   ))}

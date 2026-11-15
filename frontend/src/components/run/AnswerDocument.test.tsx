@@ -145,3 +145,19 @@ describe('AnswerDocument — honesty about what it does not have (D7)', () => {
     expect(answerText(input({ view: view({ warnings: [] }) }))).not.toContain('## Warnings')
   })
 })
+
+describe('AnswerDocument — a debate with no position carrying weight', () => {
+  const noVerdict = view({
+    stance: null,
+    confidence: null,
+    summary: 'No verdict: no position carries weight.',
+    narrative: 'No verdict: no position carries weight.',
+    narrativeStatus: 'no_verdict',
+  })
+
+  it('states the no-verdict summary as the outcome, with no fallback notice and no written answer', () => {
+    const sections = answerSections(input({ view: noVerdict }))
+    expect(sections[0].blocks).toEqual([{ kind: 'text', text: 'No verdict: no position carries weight.' }])
+    expect(answerText(input({ view: noVerdict }))).not.toContain(NARRATIVE_FALLBACK_COPY)
+  })
+})

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { RUN_SAMPLE } from './__fixtures__/run-sample'
+import type { ClusterSummary, Stance } from './events'
 import { fold } from './reducer'
 import { convergenceSeries, currentRound, railState, rosterProgress, streamItems, verdictView, STANCE_ORDER } from './selectors'
 
@@ -44,7 +45,7 @@ describe('selectors', () => {
   it('serialises one tape tick per round with canonical weights', () => {
     const series = convergenceSeries(full)
     expect(series).toHaveLength(2)
-    expect(Object.keys(series[1].weights)).toEqual(STANCE_ORDER)
+    expect(Object.keys(series[1].weights ?? {})).toEqual(STANCE_ORDER)
   })
   it('streams round headers, turns, commits, activations and warnings in order', () => {
     const kinds = streamItems(full).map((item) => item.kind)
@@ -67,5 +68,64 @@ describe('selectors', () => {
       entity: 'EU single market',
       claim: 'Lowers per-unit distribution cost.',
     })
+  })
+})
+
+describe('the verdict stance and the tape without a weighted position', () => {
+  const cluster = (stance: Stance, total_weight: number): ClusterSummary => ({
+    stance,
+    count: 1,
+    total_weight,
+    avg_confidence: 0.5,
+    avg_conviction: 0.5,
+    agents: ['Alpha'],
+  })
+  const round = (number: number, consensus: null | undefined) => ({
+    type: 'round' as const,
+    round: number,
+    pairs: [],
+    turns: [],
+    consensus,
+  })
+  const completed = (cluster_details: Record<string, ClusterSummary> | undefined, final_stances: Record<string, string> = {}) =>
+    fold(
+      [
+        { type: 'stage', stage: 'intake', index: 0, query: 'q' },
+        round(1, null),
+        {
+          type: 'complete' as const,
+          converged: false,
+          verdict: 'No verdict: no position carries weight.',
+          narrative: 'No verdict: no position carries weight.',
+          narrative_status: 'no_verdict',
+          final_stances,
+          warnings: [],
+          rounds_executed: 1,
+          confidence_score: 0,
+          cluster_details: cluster_details as Record<Stance, ClusterSummary> | undefined,
+        },
+      ],
+      NOW,
+    )
+
+  it('takes no stance, no share, and no tape shares when no cluster carries weight', () => {
+    const state = completed({ ABSTAIN: cluster('ABSTAIN', 0) }, { Alpha: 'ABSTAIN' })
+    const view = verdictView(state)
+    expect(view?.stance).toBeNull()
+    expect(view?.confidence).toBeNull()
+    expect(view?.narrativeStatus).toBe('no_verdict')
+    expect(convergenceSeries(state)[0].weights).toBeNull()
+  })
+
+  it('breaks a weight tie in POSITIVE, NEGATIVE, NEUTRAL order', () => {
+    const negativeOverNeutral = verdictView(completed({ NEUTRAL: cluster('NEUTRAL', 0.5), NEGATIVE: cluster('NEGATIVE', 0.5) }))
+    const positiveOverNeutral = verdictView(completed({ NEUTRAL: cluster('NEUTRAL', 0.5), POSITIVE: cluster('POSITIVE', 0.5) }))
+    expect(negativeOverNeutral?.stance).toBe('NEGATIVE')
+    expect(positiveOverNeutral?.stance).toBe('POSITIVE')
+  })
+
+  it('takes no stance from agent counts when the verdict carries no clusters', () => {
+    const view = verdictView(completed(undefined, { Alpha: 'POSITIVE', Beta: 'POSITIVE', Gamma: 'NEGATIVE' }))
+    expect(view?.stance).toBeNull()
   })
 })

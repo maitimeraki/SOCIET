@@ -37,7 +37,7 @@ export interface RunVerdict {
   converged: boolean
   summary: string
   narrative: string
-  /** "ok" | "fallback" — "fallback" means the narrative degraded to `summary` (§17.3). */
+  /** "ok" | "fallback" | "no_verdict" — "fallback" means the narrative degraded to `summary` (§17.3); "no_verdict" means no position carried weight. */
   narrativeStatus: string
   dissentingViews: DissentingView[]
   evidence: EvidenceItem[]

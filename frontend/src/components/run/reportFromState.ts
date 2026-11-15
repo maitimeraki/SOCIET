@@ -22,17 +22,18 @@ export function reportFromState(state: RunState, filedAt: string | null): Report
   return {
     question: state.query || 'This decision',
     filed: filedAt ? fmtDay(filedAt) : '—',
-    position: view.stance,
+    // No position carries weight: the report says ABSTAIN, the same state the server files.
+    position: view.stance ?? 'ABSTAIN',
     share: view.confidence,
     caseAgainst: view.dissentingViews[0]?.view ?? 'No dissent was recorded.',
     reasoning: reasoningOf(view),
     whoHeldWhichView: heldViews(view),
-    passes: convergenceSeries(state).map((tick) => ({
-      pass: `P${tick.round}`,
-      negative: tick.weights.NEGATIVE,
-      positive: tick.weights.POSITIVE,
-      abstain: tick.weights.ABSTAIN,
-    })),
+    // A pass with no consensus has no shares to chart, so it is left out rather than charted as zero.
+    passes: convergenceSeries(state).flatMap((tick) =>
+      tick.weights
+        ? [{ pass: `P${tick.round}`, negative: tick.weights.NEGATIVE, positive: tick.weights.POSITIVE, abstain: tick.weights.ABSTAIN }]
+        : [],
+    ),
     panel: panelRows(state, view),
     warnings: state.warnings,
   }

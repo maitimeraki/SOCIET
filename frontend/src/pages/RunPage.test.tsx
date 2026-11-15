@@ -55,7 +55,13 @@ const FILED: RunState = {
     dissentingViews: [{ stance: 'NEGATIVE', view: 'Entry cost outweighs the single market.' }],
     evidence: [],
     confidence: 0.83,
-    clusters: null,
+    // A filed verdict carries its weighted clusters; the stance is the dominant weight, not a head count.
+    clusters: {
+      POSITIVE: { stance: 'POSITIVE', count: 1, total_weight: 0.7, avg_confidence: 0.8, avg_conviction: 0.6, agents: ['Nordic Lead'] },
+      NEGATIVE: { stance: 'NEGATIVE', count: 1, total_weight: 0.3, avg_confidence: 0.6, avg_conviction: 0.5, agents: ['Baltic Lead'] },
+      NEUTRAL: { stance: 'NEUTRAL', count: 0, total_weight: 0, avg_confidence: 0, avg_conviction: 0, agents: [] },
+      ABSTAIN: { stance: 'ABSTAIN', count: 0, total_weight: 0, avg_confidence: 0, avg_conviction: 0, agents: [] },
+    },
     finalStances: { 'Nordic Lead': 'POSITIVE', 'Baltic Lead': 'NEGATIVE' },
     supporting: [],
     opposing: [],
