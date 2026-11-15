@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 import re
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Literal
 from uuid import UUID
@@ -233,6 +233,7 @@ REPORT_SYSTEM = (
     "- Cite only the source ids listed under SOURCES, as [n].\n"
     "- Tag every point (from the documents) when its claim rests on a source, otherwise (judgement).\n"
     "- Every point has all four parts: Point, Against, Opinion, Result.\n"
+    "- Quote at most a short phrase, under 80 characters, from a source. Never copy ids or long passages.\n"
     "- Write nothing outside this shape."
 )
 
@@ -312,6 +313,16 @@ def _split_sections(markdown: str) -> tuple[list[str], list[tuple[str, list[str]
 
 _PART_LABEL = re.compile(r"^(Point|Against|Opinion|Result):(.*)$")
 _SOURCE_MARKER = re.compile(r"\[\s*\d+(?:\s*,\s*\d+)*\s*\]")
+_BRACKETED = re.compile(r"\[([^\[\]\n]*)\]")
+_NUMERIC_MARKER_LIST = re.compile(r"\s*\d+(?:\s*,\s*\d+)*\s*")
+# An id-shaped word: letters then digits, as in e1, chunk_12 or r3.
+_ID_SHAPED = re.compile(r"[A-Za-z][A-Za-z_\-]*\d")
+_UUID_SHAPED = re.compile(
+    r"\b[0-9a-fA-F]{8}-?[0-9a-fA-F]{4}-?[0-9a-fA-F]{4}-?[0-9a-fA-F]{4}-?[0-9a-fA-F]{12}\b"
+    r"|\b[0-9a-fA-F]{32}\b"
+)
+#: A verbatim run of source text at least this long is copied, not paraphrased.
+VERBATIM_RUN_CHARS = 80
 
 
 def _marker_ids(markdown: str) -> set[str]:
@@ -424,7 +435,29 @@ def check_report(markdown: str, facts: BoardFacts, source_ids: set[str]) -> list
     for marker in sorted(_marker_ids(markdown), key=int):
         if marker not in source_ids:
             errors.append(f"source marker [{marker}] is not in the source map")
+    if any(
+        not _NUMERIC_MARKER_LIST.fullmatch(bracket.group(1)) and _ID_SHAPED.search(bracket.group(1))
+        for bracket in _BRACKETED.finditer(markdown)
+    ):
+        errors.append("an id in brackets is not a source marker: cite sources only as [n], never ids")
+    if _UUID_SHAPED.search(markdown):
+        errors.append("a UUID or 32-character hex id appears in the text: remove it")
     return errors
+
+
+def _squash(text: str) -> str:
+    return " ".join(text.split())
+
+
+def _verbatim_source_errors(markdown: str, sources: Mapping[str, ReportSource]) -> list[str]:
+    """A check the report must pass: no run of VERBATIM_RUN_CHARS characters copied from a source."""
+    report = _squash(markdown)
+    for source in sources.values():
+        text = _squash(source.text)
+        for start in range(len(text) - VERBATIM_RUN_CHARS + 1):
+            if text[start : start + VERBATIM_RUN_CHARS] in report:
+                return ["the report copies source text verbatim: shorten quotes to a short phrase"]
+    return []
 
 
 def report_user_prompt(bundle: ReportBundle, facts: BoardFacts) -> str:
@@ -507,7 +540,10 @@ async def write_report(
             previous = ["the model call failed"]
         else:
             markdown = (raw or "").strip()
-            previous = check_report(markdown, facts, source_ids)
+            previous = [
+                *check_report(markdown, facts, source_ids),
+                *_verbatim_source_errors(markdown, bundle.sources),
+            ]
             if not previous:
                 return ReportResult(markdown=markdown, attempts=attempt, checks=checks)
             logger.warning(
@@ -535,6 +571,14 @@ def _final_stance(turn: AgentTurn) -> Stance:
     return Stance.ABSTAIN if stance is None else stance
 
 
+def board_final_stances(rounds: list[RoundResult], profiles: list[Agent]) -> dict[str, str]:
+    """Each seated agent's final stance on the wire; ABSTAIN when it has no turn in the window."""
+    return {
+        name: Stance.ABSTAIN.value if turn is None else _final_stance(turn).value
+        for name, turn in final_turns(rounds, profiles).items()
+    }
+
+
 def board_facts(rounds: list[RoundResult], profiles: list[Agent], converged: bool) -> BoardFacts:
     """The board's facts: the consensus position and share, the room, the state and the gaps.
 
@@ -545,10 +589,9 @@ def board_facts(rounds: list[RoundResult], profiles: list[Agent], converged: boo
     share = weighted_share(consensus_window(rounds), {p.identity.name: p for p in profiles})
     room = {stance.value: 0 for stance in WIRE_STANCES}
     gaps: list[str] = []
-    for name, turn in final_turns(rounds, profiles).items():
-        stance = Stance.ABSTAIN if turn is None else _final_stance(turn)
-        room[stance.value] += 1
-        if stance is Stance.ABSTAIN:
+    for name, value in board_final_stances(rounds, profiles).items():
+        room[value] += 1
+        if value == Stance.ABSTAIN.value:
             gaps.append(f"{name} took no position")
     if not converged:
         gaps.append(NO_AGREEMENT_GAP)

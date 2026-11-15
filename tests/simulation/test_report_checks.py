@@ -280,3 +280,31 @@ def test_context_just_under_the_cap_is_accepted():
 
 def test_no_context_is_accepted():
     assert DebateRequest(query="q", graph_id=UUID(int=1), context=None).context is None
+
+
+# --- fix round 1: ids and UUIDs never reach the served report text ---------------
+
+ID_IN_BRACKETS = "an id in brackets is not a source marker: cite sources only as [n], never ids"
+UUID_IN_TEXT = "a UUID or 32-character hex id appears in the text: remove it"
+
+
+def test_an_evidence_id_in_brackets_is_rejected_as_not_a_source_marker():
+    assert check_report(GOOD.replace("[1]", "[e1]"), FACTS, {"1"}) == [ID_IN_BRACKETS]
+
+
+def test_a_chunk_like_id_in_brackets_is_rejected():
+    assert check_report(GOOD.replace("[1]", "[chunk_12]"), FACTS, {"1"}) == [ID_IN_BRACKETS]
+
+
+def test_a_uuid_in_the_text_is_rejected():
+    errors = check_report(GOOD + "\nSee 0c0ffee0-0000-4000-8000-0000000000c1 for detail.", FACTS, {"1"})
+    assert UUID_IN_TEXT in errors
+
+
+def test_a_bare_32_hex_id_in_the_text_is_rejected():
+    errors = check_report(GOOD + "\nRef abcdef0123456789abcdef0123456789 here.", FACTS, {"1"})
+    assert UUID_IN_TEXT in errors
+
+
+def test_a_numeric_marker_list_is_still_a_marker_not_an_id():
+    assert check_report(GOOD.replace("[1]", "[1, 1]"), FACTS, {"1"}) == []

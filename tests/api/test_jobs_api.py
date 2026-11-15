@@ -254,3 +254,32 @@ async def test_the_legacy_mount_cancels_too(accounts):
 
     assert response.status_code == 200, response.text
     assert response.json()["status"] == "cancelled"
+
+
+async def test_a_debate_job_read_through_the_api_never_serves_its_backend_only_keys(accounts):
+    from src.api.debate_api import _job_doc
+
+    owner, _ = accounts
+    job_id = str(uuid.uuid4())
+    result = {
+        "converged": True, "final_stances": {}, "warnings": [], "rounds_executed": 1,
+        "title": "Enter Berlin?", "markdown": "# Enter Berlin?", "position": "POSITIVE", "status": "produced",
+        "sources": {"1": {"document": "Market memo", "section": "Pricing"}},
+        "source_refs": {"1": {"node_id": "NODE-SECRET", "evidence_id": "EV-SECRET"}},
+        "attempts": 2, "checks": ["SECRET-CHECK"],
+    }
+    job = {
+        "job_id": job_id, "user_id": owner, "created_at": None, "query": "q", "graph_id": "ds1",
+        "corpus_label": None, "config": {}, "status": "complete", "result": result, "error": None,
+    }
+    await run_doc.write_run_doc(_job_doc(job))
+
+    stored = await run_doc.read_run_head(job_id)
+    assert stored["result"]["source_refs"] == result["source_refs"]
+    assert (await run_doc.read_job_doc(job_id))["result"] is None
+
+    async with _client(owner) as client:
+        response = await client.get(f"/api/v1/jobs/{job_id}")
+    assert response.status_code == 200, response.text
+    for token in ("NODE-SECRET", "EV-SECRET", "SECRET-CHECK", "source_refs", "attempts", "checks"):
+        assert token not in response.text

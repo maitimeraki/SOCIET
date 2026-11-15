@@ -441,26 +441,18 @@ def test_roster_projection_fails_closed_on_a_raw_key():
         roster_views([view])
 
 
-@pytest.mark.asyncio
-async def test_get_job_serves_a_debate_result_only_through_the_allowlist():
-    from src.api import jobs_api
+# --- fix round 1: titles, sections and breadcrumbs are capped and stripped of control characters ---
 
-    job_id, user_id = str(uuid.uuid4()), uuid.uuid4()
-    raw = {
-        "converged": True, "status": "produced", "markdown": "# T", "title": "T", "position": "POSITIVE",
-        "sources": {"1": {"document": "D", "section": "S"}},
-        "source_refs": {"1": {"node_id": "NODE-SECRET", "evidence_id": "EV-SECRET"}},
-        "attempts": 1, "checks": ["SECRET-CHECK"],
-    }
-    doc = {"job_id": job_id, "user_id": str(user_id), "mode": "debate", "status": "complete", "result": raw}
-    with (
-        patch("src.api.jobs_api.run_doc.read_job_doc", new=AsyncMock(return_value=doc)),
-        patch("src.api.jobs_api.require_owner", new=AsyncMock()),
-    ):
-        out = await jobs_api.get_job(job_id, user=SimpleNamespace(id=user_id))
+def test_a_10k_section_is_capped_at_200_characters():
+    out = project_result({"sources": {"1": {"document": "D", "section": "S" * 10_000}}})
+    assert len(out["sources"]["1"]["section"]) == 200
 
-    served = json.dumps(out)
-    assert not any(token in served for token in ("NODE-SECRET", "EV-SECRET", "SECRET-CHECK"))
-    assert out["result"]["sources"] == {"1": {"document": "D", "section": "S"}}
-    assert out["result"]["status"] == "produced"
-    assert "source_refs" not in out["result"] and "attempts" not in out["result"]
+
+def test_a_10k_provenance_title_is_capped_at_200_characters():
+    out = project_result({"provenance_by_claim": {"c": [{"title": "T" * 10_000, "breadcrumb": "B"}]}})
+    assert len(out["provenance_by_claim"]["c"][0]["title"]) == 200
+
+
+def test_control_characters_are_removed_from_a_source_label():
+    out = project_result({"sources": {"1": {"document": "Me\x00mo\x1b", "section": "Pri\ncing\t"}}})
+    assert out == {"sources": {"1": {"document": "Memo", "section": "Pricing"}}}

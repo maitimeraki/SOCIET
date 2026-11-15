@@ -4,6 +4,7 @@ Default deny: an event type or key that is not listed here does not leave the
 backend. Adding a key is a deliberate edit to this file plus its test.
 """
 import logging
+import re
 from collections.abc import Mapping
 from typing import Any
 
@@ -59,8 +60,15 @@ def _pick(source: Any, keys: frozenset[str]) -> dict[str, Any]:
     return {k: v for k, v in source.items() if k in keys}
 
 
+#: Titles, sections and breadcrumbs are short labels: capped, with control characters removed.
+TEXT_MAX_CHARS = 200
+_CONTROL_CHARS = re.compile(r"[\x00-\x1f\x7f]")
+
+
 def _text(value: Any) -> str | None:
-    return value if isinstance(value, str) else None
+    if not isinstance(value, str):
+        return None
+    return _CONTROL_CHARS.sub("", value)[:TEXT_MAX_CHARS]
 
 
 def _narrow_provenance(claims: Any) -> dict[str, list[dict[str, Any]]]:
@@ -78,17 +86,19 @@ def _narrow_provenance(claims: Any) -> dict[str, list[dict[str, Any]]]:
 
 
 def _narrow_sources(sources: Any) -> dict[str, dict[str, str]]:
-    # Each source is exactly {document, section}, both strings. An entry that is not a mapping, or
-    # whose document or section is not a string, is dropped whole.
+    # Each source is exactly {document, section}, both strings (capped). An entry that is not a
+    # mapping, or whose document or section is not a string, is dropped whole.
     if not isinstance(sources, Mapping):
         return {}
-    return {
-        str(number): {"document": source["document"], "section": source["section"]}
-        for number, source in sources.items()
-        if isinstance(source, Mapping)
-        and isinstance(source.get("document"), str)
-        and isinstance(source.get("section"), str)
-    }
+    narrowed: dict[str, dict[str, str]] = {}
+    for number, source in sources.items():
+        if not isinstance(source, Mapping):
+            continue
+        document, section = _text(source.get("document")), _text(source.get("section"))
+        if document is None or section is None:
+            continue
+        narrowed[str(number)] = {"document": document, "section": section}
+    return narrowed
 
 
 def _narrow_verdict(source: Mapping[str, Any], keys: frozenset[str]) -> dict[str, Any]:

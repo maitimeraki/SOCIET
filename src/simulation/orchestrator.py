@@ -44,7 +44,7 @@ from dataclasses import asdict, dataclass, field
 from typing import Any, Awaitable, Callable, List, Optional
 
 from src.billing.metering import MeteringError
-from src.persona.agent import Agent, Stance
+from src.persona.agent import Agent
 from src.simulation.agent_record import AgentRecord
 from src.simulation.debate_config import DebateConfig
 from src.simulation.llm_batch import BatchedLLMRunner
@@ -60,7 +60,7 @@ from src.simulation.turn_protocol import (
     stance_weights,
     weighted_share,
 )
-from src.simulation.verdict import VerdictSynthesizer, final_turns
+from src.simulation.verdict import VerdictSynthesizer, board_final_stances
 from src.utils.queryIntend import QueryIntent
 
 logger = logging.getLogger(__name__)
@@ -516,9 +516,7 @@ class DebateOrchestrator:
 
         # Step 4: final stances, read from the same consensus window as the verdict. An agent
         # with no turn in that window has no position: ABSTAIN, never NEUTRAL.
-        final_stances: dict[str, str] = {}
-        for name, turn in final_turns(rounds, profiles).items():
-            final_stances[name] = turn.stance if turn is not None else Stance.ABSTAIN.value
+        final_stances = board_final_stances(rounds, profiles)
 
         return OrchestratedDebateResult(
             converged=converged,

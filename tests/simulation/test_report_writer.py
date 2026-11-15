@@ -496,3 +496,84 @@ async def test_a_board_below_the_threshold_adds_the_threshold_gap():
     await _run(report_llm)
 
     assert NO_AGREEMENT_GAP in report_llm.prompts[0]
+
+
+# --- fix round 1: no ids, no UUIDs, no long verbatim copies in the served report ----
+
+_LONG_SPAN = (
+    "The price cut is temporary and the rollout depends on the Berlin pilot results, "
+    "which the board has not yet seen in full."
+)
+
+
+def _board_with_text(text: str):
+    alice = _agent("Alice", 0.9, [_evidence("e1", "Market memo", "Pricing", text)])
+    bob = _agent("Bob", 0.8, [_evidence("e1", "Trade report", "Tariffs", "Tariffs rose in June.")])
+    rounds = [_round(1, _turn("Alice", "POSITIVE", cites=["e1"]), _turn("Bob", "NEGATIVE", cites=["e1"]))]
+    return rounds, [alice, bob]
+
+
+def _with_line(line: str):
+    """The good report with one extra line in the first Against."""
+    return lambda prompt: _good_report(prompt).replace("Opinion:", f"{line}\nOpinion:", 1)
+
+
+@pytest.mark.asyncio
+async def test_an_evidence_id_in_brackets_fails_and_the_retry_names_the_rule():
+    rounds, profiles = _board_with_text(_LONG_SPAN)
+    llm = _ReportLLM(_with_line("Support is in [e1]."), _good_report)
+
+    report = await write_board_report(llm, rounds=rounds, profiles=profiles, query="q", scenario="", converged=False)
+
+    assert report["status"] == PRODUCED
+    assert report["attempts"] == 2
+    assert "an id in brackets is not a source marker" in report["checks"][0]
+    assert "an id in brackets is not a source marker" in llm.prompts[1]
+
+
+@pytest.mark.asyncio
+async def test_a_uuid_in_the_text_fails_and_the_retry_names_the_rule():
+    rounds, profiles = _board_with_text(_LONG_SPAN)
+    llm = _ReportLLM(_with_line("Record 0c0ffee0-0000-4000-8000-0000000000c1 backs this."), _good_report)
+
+    report = await write_board_report(llm, rounds=rounds, profiles=profiles, query="q", scenario="", converged=False)
+
+    assert report["attempts"] == 2
+    assert "a UUID or 32-character hex id appears in the text" in report["checks"][0]
+    assert "a UUID or 32-character hex id appears in the text" in llm.prompts[1]
+
+
+@pytest.mark.asyncio
+async def test_a_pasted_span_of_90_characters_fails_and_the_retry_names_the_rule():
+    rounds, profiles = _board_with_text(_LONG_SPAN)
+    llm = _ReportLLM(_with_line(f"Quote: {_LONG_SPAN[:90]}."), _good_report)
+
+    report = await write_board_report(llm, rounds=rounds, profiles=profiles, query="q", scenario="", converged=False)
+
+    assert report["attempts"] == 2
+    assert "the report copies source text verbatim: shorten quotes to a short phrase" in report["checks"][0]
+    assert "copies source text verbatim" in llm.prompts[1]
+
+
+@pytest.mark.asyncio
+async def test_a_span_copied_with_different_spacing_is_still_a_verbatim_copy():
+    rounds, profiles = _board_with_text(_LONG_SPAN)
+    spaced = _LONG_SPAN[:90].replace(" ", "  ")
+    llm = _ReportLLM(_with_line(f"Quote: {spaced}."), _good_report)
+
+    report = await write_board_report(llm, rounds=rounds, profiles=profiles, query="q", scenario="", converged=False)
+
+    assert report["attempts"] == 2
+    assert "copies source text verbatim" in report["checks"][0]
+
+
+@pytest.mark.asyncio
+async def test_a_short_quote_under_80_characters_passes_on_the_first_attempt():
+    rounds, profiles = _board_with_text(_LONG_SPAN)
+    llm = _ReportLLM(_with_line(f"Quote: {_LONG_SPAN[:60]}."))
+
+    report = await write_board_report(llm, rounds=rounds, profiles=profiles, query="q", scenario="", converged=False)
+
+    assert report["status"] == PRODUCED
+    assert report["attempts"] == 1
+    assert report["checks"] == []

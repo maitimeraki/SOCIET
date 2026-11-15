@@ -34,7 +34,7 @@ from src.simulation.pair_turn import (
 from src.simulation.profile_synthesizer import ProfileSynthesizer
 from src.simulation.society_memory import SocietyMemory, SocietySnapshot
 from src.simulation.topology import CommunicationTopology
-from src.simulation.verdict import VerdictSynthesizer
+from src.simulation.verdict import REPORT_SYSTEM, VerdictSynthesizer
 from src.utils.queryIntend import QueryIntent
 from tests.agent_factory import slim_agent
 from tests.simulation.test_profile_synthesizer import (
@@ -1732,11 +1732,60 @@ def _leak_verdict() -> DebateVerdict:
     )
 
 
-async def _run_leak_debate() -> SimpleNamespace:
-    """A real ProfileSynthesizer over the fake graph and fake profile model, one rejected candidate."""
+_LEAK_PROTOCOL_REPLY = (
+    "REASONING: the pricing section decides it, privately.\n"
+    "POSITION: POSITIVE 0.8\n"
+    "CITES: e1\n"
+    "ANSWER: Kestra and Orbit back the pilot."
+)
+
+
+class _ReportingLLM(_ReasoningLLM):
+    """The fake profile model, plus a report writer for the report's own system prompt."""
+
+    async def generate(self, system_prompt, user_prompt, **kwargs):
+        if system_prompt == REPORT_SYSTEM:
+            return _leak_report_text(user_prompt)
+        return await super().generate(system_prompt, user_prompt, **kwargs)
+
+
+def _leak_report_text(prompt: str) -> str:
+    """A report that passes the checks: it echoes the board line, names no ids and quotes nothing."""
+    line = re.search(r"must read exactly: (Position: [^\n]*)", prompt).group(1)
+    gaps = re.search(r"Gaps:\n(.*?)\nThe first Recommendation", prompt, re.S).group(1)
+    body = [
+        "# Should we enter Berlin?",
+        "## Recommendation",
+        line,
+        "Enter in stages.",
+        "Watch the pilot pricing.",
+        "Revisit in two quarters.",
+        "Confidence is moderate.",
+        "## Timing",
+        "Point: the pilot may be priced per seat (judgement)",
+        "Against:",
+        "The pricing may change.",
+        "A later launch may avoid it.",
+        "The sources do not settle the price.",
+        "The timing rests on one assumption.",
+        "A fast launch is a bet on it.",
+        "Opinion: the timing is strong only if the price holds.",
+        "Result: track the price before a date is set.",
+    ]
+    if gaps.strip() != "none":
+        body += ["## Unknowns", "Whether the price holds."]
+    return "\n".join(body)
+
+
+async def _run_leak_debate(real_report: bool = False) -> SimpleNamespace:
+    """A real ProfileSynthesizer over the fake graph and fake profile model, one rejected candidate.
+
+    With `real_report`, the turns are protocol replies citing the seated agents' evidence, and the
+    verdict is the real VerdictSynthesizer writing the report through the fake model.
+    """
     events: list[dict] = []
     records: list = []
-    llm = _ReasoningLLM(fail={"Lumen"})
+    llm = _ReportingLLM(fail={"Lumen"}) if real_report else _ReasoningLLM(fail={"Lumen"})
 
     async def ws_broadcast(event: dict) -> None:
         events.append(event)
@@ -1746,7 +1795,8 @@ async def _run_leak_debate() -> SimpleNamespace:
 
     async def gather(prompts):
         for prompt in prompts:
-            yield PairResult(pair_id=prompt.pair_id, response=_TURN_REPLY)
+            reply = _LEAK_PROTOCOL_REPLY if real_report else _TURN_REPLY
+            yield PairResult(pair_id=prompt.pair_id, response=reply)
 
     llm_runner = MagicMock(spec=BatchedLLMRunner)
     llm_runner.gather = MagicMock(side_effect=gather)
@@ -1755,8 +1805,11 @@ async def _run_leak_debate() -> SimpleNamespace:
     society_memory = AsyncMock(spec=SocietyMemory)
     society_memory.read_snapshot.return_value = SocietySnapshot(round=0)
     society_memory.commit_round.return_value = _ok_receipt()
-    verdict_synth = MagicMock(spec=VerdictSynthesizer)
-    verdict_synth.asynthesize.return_value = _leak_verdict()
+    if real_report:
+        verdict_synth = VerdictSynthesizer()
+    else:
+        verdict_synth = MagicMock(spec=VerdictSynthesizer)
+        verdict_synth.asynthesize.return_value = _leak_verdict()
     orchestrator = DebateOrchestrator(
         profile_synthesizer=ProfileSynthesizer(
             persona_repo=_repo(), graph_context=FakeGraph(_LEAK_ENTITIES)
@@ -2008,3 +2061,23 @@ async def test_final_stances_are_read_from_the_consensus_window():
         result = await orch.run("q", "ds1", DebateConfig(max_agents=5, max_rounds=3), AsyncMock())
 
     assert result.final_stances == {"Alice": "POSITIVE", "Bob": "NEGATIVE", "Carol": "ABSTAIN"}
+
+
+# --- fix round 1: a real report, written by the real synthesiser, through the same leak harness ---
+
+
+@pytest.mark.asyncio
+async def test_the_real_report_is_produced_and_its_sources_are_public_only():
+    run = await _run_leak_debate(real_report=True)
+
+    assert run.result.report["status"] == "produced", run.result.report
+    assert run.result.report["sources"]
+    assert all(set(source) == {"document", "section"} for source in run.result.report["sources"].values())
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("marker", _LEAK_MARKERS, ids=_LEAK_MARKERS)
+async def test_a_real_report_leaks_no_marker_on_any_client_surface(marker):
+    payloads = await _client_payloads(await _run_leak_debate(real_report=True))
+
+    assert [name for name, text in payloads.surfaces.items() if marker in text] == []

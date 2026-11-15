@@ -82,11 +82,11 @@ class LLMConfig:
     analysis_model: str = os.getenv("ANALYSIS_LLM_MODEL", "claude-sonnet-5")
     debate_model: str = os.getenv("DEBATE_LLM_MODEL", "claude-opus-5-5")
 
-    # Verdict answer-writer (the final narrative). Defaults to the ANALYSIS tier
-    # — it is a single structured-JSON call over the completed debate, not the
-    # debate itself. VERDICT_LLM_MODEL overrides the model, VERDICT_MAX_TOKENS the
-    # strict-JSON output budget. default_factory (not a class-body default) reads
-    # the env when the config is built, so cache-clearing re-reads it.
+    # Final report writer (the report call, up to three attempts per run). Defaults to the ANALYSIS
+    # tier: it is a single report call over the completed board, not the debate itself.
+    # VERDICT_LLM_MODEL overrides the model, VERDICT_MAX_TOKENS the output budget of one attempt.
+    # default_factory (not a class-body default) reads the env when the config is built, so
+    # cache-clearing re-reads it.
     verdict_model: str = field(
         default_factory=lambda: os.getenv("VERDICT_LLM_MODEL")
         or os.getenv("ANALYSIS_LLM_MODEL", "claude-sonnet-5")
