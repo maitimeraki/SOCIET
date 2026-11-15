@@ -25,7 +25,7 @@ import { useSelectionStore } from '../../graph/selectionStore'
 import type { MapSelection } from '../../graph/selectionStore'
 import { useGraphStream } from '../../graph/useGraphStream'
 import Skeleton from '../ui/Skeleton'
-import { PositionGlyph } from '../ui/PositionMark'
+import { PositionGlyph, stanceWord } from '../ui/PositionMark'
 
 export interface GraphCanvasProps {
   datasetId: string
@@ -767,9 +767,9 @@ export const LEGEND_ROWS: readonly LegendRow[] = [
   ...POSITION_ORDER.map((stance) => ({
     mark: <PositionGlyph position={stance} size={12} ground="map" />,
     color: POSITION_COLORS[stance],
-    word: stance,
+    word: stanceWord(stance),
   })),
-  { mark: <CircleDashed size={12} aria-hidden="true" />, color: UNPOSITIONED_COLOR, word: 'No position' },
+  { mark: <CircleDashed size={12} aria-hidden="true" />, color: UNPOSITIONED_COLOR, word: 'Not recorded' },
 ]
 
 /**

@@ -1,5 +1,5 @@
 import type { DebateConfig } from '../api/types'
-import { asStance, parsePairId, UnknownStanceError } from './events'
+import { InvalidAgentError, UnknownStanceError, asStance, parseAgentView, parsePairId } from './events'
 import type { AgentView, ClusterSummary, ConsensusInfo, DissentingView, EvidenceItem, PairInfo, QueryIntent, RunEvent, SelectionRow, Stance, TurnInfo, WrittenLink, WrittenNode } from './events'
 
 export interface StageEntry {
@@ -100,13 +100,33 @@ export const initialState: RunState = {
 }
 
 export const UNKNOWN_STANCE_WARNING = 'Unknown stance from the server; shown as not available.'
+export const INVALID_AGENT_WARNING = 'An agent profile from the server does not match the current shape; it was skipped.'
+export const VERDICT_STANCE_WARNING = 'The verdict carried a stance outside the closed set; the run is marked failed.'
+const VERDICT_STANCE_ERROR = 'The verdict could not be shown: it carried an unknown stance.'
 
-/** A stance the server sent that is outside the closed set keeps the previous state and warns; it never reads as NEUTRAL. */
-function guardStances(state: RunState, reduce: () => RunState): RunState {
+/**
+ * Runs a reduction that reads stances or agent fields. A value that fails the closed set or the view
+ * shape keeps the base state, adds one warning and drops only that event's contribution; nothing is
+ * defaulted to NEUTRAL and the fold continues.
+ */
+function skipWith(base: RunState, reduce: () => RunState): RunState {
   try {
     return reduce()
   } catch (error) {
-    if (error instanceof UnknownStanceError) return { ...state, warnings: [...state.warnings, UNKNOWN_STANCE_WARNING] }
+    if (error instanceof UnknownStanceError) return { ...base, warnings: [...base.warnings, UNKNOWN_STANCE_WARNING] }
+    if (error instanceof InvalidAgentError) return { ...base, warnings: [...base.warnings, INVALID_AGENT_WARNING] }
+    throw error
+  }
+}
+
+/** Every stance a verdict carries, read through the closed set. A false means the verdict cannot be shown. */
+function verdictStancesKnown(event: Extract<RunEvent, { type: 'complete' }>): boolean {
+  try {
+    for (const stance of Object.values(event.final_stances ?? {})) asStance(stance)
+    for (const stance of Object.keys(event.cluster_details ?? {})) asStance(stance)
+    return true
+  } catch (error) {
+    if (error instanceof UnknownStanceError) return false
     throw error
   }
 }
@@ -140,9 +160,9 @@ function reduceEvent(state: RunState, event: RunEvent, now: number): RunState {
     case 'selection':
       return { ...base, selection: event.rows }
     case 'agent':
-      return guardStances(state, () => ({
+      return skipWith(base, () => ({
         ...base,
-        roster: [...base.roster, { ...event.profile, stance: asStance(event.profile.stance) }],
+        roster: [...base.roster, parseAgentView(event.profile)],
         rosterTotal: event.total,
       }))
     case 'pair_turn': {
@@ -155,7 +175,7 @@ function reduceEvent(state: RunState, event: RunEvent, now: number): RunState {
       }
     }
     case 'round':
-      return guardStances(state, () => ({
+      return skipWith(base, () => ({
         ...base,
         rounds: [
           ...base.rounds,
@@ -187,30 +207,30 @@ function reduceEvent(state: RunState, event: RunEvent, now: number): RunState {
     case 'activation':
       return { ...base, activations: [...base.activations, { round: event.round, agents: event.agents, reasons: event.reasons }] }
     case 'complete':
-      // Stances the verdict view reads back are checked here so an unknown one cannot throw at render.
-      return guardStances(state, () => {
-        for (const stance of Object.values(event.final_stances ?? {})) asStance(stance)
-        for (const stance of Object.keys(event.cluster_details ?? {})) asStance(stance)
-        return {
-          ...base,
-          status: 'complete',
-          verdict: {
-            converged: event.converged,
-            summary: event.verdict,
-            narrative: event.narrative ?? '',
-            narrativeStatus: event.narrative_status ?? 'ok',
-            dissentingViews: event.dissenting_views ?? [],
-            evidence: event.evidence ?? [],
-            confidence: event.confidence_score ?? null,
-            clusters: event.cluster_details ?? null,
-            finalStances: event.final_stances ?? {},
-            supporting: event.supporting_entities ?? [],
-            opposing: event.opposing_entities ?? [],
-          },
-          // The complete event's warnings are the server's full list — they replace the streamed deltas.
-          warnings: event.warnings ?? base.warnings,
-        }
-      })
+      // A verdict with a stance outside the closed set ends the run as failed: it is never shown as NEUTRAL
+      // and never left running. The reader sees the warning and the error, live and reopened alike.
+      if (!verdictStancesKnown(event)) {
+        return { ...base, status: 'failed', error: VERDICT_STANCE_ERROR, warnings: [...base.warnings, VERDICT_STANCE_WARNING] }
+      }
+      return {
+        ...base,
+        status: 'complete',
+        verdict: {
+          converged: event.converged,
+          summary: event.verdict,
+          narrative: event.narrative ?? '',
+          narrativeStatus: event.narrative_status ?? 'ok',
+          dissentingViews: event.dissenting_views ?? [],
+          evidence: event.evidence ?? [],
+          confidence: event.confidence_score ?? null,
+          clusters: event.cluster_details ?? null,
+          finalStances: event.final_stances ?? {},
+          supporting: event.supporting_entities ?? [],
+          opposing: event.opposing_entities ?? [],
+        },
+        // The complete event's warnings are the server's full list — they replace the streamed deltas.
+        warnings: event.warnings ?? base.warnings,
+      }
     case 'error':
       return { ...base, status: 'failed', error: event.error }
     case 'ping':

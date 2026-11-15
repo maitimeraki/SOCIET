@@ -198,8 +198,9 @@ export const useRunStore = create<RunStoreState>((set, get) => {
           set({ connection: 'closed' })
           return
         }
-      } catch {
-        // Run-doc endpoint is Task 20; a live run needs no doc to fold.
+      } catch (error) {
+        // No readable doc (or a fold that failed) — the run still follows live from the socket. Logged, never silent.
+        console.warn(`Stored run ${runId} could not be replayed; following it live.`, error)
       }
 
       if (generation !== loadGeneration) return

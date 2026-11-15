@@ -24,8 +24,8 @@ const WORD: Record<Position, string> = {
 }
 
 /**
- * The word a position is written in. Unrecognised input is returned unchanged — an unknown stance
- * must never render "undefined", and the customer reads a word, never the enum.
+ * The word a position is written in. Input outside the four positions is returned unchanged, so the word
+ * is never "undefined"; the symbol and colour are not drawn for such input, and callers pass a `Stance`.
  */
 // eslint-disable-next-line react-refresh/only-export-components -- the word helper is the pure rule the document export and its consumers share
 export function stanceWord(stance: string): string {
@@ -92,7 +92,7 @@ export default function PositionMark({
   return (
     <span className={`inline-flex items-center gap-1.5 ${word} ${small ? 'text-micro' : 'text-label'}`}>
       <PositionGlyph position={position} size={small ? 11 : 13} ground={ground} />
-      {WORD[position]}
+      {stanceWord(position)}
     </span>
   )
 }

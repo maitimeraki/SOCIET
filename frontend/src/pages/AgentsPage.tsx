@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { getRun, listRuns } from '../api/rest'
+import { rosterFromEvents } from '../run/events'
 import type { AgentView } from '../run/events'
 import AgentCard from '../components/agents/AgentCard'
 import AgentDrawer from '../components/agents/AgentDrawer'
@@ -12,6 +13,8 @@ export default function AgentsPage() {
   const [datasets, setDatasets] = useState<{ id: string; runId: string }[]>([])
   const [datasetId, setDatasetId] = useState<string>('')
   const [roster, setRoster] = useState<AgentView[]>([])
+  /** Profiles the run doc carries that do not match the current shape; counted, never shown as cards. */
+  const [skipped, setSkipped] = useState(0)
   const [runsLoaded, setRunsLoaded] = useState(false)
   const [loadedDatasetId, setLoadedDatasetId] = useState<string | null>(null)
   const [selected, setSelected] = useState<string | null>(null)
@@ -45,14 +48,16 @@ export default function AgentsPage() {
     getRun(entry.runId)
       .then((doc) => {
         if (generation !== rosterGeneration.current) return
-        const profiles = doc.events.flatMap((event) => (event.type === 'agent' ? [event.profile] : []))
-        setRoster(profiles)
+        const panel = rosterFromEvents(doc.events)
+        setRoster(panel.roster)
+        setSkipped(panel.skipped)
         setFailed(undefined)
       })
       .catch((error: unknown) => {
         if (generation !== rosterGeneration.current) return
         setFailed(error instanceof Error ? error.message : undefined)
         setRoster([])
+        setSkipped(0)
       })
       .finally(() => {
         if (generation !== rosterGeneration.current) return
@@ -79,6 +84,11 @@ export default function AgentsPage() {
         </Select>
       )}
       {note && <p className="tnum font-mono text-mono text-ink-3">{note}</p>}
+      {!loading && skipped > 0 && (
+        <p className="text-body text-ink-3">
+          {skipped} {skipped === 1 ? 'panel entry does' : 'panel entries do'} not match the current shape and {skipped === 1 ? 'is' : 'are'} not shown.
+        </p>
+      )}
       {loading ? (
         <div className="grid gap-3 md:grid-cols-2">
           {[0, 1, 2, 3].map((i) => (

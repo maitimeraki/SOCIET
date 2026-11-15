@@ -2,8 +2,12 @@ export type Stance = 'POSITIVE' | 'NEGATIVE' | 'NEUTRAL' | 'ABSTAIN'
 
 export class UnknownStanceError extends Error {}
 
-/** Parse a backend stance string to the closed set. Anything else throws; it is never read as NEUTRAL. */
-export function asStance(value: string): Stance {
+/** A profile that does not match the agent view shape (a pre-3.1 stored row, a missing field). */
+export class InvalidAgentError extends Error {}
+
+/** Parse a backend stance to the closed set. Anything else (including a non-string) throws; it is never read as NEUTRAL. */
+export function asStance(value: unknown): Stance {
+  if (typeof value !== 'string') throw new UnknownStanceError(`Unknown stance ${String(value)}`)
   const upper = value.toUpperCase()
   if (upper === 'POSITIVE' || upper === 'NEGATIVE' || upper === 'NEUTRAL' || upper === 'ABSTAIN') return upper
   throw new UnknownStanceError(`Unknown stance "${value}"`)
@@ -40,6 +44,38 @@ export interface AgentView {
   bio: string
   details: string
   confidence: number
+}
+
+/**
+ * Project a server agent profile onto AgentView: exactly the view keys, the stance parsed. Throws
+ * InvalidAgentError when a field is missing or mistyped (a pre-3.1 row, say) and UnknownStanceError
+ * for a stance outside the closed set. Callers skip the profile and say so; nothing is defaulted.
+ */
+export function parseAgentView(raw: unknown): AgentView {
+  if (typeof raw !== 'object' || raw === null) throw new InvalidAgentError('agent profile is not an object')
+  const { name, type, role, bio, details, strength, confidence, stance } = raw as Record<string, unknown>
+  if (typeof name !== 'string' || typeof type !== 'string' || typeof role !== 'string') throw new InvalidAgentError('agent profile lacks name, type or role')
+  if (typeof bio !== 'string' || typeof details !== 'string') throw new InvalidAgentError('agent profile lacks bio or details')
+  if (!isFiniteNumber(strength) || !isFiniteNumber(confidence)) throw new InvalidAgentError('agent profile lacks strength or confidence')
+  return { name, type, role, stance: asStance(stance), strength, bio, details, confidence }
+}
+
+const isFiniteNumber = (value: unknown): value is number => typeof value === 'number' && Number.isFinite(value)
+
+/** The agent views a run doc's events carry; a profile that does not parse is counted and left out. */
+export function rosterFromEvents(events: readonly RunEvent[]): { roster: AgentView[]; skipped: number } {
+  const roster: AgentView[] = []
+  let skipped = 0
+  for (const event of events) {
+    if (event.type !== 'agent') continue
+    try {
+      roster.push(parseAgentView(event.profile))
+    } catch (error) {
+      if (!(error instanceof InvalidAgentError) && !(error instanceof UnknownStanceError)) throw error
+      skipped += 1
+    }
+  }
+  return { roster, skipped }
 }
 
 export interface PairInfo {

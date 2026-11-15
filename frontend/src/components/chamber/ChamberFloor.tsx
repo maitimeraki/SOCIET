@@ -74,7 +74,7 @@ export default function ChamberFloor({ roster, rounds, activeRound, livePairs, o
   const seated = seats.find((seat) => seat.profile.name === selected)
 
   const focusSeat = (name: string) => {
-    document.querySelector<SVGGElement>(`[aria-label^="${name.replace(/"/g, '')}"]`)?.focus()
+    document.querySelector<SVGGElement>(`[aria-label^="${CSS.escape(name)}"]`)?.focus()
   }
   const closePopover = () => {
     if (selected) focusSeat(selected)

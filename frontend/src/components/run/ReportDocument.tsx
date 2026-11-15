@@ -37,7 +37,7 @@ export default function ReportDocument({ report }: { report: ReportModel }) {
                 Positive
               </th>
               <th scope="col" className="num">
-                Abstain
+                No view
               </th>
             </tr>
           }

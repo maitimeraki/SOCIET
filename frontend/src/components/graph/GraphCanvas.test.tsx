@@ -635,7 +635,7 @@ describe('GraphLegend — the map’s key (§6, §9)', () => {
   it('names every colour the map draws, each with its own word', () => {
     const html = renderToStaticMarkup(<GraphLegend hasEntries />)
 
-    for (const word of ['Corpus', 'Experts', 'POSITIVE', 'NEUTRAL', 'ABSTAIN', 'NEGATIVE', 'No position']) {
+    for (const word of ['Corpus', 'Experts', 'Positive', 'Neutral', 'No view', 'Negative', 'Not recorded']) {
       expect(html).toContain(word)
     }
     // The swatches carry the very hues the canvas paints, so the key and the map cannot drift.
