@@ -360,6 +360,26 @@ async def read_run_doc(run_id: str) -> Optional[dict[str, Any]]:
     return head
 
 
+async def read_run_dataset(run_id: str) -> Optional[str]:
+    """The run's corpus id, read from its run_meta row alone (never the event list).
+
+    The same source read_run_doc takes dataset_id from: the first RUN_META event.
+    """
+    key = _as_uuid(run_id)
+    if key is None:
+        return None
+    async with get_session_factory()() as session:
+        payload = (
+            await session.execute(
+                select(RunEvent.payload)
+                .where(RunEvent.run_id == key, RunEvent.type == RUN_META)
+                .order_by(RunEvent.seq)
+                .limit(1)
+            )
+        ).scalar_one_or_none()
+    return payload.get("dataset_id") if isinstance(payload, dict) else None
+
+
 def _summarize(
     run: Run, error: Optional[str], meta: dict, rounds_from_events: int
 ) -> dict[str, Any]:

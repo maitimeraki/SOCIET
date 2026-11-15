@@ -25,6 +25,7 @@ from src.simulation.turn_protocol import (
     stance_weights,
     weighted_share,
 )
+from src.utils.labels import public_source
 
 if TYPE_CHECKING:
     from src.llm.client import LLMClient
@@ -627,11 +628,12 @@ def build_report_bundle(
         key = (speaker.node_id, cite)
         if key not in numbers:
             item = next((i for i in speaker.evidence if i.id == cite), None)
-            if item is None:
+            label = public_source({"document": item.doc_title, "section": item.section}) if item else None
+            if label is None:
                 return None
             n = str(len(numbers) + 1)
             numbers[key] = n
-            sources[n] = ReportSource(document=item.doc_title, section=item.section, text=item.text)
+            sources[n] = ReportSource(document=label["document"], section=label["section"], text=item.text)
             refs[n] = {"node_id": speaker.node_id, "evidence_id": item.id}
         return numbers[key]
 

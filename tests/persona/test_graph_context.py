@@ -2,7 +2,7 @@
 
 import os
 from unittest.mock import AsyncMock, patch
-from uuid import UUID
+from uuid import UUID, uuid4
 
 import pytest
 import pytest_asyncio
@@ -823,3 +823,39 @@ async def test_find_connected_nodes_by_seed_lists_a_neighbour_once_when_id_equal
     out = await ctx.find_connected_nodes_by_seed(["s1"], "ds-A", limit=10)
 
     assert [e.name for e in out["s1"]] == ["GDPR"]
+
+
+# --- the chunk-by-id read the source route uses (Task 6.2) ---------------------
+# Live Neo4j: skipped locally through the graph_ctx fixture when no server answers.
+
+OTHER_DATASET_ID = "ds-test-graph-context-other"
+
+
+@pytest_asyncio.fixture
+async def seeded_chunks(graph_ctx):
+    """One chunk in DATASET_ID and one in another dataset, removed after the test."""
+    own_id, other_id = f"chunk-own-{uuid4().hex}", f"chunk-other-{uuid4().hex}"
+    create = "CREATE (:Chunk {chunk_id: $id, text: $text, dataset_id: $dataset})"
+    async with graph_ctx._driver.session(database=graph_ctx._db) as session:
+        await session.run(create, id=own_id, text="Own sentence.", dataset=DATASET_ID)
+        await session.run(create, id=other_id, text="Other sentence.", dataset=OTHER_DATASET_ID)
+    yield own_id, other_id
+    async with graph_ctx._driver.session(database=graph_ctx._db) as session:
+        await session.run("MATCH (c:Chunk) WHERE c.chunk_id IN $ids DETACH DELETE c", ids=[own_id, other_id])
+
+
+@pytest.mark.asyncio
+async def test_fetch_chunk_text_returns_the_text_of_an_own_dataset_chunk(seeded_chunks, graph_ctx):
+    own_id, _ = seeded_chunks
+    assert await graph_ctx.fetch_chunk_text(own_id, DATASET_ID) == "Own sentence."
+
+
+@pytest.mark.asyncio
+async def test_fetch_chunk_text_is_none_for_a_chunk_of_another_dataset(seeded_chunks, graph_ctx):
+    _, other_id = seeded_chunks
+    assert await graph_ctx.fetch_chunk_text(other_id, DATASET_ID) is None
+
+
+@pytest.mark.asyncio
+async def test_fetch_chunk_text_is_none_for_an_absent_chunk(graph_ctx):
+    assert await graph_ctx.fetch_chunk_text(f"absent-{uuid4().hex}", DATASET_ID) is None

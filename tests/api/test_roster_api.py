@@ -12,6 +12,7 @@ import os
 import sys
 import uuid
 from types import SimpleNamespace
+from urllib.parse import quote
 
 import pytest
 import pytest_asyncio
@@ -25,12 +26,12 @@ from src import audit
 from src.api import operator_api
 from src.api.debate_api import SourceUnresolved, resolve_source
 from src.api.debate_api import router as debate_router
-from src.api.public_events import TEXT_MAX_CHARS
 from src.auth.deps import current_user
 from src.db.engine import get_db, get_session_factory
 from src.db.models import AgentRecordRow, User
 from src.persona.agent import Stance
 from src.simulation.agent_record import AgentView
+from src.utils.labels import TEXT_MAX_CHARS
 from tests.agent_factory import agent_record
 
 if sys.platform == "win32":
@@ -420,8 +421,9 @@ async def test_a_repeated_write_neither_duplicates_nor_fails(owner):
 
 # --- a report citation resolves to its source text (Task 6.2) ----------------
 # The source is stored in runs.verdict (public labels, backend-only refs); the text is the chunk
-# slice at the evidence span, verified equal to the stored evidence text. Chunk and record reads are
-# stood in for here, so every mismatch, unknown and foreign case runs without a database.
+# slice at the evidence span, verified equal to the stored evidence text. The run head, record,
+# dataset and chunk reads are stood in for here, so every mismatch, unknown and foreign case runs
+# without a database. The full event loader raises if the route ever calls it.
 
 CHUNK_ID = "chunk-1"
 DATASET = "dataset-a"
@@ -433,6 +435,7 @@ START = CHUNK_TEXT.index(SENTENCE)
 SPAN = [START, START + len(SENTENCE)]
 EDITED_CHUNK = CHUNK_TEXT.replace("cuts prices", "raises prices")
 FLAT_404 = b'{"detail":"Not found."}'
+NO_READS = {"head": [], "dataset": [], "record": [], "chunk": [], "graph": []}
 
 
 def _evidence(text=SENTENCE, span=SPAN):
@@ -475,31 +478,48 @@ class _Graph:
 
 
 def _install(monkeypatch, **overrides):
-    """Stands the run, record and chunk readers in for the database and Neo4j. Returns the reads."""
+    """Stands the run head, record, dataset and chunk readers in for the database and Neo4j.
+
+    Returns the reads, one list per reader. The full event loader raises if the route calls it.
+    """
     state = {"doc": _doc(), "record": _record(), "chunks": {(CHUNK_ID, DATASET): CHUNK_TEXT}}
     state.update(overrides)
-    reads = {"record": [], "chunk": []}
+    reads = {key: [] for key in NO_READS}
 
-    async def read_run(run_id):
+    async def read_head(run_id):
+        reads["head"].append(run_id)
         return state["doc"]
+
+    async def read_dataset(run_id):
+        reads["dataset"].append(run_id)
+        return (state["doc"] or {}).get("dataset_id")
+
+    async def read_events(run_id):
+        raise AssertionError("the source route loaded the run's events")
 
     async def read_record(run_id, node_id):
         reads["record"].append((run_id, node_id))
         return state["record"]
 
+    def graph_factory(config=None):
+        reads["graph"].append(config)
+        return _Graph(state["chunks"], reads)
+
     import src.graph.config_graph as config_graph
     import src.persona.graph_context as graph_context
 
-    monkeypatch.setattr(run_doc, "read_run_doc", read_run)
+    monkeypatch.setattr(run_doc, "read_run_head", read_head)
+    monkeypatch.setattr(run_doc, "read_run_dataset", read_dataset)
+    monkeypatch.setattr(run_doc, "read_run_doc", read_events)
     monkeypatch.setattr(run_doc, "read_agent_record", read_record)
     monkeypatch.setattr(config_graph, "GraphConfig", lambda: None)
-    monkeypatch.setattr(graph_context, "GraphContext", lambda config=None: _Graph(state["chunks"], reads))
+    monkeypatch.setattr(graph_context, "GraphContext", graph_factory)
     return reads
 
 
 async def _get_source(n, *, owner=OWNER, query=""):
     async with _client(_app(debate_router, user=_user(user_id=owner))) as http:
-        return await http.get(f"/simulate/debates/{RUN}/sources/{n}{query}")
+        return await http.get(f"/simulate/debates/{RUN}/sources/{quote(n, safe='')}{query}")
 
 
 async def test_the_owner_gets_the_evidence_sentence(monkeypatch):
@@ -529,11 +549,24 @@ async def test_the_chunk_is_read_from_the_runs_dataset_not_the_request(monkeypat
     assert reads["chunk"] == [(CHUNK_ID, DATASET)]
 
 
-async def test_a_foreign_run_reads_no_record_and_no_chunk(monkeypatch):
+async def test_a_foreign_run_reads_no_dataset_record_or_chunk(monkeypatch):
     reads = _install(monkeypatch, doc=_doc(user_id=str(uuid.uuid4())))
     response = await _get_source("1")
     assert response.status_code == 404
-    assert reads == {"record": [], "chunk": []}
+    assert reads["dataset"] == reads["record"] == reads["chunk"] == reads["graph"] == []
+
+
+async def test_an_unknown_run_reads_no_dataset(monkeypatch):
+    reads = _install(monkeypatch, doc=None)
+    response = await _get_source("1")
+    assert response.status_code == 404
+    assert reads["dataset"] == []
+
+
+async def test_an_unknown_number_builds_no_graph_context(monkeypatch):
+    reads = _install(monkeypatch)
+    await _get_source("2")
+    assert reads["graph"] == []
 
 
 async def test_a_changed_chunk_is_logged_with_its_reason(monkeypatch, caplog):
@@ -548,9 +581,6 @@ _FAILURES = [
     pytest.param("1", dict(doc=None), OWNER, id="unknown-run"),
     pytest.param("1", dict(doc=_doc(user_id=str(uuid.uuid4()))), OWNER, id="foreign-run"),
     pytest.param("2", {}, OWNER, id="unknown-n"),
-    pytest.param("0", {}, OWNER, id="zero-n"),
-    pytest.param("one", {}, OWNER, id="non-numeric-n"),
-    pytest.param("1.5", {}, OWNER, id="fractional-n"),
     pytest.param("1", dict(doc=_doc(dataset_id=None)), OWNER, id="no-corpus"),
     pytest.param("1", dict(chunks={}), OWNER, id="missing-chunk"),
     pytest.param("1", dict(chunks={(CHUNK_ID, DATASET): EDITED_CHUNK}), OWNER, id="changed-chunk"),
@@ -559,19 +589,37 @@ _FAILURES = [
     pytest.param("1", dict(record=_record(evidence=[_evidence(span=[0, 10**6])])), OWNER, id="span-outside-chunk"),
 ]
 
+# Malformed numbers: CR/LF, over-long, zero, leading zero, sign, fraction, unicode digits, space.
+_MALFORMED = ["1\r\n2", "1\n", "1\r", "1 ", "7777", "1000", "0", "01", "-1", "1.0", "١", "１", "one"]
+
 
 @pytest.mark.parametrize("n, overrides, owner", _FAILURES)
 async def test_every_failure_is_the_same_flat_404(monkeypatch, n, overrides, owner):
     _install(monkeypatch, **overrides)
     response = await _get_source(n, owner=owner)
-    assert response.status_code == 404
-    assert response.content == FLAT_404
+    assert (response.status_code, response.content) == (404, FLAT_404)
 
 
-async def test_a_non_numeric_n_is_not_a_validation_error(monkeypatch):
+@pytest.mark.parametrize("n", _MALFORMED)
+async def test_a_malformed_number_is_the_flat_404(monkeypatch, n):
     _install(monkeypatch)
-    response = await _get_source("not-a-number")
-    assert response.status_code == 404
+    response = await _get_source(n)
+    assert (response.status_code, response.content) == (404, FLAT_404)
+
+
+@pytest.mark.parametrize("n", _MALFORMED)
+async def test_a_malformed_number_makes_no_lookup(monkeypatch, n):
+    reads = _install(monkeypatch)
+    await _get_source(n)
+    assert reads == NO_READS
+
+
+@pytest.mark.parametrize("n", _MALFORMED)
+async def test_a_malformed_number_writes_no_log_line(monkeypatch, n, caplog):
+    _install(monkeypatch)
+    with caplog.at_level(logging.DEBUG, logger="src.api.debate_api"):
+        await _get_source(n)
+    assert [r for r in caplog.records if r.name == "src.api.debate_api"] == []
 
 
 async def test_resolve_returns_the_verified_text_and_the_public_labels():

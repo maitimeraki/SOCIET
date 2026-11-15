@@ -4,9 +4,10 @@ Default deny: an event type or key that is not listed here does not leave the
 backend. Adding a key is a deliberate edit to this file plus its test.
 """
 import logging
-import re
 from collections.abc import Mapping
 from typing import Any
+
+from src.utils.labels import label_text, public_source
 
 logger = logging.getLogger(__name__)
 
@@ -60,39 +61,18 @@ def _pick(source: Any, keys: frozenset[str]) -> dict[str, Any]:
     return {k: v for k, v in source.items() if k in keys}
 
 
-#: Titles, sections and breadcrumbs are short labels: capped, with control characters removed.
-TEXT_MAX_CHARS = 200
-_CONTROL_CHARS = re.compile(r"[\x00-\x1f\x7f]")
-
-
-def _text(value: Any) -> str | None:
-    if not isinstance(value, str):
-        return None
-    return _CONTROL_CHARS.sub("", value)[:TEXT_MAX_CHARS]
-
-
 def _narrow_provenance(claims: Any) -> dict[str, list[dict[str, Any]]]:
     # Titles and breadcrumbs only: no document id, chunk id, span or quote.
     if not isinstance(claims, Mapping):
         return {}
     return {
         claim: [
-            {"title": _text(link.get("title")), "breadcrumb": _text(link.get("breadcrumb"))}
+            {"title": label_text(link.get("title")), "breadcrumb": label_text(link.get("breadcrumb"))}
             for link in (links if isinstance(links, (list, tuple)) else [])
             if isinstance(link, Mapping)
         ]
         for claim, links in claims.items()
     }
-
-
-def public_source(source: Any) -> dict[str, str] | None:
-    # One source is exactly {document, section}, both strings (capped). Anything else is None.
-    if not isinstance(source, Mapping):
-        return None
-    document, section = _text(source.get("document")), _text(source.get("section"))
-    if document is None or section is None:
-        return None
-    return {"document": document, "section": section}
 
 
 def _narrow_sources(sources: Any) -> dict[str, dict[str, str]]:

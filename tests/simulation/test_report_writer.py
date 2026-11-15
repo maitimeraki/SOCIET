@@ -32,6 +32,7 @@ from src.simulation.verdict import (
     build_report_bundle,
     write_board_report,
 )
+from src.utils.labels import TEXT_MAX_CHARS
 from tests.agent_factory import slim_agent
 from tests.simulation.test_orchestrator import _ok_receipt
 
@@ -179,6 +180,18 @@ def test_a_switch_names_the_new_source_it_cites():
     bundle, _ = build_report_bundle(rounds, [alice], "q", "")
 
     assert bundle.switches == ["Round 2: Alice moved from POSITIVE to NEGATIVE, citing [1]"]
+
+
+def test_stored_source_labels_are_control_free_and_capped_at_build_time():
+    alice = _agent("Alice", 0.9, [
+        _evidence("e1", "Market\nmemo " + "x" * 500, "Pricing\tsection", "The price cut is temporary."),
+    ])
+    rounds = [_round(1, _turn("Alice", "POSITIVE", cites=["e1"]))]
+
+    bundle, _ = build_report_bundle(rounds, [alice], "q", "")
+
+    assert bundle.sources["1"].document == ("Marketmemo " + "x" * 500)[:TEXT_MAX_CHARS]
+    assert bundle.sources["1"].section == "Pricingsection"
 
 
 # --- the stored shape --------------------------------------------------------

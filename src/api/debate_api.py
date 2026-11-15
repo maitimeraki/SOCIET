@@ -6,6 +6,7 @@ import asyncio
 import json
 import logging
 import math
+import re
 import time
 import uuid
 from dataclasses import asdict
@@ -34,7 +35,6 @@ from src.api.public_events import (
     RUN_FAILED_MESSAGE,
     project_event,
     project_result,
-    public_source,
     stored_result,
 )
 from src.audit import client_ip
@@ -67,6 +67,7 @@ from src.simulation.profile_generator import (
 )
 from src.simulation.profile_synthesizer import DRAW_SLACK, POOL_CAP
 from src.simulation.verdict import REPORT_MAX_ATTEMPTS
+from src.utils.labels import public_source
 
 logger = logging.getLogger(__name__)
 
@@ -898,48 +899,53 @@ async def resolve_source(
     return {**label, "text": _verified_span(item, chunk_text)}
 
 
+# A citation number: 1 to 999, no leading zero, ASCII digits only.
+_SOURCE_NUMBER = re.compile(r"[1-9][0-9]{0,2}")
+
+
 @router.get("/debates/{run_id}/sources/{n}")
 async def get_debate_source(run_id: str, n: str, user: User = Depends(current_user)):
     """One report citation [n], resolved to the passage it cites. Owner only.
 
-    Every failure is the same 404: an unknown or foreign run, an unknown or malformed n, a
-    missing record or chunk, a chunk changed since the run. The reason is logged only.
-    The chunk is read from the run's own dataset, never from the request.
+    Every failure is the same 404. A malformed n is rejected before any lookup and never logged.
+    An unknown or foreign run is caught from the run head, before any event is read. The chunk
+    is read from the run's own dataset, never from the request, and the graph is opened only
+    when a chunk read is due.
     """
     from src.graph.config_graph import GraphConfig
     from src.persona.graph_context import GraphContext
 
-    doc = await run_doc.read_run_doc(run_id)
-    if doc is None:
+    if not _SOURCE_NUMBER.fullmatch(n):
+        raise HTTPException(status_code=404, detail=_FLAT_NOT_FOUND)
+    head = await run_doc.read_run_head(run_id)
+    if head is None:
         logger.warning("source %s: run %s is unknown", n, run_id)
         raise HTTPException(status_code=404, detail=_FLAT_NOT_FOUND)
     try:
-        await require_owner(doc.get("user_id"), user)
+        await require_owner(head.get("user_id"), user)
     except HTTPException:
         logger.warning("source %s: run %s is not the caller's", n, run_id)
         raise HTTPException(status_code=404, detail=_FLAT_NOT_FOUND)
-    dataset_id = doc.get("dataset_id")
-    result = doc.get("result")
+    result = head.get("result")
+    dataset_id = await run_doc.read_run_dataset(run_id) if isinstance(result, Mapping) else None
     if not dataset_id or not isinstance(result, Mapping):
         logger.warning("source %s: run %s has no report or no corpus", n, run_id)
         raise HTTPException(status_code=404, detail=_FLAT_NOT_FOUND)
 
-    async with GraphContext(GraphConfig()) as ctx:
-
-        async def read_chunk_text(chunk_id: str) -> Optional[str]:
+    async def read_chunk_text(chunk_id: str) -> Optional[str]:
+        async with GraphContext(GraphConfig()) as ctx:
             return await ctx.fetch_chunk_text(chunk_id, str(dataset_id))
 
-        try:
-            return await resolve_source(
-                n,
-                result,
-                read_record=lambda node_id: run_doc.read_agent_record(run_id, node_id),
-                read_chunk_text=read_chunk_text,
-            )
-        except SourceUnresolved as exc:
-            logger.warning("source %s of run %s not resolved: %s", n, run_id, exc)
-            raise HTTPException(status_code=404, detail=_FLAT_NOT_FOUND)
-
+    try:
+        return await resolve_source(
+            n,
+            result,
+            read_record=lambda node_id: run_doc.read_agent_record(run_id, node_id),
+            read_chunk_text=read_chunk_text,
+        )
+    except SourceUnresolved as exc:
+        logger.warning("source %s of run %s not resolved: %s", n, run_id, exc)
+        raise HTTPException(status_code=404, detail=_FLAT_NOT_FOUND)
 
 # --- a run's corpus (the replay path's seed) ---------------------------------
 
