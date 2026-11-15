@@ -120,6 +120,7 @@ class DebateRequest(BaseModel):
     def _cap_context(cls, value: Optional[dict]) -> Optional[dict]:
         if value is None:
             return value
+        # json.dumps escapes non-ASCII (ensure_ascii), so this measures at least the UTF-8 length.
         size = len(json.dumps(value, default=str).encode("utf-8"))
         if size > CONTEXT_MAX_BYTES:
             raise ValueError(f"context is {size} bytes; the limit is {CONTEXT_MAX_BYTES}")
