@@ -1,0 +1,20 @@
+[
+  {
+    "dataset": "golden-sample-eu-market",
+    "question": "Should we expand into Europe?",
+    "relevant": {"EU Market Entry": 3, "Regulatory Surcharge": 2, "Local Partner Network": 1},
+    "stance": {"EU Market Entry": "POSITIVE", "Regulatory Surcharge": "NEGATIVE", "Local Partner Network": "ABSTAIN"}
+  },
+  {
+    "dataset": "golden-sample-studio-pricing",
+    "question": "Should we raise the price of the Studio plan?",
+    "relevant": {"Studio Plan": 3, "Churn Risk": 2, "Competitor Pricing": 1},
+    "stance": {"Studio Plan": "NEUTRAL", "Churn Risk": "NEGATIVE", "Competitor Pricing": "POSITIVE"}
+  },
+  {
+    "dataset": "golden-sample-hiring",
+    "question": "Should we hire a second engineer this quarter?",
+    "relevant": {"Engineering Backlog": 3, "Hiring Budget": 2, "Onboarding Capacity": 0},
+    "stance": {"Engineering Backlog": "POSITIVE", "Hiring Budget": "NEUTRAL", "Onboarding Capacity": "ABSTAIN"}
+  }
+]
