@@ -3,7 +3,6 @@ import type { RunEvent } from '../../run/events'
 import type { RunState } from '../../run/reducer'
 import { fmtScore } from '../../utils/format'
 import DefinitionList from '../ui/DefinitionList'
-import SelectionTable from './SelectionTable'
 import EventLog from './EventLog'
 import WarningList from '../common/WarningList'
 
@@ -31,15 +30,6 @@ export default function ArtifactsTab({ run, events }: { run: RunState; events: R
           />
         ) : (
           <p className="text-body text-ink-3">No intent event recorded.</p>
-        )}
-      </section>
-
-      <section>
-        <h2 className="mb-3 text-body-sm font-semibold text-ink">Selection (S4)</h2>
-        {run.selection.length > 0 ? (
-          <SelectionTable rows={run.selection} />
-        ) : (
-          <p className="text-body text-ink-3">No selection event recorded.</p>
         )}
       </section>
 

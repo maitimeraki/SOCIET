@@ -8,6 +8,8 @@ import type { SeatSpec } from './Seat'
 import PairArc from './PairArc'
 import PositionMark from '../ui/PositionMark'
 import { ruleClasses } from '../ui/Rule'
+import { shownText } from '../../run/agentDisplay'
+import { Estimate } from '../agents/AgentFacts'
 
 const SLOTS_PER_SECTOR = 12
 
@@ -149,11 +151,13 @@ export default function ChamberFloor({ roster, rounds, activeRound, livePairs, o
               <X size={12} aria-hidden="true" />
             </button>
           </div>
-          <p className="text-micro text-ink-3">{seated.profile.role}</p>
+          <p className="text-micro text-ink-3">{shownText(seated.profile.role)}</p>
           <div className="mt-2">
             <PositionMark position={seated.profile.stance} size="sm" ground="light" />
           </div>
-          <p className="tnum mt-2 font-mono text-micro text-ink-2">conf {seated.profile.confidence.toFixed(2)}</p>
+          <div className="mt-2">
+            <Estimate value={seated.profile.confidence} />
+          </div>
           {onOpenProfile && (
             <button type="button" onClick={onOpenProfile} className="mt-2 inline-block text-micro text-accent hover:text-accent">
               Open profile →

@@ -41,10 +41,9 @@ def test_intent_drops_model_identity():
     out = project_event({"type": "intent", "intent": {"core_question": "q", "llm_model": "m", "llm_provider": "p", "extraction_confidence": 0.9}})
     assert out["intent"] == {"core_question": "q", "extraction_confidence": 0.9}
 
-def test_selection_rows_carry_only_the_seated_name():
-    out = project_event({"type": "selection", "rows": [{"name": "A", "semantic": 0.1, "density": 0.2, "blended": 0.3,
-                                                         "anchors": [{"kind": "chunk", "id": "c1"}]}]})
-    assert out["rows"] == [{"name": "A"}]
+def test_selection_event_is_dropped():
+    # The selection table is gone: no selection event reaches a client, rows or not.
+    assert project_event({"type": "selection", "rows": [{"name": "A", "blended": 0.3}]}) is None
 
 def test_unknown_event_types_are_dropped():
     assert project_event({"type": "debug_dump", "payload": "x"}) is None
@@ -347,11 +346,9 @@ def test_non_text_title_is_dropped_not_passed_through():
     assert out["provenance_by_claim"] == {"c": [{"title": None, "breadcrumb": "B"}]}
 
 
-def test_malformed_profile_and_rows_do_not_raise_or_pass_through():
+def test_malformed_profile_does_not_raise_or_pass_through():
     agent = project_event({"type": "agent", "profile": "CHUNK-XYZ", "index": 1, "total": 2})
-    selection = project_event({"type": "selection", "rows": ["CHUNK-XYZ", None]})
     assert agent["profile"] == {}
-    assert selection["rows"] == [{}, {}]
 
 
 # --- fix round 4: evidence and dissenting_views are LLM output ------------------

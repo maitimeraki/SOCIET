@@ -1,6 +1,7 @@
 import { motion, useReducedMotion } from 'framer-motion'
 import type { AgentView, Stance } from '../../run/events'
 import { stanceWord } from '../ui/PositionMark'
+import { shownText } from '../../run/agentDisplay'
 
 export const SEAT_W = 14
 export const SEAT_H = 10
@@ -35,7 +36,7 @@ export default function Seat({ seat, tabIndex, onKeyNav }: { seat: SeatSpec; tab
     <motion.g
       tabIndex={tabIndex}
       role="button"
-      aria-label={`${profile.name}, ${profile.role}, ${stanceWord(stance)}`}
+      aria-label={`${shownText(profile.name)}, ${shownText(profile.role)}, ${stanceWord(stance)}`}
       onKeyDown={(event) => {
         if (event.key === 'ArrowRight' || event.key === 'ArrowDown') {
           event.preventDefault()
@@ -56,7 +57,7 @@ export default function Seat({ seat, tabIndex, onKeyNav }: { seat: SeatSpec; tab
       transition={{ duration: reduced ? 0 : 0.25, ease: [0.2, 0, 0, 1] }}
       className="group cursor-pointer focus:outline-none"
     >
-      <title>{`${profile.name} · ${profile.role} · ${stanceWord(stance)} · conf ${profile.confidence.toFixed(2)}`}</title>
+      <title>{`${shownText(profile.name)} · ${shownText(profile.role)} · ${stanceWord(stance)} · estimate ${profile.confidence.toFixed(2)}`}</title>
       <rect
         aria-hidden="true"
         className="opacity-0 transition-opacity duration-state group-focus-visible:opacity-100"

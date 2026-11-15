@@ -20,9 +20,6 @@ METERING_STOPPED_MESSAGE = (
 
 _INTENT_KEYS = frozenset({"core_question", "stance_axis", "direct_keywords", "latent_sectors",
                           "search_perspectives", "domain_tags", "entity_frame", "extraction_confidence"})
-# interim: no selection event is streamed any more; should one arrive it carries
-# names only (no scores or features). Task 3.2 removes `selection` altogether.
-_ROW_KEYS = frozenset({"name"})
 # The profile a client sees is AgentView (spec 4a) and nothing else.
 _PROFILE_KEYS = frozenset({"name", "type", "role", "stance", "strength", "bio", "details", "confidence"})
 # The verdict keys a client may see, shared by the `complete` event and the
@@ -37,7 +34,6 @@ _EVENT_KEYS: dict[str, frozenset[str]] = {
     "stage": frozenset({"type", "stage", "index", "query", "agents", "round", "pairs", "turns",
                         "converged", "rounds_executed", "share", "threshold"}),
     "intent": frozenset({"type", "intent"}),
-    "selection": frozenset({"type", "rows"}),
     "agent": frozenset({"type", "profile", "index", "total"}),
     "pair_turn": frozenset({"type", "pair_id"}),
     "round": frozenset({"type", "round", "pairs", "turns", "consensus", "warnings"}),
@@ -118,9 +114,6 @@ def project_event(event: Mapping[str, Any]) -> dict[str, Any] | None:
     out = _pick(event, allowed)
     if kind == "intent":
         out["intent"] = _pick(event.get("intent"), _INTENT_KEYS)
-    elif kind == "selection":
-        rows = event.get("rows")
-        out["rows"] = [_pick(row, _ROW_KEYS) for row in rows] if isinstance(rows, list) else []
     elif kind == "agent":
         out["profile"] = _pick(event.get("profile"), _PROFILE_KEYS)
     return out

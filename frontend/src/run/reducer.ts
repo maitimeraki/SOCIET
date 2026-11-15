@@ -1,6 +1,6 @@
 import type { DebateConfig } from '../api/types'
 import { InvalidAgentError, UnknownStanceError, asStance, parseAgentView, parsePairId } from './events'
-import type { AgentView, ClusterSummary, ConsensusInfo, DissentingView, EvidenceItem, PairInfo, QueryIntent, RunEvent, SelectionRow, Stance, TurnInfo, WrittenLink, WrittenNode } from './events'
+import type { AgentView, ClusterSummary, ConsensusInfo, DissentingView, EvidenceItem, PairInfo, QueryIntent, RunEvent, Stance, TurnInfo, WrittenLink, WrittenNode } from './events'
 
 export interface StageEntry {
   stage: string
@@ -59,7 +59,6 @@ export interface RunState {
   intent: QueryIntent | null
   roster: AgentView[]
   rosterTotal: number | null
-  selection: SelectionRow[]
   rounds: RunRound[]
   /** In-flight/completed pair turns since the last round event, keyed by pair_id. */
   livePairs: Record<string, { a: string; b: string; startedAt: number }>
@@ -87,7 +86,6 @@ export const initialState: RunState = {
   intent: null,
   roster: [],
   rosterTotal: null,
-  selection: [],
   rounds: [],
   livePairs: {},
   commits: [],
@@ -167,8 +165,6 @@ function reduceEvent(state: RunState, event: RunEvent, now: number): RunState {
     }
     case 'intent':
       return { ...base, intent: event.intent }
-    case 'selection':
-      return { ...base, selection: event.rows }
     case 'agent':
       return skipWith(base, () => ({
         ...base,

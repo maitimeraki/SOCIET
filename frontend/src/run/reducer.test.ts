@@ -18,9 +18,6 @@ describe('reducer', () => {
   it('builds the roster in agent-event order', () => {
     expect(fold(RUN_SAMPLE, NOW).roster.map((p) => p.name)).toEqual(['D. Weber', 'M. Chen', 'P. Silva'])
   })
-  it('fills the selection table from the selection event', () => {
-    expect(fold(RUN_SAMPLE, NOW).selection[0]?.name).toBe('D. Weber')
-  })
   it('collects rounds with consensus weights', () => {
     expect(fold(RUN_SAMPLE, NOW).rounds[1]?.consensus?.weights?.POSITIVE).toBeCloseTo(0.72)
   })

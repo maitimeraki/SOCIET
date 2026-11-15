@@ -13,6 +13,21 @@ function profile(name: string, role: string, stance: Stance, type: string): Agen
   }
 }
 
+/** One agent view with every field filled; a test overrides only what it reads. */
+export function sampleView(overrides: Partial<AgentView> = {}): AgentView {
+  return {
+    name: 'D. Weber',
+    type: 'Trade body',
+    role: 'Trade analyst',
+    stance: 'POSITIVE',
+    strength: 0.65,
+    bio: 'D. Weber reads the record as a trade analyst.',
+    details: 'The tariff record favours an early entry.\n\nThe entry cost is the open question.',
+    confidence: 0.7,
+    ...overrides,
+  }
+}
+
 function turn(agent_id: string, agent_name: string, stance: string, confidence: number, content: string): TurnInfo {
   return { agent_id, agent_name, content, stance, confidence, references: ['steel tariffs'] }
 }
@@ -33,15 +48,6 @@ export const RUN_SAMPLE: RunEvent[] = [
   },
   { type: 'stage', stage: 'intake', index: 0, query: 'Should we expand into the European market in 2027?' },
   { type: 'stage', stage: 'selection', index: 1 },
-  {
-    type: 'selection',
-    rows: [
-      { name: 'D. Weber', semantic: 0.8, density: 0.64, blended: 0.74 },
-      { name: 'M. Chen', semantic: 0.77, density: 0.58, blended: 0.7 },
-      { name: 'P. Silva', semantic: 0.41, density: 0.52, blended: 0.45 },
-      { name: 'L. Novak', semantic: 0.22, density: 0.4, blended: 0.29 },
-    ],
-  },
   { type: 'agent', index: 1, total: 3, profile: profile('D. Weber', 'Trade analyst', 'POSITIVE', 'Trade body') },
   { type: 'agent', index: 2, total: 3, profile: profile('M. Chen', 'Entry-cost strategist', 'NEGATIVE', 'Company') },
   { type: 'agent', index: 3, total: 3, profile: profile('P. Silva', 'Policy analyst', 'NEUTRAL', 'Regulator') },

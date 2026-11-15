@@ -1,10 +1,9 @@
 import type { ReactNode } from 'react'
 import { motion, useReducedMotion } from 'framer-motion'
 import { CheckCircle } from '@phosphor-icons/react'
-import type { AgentView, QueryIntent, SelectionRow } from '../../run/events'
+import type { AgentView, QueryIntent } from '../../run/events'
 import type { RosterProgress } from '../../run/selectors'
 import IntentCard from './IntentCard'
-import SelectionTable from './SelectionTable'
 import ProfileCard from './ProfileCard'
 import Button from '../ui/Button'
 import Label from '../ui/Label'
@@ -47,7 +46,6 @@ function Beat({
 export default function RosterStage({
   question,
   intent,
-  selection,
   profiles,
   progress,
   onSkip,
@@ -55,7 +53,6 @@ export default function RosterStage({
 }: {
   question: string
   intent: QueryIntent | null
-  selection: SelectionRow[]
   profiles: AgentView[]
   progress: RosterProgress
   onSkip: () => void
@@ -80,24 +77,9 @@ export default function RosterStage({
 
       <Beat
         number="②"
-        title="Choosing who speaks"
-        meta={selection.length > 0 ? `S4 · selection — ${selection.length} candidates` : 'S4 · selection'}
-        state={selection.length > 0 ? 'done' : intent ? 'running' : 'pending'}
-      >
-        {selection.length > 0 ? (
-          <SelectionTable rows={selection} />
-        ) : (
-          <p className={`text-body ${intent ? 'animate-pulse text-ink-3' : 'text-ink-3'}`}>
-            Choosing who speaks…
-          </p>
-        )}
-      </Beat>
-
-      <Beat
-        number="③"
         title="Building profiles"
         meta={progress.total !== null ? `S5 · synthesis — ${progress.built} of ${progress.total}` : 'S5 · synthesis'}
-        state={progress.phase === 'seated' ? 'done' : selection.length > 0 ? 'running' : 'pending'}
+        state={progress.phase === 'seated' ? 'done' : progress.phase === 'building' ? 'running' : 'pending'}
       >
         {progress.phase === 'empty' ? (
           <div className={`${ruleClasses('top')} pt-5`}>
@@ -123,7 +105,7 @@ export default function RosterStage({
       </Beat>
 
       <Beat
-        number="④"
+        number="③"
         title="The panel is seated"
         meta={progress.phase === 'seated' ? `${profiles.length} seated` : ''}
         state={progress.phase === 'seated' ? 'done' : 'pending'}

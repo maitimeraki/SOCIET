@@ -617,10 +617,10 @@ class TestAgentRecordsAtTheSynthesisBoundary:
 
 
 class TestDebateJobPayload:
-    """S9: the delivered job result self-explains — intent, selection, stage events."""
+    """S9: the delivered job result self-explains — intent and stage events."""
 
     @pytest.mark.asyncio
-    async def test_job_result_carries_intent_selection_and_stage_events(self):
+    async def test_job_result_carries_intent_and_stage_events(self):
         job_id = f"payload-{uuid.uuid4()}"
         config = DebateConfig(max_agents=5, max_rounds=1, max_new_agents_per_round=0)
 
@@ -633,14 +633,8 @@ class TestDebateJobPayload:
         assert result["intent"]["core_question"] == "Should we tax carbon?"
         assert result["intent"]["extraction_confidence"] == 0.9
 
-        # selection: the seated names, best first. The entity the question's
-        # chunks name outranks the other; no scores or features leave the server.
-        selection = result["selection"]
-        assert [row["name"] for row in selection] == [
-            "Carbon Analyst",
-            "Quarterly Logistics Review",
-        ]
-        assert all(set(row) == {"name"} for row in selection)
+        # no selection key: the table is gone; S4 still shows as a stage event below.
+        assert "selection" not in result
 
         # stage events: real transitions pushed through the job's WS manager
         assert [e["stage"] for e in _stage_events(ws_manager)] == [

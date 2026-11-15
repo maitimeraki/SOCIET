@@ -401,11 +401,6 @@ async def _run_debate_async(
                 "warnings": result.warnings,
                 "rounds_executed": result.rounds_executed,
                 "intent": result.intent.model_dump() if result.intent else None,
-                # S4 decomposition, rendered field-by-field so later additions
-                # (e.g. P2-B's provenance anchor) flow through automatically.
-                "selection": [
-                    {"name": decision.name} for decision in seat_decisions if decision.seated
-                ],
                 "confidence_score": result.confidence_score,
                 "weight_share": result.weight_share,
                 "contested": result.contested,

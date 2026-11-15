@@ -192,8 +192,7 @@ class DebateOrchestrator:
 
         `decisions` is the caller-owned sink for every candidate's seat decision
         (best first). The caller reads it after the run. No `selection` event is
-        streamed: the roster UI's table still reads score fields that no longer
-        exist (Task 3.2 removes it).
+        streamed.
 
         `on_records` receives the backend-only AgentRecords as they are produced: once
         after the initial synthesis (also when it raises: rejected records exist then),

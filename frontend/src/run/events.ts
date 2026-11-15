@@ -24,14 +24,6 @@ export interface QueryIntent {
   extraction_confidence: number
 }
 
-export interface SelectionRow {
-  name: string
-  semantic: number
-  density: number
-  blended: number
-  anchors?: Record<string, string>[]
-}
-
 /** The one agent shape the backend sends. Nothing else about an agent reaches the client. */
 export interface AgentView {
   name: string
@@ -157,7 +149,6 @@ export type RunEvent =
       query?: string
     }
   | { type: 'intent'; intent: QueryIntent }
-  | { type: 'selection'; rows: SelectionRow[] }
   | { type: 'agent'; profile: AgentView; index: number; total: number }
   | { type: 'pair_turn'; pair_id: string; response: string | null; error: string | null }
   | { type: 'round'; round: number; pairs: PairInfo[]; turns: TurnInfo[]; consensus?: ConsensusInfo | null }

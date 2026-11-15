@@ -8,7 +8,7 @@ export const STANCE_ORDER: Stance[] = ['POSITIVE', 'NEUTRAL', 'ABSTAIN', 'NEGATI
 // Roster (profile creation) — the ①→④ sequence state
 // ---------------------------------------------------------------------------
 
-export type RosterPhase = 'reading' | 'selecting' | 'building' | 'seated' | 'empty'
+export type RosterPhase = 'reading' | 'building' | 'seated' | 'empty'
 
 export interface RosterProgress {
   phase: RosterPhase
@@ -33,7 +33,6 @@ export function rosterProgress(state: RunState): RosterProgress {
   if (finished && built === 0) return { phase: 'empty', built, total: 0 }
   if (seated) return { phase: 'seated', built, total }
   if (built > 0) return { phase: 'building', built, total }
-  if (state.selection.length > 0) return { phase: 'selecting', built, total }
   return { phase: 'reading', built, total }
 }
 

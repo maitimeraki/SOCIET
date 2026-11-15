@@ -94,7 +94,6 @@ function RunWork({ run, events, tab, runId, scrubbed, latestRound, runCreatedAt,
           <RosterStage
             question={run.query}
             intent={run.intent}
-            selection={run.selection}
             profiles={run.roster}
             progress={progress}
             onSkip={() => onNavigate(`/runs/${runId}/floor`)}

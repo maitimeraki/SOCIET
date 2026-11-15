@@ -9,12 +9,12 @@ const full = fold(RUN_SAMPLE, NOW)
 describe('selectors', () => {
   it('walks the roster phases in order as the fold progresses', () => {
     expect(rosterProgress(fold(RUN_SAMPLE.slice(0, 1), NOW)).phase).toBe('reading')
-    expect(rosterProgress(fold(RUN_SAMPLE.slice(0, 4), NOW)).phase).toBe('selecting')
-    expect(rosterProgress(fold(RUN_SAMPLE.slice(0, 5), NOW)).phase).toBe('building')
+    expect(rosterProgress(fold(RUN_SAMPLE.slice(0, 3), NOW)).phase).toBe('reading')
+    expect(rosterProgress(fold(RUN_SAMPLE.slice(0, 4), NOW)).phase).toBe('building')
     expect(rosterProgress(full).phase).toBe('seated')
   })
   it('reports k of n while profiles build', () => {
-    const progress = rosterProgress(fold(RUN_SAMPLE.slice(0, 6), NOW))
+    const progress = rosterProgress(fold(RUN_SAMPLE.slice(0, 5), NOW))
     expect(progress.built).toBe(2)
     expect(progress.total).toBe(3)
   })

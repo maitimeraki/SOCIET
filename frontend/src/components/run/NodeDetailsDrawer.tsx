@@ -5,6 +5,7 @@ import Drawer from '../ui/Drawer'
 import IconButton from '../ui/IconButton'
 import PositionMark from '../ui/PositionMark'
 import Emphasis from '../common/Emphasis'
+import { Estimate } from '../agents/AgentFacts'
 import { useGraphStore } from '../../graph/graphStore'
 import type { GraphEdge, GraphNode } from '../../graph/graphStore'
 import { LayerIcon } from '../../graph/layerIcons'
@@ -215,7 +216,7 @@ export function NodeDetailsView({ details, onClose }: { details: MapDetails; onC
               <Reading heading="Argued as">
                 <div className="flex items-baseline gap-3">
                   <PositionMark position={details.held.stance} ground="light" />
-                  <span className="tnum font-mono text-mono text-ink">{details.held.confidence.toFixed(2)}</span>
+                  <Estimate value={details.held.confidence} />
                 </div>
                 <Emphasis text={details.held.view} className="mt-2 text-body text-ink-2" />
               </Reading>
