@@ -43,8 +43,8 @@ from src.auth.deps import (
     websocket_user,
 )
 from src.billing import units as billing_units
-from src.billing.metering import MeteringError
 from src.billing.entitlements import resolve_entitlements
+from src.billing.metering import MeteringError
 from src.config.settings import get_settings
 from src.db.engine import get_db
 from src.db.models import User
@@ -200,9 +200,6 @@ async def _run_debate_async(
         job_id=job_id
     )
 
-    # D3: the depth gate — distillation is on for standard/deep, off for shallow.
-    distill = simulation_depth in {"standard", "deep"}
-
     try:
         async with _DEBATE_JOBS_LOCK:
             job = _DEBATE_JOBS.get(job_id)
@@ -273,7 +270,6 @@ async def _run_debate_async(
                 llm_client=llm,
                 on_stage=ws_manager.broadcast,
                 intent=intent,
-                distill=distill,
                 context=context,
                 cancel_check=cancel_check,
                 decisions=seat_decisions,

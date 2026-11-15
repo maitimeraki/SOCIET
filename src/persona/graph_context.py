@@ -94,6 +94,17 @@ class ChunkHit:
 
 
 @dataclass(frozen=True)
+class RelationHit:
+    """One entity-to-entity relation. `chunk_id` is a chunk that names both ends."""
+
+    type: str
+    outgoing: bool
+    counterpart_id: str
+    counterpart_name: str
+    chunk_id: str
+
+
+@dataclass(frozen=True)
 class ChunkSearch:
     """The two ranked chunk legs, unfused: the synthesizer fuses them."""
 
@@ -467,6 +478,60 @@ class GraphContext:
             self._entity_from_node(row.get("n"), 0.0)
             for row in rows
             if row.get("n") is not None
+        ]
+
+    async def find_relations_for(
+        self,
+        entity_id: str,
+        counterpart_ids: List[str],
+        dataset_id: str,
+        limit: int = 8,
+    ) -> List["RelationHit"]:
+        """Entity-to-entity relations from one entity to the named counterparts.
+
+        A relation is returned only with a chunk that names both ends: that chunk
+        is its citable source. A relation with no such chunk is left out, so no
+        evidence id can point at text that does not exist. Both ends and the chunk
+        are scoped to the dataset.
+        """
+        counterparts = [str(c) for c in counterpart_ids if str(c or "").strip()]
+        if not counterparts or not str(entity_id or "").strip():
+            return []
+
+        cypher = f"""
+        MATCH (seed:__Entity__)-[r]-(n:__Entity__)
+        WHERE seed.id = $entity_id
+          AND {entity_in_dataset("seed")}
+          AND n.id IN $counterpart_ids AND NOT n:Chunk AND n <> seed
+          AND {entity_in_dataset("n")}
+        OPTIONAL MATCH (ch:Chunk)-[:MENTIONS]->(seed)
+        WHERE {chunk_in_dataset("ch")} AND EXISTS {{ (ch)-[:MENTIONS]->(n) }}
+        WITH seed, n, r, min(ch.chunk_id) AS chunk_id
+        WHERE chunk_id IS NOT NULL
+        RETURN type(r) AS rel_type, startNode(r) = seed AS outgoing,
+               n.id AS counterpart_id, n.name AS counterpart_name, chunk_id
+        ORDER BY rel_type, counterpart_id
+        LIMIT $limit
+        """
+        async with self._driver.session(database=self._db) as session:
+            result = await session.run(
+                cast(LiteralString, cypher),
+                entity_id=str(entity_id),
+                counterpart_ids=counterparts,
+                dataset_id=dataset_id,
+                limit=limit,
+            )
+            rows = await result.data()
+
+        return [
+            RelationHit(
+                type=str(row["rel_type"]),
+                outgoing=bool(row["outgoing"]),
+                counterpart_id=str(row["counterpart_id"]),
+                counterpart_name=str(row["counterpart_name"] or row["counterpart_id"]),
+                chunk_id=str(row["chunk_id"]),
+            )
+            for row in rows
         ]
 
     def _parse_tags(self, tags: Any) -> List[str]:

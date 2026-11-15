@@ -1,17 +1,48 @@
-"""ProfileSynthesizer: Graph-backed agent profile synthesis, seated by query relevance."""
+"""ProfileSynthesizer: seat the question's most relevant graph entities, then generate one cited profile each.
 
-import asyncio
-import inspect
+Sequential: one candidate is drawn, its profile is generated and validated, and only then is the next
+candidate drawn. A failed profile is rejected and frees its seat for the next draw; nothing is written
+in its place.
+"""
+
+import hashlib
 import logging
 from collections import defaultdict
-from collections.abc import Awaitable, Callable, Mapping
-from dataclasses import replace
+from collections.abc import Awaitable, Callable
+from dataclasses import dataclass, replace
 from typing import Any
+from uuid import uuid4
 
-from src.persona.agent import SOURCE_EVIDENCE_MAX_SNIPPETS, Agent
+from src.llm.config_llm import get_llm_config
+from src.persona.agent import Agent, DiscoveryType, PersonaIdentity, Stance
 from src.persona.graph_context import EntityNode, GraphContext
 from src.persona.repository import PersonaRepository
 from src.simulation.actor_filter import classify_actor_labels
+from src.simulation.agent_record import (
+    AgentRecord,
+    CiteIds,
+    GenerationInfo,
+    NodeInfo,
+    RankInfo,
+    RejectedClaim,
+    UniquenessInfo,
+    ValidationInfo,
+    dossier_hash,
+)
+from src.simulation.evidence import (
+    MAX_RELATIONS,
+    ChunkRow,
+    EvidencePack,
+    RelationItem,
+    build_pack,
+)
+from src.simulation.profile_generator import (
+    PROFILE_PROMPT_VERSION,
+    PROFILE_TEMPERATURE,
+    GenerationResult,
+    generate_profile,
+)
+from src.simulation.profile_validation import ProfileDraft
 from src.simulation.ranking import (
     Candidate,
     NoAgentsDerivableError,
@@ -30,8 +61,11 @@ logger = logging.getLogger(__name__)
 CHUNK_POOL = 200
 #: Entity vector hits read; their similarity is percentile-ranked.
 ENTITY_HITS = 100
-#: Graph neighbours read per pool entity (PPR edges and evidence), strongest first.
+#: Graph neighbours read per pool entity (PPR edges), strongest first.
 NEIGHBOURS_PER_SEED = 25
+#: Neighbours that count as a candidate's evidence and reach its pack's relations.
+#: evidence_count counts these capped neighbours, not the pack's own items (which build_pack caps at 12).
+NEIGHBOUR_CAP = 5
 NO_COVERAGE_MESSAGE = "the graph does not cover this question"
 _UNTYPED_LABELS = frozenset({"", "Entity", "__Entity__"})
 
@@ -39,6 +73,13 @@ _UNTYPED_LABELS = frozenset({"", "Entity", "__Entity__"})
 def _type_label(node: EntityNode) -> str:
     """The entity's real type label, or "" when the graph carries none."""
     return "" if node.label in _UNTYPED_LABELS else node.label
+
+
+def _aliases(node: EntityNode) -> list[str]:
+    raw = node.properties.get("aliases")
+    if not isinstance(raw, (list, tuple)):
+        return []
+    return [str(alias).strip() for alias in raw if str(alias).strip()]
 
 
 def _distinct_by_id(entities: list[EntityNode], own_id: str) -> list[EntityNode]:
@@ -63,8 +104,35 @@ def _embedding(node: EntityNode) -> tuple[float, ...]:
     return ()
 
 
+@dataclass
+class _Pool:
+    """The ranked candidates and the per-entity inputs a profile pack is built from."""
+
+    candidates: list[Candidate]
+    nodes: dict[str, EntityNode]
+    neighbours: dict[str, list[EntityNode]]
+    chunk_rows: dict[str, list[ChunkRow]]
+
+
+@dataclass(frozen=True)
+class _Attempt:
+    """One drawn candidate's pass through generation: its pack, its result, and the seated Agent if any."""
+
+    candidate: Candidate
+    axis: str
+    aliases: list[str]
+    pack: EvidencePack
+    generated: GenerationResult
+    agent: Agent | None
+
+
+def _rejection_reason(generated: GenerationResult) -> str:
+    fields = ", ".join(sorted({r.field for r in generated.rejections})) or "no draft"
+    return f"profile not seated ({fields})"
+
+
 class ProfileSynthesizer:
-    """Synthesizes canonical Agents from the graph's required nodes — one agent per node."""
+    """Synthesizes canonical Agents: one seated, generated and validated profile per seat."""
 
     def __init__(self, persona_repo: PersonaRepository, graph_context: GraphContext):
         self._repo = persona_repo
@@ -78,230 +146,62 @@ class ProfileSynthesizer:
         intent: QueryIntent | None = None,
         warnings: list[str] | None = None,
         decisions: list[SeatDecision] | None = None,
-        distill: bool = False,
+        records: list[AgentRecord] | None = None,
         llm_client: Any = None,
         on_profile: "Callable[[Agent, int, int], Awaitable[None]] | None" = None,
     ) -> list[Agent]:
-        """Synthesize agent profiles: seat the question's most relevant graph entities.
+        """Seat up to `max_agents` candidates for the question and generate one profile per seat.
 
-        `_seat` builds the candidate pool from the question's fused chunks and
-        entity hits, scores it by query relevance, PageRank, grounding and the
-        actor filter, and seats `max_agents` of it through `SeatQueue`. One Agent
-        is then built per seat.
+        Each drawn candidate gets a pack of its own chunks and relations, one generation
+        call and a support judge. A profile that fails is rejected and its seat is redrawn.
 
-        Raises `NoAgentsDerivableError` when no candidate reaches the question. An
-        empty roster is a failed job, not a debate with nobody in it.
+        Raises `NoAgentsDerivableError` when no candidate reaches the question, or when every
+        drawn candidate's profile failed. An empty roster with nothing drawn returns [].
 
-        `warnings` is an optional caller-owned sink for degradations. `decisions`
-        is an optional caller-owned sink for every candidate's seat decision.
-        `llm_client` runs the actor filter; without it every entity type counts as
-        an actor, and a warning says so.
-
-        `distill=True` (the S5 gate, decided by the caller from the simulation
-        depth) makes ONE batched distillation call for the whole seated set
-        before any profile is built, feeding it the S3 stance axis; the returned
-        `(description, perspective)` supplies that persona's
-        `bio`/`detailed_perspective`, with a per-persona template fallback +
-        warning. `False` (default) is exactly the pre-S5 path.
+        `records`, `decisions` and `warnings` are caller-owned sinks. `records` holds one
+        AgentRecord for every candidate that reached generation, published or rejected.
         """
-        seats = await self._seat(
-            query,
-            dataset_id=dataset_id,
-            max_agents=max_agents,
-            warnings=warnings,
-            llm_client=llm_client,
-            decisions=decisions,
-        )
-        # Each seat's evidence is its node plus that node's one-hop neighbours. The
-        # whole list reaches the build and the distillation.
-        top_rows = [(candidate.name, evidence) for candidate, evidence in seats]
+        if llm_client is None:
+            raise ValueError("profile generation needs an llm_client")
+        pool = await self._rank(query, dataset_id, warnings, llm_client)
+        if not any(c.vector for c in pool.candidates):
+            logger.info("MMR diversity penalty off: no entity embeddings in the candidate pool")
 
-        # S5: ONE batched distillation call for the whole seated set — the S3
-        # stance axis gives every persona a question-aware voice. Only runs when
-        # the caller's depth gate asked for it; per-persona failures fall back to
-        # the deterministic template and warn (never raise).
-        distilled: dict[str, tuple[str, str]] = {}
-        if distill:
-            # T3: the persona's OWN chunk text — the grounding the EVIDENCE block
-            # has been missing (entity nodes carry no `summary`). ONE call for the
-            # whole batch, keyed by chunk id so each persona gets its own snippets
-            # (R17). The fetch is deliberately uncapped in Cypher (R19): a global
-            # cap over this persona-ordered union would let a chunk-heavy persona
-            # starve the ones after it. `_own_source_snippets` caps each persona
-            # instead. A roster with no chunk refs issues no query at all.
-            batch_chunk_ids = list(
-                dict.fromkeys(
-                    chunk_id
-                    for _, evidence in top_rows
-                    for chunk_id in self._evidence_chunk_ids(evidence)
-                )
+        queue = SeatQueue(pool.candidates, n=max_agents)
+        axis = intent.stance_axis if intent is not None else ""
+        run_id = uuid4().hex
+        attempts: list[_Attempt] = []
+        seated: list[Agent] = []
+        while (drawn := queue.next()) is not None:
+            resolved = False
+            try:
+                attempt = await self._attempt(drawn, pool, query, axis, dataset_id, llm_client)
+                attempts.append(attempt)
+                if attempt.agent is None:
+                    queue.reject(drawn, _rejection_reason(attempt.generated))
+                else:
+                    queue.accept(drawn)
+                resolved = True
+            finally:
+                if not resolved:
+                    queue.reject(drawn, "generation interrupted")
+            if attempt.agent is None:
+                continue
+            agent = attempt.agent
+            seated.append(agent)
+            await self._persist_links(agent, dataset_id, warnings)
+            await self._notify(on_profile, agent, len(seated), max_agents)
+
+        if decisions is not None:
+            decisions.extend(queue.decisions())
+        if records is not None:
+            by_id = {d.entity_id: d for d in queue.decisions()}
+            records.extend(self._record(run_id, query, a, by_id[a.candidate.entity_id]) for a in attempts)
+        if attempts and not seated:
+            raise NoAgentsDerivableError(
+                "no profile could be seated: every drawn candidate failed profile generation or validation"
             )
-            snippets_by_chunk = (
-                await self._repo.fetch_source_evidence_by_chunk(
-                    batch_chunk_ids, dataset_id=dataset_id
-                )
-                if batch_chunk_ids
-                else {}
-            )
-            distilled = await self._repo.distill_profiles(
-                personas=[
-                    self._distillation_entry(
-                        name,
-                        evidence,
-                        self._own_source_snippets(evidence, snippets_by_chunk),
-                    )
-                    for name, evidence in top_rows
-                ],
-                query=query,
-                core_question=intent.core_question if intent is not None else "",
-                stance_axis=intent.stance_axis if intent is not None else "",
-                warnings=warnings,
-            )
-
-        # Build one profile per required node
-        # ONE batched node fetch serves every profile (was one query per profile).
-        # The name list is the exact expression `_build_profile` resolves below,
-        # so the pre-fetch cannot diverge from the per-profile lookups; a name
-        # with no row keeps the node-properties fallback.
-        nodes_by_name = await self._repo.fetch_nodes_by_names(
-            [name for name, _ in top_rows], dataset_id=dataset_id
-        )
-        profiles: list[Agent] = []
-        semaphore = asyncio.Semaphore(8)
-
-        async def _build_profile(
-            row_name: str, evidence: list[EntityNode]
-        ) -> Agent | None:
-            async with semaphore:
-                # Use the most relevant entity in the evidence as representative
-                representative = max(evidence, key=lambda e: e.relevance_score)
-                agent_name = representative.name
-
-                # Full node properties, served by the roster's single batch fetch.
-                node = nodes_by_name.get(agent_name) or {
-                    "name": agent_name,
-                    **representative.properties,
-                }
-                # The entity's real type label is the build's archetype fallback;
-                # properties alone never carry it.
-                node = {**node, "label": representative.label}
-
-                # Calculate metrics using repo method
-                # For node-level synthesis, we construct synthetic sector_results
-                sector_results = self._build_sector_results(evidence)
-
-                max_relevance = (
-                    max(e.relevance_score for e in evidence) if evidence else 1.0
-                )
-
-                metrics = await self._repo.calculate_agent_metrics_and_context_for_llm(
-                    agent_name=agent_name,
-                    node=node,
-                    sector_results=sector_results,
-                    max_relevance=max_relevance,
-                    dataset_id=dataset_id,
-                )
-
-                # Task 1: the same `_effective_stance` precedence the build uses
-                # (distilled → graph derivation → safe default) decides the value
-                # persisted with the entity links, because Task 6's round-1
-                # pairing reads `Persona.stance` before any opinion exists — the
-                # persisted stance must equal the built Agent's.
-                distilled_for_row = distilled.get(row_name) if distilled else None
-                stance_to_persist = PersonaRepository._effective_stance(
-                    node, metrics, distilled_for_row
-                )[0].value
-
-                # D2: write this persona's real provenance edges BEFORE the build,
-                # so the `get_provenance` inside it finds them instead of falling
-                # back to the uuid5 sector fabrication. Never raises into synthesis.
-                chunk_ids = self._evidence_chunk_ids(evidence)
-                if chunk_ids:
-                    try:
-                        pending = self._repo.write_persona_provenance(
-                            persona_name=agent_name,
-                            dataset_id=dataset_id,
-                            chunk_node_ids=chunk_ids,
-                        )
-                        if inspect.iscoroutine(pending):
-                            await pending
-                    except Exception as exc:
-                        logger.warning(
-                            "provenance write failed for persona %r: %s",
-                            agent_name,
-                            exc,
-                        )
-                        if warnings is not None:
-                            warnings.append(
-                                f"provenance write failed for persona {agent_name!r} ({type(exc).__name__})"
-                            )
-
-                    # Topology prerequisite: without persona→entity links the
-                    # round-1 pair scorer has no shared middle nodes to count.
-                    try:
-                        pending = self._repo.write_persona_entity_links(
-                            persona_name=agent_name,
-                            dataset_id=dataset_id,
-                            chunk_node_ids=chunk_ids,
-                            stance=stance_to_persist,
-                        )
-                        if inspect.iscoroutine(pending):
-                            await pending
-                    except Exception as exc:
-                        logger.warning(
-                            "entity-link write failed for persona %r: %s",
-                            agent_name,
-                            exc,
-                        )
-                        if warnings is not None:
-                            warnings.append(
-                                f"entity-link write failed for persona {agent_name!r} ({type(exc).__name__})"
-                            )
-
-                # Build profile
-                return await self._repo.build_single_agent_profile_from_node(
-                    agent_name=agent_name,
-                    node=node,
-                    user_query=query,
-                    dataset_id=dataset_id,
-                    agent_metrics=metrics,
-                    sector_results=sector_results,
-                    llm_output=None,
-                    distilled=distilled_for_row,
-                    chunk_node_ids=chunk_ids,
-                )
-
-        # S9 visibility: one `agent` event per completed profile, in completion
-        # order — the roster seats members one by one as they are built.
-        completed = 0
-        completed_lock = asyncio.Lock()
-
-        async def _build_and_notify(
-            name: str, entity_evidence: list[EntityNode]
-        ) -> Agent | None:
-            nonlocal completed
-            profile = await _build_profile(name, entity_evidence)
-            if profile is not None and on_profile is not None:
-                async with completed_lock:
-                    completed += 1
-                    index = completed
-                try:
-                    await on_profile(profile, index, len(top_rows))
-                except Exception as exc:
-                    logger.warning(
-                        "on_profile emitter failed for %r: %s",
-                        profile.identity.name,
-                        exc,
-                    )
-            return profile
-
-        tasks = [
-            _build_and_notify(name, entity_evidence) for name, entity_evidence in top_rows
-        ]
-        results = await asyncio.gather(*tasks)
-        profiles = [p for p in results if p is not None]
-
-        return profiles
+        return seated
 
     async def synthesize_from_names(
         self,
@@ -310,169 +210,26 @@ class ProfileSynthesizer:
         dataset_id: str,
         relevance_by_name: dict[str, float] | None = None,
     ) -> list[Agent]:
-        """Build full Agent profiles for explicitly-named graph Personas.
+        """Joiner seating for activation. Not built yet.
 
-        Activation path: candidates surfaced by topology are converted through
-        the same repository pipeline as query-driven synthesis.
-        Joiners are deliberately **not** distilled (no mid-loop LLM calls), so
-        they keep the template bio/perspective. Their identity is still derived
-        from the graph rather than a hollow constant: `fetch_nodes_by_names`
-        carries the node's real type label, so the build applies the same Task 5
-        archetype/style/domain precedence the roster gets. They also get the
-        same D2 provenance write as the initial roster when their node carries a
-        `triplet_source_id`, with the same log-and-continue tolerance.
+        A joiner has to pass the same seat, generate and validate path as a roster member.
+        That is task 2.6b. Until then this refuses rather than build a template Agent.
         """
         if not names:
             return []
-        relevant = {str(k): float(v) for k, v in (relevance_by_name or {}).items()}
-        # ONE batched node fetch for every joiner (was one query per name); the
-        # per-name map keeps the same build-or-skip handling below.
-        nodes_by_name = await self._repo.fetch_nodes_by_names(
-            names, dataset_id=dataset_id
+        raise NotImplementedError(
+            "joiner seating lands in task 2.6b: activation cannot seat a generated profile yet"
         )
-        semaphore = asyncio.Semaphore(8)
 
-        async def _build(name: str) -> Agent | None:
-            async with semaphore:
-                node = nodes_by_name.get(name)
-                if node is None:
-                    # No graph node backs this name. Skipping beats fabricating a
-                    # default-archetype/-stance/-cior Agent from the bare string.
-                    logger.warning(
-                        "synthesize_from_names: %r has no graph node; skipped", name
-                    )
-                    return None
-                if name not in relevant:
-                    logger.warning(
-                        "synthesize_from_names: %r has no relevance; skipped", name
-                    )
-                    return None
-                relevance = max(0.05, min(1.0, relevant[name]))
-                domain_tags = (
-                    node.get("domain_tags")
-                    if isinstance(node, dict)
-                    else getattr(node, "domain_tags", []) or []
-                )
-                first_tag = (domain_tags[0] if domain_tags else None) or "general"
-                sector_results = [
-                    {
-                        "domain_tag": first_tag,
-                        "total_relevance": relevance,
-                        "evidence_nodes": [name],
-                        "density": 1,
-                    }
-                ]
-                metrics = await self._repo.calculate_agent_metrics_and_context_for_llm(
-                    agent_name=name,
-                    node=node,
-                    sector_results=sector_results,
-                    max_relevance=1.0,
-                    dataset_id=dataset_id,
-                )
-
-                # D2 on the activation path: write the joiner's real provenance
-                # edge BEFORE the build (which reads it), tolerantly — a failed
-                # write is logged and the profile still builds.
-                chunk_id = (
-                    node.get("triplet_source_id")
-                    if isinstance(node, dict)
-                    else getattr(node, "triplet_source_id", None)
-                )
-                chunk_ids = (
-                    [chunk_id.strip()]
-                    if isinstance(chunk_id, str) and chunk_id.strip()
-                    else []
-                )
-                if chunk_ids:
-                    try:
-                        pending = self._repo.write_persona_provenance(
-                            persona_name=name,
-                            dataset_id=dataset_id,
-                            chunk_node_ids=chunk_ids,
-                        )
-                        if inspect.iscoroutine(pending):
-                            await pending
-                    except Exception as exc:
-                        logger.warning(
-                            "provenance write failed for joiner %r: %s",
-                            name,
-                            exc,
-                        )
-
-                    # Same topology prerequisite as the initial roster: joiners
-                    # need entity links or they can never pair either.
-                    try:
-                        pending = self._repo.write_persona_entity_links(
-                            persona_name=name,
-                            dataset_id=dataset_id,
-                            chunk_node_ids=chunk_ids,
-                        )
-                        if inspect.iscoroutine(pending):
-                            await pending
-                    except Exception as exc:
-                        logger.warning(
-                            "entity-link write failed for joiner %r: %s",
-                            name,
-                            exc,
-                        )
-
-                return await self._repo.build_single_agent_profile_from_node(
-                    agent_name=name,
-                    node=node,
-                    user_query=query,
-                    dataset_id=dataset_id,
-                    agent_metrics=metrics,
-                    sector_results=sector_results,
-                    llm_output=None,
-                    chunk_node_ids=chunk_ids,
-                )
-
-        results = await asyncio.gather(*(_build(n) for n in names))
-        return [p for p in results if p is not None]
-
-    async def _subgraph_by_seed(
-        self, nodes: list[EntityNode], dataset_id: str, limit: int
-    ) -> dict[str, list[EntityNode]]:
-        """Each node's 1-hop entity neighbours, keyed by node id — ONE query for
-        the whole roster. A missing method, a raising fetch or a non-mapping
-        answer degrades to no neighbours — logged, never raised.
-        """
-        fetch = getattr(self._ctx, "find_connected_nodes_by_seed", None)
-        if not callable(fetch):
-            return {}
-        try:
-            grouped = fetch(
-                [node.id for node in nodes], dataset_id=dataset_id, limit=limit
-            )
-            if inspect.iscoroutine(grouped):
-                grouped = await grouped
-        except Exception as exc:
-            logger.warning(
-                "subgraph fetch failed; grounding personas on their own nodes only: %s",
-                exc,
-            )
-            return {}
-        return grouped if isinstance(grouped, Mapping) else {}
-
-    async def _seat(
+    async def _rank(
         self,
         query: str,
         dataset_id: str,
-        max_agents: int,
         warnings: list[str] | None,
         llm_client: Any,
-        decisions: list[SeatDecision] | None,
-    ) -> list[tuple[Candidate, list[EntityNode]]]:
-        """Seat up to `max_agents` candidates for the question, best first.
-
-        The pool is the entities the top fused chunks mention plus the entity
-        vector hits. Query relevance is the best fused chunk mentioning an entity;
-        PageRank spreads it over the graph. `SeatQueue` accepts each draw at once,
-        so the profile build that follows is the only step after seating.
-        """
-        search = await self._ctx.find_relevant_chunks(
-            query, dataset_id=dataset_id, limit=CHUNK_POOL
-        )
+    ) -> _Pool:
+        """Build and rank the candidate pool for the question. Raises when none reaches it."""
+        search = await self._ctx.find_relevant_chunks(query, dataset_id=dataset_id, limit=CHUNK_POOL)
         chunk_hits = {hit.chunk_id: hit for hit in [*search.vector, *search.fulltext]}
         fused = rrf_fuse(
             [[hit.chunk_id for hit in search.vector], [hit.chunk_id for hit in search.fulltext]]
@@ -483,26 +240,26 @@ class ProfileSynthesizer:
         query_relevance: dict[str, float] = {}
         chunk_count: dict[str, int] = defaultdict(int)
         doc_ids: dict[str, set[str]] = defaultdict(set)
+        chunk_rows: dict[str, list[ChunkRow]] = defaultdict(list)
         for chunk_id in top_chunks:
             hit = chunk_hits[chunk_id]
+            relevance = fused[chunk_id] / peak
             for entity_id in hit.entity_ids:
-                relevance = fused[chunk_id] / peak
                 query_relevance[entity_id] = max(query_relevance.get(entity_id, 0.0), relevance)
                 chunk_count[entity_id] += 1
                 doc_ids[entity_id].add(hit.doc_id)
+                chunk_rows[entity_id].append(
+                    ChunkRow(hit.chunk_id, hit.doc_id, hit.doc_title, hit.section, hit.text, fused[chunk_id])
+                )
 
-        entity_hits = await self._ctx.find_relevant_entities(
-            query, dataset_id=dataset_id, limit=ENTITY_HITS
-        )
+        entity_hits = await self._ctx.find_relevant_entities(query, dataset_id=dataset_id, limit=ENTITY_HITS)
         hit_by_id = {entity.id: entity for entity in entity_hits}
         similarity_population = [entity.relevance_score for entity in entity_hits]
 
         pool_ids = sorted(set(query_relevance) | set(hit_by_id))
         unfetched = [entity_id for entity_id in pool_ids if entity_id not in hit_by_id]
         fetched = (
-            await self._ctx.find_entities_by_ids(unfetched, dataset_id=dataset_id)
-            if unfetched
-            else []
+            await self._ctx.find_entities_by_ids(unfetched, dataset_id=dataset_id) if unfetched else []
         )
         nodes = {entity.id: entity for entity in fetched}
         nodes.update(hit_by_id)
@@ -510,25 +267,13 @@ class ProfileSynthesizer:
         if not any(query_relevance.get(node.id, 0.0) > 0 for node in pool):
             raise NoAgentsDerivableError(NO_COVERAGE_MESSAGE)
 
-        grouped = await self._subgraph_by_seed(
-            pool, dataset_id=dataset_id, limit=NEIGHBOURS_PER_SEED
+        grouped = await self._ctx.find_connected_nodes_by_seed(
+            [node.id for node in pool], dataset_id=dataset_id, limit=NEIGHBOURS_PER_SEED
         )
-        neighbours = {
-            node.id: _distinct_by_id(grouped.get(node.id, []), node.id) for node in pool
-        }
+        neighbours = {node.id: _distinct_by_id(grouped.get(node.id, []), node.id) for node in pool}
         # Undirected, one edge per pair: a pool-to-pool edge arrives from both ends.
-        edges = sorted(
-            {
-                tuple(sorted((node.id, n.id)))
-                for node in pool
-                for n in neighbours[node.id]
-            }
-        )
-        seeds = {
-            node.id: query_relevance[node.id]
-            for node in pool
-            if query_relevance.get(node.id, 0.0) > 0
-        }
+        edges = sorted({tuple(sorted((node.id, n.id))) for node in pool for n in neighbours[node.id]})
+        seeds = {node.id: query_relevance[node.id] for node in pool if query_relevance.get(node.id, 0.0) > 0}
         ppr = personalized_pagerank(adjacency(edges), seeds)
 
         candidates = [
@@ -538,29 +283,23 @@ class ProfileSynthesizer:
                 type_label=_type_label(node),
                 query_relevance=query_relevance.get(node.id, 0.0),
                 entity_similarity=(
-                    percentile(node.relevance_score, similarity_population)
-                    if node.id in hit_by_id
-                    else 0.0
+                    percentile(node.relevance_score, similarity_population) if node.id in hit_by_id else 0.0
                 ),
                 ppr=ppr.get(node.id, 0.0),
                 doc_count=len(doc_ids.get(node.id, ())),
                 chunk_count=chunk_count.get(node.id, 0),
-                evidence_count=chunk_count.get(node.id, 0) + len(neighbours[node.id]),
+                evidence_count=chunk_count.get(node.id, 0) + len(neighbours[node.id][:NEIGHBOUR_CAP]),
                 vector=_embedding(node),
             )
             for node in pool
         ]
         candidates = await self._classify_actors(candidates, llm_client, warnings)
-
-        queue = SeatQueue(candidates, n=max_agents)
-        seats: list[tuple[Candidate, list[EntityNode]]] = []
-        while (drawn := queue.next()) is not None:
-            queue.accept(drawn)
-            node = nodes[drawn.entity_id]
-            seats.append((drawn, [node, *neighbours[node.id]]))
-        if decisions is not None:
-            decisions.extend(queue.decisions())
-        return seats
+        return _Pool(
+            candidates=candidates,
+            nodes=nodes,
+            neighbours=neighbours,
+            chunk_rows={entity_id: list(rows) for entity_id, rows in chunk_rows.items()},
+        )
 
     async def _classify_actors(
         self,
@@ -570,109 +309,174 @@ class ProfileSynthesizer:
     ) -> list[Candidate]:
         """Mark each candidate actor or not, by its entity type label, in one call.
 
-        Without an LLM client every type counts as an actor, and the warning says
-        so. A candidate with no type label keeps the actor default.
+        A candidate with no type label keeps the actor default.
         """
         labels = sorted({c.type_label for c in candidates if c.type_label})
         if not labels:
             return candidates
-        if llm_client is None:
-            if warnings is not None:
-                warnings.append(
-                    "actor filter skipped: no LLM client, every entity type counts as an actor"
-                )
-            return candidates
         flags, degraded = await classify_actor_labels(llm_client, labels)
         if degraded and warnings is not None:
-            warnings.append(
-                "actor filter: unclassified entity types count as actors"
-            )
+            warnings.append("actor filter: unclassified entity types count as actors")
         return [replace(c, is_actor=flags.get(c.type_label, True)) for c in candidates]
 
-    @staticmethod
-    def _own_source_snippets(
-        evidence: list[EntityNode], snippets_by_chunk: Mapping[str, list[str]]
-    ) -> list[str]:
-        """This persona's own snippets, in its evidence's chunk order, capped.
-
-        Reading only the chunks this persona's evidence names is what keeps one
-        persona's source text out of another's distillation.
-        """
-        if not isinstance(snippets_by_chunk, Mapping):
-            return []
-        return [
-            snippet
-            for chunk_id in ProfileSynthesizer._evidence_chunk_ids(evidence)
-            for snippet in (snippets_by_chunk.get(chunk_id) or [])
-        ][:SOURCE_EVIDENCE_MAX_SNIPPETS]
-
-    def _distillation_entry(
+    async def _attempt(
         self,
-        name: str,
-        evidence: list[EntityNode],
-        source_snippets: list[str] | None = None,
-    ) -> dict:
-        """One persona's S5 distillation input: identity and the grounding synthesis
-        already holds (the persona's real source snippets, node properties,
-        matched sectors, node summaries). No extra graph reads — the entry is
-        name-keyed, the same key profiles build under.
-        """
-        representative = (
-            max(evidence, key=lambda e: e.relevance_score) if evidence else None
+        drawn: Candidate,
+        pool: _Pool,
+        query: str,
+        axis: str,
+        dataset_id: str,
+        llm_client: Any,
+    ) -> _Attempt:
+        """Build the drawn candidate's pack, generate its profile, and seat an Agent if it passes."""
+        node = pool.nodes[drawn.entity_id]
+        aliases = _aliases(node)
+        counterpart_ids = [n.id for n in pool.neighbours[drawn.entity_id][:NEIGHBOUR_CAP]]
+        relations = await self._relations_for(drawn.entity_id, counterpart_ids, dataset_id)
+        pack = build_pack(drawn.name, aliases, pool.chunk_rows.get(drawn.entity_id, []), relations)
+        generated = await generate_profile(
+            llm_client,
+            question=query,
+            axis=axis,
+            name=drawn.name,
+            aliases=aliases,
+            type_label=drawn.type_label,
+            pack=pack,
         )
-        properties = (
-            getattr(representative, "properties", None)
-            if representative is not None
-            else None
+        agent = (
+            self._agent(drawn, dataset_id, generated.draft, pack) if generated.draft is not None else None
         )
-        summaries = [
-            e.summary.strip()
-            for e in evidence
-            if isinstance(getattr(e, "summary", None), str) and e.summary.strip()
+        return _Attempt(drawn, axis, aliases, pack, generated, agent)
+
+    async def _relations_for(
+        self, entity_id: str, counterpart_ids: list[str], dataset_id: str
+    ) -> list[RelationItem]:
+        """Scoped relations from the candidate to its capped neighbours; the pack keeps MAX_RELATIONS."""
+        if not counterpart_ids:
+            return []
+        hits = await self._ctx.find_relations_for(
+            entity_id, counterpart_ids, dataset_id=dataset_id, limit=MAX_RELATIONS
+        )
+        return [
+            RelationItem(
+                "",
+                hit.type,
+                "out" if hit.outgoing else "in",
+                hit.counterpart_id,
+                hit.counterpart_name,
+                hit.chunk_id,
+            )
+            for hit in hits
         ]
-        return {
-            "name": name,
-            "node": dict(properties) if isinstance(properties, dict) else {},
-            "sector_results": self._build_sector_results(evidence),
-            "evidence": list(source_snippets or []) + summaries,
-        }
 
     @staticmethod
-    def _evidence_chunk_ids(evidence: list[EntityNode]) -> list[str]:
-        """The evidence's chunk node ids: each entity's `triplet_source_id`.
+    def _agent(drawn: Candidate, dataset_id: str, draft: ProfileDraft, pack: EvidencePack) -> Agent:
+        """The slim Agent for a validated draft. Only the draft and the pack are read."""
+        return Agent(
+            node_id=drawn.entity_id,
+            dataset_id=dataset_id,
+            identity=PersonaIdentity(
+                name=drawn.name,
+                archetype="",
+                communication_style="",
+                type_label=drawn.type_label,
+            ),
+            discovery_type=DiscoveryType.GRAPH_DISCOVERY,
+            role=draft.role,
+            stance=Stance.parse(draft.stance),
+            strength=draft.strength,
+            confidence=draft.confidence,
+            bio=draft.bio,
+            details_raw=draft.details,
+            evidence=list(pack.items),
+            relations=list(pack.relations),
+            cites=dict(draft.cites),
+        )
 
-        Tolerant `Mapping` reads — a non-mapping `properties` or a missing/blank
-        value contributes nothing; ids are stripped and deduped. Never invents.
+    async def _persist_links(self, agent: Agent, dataset_id: str, warnings: list[str] | None) -> None:
+        """Write the seated persona's provenance and entity links, which the topology reads.
+
+        A failed write is logged and warned, never raised: the profile is already seated.
         """
-        ids: list[str] = []
-        for entity in evidence:
-            properties = getattr(entity, "properties", None)
-            if not isinstance(properties, Mapping):
-                continue
-            value = properties.get("triplet_source_id")
-            if isinstance(value, str) and value.strip():
-                ids.append(value.strip())
-        return list(dict.fromkeys(ids))
+        name = agent.identity.name
+        chunk_ids = list(dict.fromkeys(item.chunk_id for item in agent.evidence))
+        if not chunk_ids:
+            return
+        writes = (
+            ("provenance", lambda: self._repo.write_persona_provenance(
+                persona_name=name, dataset_id=dataset_id, chunk_node_ids=chunk_ids)),
+            ("entity-link", lambda: self._repo.write_persona_entity_links(
+                persona_name=name, dataset_id=dataset_id, chunk_node_ids=chunk_ids,
+                stance=agent.stance.value)),
+        )
+        for label, write in writes:
+            try:
+                await write()
+            except Exception as exc:
+                logger.warning("%s write failed for persona %r: %s", label, name, exc)
+                if warnings is not None:
+                    warnings.append(f"{label} write failed for persona {name!r} ({type(exc).__name__})")
 
-    def _build_sector_results(self, evidence: list[EntityNode]) -> list[dict[str, Any]]:
-        """Build synthetic sector_results from one node's evidence."""
-        if not evidence:
-            return []
+    @staticmethod
+    async def _notify(
+        on_profile: "Callable[[Agent, int, int], Awaitable[None]] | None",
+        agent: Agent,
+        index: int,
+        total: int,
+    ) -> None:
+        if on_profile is None:
+            return
+        try:
+            await on_profile(agent, index, total)
+        except Exception as exc:
+            logger.warning("on_profile emitter failed for %r: %s", agent.identity.name, exc)
 
-        # Use the top entity's domain tags as the sector
-        primary = evidence[0]
-        domain_tag = primary.domain_tags[0] if primary.domain_tags else primary.label
-
-        # Collect all unique agent names from the evidence
-        evidence_nodes = [e.name for e in evidence if e.name]
-        total_relevance = sum(e.relevance_score for e in evidence)
-        density = len(evidence)
-
-        return [
-            {
-                "domain_tag": domain_tag,
-                "total_relevance": total_relevance,
-                "evidence_nodes": evidence_nodes,
-                "density": density,
-            }
-        ]
+    @staticmethod
+    def _record(run_id: str, query: str, attempt: _Attempt, decision: SeatDecision) -> AgentRecord:
+        """The backend-only record of one candidate's attempt. Never sent to a client."""
+        draft = attempt.generated.draft
+        rejections = attempt.generated.rejections
+        candidate = attempt.candidate
+        return AgentRecord(
+            run_id=run_id,
+            node_id=candidate.entity_id,
+            query_hash=hashlib.sha256(query.encode("utf-8")).hexdigest(),
+            question=query,
+            decision_axis=attempt.axis,
+            node=NodeInfo(
+                name=candidate.name,
+                aliases=attempt.aliases,
+                type_label=candidate.type_label or None,
+                type_source="graph" if candidate.type_label else "unknown",
+            ),
+            rank=RankInfo(
+                features=decision.features,
+                score=decision.score,
+                seated=decision.seated,
+                reason=decision.reason,
+                order=decision.order,
+            ),
+            evidence=list(attempt.pack.items),
+            relations=list(attempt.pack.relations),
+            view=attempt.agent.view() if attempt.agent is not None else None,
+            details_raw=draft.details if draft is not None else "",
+            cites=CiteIds(**{k: v for k, v in (draft.cites if draft else {}).items() if k in CiteIds.model_fields}),
+            validation=ValidationInfo(
+                json_ok=not any(r.field == "json" for r in rejections),
+                repairs=max(0, attempt.generated.attempts - 1),
+                rejected=[RejectedClaim(field=r.field, reason=r.reason) for r in rejections],
+                details_chars=len(draft.details) if draft is not None else 0,
+                cites_valid=draft is not None,
+            ),
+            uniqueness=UniquenessInfo(),
+            generation=GenerationInfo(
+                model=attempt.generated.model,
+                prompt_version=PROFILE_PROMPT_VERSION,
+                temperature=PROFILE_TEMPERATURE,
+                attempts=max(1, attempt.generated.attempts),
+                latency_ms=attempt.generated.latency_ms,
+            ),
+            dossier_hash=dossier_hash(attempt.pack, get_llm_config()),
+            status="published" if attempt.agent is not None else "rejected",
+            reason=None if attempt.agent is not None else decision.reason,
+        )

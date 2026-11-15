@@ -31,7 +31,6 @@ from src.api.debate_api import (
 from src.auth.deps import current_user
 from src.db.engine import get_session_factory
 from src.db.models import User
-from src.persona.graph_context import ChunkHit, ChunkSearch
 from src.persona.agent import (
     Agent,
     ConfidenceBreakdown,
@@ -41,9 +40,12 @@ from src.persona.agent import (
     PersonaIdentity,
     Stance,
 )
+from src.persona.graph_context import ChunkHit, ChunkSearch
 from src.simulation.debate_config import DebateConfig
 from src.simulation.orchestrator import OrchestratedDebateResult
 from src.simulation.pair_turn import CommPair, DebateVerdict, RoundResult
+from src.simulation.profile_generator import GenerationResult
+from src.simulation.profile_validation import ProfileDraft
 
 if sys.platform == "win32":
     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
@@ -374,6 +376,20 @@ def _stub_profile(name: str) -> Agent:
     )
 
 
+async def _stub_generation(client, *, question, axis, name, aliases, type_label, pack):
+    """The generation seam: every candidate gets a draft; the job test is about wiring, not prose."""
+    draft = ProfileDraft(
+        role=f"{name} role",
+        stance="positive",
+        strength=0.6,
+        bio=f"{name} bio",
+        details=f"{name} details",
+        confidence=0.7,
+        cites={},
+    )
+    return GenerationResult(draft=draft, rejections=[], attempts=1, latency_ms=0, model="stub")
+
+
 def _stub_verdict() -> DebateVerdict:
     return DebateVerdict(
         overall_stance=Stance.POSITIVE,
@@ -474,16 +490,11 @@ async def _run_stubbed_job(
     )
     ctx.find_entities_by_ids = AsyncMock(return_value=[])
     ctx.find_connected_nodes_by_seed = AsyncMock(return_value={})
+    ctx.find_relations_for = AsyncMock(return_value=[])
 
     repo = MagicMock()
-    repo.fetch_nodes_by_names = AsyncMock(return_value={})
-    repo.calculate_agent_metrics_and_context_for_llm = AsyncMock(return_value={})
-    # The product path defaults to depth=standard, so S5 distillation is ON here:
-    # the stub repo must satisfy the batch seam (empty result = template path).
-    repo.distill_profiles = AsyncMock(return_value={})
-    repo.build_single_agent_profile_from_node = AsyncMock(
-        side_effect=lambda **kw: _stub_profile(kw["agent_name"])
-    )
+    repo.write_persona_provenance = AsyncMock(return_value=1)
+    repo.write_persona_entity_links = AsyncMock(return_value=1)
 
     topo = MagicMock()
     topo.compute_round_pairs = AsyncMock(
@@ -528,6 +539,10 @@ async def _run_stubbed_job(
             patch("src.llm.client.LLMClient", return_value=llm),
             patch("src.persona.graph_context.GraphContext", return_value=ctx),
             patch("src.persona.repository.PersonaRepository", return_value=repo),
+            patch(
+                "src.simulation.profile_synthesizer.generate_profile",
+                side_effect=_stub_generation,
+            ),
             patch("src.simulation.topology.CommunicationTopology", return_value=topo),
             patch("src.simulation.orchestrator.RoundRunner") as rr_cls,
             patch(
@@ -995,30 +1010,31 @@ async def _run_with_depth(job_id: str, depth: str):
     return job, repo_cls, orch, llm
 
 
-class TestSimulationDepthGate:
-    """D3: shallow → distillation off; standard/deep → on; the client is injected."""
+class TestLlmClientInjection:
+    """The one LLMClient reaches the repository and the orchestrator at every depth.
+
+    The depth no longer gates persona distillation (the template path is gone).
+    """
 
     @pytest.mark.asyncio
-    async def test_shallow_turns_distillation_off(self):
+    async def test_shallow_passes_the_injected_client(self):
         job, repo_cls, orch, llm = await _run_with_depth(
             f"depth-{uuid.uuid4()}", "shallow"
         )
 
         assert job["status"] == "complete"
-        assert orch.run.await_args.kwargs["distill"] is False
         assert repo_cls.call_args.kwargs["llm_client"] is llm
         # Task 8: the same client must reach verdict synthesis, not just the repo.
         assert orch.run.await_args.kwargs["llm_client"] is llm
 
     @pytest.mark.asyncio
-    async def test_standard_and_deep_turn_distillation_on(self):
+    async def test_standard_and_deep_pass_the_injected_client(self):
         for depth in ("standard", "deep"):
             job, repo_cls, orch, llm = await _run_with_depth(
                 f"depth-{depth}-{uuid.uuid4()}", depth
             )
 
             assert job["status"] == "complete"
-            assert orch.run.await_args.kwargs["distill"] is True
             assert repo_cls.call_args.kwargs["llm_client"] is llm
             assert orch.run.await_args.kwargs["llm_client"] is llm
 

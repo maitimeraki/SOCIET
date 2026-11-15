@@ -128,7 +128,7 @@ async def test_five_step_flow():
         intent=None,
         warnings=result.warnings,
         decisions=ANY,
-        distill=False,
+        records=ANY,
         llm_client=None,
         on_profile=ANY,
     )
@@ -260,22 +260,6 @@ async def test_non_debatable_raises_after_the_synthesis_stage_event():
         ("selection", None),
         ("synthesis", 1),
     ]
-
-
-@pytest.mark.asyncio
-async def test_run_threads_the_distill_gate_to_synthesis():
-    """S5/D3: the boundary's gate reaches profile synthesis unchanged."""
-    orch = _stage_ready_orch(max_rounds=1)
-
-    await orch.run(
-        "q",
-        "ds1",
-        DebateConfig(max_agents=5, max_rounds=1),
-        AsyncMock(),
-        distill=True,
-    )
-
-    assert orch._profile_synthesizer.synthesize.await_args.kwargs["distill"] is True
 
 
 @pytest.mark.asyncio

@@ -1,751 +1,213 @@
-"""Tests for ProfileSynthesizer."""
+"""Tests for ProfileSynthesizer: seating, one generated profile per seat, records, refusal.
+
+The LLM seam is a fake that answers the profile, judge and actor-filter prompts from the
+prompt it is given. The graph is a fake that answers the tenant-scoped reads.
+"""
 
 import json
-from datetime import datetime
+import re
+from contextlib import contextmanager
 from unittest.mock import AsyncMock, MagicMock
-from uuid import uuid4
 
 import pytest
 
-from src.persona.agent import (
-    Agent,
-    ConfidenceBreakdown,
-    DiscoveryType,
-    ExpertiseLevel,
-    PersonaIdentity,
-    ProvenanceLink,
-)
+from src.billing import metering
 from src.billing.metering import MeteringError
-from src.persona.graph_context import ChunkHit, ChunkSearch, EntityNode
-from src.simulation.profile_synthesizer import ProfileSynthesizer
-from src.simulation.ranking import NoAgentsDerivableError, SeatDecision
-from src.utils.queryIntend import QueryIntent
+from src.persona.agent import Stance
+from src.persona.graph_context import ChunkHit, ChunkSearch, EntityNode, RelationHit
+from src.simulation.evidence import MAX_RELATIONS
+from src.simulation.profile_synthesizer import NEIGHBOUR_CAP, ProfileSynthesizer
+from src.simulation.ranking import NoAgentsDerivableError
+
+QUESTION = "Should we enter Berlin?"
+TEMPLATE_STRINGS = ["Domain expert", "Participant", "direct and evidence-led", "related nodes", "I specialize in"]
 
 
-def chunk_search(vector=(), fulltext=(), mentions=None) -> ChunkSearch:
-    """Two ranked chunk legs; `mentions` maps a chunk id to the entity ids it names."""
-    mentions = mentions or {}
+class FakeLLM:
+    """Answers the profile call with a valid draft that cites the prompt's evidence.
 
-    def hits(ids):
-        return [
-            ChunkHit(
-                chunk_id=cid,
-                doc_id=f"doc-{cid}",
-                doc_title="",
-                section="",
-                text="",
-                rank=rank,
-                entity_ids=tuple(mentions.get(cid, ())),
+    `fail` names get an unparseable reply, `abstain` names an abstain stance. The
+    role echoes the question, so the same node asked two questions gives two profiles.
+    `raises` is raised by every call; `raise_on_profile` only by the profile call.
+    """
+
+    def __init__(self, actor_flags=None, fail=(), abstain=(), raises=None, raise_on_profile=None, scope_stack=None):
+        self.actor_flags = actor_flags or {}
+        self.fail = set(fail)
+        self.abstain = set(abstain)
+        self.raises = raises
+        self.raise_on_profile = raise_on_profile
+        self.scope_stack = scope_stack
+        self.scopes_seen: list[list[str]] = []
+
+    async def generate(self, system_prompt, user_prompt, **kwargs):
+        if self.scope_stack is not None:
+            self.scopes_seen.append(list(self.scope_stack))
+        if self.raises is not None:
+            raise self.raises
+        if system_prompt.startswith("You are an analyst"):
+            if self.raise_on_profile is not None:
+                raise self.raise_on_profile
+            return self._profile(user_prompt)
+        if system_prompt.startswith("You check whether"):
+            return json.dumps({"unsupported": []})
+        labels = json.loads(user_prompt)
+        return json.dumps({label: self.actor_flags.get(label, True) for label in labels})
+
+    def _profile(self, user_prompt: str) -> str:
+        name = re.search(r"^name: (.*)$", user_prompt, re.M).group(1)
+        question = user_prompt.split("QUESTION\n", 1)[1].split("\n", 1)[0]
+        ids = re.findall(r'<evidence id="(e\d+)"', user_prompt)
+        if name in self.fail:
+            return "this is not json"
+        if name in self.abstain:
+            return json.dumps(
+                {
+                    "role": f"sees no bearing on {question}",
+                    "stance": "abstain",
+                    "strength": 0.2,
+                    "bio": _bio(name),
+                    "details": _details(ids),
+                    "confidence": 0.3,
+                    "cites": {"role": ids[:1], "stance": [], "bio": ids[:1], "confidence": []},
+                }
             )
-            for rank, cid in enumerate(ids, start=1)
-        ]
+        return json.dumps(
+            {
+                "role": f"presses {question} as proof of demand",
+                "stance": "positive",
+                "strength": 0.7,
+                "bio": _bio(name),
+                "details": _details(ids),
+                "confidence": 0.4,
+                "cites": {"role": ids[:1], "stance": ids[:1], "bio": ids[:1], "confidence": []},
+            }
+        )
 
-    return ChunkSearch(vector=hits(vector), fulltext=hits(fulltext))
+
+def _bio(name: str) -> str:
+    return f"{name} weighs the rollout, tracks compliance and prices the pilot. " * 3
 
 
-def _neighbour_of(entity) -> EntityNode:
-    return EntityNode(
-        id=f"{entity.id}-n", name=f"{entity.name} neighbour", label="Persona"
+def _details(ids: list[str]) -> str:
+    markers = ids[:3]
+    return " ".join(
+        f"Point {i} weighs the rollout against compliance timing [{markers[i % len(markers)]}]."
+        for i in range(30)
     )
 
 
-def mentioning_all(entity_ids) -> ChunkSearch:
-    """Two chunks in both legs, each naming every entity: each candidate is grounded."""
-    ids = list(entity_ids)
-    legs = ["c0", "c1"]
-    return chunk_search(vector=legs, fulltext=legs, mentions={c: ids for c in legs})
+def _sentences(name: str) -> str:
+    return f"{name} weighs the rollout. {name} tracks compliance. {name} prices the pilot."
 
 
-class _SeatsByChunks:
-    """A fake graph whose chunk legs name every entity its entity read returns."""
+def _entity(entity_id: str, name: str, label: str = "Company", score: float = 0.5) -> EntityNode:
+    return EntityNode(id=entity_id, name=name, label=label, relevance_score=score)
+
+
+def _chunks_for(entities: list[EntityNode]) -> ChunkSearch:
+    hits = [
+        ChunkHit(
+            chunk_id=f"c-{entity.id}",
+            doc_id=f"doc-{entity.id}",
+            doc_title="Market memo",
+            section="Pricing",
+            text=_sentences(entity.name),
+            rank=rank,
+            entity_ids=(entity.id,),
+        )
+        for rank, entity in enumerate(entities, start=1)
+    ]
+    return ChunkSearch(vector=hits, fulltext=hits)
+
+
+def _neighbours_for(entities: list[EntityNode], count: int = 1) -> dict[str, list[EntityNode]]:
+    return {
+        e.id: [_entity(f"{e.id}-n{i}", f"{e.name} partner {i}") for i in range(count)] for e in entities
+    }
+
+
+class FakeGraph:
+    """The tenant-scoped reads the synthesizer makes, over fixed entities and chunks."""
+
+    def __init__(self, entities, *, chunks=None, hits=None, neighbours=None, relations=None):
+        self.entities = {e.id: e for e in entities}
+        self._chunks = chunks if chunks is not None else _chunks_for(list(entities))
+        self._hits = list(entities) if hits is None else hits
+        self._neighbours = neighbours if neighbours is not None else _neighbours_for(list(entities))
+        self._relations = relations or {}
+        self.relation_calls: list[tuple[str, list[str]]] = []
 
     async def find_relevant_chunks(self, query, dataset_id, limit=200):
-        entities = await self.find_relevant_entities(query, dataset_id, limit)
-        return mentioning_all([entity.id for entity in entities])
+        return self._chunks
+
+    async def find_relevant_entities(self, query, dataset_id, limit=100):
+        return self._hits
+
+    async def find_entities_by_ids(self, entity_ids, dataset_id):
+        return [self.entities[i] for i in entity_ids if i in self.entities]
+
+    async def find_connected_nodes_by_seed(self, node_ids, dataset_id, limit=10):
+        return {i: self._neighbours.get(i, []) for i in node_ids}
+
+    async def find_relations_for(self, entity_id, counterpart_ids, dataset_id, limit=8):
+        self.relation_calls.append((entity_id, list(counterpart_ids)))
+        return self._relations.get(entity_id, [])
 
 
-def seating_ctx(entities, chunks=None, neighbours=None) -> MagicMock:
-    """A graph fake whose chunks name every entity and whose entities each have one
-    neighbour, so each candidate has the evidence seating requires."""
-    entities = list(entities)
-    if chunks is None:
-        chunks = mentioning_all([entity.id for entity in entities])
-    if neighbours is None:
-        neighbours = {entity.id: [_neighbour_of(entity)] for entity in entities}
-    ctx = MagicMock()
-    ctx.find_relevant_chunks = AsyncMock(return_value=chunks)
-    ctx.find_relevant_entities = AsyncMock(return_value=entities)
-    ctx.find_entities_by_ids = AsyncMock(return_value=[])
-    ctx.find_connected_nodes_by_seed = AsyncMock(return_value=neighbours)
-    return ctx
-
-
-@pytest.fixture
-def mock_entity_nodes():
-    """Create 10 mock EntityNode objects."""
-    nodes = []
-    for i in range(10):
-        node = MagicMock()
-        node.id = str(uuid4())
-        node.name = f"Agent{chr(65 + i)}"
-        node.label = "Persona"
-        node.properties = {
-            "name": f"Agent{chr(65 + i)}",
-            "archetype": "Strategic Analyst",
-            "expertise_level": "Strategic",
-            "domain_tags": ["ethics", "healthcare"],
-            "summary": f"Expert in domain {i}",
-        }
-        node.relevance_score = 0.5 + (i * 0.05)
-        node.summary = f"Expert in domain {i}"
-        node.domain_tags = ["ethics", "healthcare"]
-        nodes.append(node)
-    return nodes
-
-
-@pytest.fixture
-def mock_agent_profile():
-    """Create a mock Agent."""
-    return Agent(
-        discovery_type=DiscoveryType.INTENT_DRIVEN,
-        expertise_level=ExpertiseLevel.STRATEGIC,
-        identity=PersonaIdentity(
-            name="TestAgent",
-            archetype="Strategic Analyst",
-            communication_style="factual",
-        ),
-        domain_tags=["ethics", "healthcare"],
-        bio="Test agent description",
-        detailed_perspective="Test perspective",
-        confidence=0.75,
-        confidence_breakdown=ConfidenceBreakdown(
-            source_breadth=3,
-            node_density=5,
-            relationship_connectivity=0.6,
-        ),
-        summary_provenance=[],
-        last_updated=datetime.utcnow(),
-    )
-
-
-@pytest.fixture
-def mock_persona_repo(mock_agent_profile):
-    """Create a mock PersonaRepository."""
+def _repo() -> MagicMock:
     repo = MagicMock()
-    repo.fetch_nodes_by_names = AsyncMock(return_value={})
-    repo.calculate_agent_metrics_and_context_for_llm = AsyncMock(
-        return_value={
-            "confidence": 0.75,
-            "density": 5,
-            "connectivity": 0.6,
-            "relevance_score": 1.0,
-            "matched_sectors": ["ethics", "healthcare"],
-            "neighbor_context": [],
-            "context_text": "Test context",
-        }
-    )
-    repo.build_single_agent_profile_from_node = AsyncMock(
-        return_value=mock_agent_profile
-    )
+    repo.write_persona_provenance = AsyncMock(return_value=1)
+    repo.write_persona_entity_links = AsyncMock(return_value=1)
     return repo
 
 
-@pytest.fixture
-def mock_graph_context(mock_entity_nodes):
-    """Create a mock GraphContext."""
-    ctx = seating_ctx(mock_entity_nodes)
-    return ctx
+def _synth(entities, *, graph: FakeGraph | None = None, repo=None) -> ProfileSynthesizer:
+    graph = graph or FakeGraph(entities)
+    return ProfileSynthesizer(persona_repo=repo or _repo(), graph_context=graph)
 
 
-@pytest.fixture
-def synthesizer(mock_persona_repo, mock_graph_context):
-    """Create a ProfileSynthesizer with mocks."""
-    return ProfileSynthesizer(
-        persona_repo=mock_persona_repo,
-        graph_context=mock_graph_context,
+async def _run(synth, llm=None, *, query=QUESTION, max_agents=3, **kwargs):
+    return await synth.synthesize(
+        query, dataset_id="ds-A", max_agents=max_agents, llm_client=llm or FakeLLM(), **kwargs
     )
 
 
-@pytest.mark.asyncio
-async def test_synthesize_returns_list_of_agent_profiles(synthesizer):
-    """Verify synthesize returns list of Agent with length <= max_agents."""
-    profiles = await synthesizer.synthesize(
-        query="AI ethics healthcare",
-        dataset_id="test_dataset",
-        max_agents=5,
-    )
+KESTRA = _entity("kestra", "Kestra", score=0.9)
+LUMEN = _entity("lumen", "Lumen", score=0.8)
+ORBIT = _entity("orbit", "Orbit", score=0.7)
 
-    assert isinstance(profiles, list)
-    assert len(profiles) <= 5
-    for profile in profiles:
-        assert isinstance(profile, Agent)
 
-
-@pytest.mark.asyncio
-async def test_synthesize_calls_graph_context_with_query(
-    synthesizer, mock_graph_context
-):
-    """Verify GraphContext was called with the query."""
-    await synthesizer.synthesize(
-        query="AI ethics healthcare",
-        dataset_id="test_dataset",
-        max_agents=5,
-    )
-
-    mock_graph_context.find_relevant_chunks.assert_awaited_once()
-    assert mock_graph_context.find_relevant_chunks.await_args.args[0] == "AI ethics healthcare"
-    assert mock_graph_context.find_relevant_entities.await_args.args[0] == "AI ethics healthcare"
-
-
-@pytest.mark.asyncio
-async def test_synthesize_calls_repo_methods(synthesizer, mock_persona_repo):
-    """Verify PersonaRepository methods were called with correct args."""
-    await synthesizer.synthesize(
-        query="AI ethics healthcare",
-        dataset_id="test_dataset",
-        max_agents=5,
-    )
-
-    # Verify fetch_nodes_by_names was called
-    assert mock_persona_repo.fetch_nodes_by_names.called
-
-    # Verify metrics calculation was called
-    assert mock_persona_repo.calculate_agent_metrics_and_context_for_llm.called
-
-    # Verify profile building was called
-    assert mock_persona_repo.build_single_agent_profile_from_node.called
-
-
-@pytest.mark.asyncio
-async def test_synthesize_profiles_have_valid_structure(mock_agent_profile):
-    """Verify returned profiles have all required Agent fields."""
-    profile = mock_agent_profile
-
-    assert hasattr(profile, "identity")
-    assert hasattr(profile, "domain_tags")
-    assert hasattr(profile, "bio")
-    assert hasattr(profile, "detailed_perspective")
-    assert hasattr(profile, "confidence")
-    assert hasattr(profile, "confidence_breakdown")
-    assert hasattr(profile, "summary_provenance")
-
-    assert isinstance(profile.identity, PersonaIdentity)
-    assert isinstance(profile.confidence_breakdown, ConfidenceBreakdown)
-
-
-@pytest.mark.asyncio
-async def test_synthesize_returns_exactly_target_profiles():
-    """When graph has enough entities, adaptive target is returned exactly.
-
-    With 9 entities: sqrt(9) * 4 = 12, capped at max_agents=5 -> returns 5.
-    """
-    entities = []
-    for i in range(9):
-        node = MagicMock()
-        node.id = str(uuid4())
-        node.name = f"Agent{chr(65 + i)}"
-        node.label = "Persona"
-        node.properties = {"name": f"Agent{chr(65 + i)}", "domain_tags": ["test"]}
-        node.relevance_score = 0.9 - (i * 0.01)
-        node.domain_tags = ["test"]
-        entities.append(node)
-
-    repo = MagicMock()
-    repo.fetch_nodes_by_names = AsyncMock(
-        return_value={f"Agent{chr(65 + i)}": {"name": f"Agent{chr(65 + i)}"} for i in range(9)}
-    )
-    repo.calculate_agent_metrics_and_context_for_llm = AsyncMock(
-        return_value={
-            "confidence": 0.75,
-            "density": 5,
-            "connectivity": 0.6,
-            "relevance_score": 1.0,
-            "matched_sectors": ["test"],
-            "neighbor_context": [],
-            "context_text": "Test context",
-        }
-    )
-    repo.build_single_agent_profile_from_node = AsyncMock(
-        return_value=Agent(
-            discovery_type=DiscoveryType.INTENT_DRIVEN,
-            expertise_level=ExpertiseLevel.STRATEGIC,
-            identity=PersonaIdentity(
-                name="Agent", archetype="Analyst", communication_style="factual"
-            ),
-            domain_tags=["test"],
-            bio="desc",
-            detailed_perspective="perspective",
-            confidence=0.75,
-            confidence_breakdown=ConfidenceBreakdown(
-                source_breadth=1, node_density=1, relationship_connectivity=0.5
-            ),
-            summary_provenance=[],
-            last_updated=datetime.utcnow(),
-        )
-    )
-
-    ctx = seating_ctx(entities)
-    
-    synth = ProfileSynthesizer(persona_repo=repo, graph_context=ctx)
-    profiles = await synth.synthesize(query="test", dataset_id="ds", max_agents=5)
-
-    assert len(profiles) == 5
-
-
-@pytest.mark.asyncio
-async def test_synthesize_returns_fewer_when_sparse():
-    """When graph is sparse, fewer than max_agents are returned.
-
-    With 4 entities: sqrt(4) * 4 = 8, capped at max_agents=5 -> returns min(5,8)=4.
-    """
-    entities = []
-    for i in range(4):
-        node = MagicMock()
-        node.id = str(uuid4())
-        node.name = f"Agent{chr(65 + i)}"
-        node.label = "Persona"
-        node.properties = {"name": f"Agent{chr(65 + i)}"}
-        node.relevance_score = 0.8
-        node.domain_tags = ["test"]
-        entities.append(node)
-
-    repo = MagicMock()
-    repo.fetch_nodes_by_names = AsyncMock(
-        return_value={f"Agent{chr(65 + i)}": {"name": f"Agent{chr(65 + i)}"} for i in range(4)}
-    )
-    repo.calculate_agent_metrics_and_context_for_llm = AsyncMock(
-        return_value={
-            "confidence": 0.75,
-            "density": 2,
-            "connectivity": 0.5,
-            "relevance_score": 0.8,
-            "matched_sectors": ["test"],
-            "neighbor_context": [],
-            "context_text": "Test",
-        }
-    )
-    repo.build_single_agent_profile_from_node = AsyncMock(
-        return_value=Agent(
-            discovery_type=DiscoveryType.INTENT_DRIVEN,
-            expertise_level=ExpertiseLevel.STRATEGIC,
-            identity=PersonaIdentity(
-                name="Agent", archetype="Analyst", communication_style="factual"
-            ),
-            domain_tags=["test"],
-            bio="desc",
-            detailed_perspective="perspective",
-            confidence=0.75,
-            confidence_breakdown=ConfidenceBreakdown(
-                source_breadth=1, node_density=1, relationship_connectivity=0.5
-            ),
-            summary_provenance=[],
-            last_updated=datetime.utcnow(),
-        )
-    )
-
-    ctx = seating_ctx(entities)
-    
-    synth = ProfileSynthesizer(persona_repo=repo, graph_context=ctx)
-    profiles = await synth.synthesize(query="test", dataset_id="ds", max_agents=5)
-
-    assert 0 < len(profiles) < 5
-
-
-@pytest.mark.asyncio
-async def test_synthesize_profiles_have_provenance_and_domain_tags():
-    """All returned profiles have non-empty provenance and domain_tags."""
-    entities = []
-    for i in range(3):
-        node = MagicMock()
-        node.id = str(uuid4())
-        node.name = f"Agent{chr(65 + i)}"
-        node.label = "Persona"
-        node.properties = {"name": f"Agent{chr(65 + i)}"}
-        node.relevance_score = 0.9
-        node.domain_tags = ["ethics", "healthcare"]
-        entities.append(node)
-
-    repo = MagicMock()
-    repo.fetch_nodes_by_names = AsyncMock(
-        return_value={f"Agent{chr(65 + i)}": {"name": f"Agent{chr(65 + i)}"} for i in range(3)}
-    )
-    repo.calculate_agent_metrics_and_context_for_llm = AsyncMock(
-        return_value={
-            "confidence": 0.75,
-            "density": 3,
-            "connectivity": 0.6,
-            "relevance_score": 0.9,
-            "matched_sectors": ["ethics", "healthcare"],
-            "neighbor_context": [],
-            "context_text": "Test",
-        }
-    )
-    repo.build_single_agent_profile_from_node = AsyncMock(
-        return_value=Agent(
-            discovery_type=DiscoveryType.INTENT_DRIVEN,
-            expertise_level=ExpertiseLevel.STRATEGIC,
-            identity=PersonaIdentity(
-                name="Agent", archetype="Analyst", communication_style="factual"
-            ),
-            domain_tags=["ethics", "healthcare"],
-            bio="desc",
-            detailed_perspective="perspective",
-            confidence=0.75,
-            confidence_breakdown=ConfidenceBreakdown(
-                source_breadth=2, node_density=3, relationship_connectivity=0.6
-            ),
-            summary_provenance=[
-                ProvenanceLink(
-                    doc_id="doc1", title="Source", breadcrumb="a>b", chunk_id=uuid4()
-                )
-            ],
-            last_updated=datetime.utcnow(),
-        )
-    )
-
-    ctx = seating_ctx(entities)
-    
-    synth = ProfileSynthesizer(persona_repo=repo, graph_context=ctx)
-    profiles = await synth.synthesize(query="test", dataset_id="ds", max_agents=5)
-
-    assert len(profiles) == 3
-    for p in profiles:
-        assert len(p.summary_provenance) > 0, "provenance must be non-empty"
-        assert len(p.domain_tags) > 0, "domain_tags must be non-empty"
-
-
-@pytest.mark.asyncio
-async def test_synthesize_confidence_in_valid_range():
-    """All returned profiles have confidence in [0.4, 0.95]."""
-    entities = []
-    for i in range(3):
-        node = MagicMock()
-        node.id = str(uuid4())
-        node.name = f"Agent{chr(65 + i)}"
-        node.label = "Persona"
-        node.properties = {"name": f"Agent{chr(65 + i)}"}
-        node.relevance_score = 0.8
-        node.domain_tags = ["test"]
-        entities.append(node)
-
-    repo = MagicMock()
-    repo.fetch_nodes_by_names = AsyncMock(
-        return_value={f"Agent{chr(65 + i)}": {"name": f"Agent{chr(65 + i)}"} for i in range(3)}
-    )
-    repo.calculate_agent_metrics_and_context_for_llm = AsyncMock(
-        return_value={
-            "confidence": 0.75,
-            "density": 3,
-            "connectivity": 0.6,
-            "relevance_score": 0.8,
-            "matched_sectors": ["test"],
-            "neighbor_context": [],
-            "context_text": "Test",
-        }
-    )
-
-    # Build profiles with varying confidence values
-    async def build_profile(*args, **kwargs):
-        return Agent(
-            discovery_type=DiscoveryType.INTENT_DRIVEN,
-            expertise_level=ExpertiseLevel.STRATEGIC,
-            identity=PersonaIdentity(
-                name="Agent", archetype="Analyst", communication_style="factual"
-            ),
-            domain_tags=["test"],
-            bio="desc",
-            detailed_perspective="perspective",
-            confidence=0.75,
-            confidence_breakdown=ConfidenceBreakdown(
-                source_breadth=2, node_density=3, relationship_connectivity=0.6
-            ),
-            summary_provenance=[],
-            last_updated=datetime.utcnow(),
-        )
-
-    repo.build_single_agent_profile_from_node = AsyncMock(side_effect=build_profile)
-
-    ctx = seating_ctx(entities)
-    
-    synth = ProfileSynthesizer(persona_repo=repo, graph_context=ctx)
-    profiles = await synth.synthesize(query="test", dataset_id="ds", max_agents=5)
-
-    for p in profiles:
-        assert 0.4 <= p.confidence <= 0.95
-
-
-@pytest.mark.asyncio
-async def test_synthesize_vector_search_called_with_query_string():
-    """find_relevant_entities is called with the raw query string, not an embedding.
-
-    The GraphContext internally calls _get_embedding(query) before vector search.
-    The synthesize method passes the raw query; this test verifies that contract.
-    The graph returns one entity — an empty graph is now a hard selection failure.
-    """
-    entity = MagicMock()
-    entity.id = "e1"
-    entity.name = "AgentA"
-    entity.relevance_score = 0.9
-    entity.domain_tags = ["test"]
-    entity.summary = "test entity"
-    ctx = seating_ctx([entity])
-
-    repo = MagicMock()
-    repo.fetch_nodes_by_names = AsyncMock(return_value={})
-    repo.calculate_agent_metrics_and_context_for_llm = AsyncMock(
-        return_value={
-            "confidence": 0.75,
-            "density": 1,
-            "connectivity": 0.5,
-            "relevance_score": 1.0,
-            "matched_sectors": [],
-            "neighbor_context": [],
-            "context_text": "",
-        }
-    )
-    repo.build_single_agent_profile_from_node = AsyncMock(return_value=None)
-
-    synth = ProfileSynthesizer(persona_repo=repo, graph_context=ctx)
-    await synth.synthesize(
-        query="AI ethics in healthcare policy", dataset_id="ds", max_agents=3
-    )
-
-    ctx.find_relevant_entities.assert_awaited_once()
-    assert ctx.find_relevant_entities.await_args.args[0] == "AI ethics in healthcare policy"
-
-
-"""Tests for ProfileSynthesizer.synthesize_from_names (activation path)."""
-import logging
-
-import pytest
-
-
-@pytest.fixture
-def repo():
-    repo = AsyncMock()
-    repo.fetch_nodes_by_names = AsyncMock(
-        return_value={
-            "Carl": {"name": "Carl", "domain_tags": ["regulation"], "confidence": 0.7},
-        }
-    )
-    repo.calculate_agent_metrics_and_context_for_llm = AsyncMock(
-        return_value={"confidence": 0.7}
-    )
-    repo.build_single_agent_profile_from_node = AsyncMock(
-        side_effect=lambda **kw: MagicMock(name=kw["agent_name"])
-    )
-    return repo
-
-
-@pytest.fixture
-def synth(repo):
-    return ProfileSynthesizer(repo, MagicMock())
-
-
-@pytest.mark.asyncio
-async def test_synthesize_from_names_builds_via_repo_pipeline(repo, synth):
-    profiles = await synth.synthesize_from_names(
-        ["Carl"], "query", "ds1", {"Carl": 0.5}
-    )
-    assert len(profiles) == 1
-    repo.fetch_nodes_by_names.assert_awaited_with(["Carl"], dataset_id="ds1")
-    kwargs = repo.build_single_agent_profile_from_node.await_args.kwargs
-    assert kwargs["agent_name"] == "Carl" and kwargs["dataset_id"] == "ds1"
-    metrics_kw = repo.calculate_agent_metrics_and_context_for_llm.await_args.kwargs
-    assert metrics_kw["max_relevance"] == 1.0
-    assert metrics_kw["sector_results"][0]["total_relevance"] == 0.5
-
-
-@pytest.mark.asyncio
-async def test_synthesize_from_names_skips_unresolvable(repo, synth):
-    repo.build_single_agent_profile_from_node = AsyncMock(return_value=None)
-    profiles = await synth.synthesize_from_names(["Ghost"], "q", "ds")
-    assert profiles == []
-
-
-@pytest.mark.asyncio
-async def test_synthesize_from_names_empty_names(repo, synth):
-    assert await synth.synthesize_from_names([], "q", "ds") == []
-    repo.fetch_nodes_by_names.assert_not_awaited()
-
-
-@pytest.mark.asyncio
-async def test_synthesize_from_names_skips_name_absent_from_nodes_map(repo, synth):
-    """A name that does not resolve in nodes_map is unresolvable: skip, never build.
-
-    The repo fixture resolves only "Carl", so "Ghost" is absent from the graph.
-    Building anyway would fabricate an Agent with default archetype/stance/cior
-    from the bare name — a hardcoded roster in disguise.
-    """
-    nodes_map = await repo.fetch_nodes_by_names(["Ghost"])
-    assert "Ghost" not in nodes_map  # premise: the name does not resolve
-
-    profiles = await synth.synthesize_from_names(["Ghost"], "q", "ds")
-
-    assert profiles == []
-    repo.build_single_agent_profile_from_node.assert_not_awaited()
-
-
-@pytest.mark.asyncio
-async def test_synthesize_from_names_filters_none_for_resolved_name(repo, synth):
-    """A name that does resolve, whose builder still yields None, is filtered out.
-
-    This keeps the `p is not None` filter exercised now that unresolvable names
-    short-circuit before the builder.
-    """
-    repo.build_single_agent_profile_from_node = AsyncMock(return_value=None)
-
-    profiles = await synth.synthesize_from_names(["Carl"], "q", "ds", {"Carl": 0.5})
-
-    assert profiles == []
-    repo.build_single_agent_profile_from_node.assert_awaited()
-
-
-@pytest.mark.asyncio
-async def test_synthesize_from_names_writes_the_joiner_provenance_before_building(
-    repo, synth
-):
-    """I2: a joiner whose node carries `triplet_source_id` gets the D2 write."""
-    order: list[str] = []
-    repo.fetch_nodes_by_names = AsyncMock(
-        return_value={
-            "Carl": {
-                "name": "Carl",
-                "domain_tags": ["regulation"],
-                "triplet_source_id": " node-7 ",
-            },
-        }
-    )
-    repo.write_persona_provenance = AsyncMock(
-        side_effect=lambda **kw: order.append("write") or 1
-    )
-    repo.build_single_agent_profile_from_node = AsyncMock(
-        side_effect=lambda **kw: order.append("build")
-        or MagicMock(name=kw["agent_name"])
-    )
-
-    profiles = await synth.synthesize_from_names(["Carl"], "q", "ds1", {"Carl": 0.5})
-
-    repo.write_persona_provenance.assert_awaited_once_with(
-        persona_name="Carl",
-        dataset_id="ds1",
-        chunk_node_ids=["node-7"],
-    )
-    assert order == ["write", "build"]  # written BEFORE the build reads it
-    assert len(profiles) == 1
-
-
-@pytest.mark.asyncio
-async def test_synthesize_from_names_skips_the_write_without_a_chunk_ref(repo, synth):
-    """The fixture node has no `triplet_source_id`: nothing is written, never invented."""
-    await synth.synthesize_from_names(["Carl"], "q", "ds1", {"Carl": 0.5})
-
-    repo.write_persona_provenance.assert_not_awaited()
-
-
-@pytest.mark.asyncio
-async def test_synthesize_from_names_survives_a_failing_writer(repo, synth):
-    """Same tolerance as `_build_profile`: logged and continued, never raised."""
-    repo.fetch_nodes_by_names = AsyncMock(
-        return_value={
-            "Carl": {"name": "Carl", "triplet_source_id": "node-7"},
-        }
-    )
-    repo.write_persona_provenance = AsyncMock(side_effect=RuntimeError("neo4j down"))
-
-    profiles = await synth.synthesize_from_names(["Carl"], "q", "ds1", {"Carl": 0.5})
-
-    assert len(profiles) == 1
-
-
-"""Seating: the reachable candidates are seated by relevance, PageRank and MMR."""
-
-
-def _cluster_entity(name: str, score: float, tags: list, summary: str) -> MagicMock:
-    node = MagicMock()
-    node.id = name  # unique per entity, so each entity is its own cluster
-    node.name = name
-    node.label = "Persona"
-    node.properties = {"name": name}
-    node.relevance_score = score
-    node.domain_tags = tags
-    node.summary = summary
-    return node
-
-
-def _selection_synth(entities, chunks=None, neighbours=None):
-    """A synthesizer over `entities` whose repo names each built profile after its agent."""
-
-    async def build_profile(**kwargs):
-        return MagicMock(
-            identity=PersonaIdentity(
-                name=kwargs["agent_name"],
-                archetype="Analyst",
-                communication_style="factual",
-            )
-        )
-
-    repo = MagicMock()
-    repo.fetch_nodes_by_names = AsyncMock(return_value={})
-    repo.calculate_agent_metrics_and_context_for_llm = AsyncMock(return_value={})
-    repo.build_single_agent_profile_from_node = AsyncMock(side_effect=build_profile)
-    ctx = seating_ctx(entities, chunks=chunks, neighbours=neighbours)
-    return ProfileSynthesizer(persona_repo=repo, graph_context=ctx)
-
-
-class _ActorReplies:
-    """An LLM client whose reply classifies every label by `flags`."""
-
-    def __init__(self, flags):
-        self._flags = flags
-
-    async def generate(self, **kwargs):
-        return json.dumps(self._flags)
-
-
-class _HeldClient:
-    async def generate(self, **kwargs):
-        raise MeteringError("hold gone")
-
-
-# The entity the question names is seated before a denser entity it does not name.
-_SELECTION_ENTITIES = [
-    _cluster_entity("Carbon Analyst", 0.9, ["economics"], "carbon tax economics policy"),
-    _cluster_entity("Grid Engineer", 0.5, ["energy"], "energy grid engineering"),
-]
+# ---- seating: the question decides who is seated -------------------------------------------
 
 
 @pytest.mark.asyncio
 async def test_seats_follow_the_question_not_graph_density():
-    lumen = _cluster_entity("Lumen Pay", 0.0, ["payments"], "pricing")
-    hub = _cluster_entity("Dense Hub", 0.0, ["misc"], "misc")
-    chunks = chunk_search(
-        vector=["c_pricing", "c_misc"],
-        fulltext=["c_pricing"],
-        mentions={"c_pricing": [lumen.id], "c_misc": [hub.id]},
+    lumen = _entity("lumen-pay", "Lumen Pay")
+    hub = _entity("dense-hub", "Dense Hub")
+    graph = FakeGraph(
+        [lumen, hub],
+        chunks=ChunkSearch(
+            vector=[ChunkHit("c-pay", "doc-pay", "Memo", "Pricing", _sentences("Lumen Pay"), 1, (lumen.id,))],
+            fulltext=[ChunkHit("c-pay", "doc-pay", "Memo", "Pricing", _sentences("Lumen Pay"), 1, (lumen.id,))],
+        ),
+        neighbours={
+            hub.id: [_entity(f"hub-{i}", f"Hub part {i}") for i in range(5)],
+            lumen.id: [_entity("lumen-n", "Lumen part")],
+        },
     )
-    neighbours = {
-        hub.id: [
-            EntityNode(id=f"hub-{i}", name=f"Hub part {i}", label="Persona")
-            for i in range(5)
-        ],
-        lumen.id: [EntityNode(id="lumen-n", name="Lumen part", label="Persona")],
-    }
-    synth = _selection_synth([lumen, hub], chunks=chunks, neighbours=neighbours)
 
-    profiles = await synth.synthesize(query="pricing?", dataset_id="ds-A", max_agents=2)
+    agents = await _run(_synth([lumen, hub], graph=graph), max_agents=2)
 
-    assert profiles[0].identity.name == "Lumen Pay"
+    assert agents[0].identity.name == "Lumen Pay"
 
 
 @pytest.mark.asyncio
 async def test_a_question_the_graph_does_not_cover_is_refused_with_a_reason():
-    synth = _selection_synth(
-        [_cluster_entity("Carbon Analyst", 0.9, ["economics"], "carbon")],
-        chunks=chunk_search(vector=[], fulltext=[]),
-    )
+    graph = FakeGraph([KESTRA], chunks=ChunkSearch(vector=[], fulltext=[]))
+
     with pytest.raises(NoAgentsDerivableError, match="does not cover"):
-        await synth.synthesize("weather?", dataset_id="ds-A", max_agents=4)
+        await _run(_synth([KESTRA], graph=graph), query="weather?", max_agents=4)
 
 
 def test_no_density_fallback_remains():
@@ -756,1028 +218,282 @@ def test_no_density_fallback_remains():
 
 @pytest.mark.asyncio
 async def test_decisions_record_every_candidate_and_the_seated_ones_in_order():
-    entities = [
-        _cluster_entity("Alpha Bank", 0.9, ["finance"], "a"),
-        _cluster_entity("Beta Fund", 0.5, ["finance"], "b"),
-        _cluster_entity("Gamma Trust", 0.4, ["finance"], "c"),
-    ]
-    synth = _selection_synth(entities)
-    decisions: list[SeatDecision] = []
+    decisions: list = []
 
-    profiles = await synth.synthesize(
-        query="q", dataset_id="ds", max_agents=2, decisions=decisions
-    )
+    await _run(_synth([KESTRA, LUMEN, ORBIT]), max_agents=2, decisions=decisions)
 
-    assert len(decisions) == 3
-    seated = [d.name for d in decisions if d.seated]
-    assert seated == [p.identity.name for p in profiles]
-    assert len(seated) == 2
+    seated = [d for d in decisions if d.seated]
+    assert [(d.name, d.order) for d in seated] == [("Kestra", 1), ("Lumen", 2)]
+    assert [d.reason for d in decisions if not d.seated] == ["eligible, not reached"]
 
 
 @pytest.mark.asyncio
 async def test_an_entity_only_the_chunks_name_is_fetched_by_id_and_seated():
-    named = _cluster_entity("Lumen Pay", 0.0, ["payments"], "pricing")
-    chunks = chunk_search(
-        vector=["c0", "c1"],
-        fulltext=["c0", "c1"],
-        mentions={"c0": [named.id], "c1": [named.id]},
-    )
-    ctx = seating_ctx([], chunks=chunks, neighbours={named.id: []})
-    ctx.find_entities_by_ids = AsyncMock(return_value=[named])
-    synth = ProfileSynthesizer(
-        persona_repo=_selection_synth([])._repo, graph_context=ctx
-    )
+    named_only_by_chunks = _entity("orbit", "Orbit")
+    graph = FakeGraph([KESTRA, named_only_by_chunks], hits=[KESTRA])
+    graph._chunks = _chunks_for([KESTRA, named_only_by_chunks])
 
-    profiles = await synth.synthesize(query="pricing?", dataset_id="ds", max_agents=1)
+    agents = await _run(_synth([KESTRA], graph=graph), max_agents=2)
 
-    ctx.find_entities_by_ids.assert_awaited_once_with([named.id], dataset_id="ds")
-    assert [p.identity.name for p in profiles] == ["Lumen Pay"]
+    assert {a.identity.name for a in agents} == {"Kestra", "Orbit"}
 
 
 @pytest.mark.asyncio
 async def test_a_non_actor_label_is_not_seated():
-    company = _cluster_entity("Lumen Pay", 0.9, ["payments"], "pricing")
-    company.label = "Company"
-    metric = _cluster_entity("Q3 Revenue Figure", 0.95, ["finance"], "revenue")
-    metric.label = "Metric"
-    synth = _selection_synth([company, metric])
-    decisions: list[SeatDecision] = []
+    metric = _entity("margin", "Margin", label="Metric")
+    entities = [KESTRA, metric]
 
-    profiles = await synth.synthesize(
-        query="pricing?",
-        dataset_id="ds",
-        max_agents=2,
-        decisions=decisions,
-        llm_client=_ActorReplies({"Company": True, "Metric": False}),
-    )
+    agents = await _run(_synth(entities), FakeLLM(actor_flags={"Metric": False}), max_agents=3)
 
-    assert [p.identity.name for p in profiles] == ["Lumen Pay"]
-    assert {d.name: d.reason for d in decisions}["Q3 Revenue Figure"] == "not an actor"
-
-
-@pytest.mark.asyncio
-async def test_without_an_llm_client_every_type_counts_as_an_actor_and_says_so():
-    company = _cluster_entity("Lumen Pay", 0.9, ["payments"], "pricing")
-    company.label = "Company"
-    synth = _selection_synth([company])
-    warnings: list[str] = []
-
-    profiles = await synth.synthesize(
-        query="pricing?", dataset_id="ds", max_agents=1, warnings=warnings
-    )
-
-    assert [p.identity.name for p in profiles] == ["Lumen Pay"]
-    assert any("actor filter skipped" in w for w in warnings)
+    assert [a.identity.name for a in agents] == ["Kestra"]
 
 
 @pytest.mark.asyncio
 async def test_metering_error_from_the_actor_filter_is_not_absorbed():
-    company = _cluster_entity("Lumen Pay", 0.9, ["payments"], "pricing")
-    company.label = "Company"
-    synth = _selection_synth([company])
+    metric = _entity("margin", "Margin", label="Metric")
 
     with pytest.raises(MeteringError):
-        await synth.synthesize(
-            query="pricing?", dataset_id="ds", max_agents=1, llm_client=_HeldClient()
-        )
+        await _run(_synth([metric]), FakeLLM(raises=MeteringError("hold gone")))
 
 
 @pytest.mark.asyncio
 async def test_a_candidate_with_one_piece_of_evidence_is_not_seated():
-    thin = _cluster_entity("Thin Source", 0.9, ["x"], "x")
-    solid = _cluster_entity("Solid Source", 0.5, ["x"], "y")
-    chunks = chunk_search(
-        vector=["c0", "c1"],
-        fulltext=["c0", "c1"],
-        mentions={"c0": [thin.id, solid.id], "c1": [solid.id]},
-    )
-    synth = _selection_synth([thin, solid], chunks=chunks, neighbours={})
-    decisions: list[SeatDecision] = []
+    graph = FakeGraph([KESTRA], neighbours={"kestra": []})
 
-    profiles = await synth.synthesize(
-        query="q", dataset_id="ds", max_agents=2, decisions=decisions
-    )
+    agents = await _run(_synth([KESTRA], graph=graph), max_agents=3)
 
-    assert [p.identity.name for p in profiles] == ["Solid Source"]
-    assert {d.name: d.reason for d in decisions}["Thin Source"] == "evidence 1 < 2"
+    assert agents == []
 
 
 @pytest.mark.asyncio
 async def test_same_name_entities_share_one_seat():
-    """Two clusters whose names fold to one cluster key take one seat between them."""
-    first = _cluster_entity("Twin", 0.9, ["alpha"], "alpha twin")
-    second = _cluster_entity("Twin", 0.5, ["beta"], "beta twin")
-    first.id, second.id = "e-a", "e-b"
-    synth = _selection_synth([first, second])
+    twin = _entity("kestra-2", "Kestra")
 
-    profiles = await synth.synthesize(query="q", dataset_id="ds", max_agents=2)
+    agents = await _run(_synth([KESTRA, twin]), max_agents=3)
 
-    assert [p.identity.name for p in profiles] == ["Twin"]
-
-
-def _distill_synth(entities, distilled_by_name: dict):
-    """A synthesizer whose repo records the distillation and profile-build calls."""
-
-    async def build_profile(**kwargs):
-        return MagicMock(
-            identity=PersonaIdentity(
-                name=kwargs["agent_name"],
-                archetype="Analyst",
-                communication_style="factual",
-            )
-        )
-
-    repo = MagicMock()
-    repo.fetch_nodes_by_names = AsyncMock(return_value={})
-    repo.calculate_agent_metrics_and_context_for_llm = AsyncMock(return_value={})
-    repo.distill_profiles = AsyncMock(return_value=distilled_by_name)
-    repo.build_single_agent_profile_from_node = AsyncMock(side_effect=build_profile)
-
-    ctx = seating_ctx(entities)
-    return ProfileSynthesizer(persona_repo=repo, graph_context=ctx), repo
-
-
-def _build_calls(repo) -> dict:
-    """{agent_name: distilled kwarg} across every profile-build call."""
-    return {
-        call.kwargs["agent_name"]: call.kwargs["distilled"]
-        for call in repo.build_single_agent_profile_from_node.await_args_list
-    }
+    assert len(agents) == 1
 
 
 @pytest.mark.asyncio
-async def test_distill_makes_one_batch_call_and_threads_results_per_persona():
-    intent = QueryIntent(
-        direct_keywords=["carbon"],
-        latent_sectors=[],
-        search_perspectives=[],
-        core_question="Tax carbon?",
-        stance_axis="Support = tax it.",
-    )
-    distilled = {
-        "Carbon Analyst": ("Carbon one-liner.", "I am the carbon analyst."),
-        "Grid Engineer": ("Grid one-liner.", "I am the grid engineer."),
-    }
-    synth, repo = _distill_synth(_SELECTION_ENTITIES, distilled)
+async def test_returns_exactly_the_seat_count_when_the_pool_is_larger():
+    names = ["Acme", "Borealis", "Cygnet", "Dorado", "Eridanus"]
+    entities = [_entity(f"e{i}", name, score=1 - i / 10) for i, name in enumerate(names)]
 
-    profiles = await synth.synthesize(
-        query="q",
-        dataset_id="ds",
-        max_agents=2,
-        intent=intent,
-        distill=True,
-    )
+    agents = await _run(_synth(entities), max_agents=3)
 
-    # ONE batched call for the whole selection set, fed the S3 question context
-    repo.distill_profiles.assert_awaited_once()
-    call = repo.distill_profiles.await_args.kwargs
-    assert [entry["name"] for entry in call["personas"]] == [
-        "Carbon Analyst",
-        "Grid Engineer",
-    ]
-    assert call["query"] == "q"
-    assert call["core_question"] == "Tax carbon?"
-    assert call["stance_axis"] == "Support = tax it."
-    # ...and each entry carries its own grounding
-    carbon_entry = call["personas"][0]
-    assert carbon_entry["evidence"] == ["carbon tax economics policy"]
-    assert "anchors" not in carbon_entry
-
-    # every persona's distilled pair reaches its own profile build
-    assert _build_calls(repo) == distilled
-    assert [p.identity.name for p in profiles] == ["Carbon Analyst", "Grid Engineer"]
+    assert len(agents) == 3
 
 
 @pytest.mark.asyncio
-async def test_distillation_entry_includes_source_text():
-    """Task 3: the persona's real chunk text grounds its distillation evidence."""
-    entity = _cluster_entity("Amazon", 0.9, ["retail"], "amazon summary")
-    entity.properties = {"name": "Amazon", "triplet_source_id": "chunk-1"}
-    synth, repo = _distill_synth([entity], {})
-    repo.fetch_source_evidence_by_chunk = AsyncMock(
-        return_value={"chunk-1": ["Amazon acquired WholeFoods for $2.5B"]}
-    )
+async def test_returns_fewer_when_the_pool_is_sparse():
+    agents = await _run(_synth([KESTRA, LUMEN]), max_agents=5)
 
-    await synth.synthesize(query="q", dataset_id="ds", max_agents=1, distill=True)
+    assert len(agents) == 2
 
-    entry = repo.distill_profiles.await_args.kwargs["personas"][0]
-    assert entry["evidence"] == [
-        "Amazon acquired WholeFoods for $2.5B",
-        "amazon summary",
-    ]
-    assert repo.fetch_source_evidence_by_chunk.await_args.args[0] == ["chunk-1"]
+
+# ---- the five profile checks ----------------------------------------------------------------
 
 
 @pytest.mark.asyncio
-async def test_source_text_is_fetched_once_for_the_whole_batch():
-    """One call over the union of every persona's chunk ids — never an N-loop."""
-    amazon = _cluster_entity("Amazon", 0.9, ["retail"], "amazon summary")
-    amazon.properties = {"name": "Amazon", "triplet_source_id": "c1"}
-    grid = _cluster_entity("Grid Co", 0.5, ["energy"], "grid summary")
-    grid.properties = {"name": "Grid Co", "triplet_source_id": "c2"}
-    synth, repo = _distill_synth([amazon, grid], {})
-    repo.fetch_source_evidence_by_chunk = AsyncMock(
-        return_value={"c1": ["amazon text"], "c2": ["grid text"]}
-    )
+async def test_a_failed_profile_is_not_seated_and_is_recorded():
+    records: list = []
 
-    await synth.synthesize(query="q", dataset_id="ds", max_agents=2, distill=True)
+    agents = await _run(_synth([KESTRA, LUMEN]), FakeLLM(fail={"Lumen"}), max_agents=2, records=records)
 
-    repo.fetch_source_evidence_by_chunk.assert_awaited_once()
-    assert sorted(repo.fetch_source_evidence_by_chunk.await_args.args[0]) == [
-        "c1",
-        "c2",
-    ]
+    assert [a.identity.name for a in agents] == ["Kestra"]
+    assert [(r.node.name, r.status) for r in records if r.node.name == "Lumen"] == [("Lumen", "rejected")]
 
 
 @pytest.mark.asyncio
-async def test_each_persona_is_grounded_in_only_its_own_source_text():
-    """R17: distinct chunks → distinct snippets; no persona sees another's text."""
-    amazon = _cluster_entity("Amazon", 0.9, ["retail"], "amazon summary")
-    amazon.properties = {"name": "Amazon", "triplet_source_id": "c1"}
-    grid = _cluster_entity("Grid Co", 0.5, ["energy"], "grid summary")
-    grid.properties = {"name": "Grid Co", "triplet_source_id": "c3"}
-    synth, repo = _distill_synth([amazon, grid], {})
-    repo.fetch_source_evidence_by_chunk = AsyncMock(
-        return_value={
-            "c1": ["Amazon acquired WholeFoods"],
-            "c3": ["Grid demand peaked"],
-        }
+async def test_no_template_string_reaches_any_output():
+    records: list = []
+    agents = await _run(_synth([KESTRA, LUMEN, ORBIT]), max_agents=3, records=records)
+
+    serialised = json.dumps(
+        [a.model_dump(mode="json") for a in agents] + [a.view().model_dump(mode="json") for a in agents]
     )
 
-    await synth.synthesize(query="q", dataset_id="ds", max_agents=2, distill=True)
-
-    entries = {
-        entry["name"]: entry["evidence"]
-        for entry in repo.distill_profiles.await_args.kwargs["personas"]
-    }
-    assert "Amazon acquired WholeFoods" in entries["Amazon"]
-    assert "Grid demand peaked" in entries["Grid Co"]
-    assert "Grid demand peaked" not in entries["Amazon"]
-    assert "Amazon acquired WholeFoods" not in entries["Grid Co"]
-
-
-def _real_chunk_fetch_repo(rows):
-    """A fake-driver repo exposing the REAL `fetch_source_evidence_by_chunk`.
-
-    Lets a synthesizer-level test exercise the actual query + bucketing instead
-    of a mock that can only replay whatever it was handed.
-    """
-    from src.persona.repository import PersonaRepository
-
-    real = PersonaRepository.__new__(PersonaRepository)
-    real._db = "neo4j"
-    session = MagicMock()
-    result = MagicMock()
-    result.data = AsyncMock(return_value=rows)
-    session.run = AsyncMock(return_value=result)
-    session_cm = MagicMock()
-    session_cm.__aenter__ = AsyncMock(return_value=session)
-    session_cm.__aexit__ = AsyncMock(return_value=False)
-    driver = MagicMock()
-    driver.session = MagicMock(return_value=session_cm)
-    real._driver = driver
-    return real
+    assert not [t for t in TEMPLATE_STRINGS if t in serialised]
 
 
 @pytest.mark.asyncio
-async def test_a_chunk_heavy_persona_does_not_starve_the_later_one():
-    """R19: no global snippet limit — the late persona keeps its own grounding.
+async def test_same_node_two_questions_differ():
+    synth = _synth([KESTRA])
 
-    'Heavy' names 11 chunks (its node + a 10-node subgraph) and 'Light' names 1,
-    which lands LAST in the persona-ordered union. Under a global
-    `LIMIT 3 * n_personas` the query returns only Heavy's first rows, so Light
-    silently distills on `[]`.
-    """
-    heavy = _cluster_entity("Heavy", 0.9, ["retail"], "heavy summary")
-    heavy.properties = {"name": "Heavy", "triplet_source_id": "h1"}
-    heavy_subgraph = []
-    for i in range(2, 12):
-        node = _cluster_entity(f"Heavy {i}", 0.05, ["retail"], "")
-        node.properties = {"name": f"Heavy {i}", "triplet_source_id": f"h{i}"}
-        heavy_subgraph.append(node)
-    light = _cluster_entity("Light", 0.5, ["energy"], "light summary")
-    light.properties = {"name": "Light", "triplet_source_id": "L1"}
+    first = (await _run(synth, query="Should we enter Berlin?", max_agents=1))[0]
+    second = (await _run(synth, query="Is the supplier reliable?", max_agents=1))[0]
 
-    async def build_profile(**kwargs):
-        return MagicMock(
-            identity=PersonaIdentity(
-                name=kwargs["agent_name"],
-                archetype="Analyst",
-                communication_style="factual",
-            )
-        )
+    assert first.role != second.role
 
-    repo = MagicMock()
-    repo.fetch_nodes_by_names = AsyncMock(return_value={})
-    repo.calculate_agent_metrics_and_context_for_llm = AsyncMock(return_value={})
-    repo.distill_profiles = AsyncMock(return_value={})
-    repo.build_single_agent_profile_from_node = AsyncMock(side_effect=build_profile)
-    # The real query + bucketing, over a fake driver.
-    repo.fetch_source_evidence_by_chunk = _real_chunk_fetch_repo(
-        [
-            {"chunk_id": cid, "text": f"text-{cid}"}
-            for cid in ["h1", *[f"h{i}" for i in range(2, 12)], "L1"]
+
+@pytest.mark.asyncio
+async def test_abstain_when_nothing_bears_on_the_question():
+    agents = await _run(_synth([KESTRA]), FakeLLM(abstain={"Kestra"}), max_agents=1)
+
+    assert agents[0].stance is Stance.ABSTAIN
+    assert agents[0].cites["stance"] == []
+
+
+@pytest.mark.asyncio
+async def test_a_run_where_every_profile_fails_is_refused_with_a_reason():
+    with pytest.raises(NoAgentsDerivableError, match="profile"):
+        await _run(_synth([KESTRA, LUMEN]), FakeLLM(fail={"Kestra", "Lumen"}), max_agents=2)
+
+
+# ---- the seated Agent, records, sinks and the seam ------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_a_seated_agent_carries_the_validated_draft_and_its_pack():
+    agents = await _run(_synth([KESTRA]), max_agents=1)
+
+    agent = agents[0]
+    assert (agent.node_id, agent.dataset_id, agent.identity.name) == ("kestra", "ds-A", "Kestra")
+    assert agent.stance is Stance.POSITIVE
+    assert (agent.role, agent.strength, agent.confidence) == (f"presses {QUESTION} as proof of demand", 0.7, 0.4)
+    assert agent.bio == _bio("Kestra")
+    assert agent.evidence and agent.cites["stance"]
+
+
+@pytest.mark.asyncio
+async def test_relations_are_read_only_to_the_capped_neighbours():
+    neighbours = {"kestra": [_entity(f"n{i}", f"Neighbour {i}") for i in range(7)]}
+    graph = FakeGraph([KESTRA], neighbours=neighbours)
+
+    await _run(_synth([KESTRA], graph=graph), max_agents=1)
+
+    entity_id, counterparts = graph.relation_calls[0]
+    assert (entity_id, len(counterparts)) == ("kestra", NEIGHBOUR_CAP)
+
+
+@pytest.mark.asyncio
+async def test_the_pack_keeps_at_most_eight_relations():
+    relations = {
+        "kestra": [
+            RelationHit("PARTNERS_WITH", True, f"n{i}", f"Neighbour {i}", "c-kestra") for i in range(MAX_RELATIONS + 2)
         ]
-    ).fetch_source_evidence_by_chunk
-
-    ctx = seating_ctx([heavy, light], neighbours={"Heavy": heavy_subgraph})
-    synth = ProfileSynthesizer(persona_repo=repo, graph_context=ctx)
-
-    await synth.synthesize(query="q", dataset_id="ds", max_agents=2, distill=True)
-
-    entries = {
-        entry["name"]: entry["evidence"]
-        for entry in repo.distill_profiles.await_args.kwargs["personas"]
     }
-    assert "text-h1" in entries["Heavy"]
-    assert "text-L1" in entries["Light"]  # the late persona is still grounded
-    assert not [t for t in entries["Light"] if t.startswith("text-h")]
+    graph = FakeGraph([KESTRA], relations=relations)
+
+    agents = await _run(_synth([KESTRA], graph=graph), max_agents=1)
+
+    assert len(agents[0].relations) == MAX_RELATIONS
 
 
 @pytest.mark.asyncio
-async def test_no_chunk_refs_means_no_evidence_fetch():
-    """A roster whose nodes carry no chunk ref makes no source-evidence query."""
-    synth, repo = _distill_synth(_SELECTION_ENTITIES, {})
-    repo.fetch_source_evidence_by_chunk = AsyncMock(return_value={})
+async def test_records_hold_every_candidate_tried_published_or_rejected():
+    records: list = []
 
-    await synth.synthesize(query="q", dataset_id="ds", max_agents=2, distill=True)
+    await _run(_synth([KESTRA, LUMEN]), FakeLLM(fail={"Lumen"}), max_agents=2, records=records)
 
-    repo.fetch_source_evidence_by_chunk.assert_not_awaited()
-
-
-@pytest.mark.asyncio
-async def test_distill_off_makes_no_llm_call_and_keeps_the_pre_s5_path():
-    """The default keyword is byte-identical behavior: no call, no distilled text."""
-    synth, repo = _distill_synth(_SELECTION_ENTITIES, {})
-
-    await synth.synthesize(query="q", dataset_id="ds", max_agents=2)
-
-    repo.distill_profiles.assert_not_called()
-    assert set(_build_calls(repo).values()) == {None}
-
-
-"""D2: the provenance writer runs per persona, before the profile build that reads it."""
-
-
-def _anchored_entity(name: str, anchor, score: float = 0.9) -> MagicMock:
-    """An entity whose `properties` carries the raw `triplet_source_id`."""
-    node = MagicMock()
-    node.id = name
-    node.name = name
-    node.label = "Persona"
-    node.properties = {"name": name}
-    if anchor is not None:
-        node.properties["triplet_source_id"] = anchor
-    node.relevance_score = score
-    node.domain_tags = ["test"]
-    node.summary = f"{name} summary"
-    return node
-
-
-def _provenance_synth(entities):
-    """A synthesizer whose repo records the write/build call order."""
-    order: list[str] = []
-
-    async def write(**kwargs):
-        order.append(f"write:{kwargs['persona_name']}")
-        return 1
-
-    async def build(**kwargs):
-        order.append(f"build:{kwargs['agent_name']}")
-        return MagicMock(
-            identity=PersonaIdentity(
-                name=kwargs["agent_name"],
-                archetype="Analyst",
-                communication_style="factual",
-            )
-        )
-
-    repo = MagicMock()
-    repo.fetch_nodes_by_names = AsyncMock(return_value={})
-    repo.calculate_agent_metrics_and_context_for_llm = AsyncMock(return_value={})
-    repo.write_persona_provenance = AsyncMock(side_effect=write)
-    repo.build_single_agent_profile_from_node = AsyncMock(side_effect=build)
-
-    ctx = seating_ctx(entities)
-    return ProfileSynthesizer(persona_repo=repo, graph_context=ctx), repo, order
+    assert sorted((r.node.name, r.status) for r in records) == [("Kestra", "published"), ("Lumen", "rejected")]
+    assert all(r.run_id == records[0].run_id for r in records)
 
 
 @pytest.mark.asyncio
-async def test_synthesize_writes_each_nodes_anchor_before_its_build():
-    """Two required nodes; each writer gets that node's own chunk ref."""
-    lead = _anchored_entity("Lead", "node-7", 0.9)
-    second = _anchored_entity("Second", " node-9 ", 0.5)
-    synth, repo, order = _provenance_synth([lead, second])
+async def test_a_rejected_record_carries_no_client_view_and_no_text():
+    records: list = []
 
-    profiles = await synth.synthesize(query="q", dataset_id="ds", max_agents=2)
+    await _run(_synth([KESTRA, LUMEN]), FakeLLM(fail={"Lumen"}), max_agents=2, records=records)
 
-    written = [call.kwargs for call in repo.write_persona_provenance.await_args_list]
-    assert {w["persona_name"]: w["chunk_node_ids"] for w in written} == {
-        "Lead": ["node-7"],
-        "Second": ["node-9"],
-    }
-    assert order.index("write:Lead") < order.index("build:Lead")
-    assert order.index("write:Second") < order.index("build:Second")
-    assert sorted(p.identity.name for p in profiles) == ["Lead", "Second"]
+    rejected = next(r for r in records if r.status == "rejected")
+    assert (rejected.view, rejected.details_raw) == (None, "")
 
 
 @pytest.mark.asyncio
-async def test_synthesize_skips_the_write_when_no_entity_carries_an_anchor():
-    synth, repo, _ = _provenance_synth([_anchored_entity("Bare", None)])
+async def test_a_profile_call_runs_inside_the_debate_scope(monkeypatch):
+    stack: list[str] = []
 
-    profiles = await synth.synthesize(query="q", dataset_id="ds", max_agents=1)
+    @contextmanager
+    def spy_scope(source):
+        stack.append(source)
+        try:
+            yield
+        finally:
+            stack.pop()
 
-    repo.write_persona_provenance.assert_not_awaited()
-    assert [p.identity.name for p in profiles] == ["Bare"]
+    monkeypatch.setattr(metering, "source_scope", spy_scope)
+    llm = FakeLLM(scope_stack=stack)
 
+    await _run(_synth([KESTRA]), llm, max_agents=1)
 
-def test_evidence_chunk_ids_tolerates_non_mapping_properties():
-    """A non-mapping `properties` contributes nothing — never invented."""
-    from src.simulation.profile_synthesizer import ProfileSynthesizer
-
-    odd = MagicMock()
-    odd.properties = ["not", "a", "mapping"]
-    assert ProfileSynthesizer._evidence_chunk_ids([odd]) == []
+    assert llm.scopes_seen and all("debate" in scope for scope in llm.scopes_seen)
 
 
 @pytest.mark.asyncio
-async def test_synthesize_survives_a_failing_writer_with_one_warning():
-    synth, repo, _ = _provenance_synth([_anchored_entity("Lead", "node-7")])
+async def test_metering_error_from_the_profile_call_is_not_absorbed():
+    with pytest.raises(MeteringError):
+        await _run(_synth([KESTRA]), FakeLLM(raise_on_profile=MeteringError("hold gone")), max_agents=1)
+
+
+@pytest.mark.asyncio
+async def test_the_seated_stance_and_provenance_are_persisted_for_the_topology():
+    repo = _repo()
+
+    await _run(_synth([KESTRA], repo=repo), max_agents=1)
+
+    repo.write_persona_entity_links.assert_awaited_once()
+    kwargs = repo.write_persona_entity_links.await_args.kwargs
+    assert (kwargs["persona_name"], kwargs["stance"]) == ("Kestra", "POSITIVE")
+    assert kwargs["chunk_node_ids"] == ["c-kestra"]
+
+
+@pytest.mark.asyncio
+async def test_a_rejected_profile_writes_no_links():
+    repo = _repo()
+
+    await _run(_synth([KESTRA, LUMEN], repo=repo), FakeLLM(fail={"Lumen"}), max_agents=2)
+
+    persisted = [c.kwargs["persona_name"] for c in repo.write_persona_entity_links.await_args_list]
+    assert persisted == ["Kestra"]
+
+
+@pytest.mark.asyncio
+async def test_a_failed_link_write_warns_and_keeps_the_seat():
+    repo = _repo()
     repo.write_persona_provenance = AsyncMock(side_effect=RuntimeError("neo4j down"))
     warnings: list[str] = []
 
-    profiles = await synth.synthesize(
-        query="q", dataset_id="ds", max_agents=1, warnings=warnings
-    )
+    agents = await _run(_synth([KESTRA], repo=repo), max_agents=1, warnings=warnings)
 
-    provenance = [w for w in warnings if "provenance" in w]
-    assert len(provenance) == 1
-    assert "Lead" in provenance[0]
-    assert [p.identity.name for p in profiles] == ["Lead"]
-    repo.build_single_agent_profile_from_node.assert_awaited()
-
-
-"""P5: the S4 rows and each built profile are emitted to the caller's live sinks."""
+    assert [a.identity.name for a in agents] == ["Kestra"]
+    assert any("provenance write failed" in w for w in warnings)
 
 
 @pytest.mark.asyncio
-async def test_synthesize_survives_a_raising_profile_emitter():
-    """A broken WS emitter is logged, never allowed to break profile synthesis."""
-    synthesizer = _selection_synth(_SELECTION_ENTITIES)
+async def test_on_profile_emits_each_seated_agent_in_order():
+    emitted: list[tuple[str, int, int]] = []
 
-    async def broken(profile, index, total):
-        raise RuntimeError("ws down")
+    async def emit(profile, index, total):
+        emitted.append((profile.identity.name, index, total))
 
-    profiles = await synthesizer.synthesize(
-        query="test query", dataset_id="ds1", on_profile=broken
-    )
-    assert (
-        len(profiles) == 2
-    )  # the same count the arrange block produces without emitters
+    await _run(_synth([KESTRA, LUMEN]), max_agents=2, on_profile=emit)
 
-
-"""Test rig: a GraphContext stand-in that records every provenance read."""
-
-
-class _CountingContext(_SeatsByChunks):
-    """A GraphContext stand-in that counts provenance reads (no MagicMock auto-attrs)."""
-
-    def __init__(self, entities, provenance_by_id):
-        self._entities = entities
-        self._provenance_by_id = provenance_by_id
-        self.batch_calls: list[list[str]] = []
-        self.single_calls = 0
-
-    async def find_relevant_entities(self, query, dataset_id, limit=10):
-        return self._entities
-
-    async def get_provenance_batch(self, entity_ids, dataset_id):
-        self.batch_calls.append(list(entity_ids))
-        return {eid: list(self._provenance_by_id.get(eid, [])) for eid in entity_ids}
-
-    async def get_provenance(self, entity_id, dataset_id):
-        self.single_calls += 1
-        return list(self._provenance_by_id.get(entity_id, []))
-
-
-def _synth_over(ctx):
-    """A synthesizer over `ctx` whose repo names each built profile after its agent."""
-
-    async def build_profile(**kwargs):
-        return MagicMock(
-            identity=PersonaIdentity(
-                name=kwargs["agent_name"],
-                archetype="Analyst",
-                communication_style="factual",
-            )
-        )
-
-    repo = MagicMock()
-    repo.fetch_nodes_by_names = AsyncMock(return_value={})
-    repo.calculate_agent_metrics_and_context_for_llm = AsyncMock(return_value={})
-    repo.build_single_agent_profile_from_node = AsyncMock(side_effect=build_profile)
-    return ProfileSynthesizer(persona_repo=repo, graph_context=ctx), repo
-
-
-_ROSTER = [
-    _cluster_entity("A", 0.9, ["test"], "alpha summary"),
-    _cluster_entity("B", 0.8, ["test"], "beta summary"),
-    _cluster_entity("C", 0.7, ["test"], "gamma summary"),
-]
-
-
-def _shared_doc():
-    return ProvenanceLink(doc_id="doc:1", title="T", breadcrumb="", chunk_id=uuid4())
-
-
-"""Task 10: each site fetches every node in ONE query, never one query per name."""
-
-from src.persona.repository import PersonaRepository
-
-
-def _repo_with_counted_queries(rows):
-    """A real `fetch_nodes_by_names` over a stubbed driver: executed queries counted.
-
-    One `session.run` is one round trip, so the count is the query count.
-    """
-    result = AsyncMock()
-    result.data = AsyncMock(return_value=rows)
-
-    session = AsyncMock()
-    session.run = AsyncMock(return_value=result)
-    session.__aenter__ = AsyncMock(return_value=session)
-    session.__aexit__ = AsyncMock(return_value=None)
-
-    driver = MagicMock()
-    driver.session = MagicMock(return_value=session)
-
-    repo = PersonaRepository.__new__(PersonaRepository)
-    repo._driver = driver
-    repo._db = "testdb"
-    return repo, session
-
-
-def _node_row(name: str, **props) -> dict:
-    return {"name": name, "n": {"name": name, **props}, "is_entity": True}
-
-
-async def _named_profile(**kwargs):
-    return MagicMock(
-        identity=PersonaIdentity(
-            name=kwargs["agent_name"],
-            archetype="Analyst",
-            communication_style="factual",
-        )
-    )
-
-
-def _nodes_by_agent(repo) -> dict:
-    """{agent_name: node} across every profile-build call."""
-    return {
-        call.kwargs["agent_name"]: call.kwargs["node"]
-        for call in repo.build_single_agent_profile_from_node.await_args_list
-    }
+    assert emitted == [("Kestra", 1, 2), ("Lumen", 2, 2)]
 
 
 @pytest.mark.asyncio
-async def test_synthesize_fetches_all_required_nodes_in_one_query():
-    """Three required nodes → ONE node-fetch query whose rows map per name (Task 10)."""
-    doc = _shared_doc()
-    repo, session = _repo_with_counted_queries(
-        [
-            _node_row("A", domain_tags=["alpha"]),
-            _node_row("C", domain_tags=["gamma"]),
-        ]
-    )
-    repo.calculate_agent_metrics_and_context_for_llm = AsyncMock(return_value={})
-    repo.build_single_agent_profile_from_node = AsyncMock(side_effect=_named_profile)
-    synth = ProfileSynthesizer(
-        repo, _CountingContext(list(_ROSTER), {"A": [doc], "B": [doc]})
-    )
+async def test_a_raising_emitter_does_not_drop_the_seat():
+    async def emit(profile, index, total):
+        raise RuntimeError("socket closed")
 
-    profiles = await synth.synthesize(query="q", dataset_id="ds", max_agents=3)
+    agents = await _run(_synth([KESTRA]), max_agents=1, on_profile=emit)
 
-    # One node per agent, ONE query.
-    assert session.run.await_count == 1
-    assert sorted(session.run.await_args.kwargs["names"]) == ["A", "B", "C"]
-    assert [p.identity.name for p in profiles] == ["A", "B", "C"]
-    assert _nodes_by_agent(repo) == {
-        "A": {"name": "A", "domain_tags": ["alpha"], "label": "Persona"},
-        "B": {"name": "B", "label": "Persona"},  # no row → the node's own properties
-        "C": {"name": "C", "domain_tags": ["gamma"], "label": "Persona"},
-    }
+    assert [a.identity.name for a in agents] == ["Kestra"]
 
 
 @pytest.mark.asyncio
-async def test_synthesize_falls_back_per_name_when_the_batch_misses_one():
-    """A node name absent from the batch keeps the node-properties fallback (Task 10)."""
-    doc = _shared_doc()
-    repo, session = _repo_with_counted_queries([_node_row("A", domain_tags=["alpha"])])
-    repo.calculate_agent_metrics_and_context_for_llm = AsyncMock(return_value={})
-    repo.build_single_agent_profile_from_node = AsyncMock(side_effect=_named_profile)
-    synth = ProfileSynthesizer(
-        repo, _CountingContext(list(_ROSTER), {"A": [doc], "B": [doc]})
-    )
-
-    profiles = await synth.synthesize(query="q", dataset_id="ds", max_agents=3)
-
-    assert session.run.await_count == 1
-    assert [p.identity.name for p in profiles] == ["A", "B", "C"]
-    assert _nodes_by_agent(repo) == {
-        "A": {"name": "A", "domain_tags": ["alpha"], "label": "Persona"},
-        "B": {"name": "B", "label": "Persona"},
-        "C": {"name": "C", "label": "Persona"},
-    }
+async def test_synthesize_refuses_to_run_without_an_llm_client():
+    with pytest.raises(ValueError, match="llm_client"):
+        await _synth([KESTRA]).synthesize(QUESTION, dataset_id="ds-A", max_agents=1)
 
 
 @pytest.mark.asyncio
-async def test_synthesize_from_names_fetches_all_names_in_one_query():
-    """Three joiners → ONE node-fetch query; the per-name map still drives build-or-skip."""
-    repo, session = _repo_with_counted_queries(
-        [_node_row("Carl", domain_tags=["regulation"])]
-    )
-    repo.calculate_agent_metrics_and_context_for_llm = AsyncMock(return_value={})
-    repo.build_single_agent_profile_from_node = AsyncMock(side_effect=_named_profile)
-    synth = ProfileSynthesizer(repo, MagicMock())
-
-    profiles = await synth.synthesize_from_names(
-        ["Carl", "Dana", "Ghost"], "q", "ds", {"Carl": 0.5, "Dana": 0.5, "Ghost": 0.5}
-    )
-
-    assert session.run.await_count == 1
-    assert session.run.await_args.kwargs["names"] == ["Carl", "Dana", "Ghost"]
-    assert [p.identity.name for p in profiles] == [
-        "Carl"
-    ]  # Dana/Ghost unresolved: skipped
-    assert _nodes_by_agent(repo) == {
-        "Carl": {"name": "Carl", "domain_tags": ["regulation"]}
-    }
-
-
-"""Round-1 pairing prerequisite: synthesis writes the persona→entity links
-the topology counts."""
-
-
-def _linkable_synth(entities, provenance_by_id=None):
-    """A synthesizer recording the writer/build call order."""
-    order: list[str] = []
-
-    async def build_profile(**kwargs):
-        order.append("build")
-        return MagicMock(
-            identity=PersonaIdentity(
-                name=kwargs["agent_name"],
-                archetype="Analyst",
-                communication_style="factual",
-            )
-        )
-
-    repo = MagicMock()
-    repo.fetch_nodes_by_names = AsyncMock(return_value={})
-    repo.calculate_agent_metrics_and_context_for_llm = AsyncMock(return_value={})
-    repo.write_persona_provenance = AsyncMock(
-        side_effect=lambda **kw: order.append("provenance") or 1
-    )
-    repo.write_persona_entity_links = AsyncMock(
-        side_effect=lambda **kw: order.append("entities") or 1
-    )
-    repo.build_single_agent_profile_from_node = AsyncMock(side_effect=build_profile)
-    ctx = _CountingContext(list(entities), provenance_by_id or {})
-    return ProfileSynthesizer(repo, ctx), repo, order
+async def test_joiners_are_refused_until_task_2_6b():
+    with pytest.raises(NotImplementedError, match="2.6b"):
+        await _synth([KESTRA]).synthesize_from_names(["Kestra"], QUESTION, dataset_id="ds-A")
 
 
 @pytest.mark.asyncio
-async def test_synthesize_writes_entity_links_from_the_cluster_chunks_before_building():
-    """Without these edges every persona is an isolated node and round 1 pairs 0."""
-    entity = _cluster_entity("Lead", 0.9, ["test"], "lead summary")
-    entity.properties = {"name": "Lead", "triplet_source_id": "node-7"}
-    synth, repo, order = _linkable_synth([entity])
-
-    profiles = await synth.synthesize(query="q", dataset_id="ds1", max_agents=1)
-
-    repo.write_persona_entity_links.assert_awaited_once_with(
-        persona_name="Lead",
-        dataset_id="ds1",
-        chunk_node_ids=["node-7"],
-        stance="NEUTRAL",
-    )
-    assert order == ["provenance", "entities", "build"]
-    assert [p.identity.name for p in profiles] == ["Lead"]
-
-
-"""Required-node roster: one agent per node — never one document-collapsed cell."""
-
-
-@pytest.mark.asyncio
-async def test_synthesize_single_cell_graph_builds_one_agent_per_required_node():
-    """THE regression: 11 nodes from one document → 11 agents, not 1.
-
-    The old roster grouped entities by shared document provenance, so a
-    single-document graph collapsed to one un-pairable agent. The graph is
-    seeded through `_CountingContext` so every node reports one shared doc.
-    """
-    entities = [
-        _cluster_entity(f"Node {chr(65 + i)}", 0.9 - i * 0.01, ["test"], f"summary {i}")
-        for i in range(11)
-    ]
-    doc = _shared_doc()
-    synth, _ = _synth_over(
-        _CountingContext(entities, {f"Node {chr(65 + i)}": [doc] for i in range(11)})
-    )
-
-    profiles = await synth.synthesize(query="q", dataset_id="ds", max_agents=50)
-
-    assert len(profiles) == 11  # the old path returned 1: every node shared one doc
-    assert [p.identity.name for p in profiles] == [f"Node {chr(65 + i)}" for i in range(11)]
-
-
-@pytest.mark.asyncio
-async def test_synthesize_reads_no_provenance_the_roster_is_node_level():
-    """The roster derivation touches no provenance: the nodes are the agents."""
-    doc = _shared_doc()
-    synth, repo = _synth_over(_CountingContext(list(_ROSTER), {"A": [doc], "B": [doc]}))
-    ctx = synth._ctx
-
-    profiles = await synth.synthesize(query="q", dataset_id="ds", max_agents=3)
-
-    assert ctx.batch_calls == [] and ctx.single_calls == 0
-    assert [p.identity.name for p in profiles] == ["A", "B", "C"]
-    totals = {
-        call.kwargs["agent_name"]: call.kwargs["sector_results"][0]["total_relevance"]
-        for call in repo.build_single_agent_profile_from_node.await_args_list
-    }
-    assert totals == {"A": 0.9, "B": 0.8, "C": 0.7}  # each build saw its own node
-
-
-"""Traversal expansion: the roster's candidates are the seeds plus their one-hop neighbours."""
-
-
-"""Task 1: the synthesized stance is persisted on the Persona node with the
-entity links, where Task 6's round-1 pairing reads it."""
-
-
-@pytest.mark.asyncio
-async def test_synthesize_persists_the_distilled_stance_with_the_entity_links():
-    from src.persona.agent import Stance
-    from src.persona.repository import DistilledProfile
-
-    entity = _anchored_entity("Lead", "node-7", 0.9)
-    repo = MagicMock()
-    repo.fetch_nodes_by_names = AsyncMock(return_value={})
-    repo.calculate_agent_metrics_and_context_for_llm = AsyncMock(return_value={})
-    repo.fetch_source_evidence_by_chunk = AsyncMock(return_value={})
-    repo.distill_profiles = AsyncMock(
-        return_value={
-            "Lead": DistilledProfile("d", "p", Stance.POSITIVE, 0.8, 0.6),
-        }
-    )
-    repo.write_persona_provenance = AsyncMock(return_value=1)
-    repo.write_persona_entity_links = AsyncMock(return_value=1)
-    repo.build_single_agent_profile_from_node = AsyncMock(return_value=MagicMock())
-    synth = ProfileSynthesizer(repo, _CountingContext([entity], {}))
-
-    await synth.synthesize(query="q", dataset_id="ds", max_agents=1, distill=True)
-
-    assert repo.write_persona_entity_links.await_args.kwargs["stance"] == "POSITIVE"
-
-
-@pytest.mark.asyncio
-async def test_synthesize_persists_the_derived_stance_without_distillation():
-    """The shallow path: the graph derivation is persisted too, not just the LLM's."""
-    entity = _anchored_entity("Critic", "node-9", 0.9)
-    entity.properties = {"name": "Critic", "triplet_source_id": "node-9"}
-    repo = MagicMock()
-    repo.fetch_nodes_by_names = AsyncMock(
-        return_value={"Critic": {"name": "Critic", "relations": ["OPPOSES"]}}
-    )
-    repo.calculate_agent_metrics_and_context_for_llm = AsyncMock(return_value={})
-    repo.write_persona_provenance = AsyncMock(return_value=1)
-    repo.write_persona_entity_links = AsyncMock(return_value=1)
-    repo.build_single_agent_profile_from_node = AsyncMock(return_value=MagicMock())
-    synth = ProfileSynthesizer(repo, _CountingContext([entity], {}))
-
-    await synth.synthesize(query="q", dataset_id="ds", max_agents=1)
-
-    assert repo.write_persona_entity_links.await_args.kwargs["stance"] == "NEGATIVE"
-
-
-@pytest.mark.asyncio
-async def test_synthesize_persists_the_same_stance_the_build_derives():
-    """The persisted stance follows the build's precedence, not a node property.
-
-    A node with both a `stance` property and OPPOSES evidence derives NEGATIVE
-    (distilled → derivation → node property), so `Persona.stance` must be
-    NEGATIVE — the value the built Agent also gets — not the node's POSITIVE.
-    """
-    entity = _anchored_entity("Torn", "node-5", 0.9)
-    repo = MagicMock()
-    repo.fetch_nodes_by_names = AsyncMock(
-        return_value={
-            "Torn": {"name": "Torn", "stance": "POSITIVE", "relations": ["OPPOSES"]},
-        }
-    )
-    repo.calculate_agent_metrics_and_context_for_llm = AsyncMock(return_value={})
-    repo.write_persona_provenance = AsyncMock(return_value=1)
-    repo.write_persona_entity_links = AsyncMock(return_value=1)
-    repo.build_single_agent_profile_from_node = AsyncMock(return_value=MagicMock())
-    synth = ProfileSynthesizer(repo, _CountingContext([entity], {}))
-
-    await synth.synthesize(query="q", dataset_id="ds", max_agents=1)
-
-    assert repo.write_persona_entity_links.await_args.kwargs["stance"] == "NEGATIVE"
-
-
-@pytest.mark.asyncio
-async def test_synthesize_rosters_seeds_when_the_context_has_no_traversal():
-    """A context predating the walk still rosters its seeds (mock tolerance)."""
-
-    class _SeedOnlyContext(_SeatsByChunks):
-        async def find_relevant_entities(self, query, dataset_id, limit=10):
-            return list(_ROSTER)
-
-    synth, _ = _synth_over(_SeedOnlyContext())
-
-    profiles = await synth.synthesize(query="q", dataset_id="ds", max_agents=3)
-
-    assert [p.identity.name for p in profiles] == ["A", "B", "C"]
-
-
-"""Task 2: each persona's evidence is its node plus the node's 1-hop subgraph."""
-
-
-@pytest.mark.asyncio
-async def test_label_reaches_the_build_node_dict():
-    """Task 5b: the entity's real type label rides into the node dict the build reads."""
-    entity = _cluster_entity("Regulator Corp", 0.9, ["banking"], "banking summary")
-    entity.label = "Regulator"
-    synth, repo = _distill_synth([entity], {})
-
-    await synth.synthesize(query="q", dataset_id="ds", max_agents=1)
-
-    node = repo.build_single_agent_profile_from_node.await_args.kwargs["node"]
-    assert node["label"] == "Regulator"
-
-
-@pytest.mark.asyncio
-async def test_label_reaches_the_build_node_dict_on_the_batch_hit_path():
-    """Same merge when `fetch_nodes_by_names` serves the node (not the fallback)."""
-    entity = _cluster_entity("Regulator Corp", 0.9, ["banking"], "banking summary")
-    entity.label = "Regulator"
-    synth, repo = _distill_synth([entity], {})
-    repo.fetch_nodes_by_names = AsyncMock(
-        return_value={
-            "Regulator Corp": {"name": "Regulator Corp", "domain_tags": ["banking"]}
-        }
-    )
-
-    await synth.synthesize(query="q", dataset_id="ds", max_agents=1)
-
-    node = repo.build_single_agent_profile_from_node.await_args.kwargs["node"]
-    assert node["label"] == "Regulator"
-    assert node["domain_tags"] == ["banking"]  # the fetched properties survive
-
-
-@pytest.mark.asyncio
-async def test_candidate_evidence_includes_the_subgraph():
-    """A seed's candidate is grounded in its neighbours, not one bare node."""
-    seed = _cluster_entity("Amazon", 0.9, ["retail"], "amazon summary")
-    neighbour = _cluster_entity("WholeFoods", 0.0, ["grocery"], "wholefoods summary")
-
-    class _SubgraphContext(_SeatsByChunks):
-        async def find_relevant_entities(self, query, dataset_id, limit=10):
-            return [seed]
-
-        async def find_connected_nodes_by_seed(self, node_ids, dataset_id, limit=10):
-            return {"Amazon": [neighbour]}
-
-    synth, repo = _synth_over(_SubgraphContext())
-
-    profiles = await synth.synthesize(query="q", dataset_id="ds", max_agents=1)
-
-    call = repo.build_single_agent_profile_from_node.await_args.kwargs
-    assert call["sector_results"][0]["evidence_nodes"] == ["Amazon", "WholeFoods"]
-    assert (
-        call["sector_results"][0]["density"] == 2
-    )  # the neighbour joined the evidence
-    assert [p.identity.name for p in profiles] == [
-        "Amazon"
-    ]  # representative still the seed
-
-
-@pytest.mark.asyncio
-async def test_subgraph_failure_degrades_to_the_node_alone(caplog):
-    """A raising subgraph fetch is logged and never breaks synthesis."""
-
-    class _RaisingSubgraph(_SeatsByChunks):
-        async def find_relevant_entities(self, query, dataset_id, limit=10):
-            return [_cluster_entity("Solo", 0.9, ["x"], "solo summary")]
-
-        async def find_connected_nodes_by_seed(self, node_ids, dataset_id, limit=10):
-            raise RuntimeError("neo4j transient")
-
-    synth, repo = _synth_over(_RaisingSubgraph())
-
-    with caplog.at_level(logging.WARNING, logger="src.simulation.profile_synthesizer"):
-        profiles = await synth.synthesize(query="q", dataset_id="ds", max_agents=1)
-
-    assert "subgraph fetch failed" in caplog.text
-    call = repo.build_single_agent_profile_from_node.await_args.kwargs
-    assert call["sector_results"][0]["evidence_nodes"] == ["Solo"]
-    assert [p.identity.name for p in profiles] == ["Solo"]
-
-
-"""Task 7: the roster is diversified across entity types, not ten of one."""
-
-
-def _typed_entity(name: str, score: float, label: str, tags=("test",)) -> MagicMock:
-    node = _cluster_entity(name, score, list(tags), f"{name} summary")
-    node.label = label
-    return node
-
-
-"""Task 7b: a late joiner is built with the graph's own type, not the hollow default."""
-
-
-@pytest.mark.asyncio
-async def test_joiner_gets_a_real_archetype():
-    """A joiner from a Regulator node derives archetype "Regulator", not a constant.
-
-    The real `fetch_nodes_by_names` reads the node's Neo4j label (its entity
-    type) and the real build derives the identity from it — the same Task 5
-    precedence the roster uses.
-    """
-    repo, _ = _repo_with_counted_queries(
-        [
-            {
-                "name": "Regulator Node",
-                "n": {"name": "Regulator Node", "domain_tags": ["banking"]},
-                "is_entity": True,
-                "labels": ["__Entity__", "Regulator"],
-            },
-        ]
-    )
-    repo.calculate_agent_metrics_and_context_for_llm = AsyncMock(return_value={})
-    repo.get_provenance = AsyncMock(return_value=[])
-    synth = ProfileSynthesizer(repo, MagicMock())
-
-    profiles = await synth.synthesize_from_names(["Regulator Node"], "q", "ds", {"Regulator Node": 0.5})
-
-    assert [p.identity.name for p in profiles] == ["Regulator Node"]
-    assert profiles[0].identity.archetype == "Regulator"
-    assert profiles[0].identity.archetype != "Strategic Analyst"
-
-
-@pytest.mark.asyncio
-async def test_a_connector_outranks_an_isolated_entity_with_equal_chunk_score():
-    """Pool-to-pool edges reach PageRank: the connector to a partner outranks the isolated entity."""
-    connector = _cluster_entity("Connector", 0.0, ["x"], "c")
-    partner = _cluster_entity("Partner", 0.0, ["x"], "p")
-    isolated = _cluster_entity("Isolated", 0.0, ["x"], "i")
-    ids = [connector.id, partner.id, isolated.id]
-    chunks = chunk_search(
-        vector=["c0", "c1"], fulltext=["c0", "c1"], mentions={"c0": ids, "c1": ids}
-    )
-    neighbours = {
-        connector.id: [
-            EntityNode(id="Partner", name="Partner", label="Persona"),
-            EntityNode(id="Hub", name="Hub", label="Persona"),
-        ],
-        partner.id: [EntityNode(id="Connector", name="Connector", label="Persona")],
-        isolated.id: [],
-    }
-    synth = _selection_synth(
-        [connector, partner, isolated], chunks=chunks, neighbours=neighbours
-    )
-    decisions: list[SeatDecision] = []
-
-    profiles = await synth.synthesize(
-        query="q", dataset_id="ds", max_agents=1, decisions=decisions
-    )
-
-    assert [p.identity.name for p in profiles] == ["Connector"]
-    scores = {d.name: d.features["ppr"] for d in decisions}
-    assert scores["Connector"] > scores["Isolated"]
-
-
-@pytest.mark.asyncio
-async def test_a_neighbour_listed_twice_does_not_satisfy_min_evidence_alone():
-    """id == name: one neighbour arrives under both keys. It counts once, so it is
-    one piece of evidence, below MIN_EVIDENCE=2 with no chunk to back it."""
-    named_only = _cluster_entity("Lone Neighbour", 0.0, ["x"], "n")
-    grounded = _cluster_entity("Grounded", 0.0, ["x"], "g")
-    chunks = chunk_search(
-        vector=["c0", "c1"],
-        fulltext=["c0", "c1"],
-        mentions={"c0": [grounded.id], "c1": [grounded.id]},
-    )
-    twin = EntityNode(id="Dup", name="Dup", label="Persona")
-    synth = _selection_synth(
-        [named_only, grounded],
-        chunks=chunks,
-        neighbours={named_only.id: [twin, twin], grounded.id: []},
-    )
-    decisions: list[SeatDecision] = []
-
-    await synth.synthesize(query="q", dataset_id="ds", max_agents=2, decisions=decisions)
-
-    assert {d.name: d.reason for d in decisions}["Lone Neighbour"] == "evidence 1 < 2"
+async def test_an_empty_joiner_list_is_a_no_op():
+    assert await _synth([KESTRA]).synthesize_from_names([], QUESTION, dataset_id="ds-A") == []

@@ -45,6 +45,7 @@ from typing import Any, Awaitable, Callable, List, Optional
 
 from src.billing.metering import MeteringError
 from src.persona.agent import Agent, Stance
+from src.simulation.agent_record import AgentRecord
 from src.simulation.debate_config import DebateConfig
 from src.simulation.llm_batch import BatchedLLMRunner
 from src.simulation.pair_turn import CommPair, RoundResult
@@ -156,7 +157,6 @@ class DebateOrchestrator:
         llm_client: Optional[Any] = None,
         intent: Optional[QueryIntent] = None,
         on_stage: Optional[StageEmitter] = None,
-        distill: bool = False,
         context: Optional[dict] = None,
         cancel_check: Optional[Callable[[], bool]] = None,
         decisions: Optional[list[SeatDecision]] = None,
@@ -175,10 +175,6 @@ class DebateOrchestrator:
 
         `on_stage` is the optional S9 stage-event emitter (see the module
         docstring for the contract). `None` means no events, no crash.
-
-        `distill` is the S5 gate (decided by the job boundary from the
-        simulation depth, D3): when True, profile synthesis makes ONE batched
-        persona-distillation call for the whole selection set.
 
         `context` is the optional user-supplied scenario context (a JSON-safe
         dict); it is serialized into the verdict prompt so the answer weighs the
@@ -199,6 +195,7 @@ class DebateOrchestrator:
         all_turns: list = []
         profiles: List[Agent] = []
         seat_sink: list[SeatDecision] = decisions if decisions is not None else []
+        profile_records: list[AgentRecord] = []
         stage_index = await self._emit_stage(on_stage, 0, "intake", query=query)
 
         async def _emit_profile(profile: Agent, index: int, total: int) -> None:
@@ -220,7 +217,7 @@ class DebateOrchestrator:
             intent=intent,
             warnings=warnings,
             decisions=seat_sink,
-            distill=distill,
+            records=profile_records,
             llm_client=llm_client,
             on_profile=_emit_profile,
         )

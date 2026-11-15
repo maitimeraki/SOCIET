@@ -109,7 +109,7 @@ class AgentRecord(BaseModel):
     rank: RankInfo
     evidence: list[EvidenceItem]
     relations: list[RelationItem]
-    view: AgentView
+    view: Optional[AgentView]  # None when the candidate was not seated: no text is invented
     details_raw: str
     cites: CiteIds
     validation: ValidationInfo
