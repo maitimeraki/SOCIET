@@ -47,6 +47,14 @@ class Stance(str, Enum):
     NEGATIVE = "NEGATIVE"
     NEUTRAL = "NEUTRAL"
     AMBIVALENT = "AMBIVALENT"
+    ABSTAIN = "ABSTAIN"
+
+    @classmethod
+    def parse(cls, value: object) -> "Stance":
+        """The single stance parser. Raises ValueError on anything but a known stance."""
+        if not isinstance(value, str):
+            raise ValueError(f"not a stance: {value!r}")
+        return cls(value.strip().upper())
 
 
 class DiscoveryType(str, Enum):
