@@ -1,4 +1,5 @@
 import type { Stance } from '../../run/events'
+import { stanceWord } from '../ui/PositionMark'
 
 export const FLOOR_VIEWBOX = { width: 1200, height: 520 }
 export const CX = 600
@@ -10,7 +11,7 @@ export const RADIUS_BACK = 510
 export const SECTORS: { stance: Stance; label: string; from: number; to: number }[] = [
   { stance: 'POSITIVE', label: 'AYE', from: 180, to: 225 },
   { stance: 'NEUTRAL', label: 'CROSSBENCH', from: 225, to: 270 },
-  { stance: 'ABSTAIN', label: 'NO VIEW', from: 270, to: 315 },
+  { stance: 'ABSTAIN', label: stanceWord('ABSTAIN'), from: 270, to: 315 },
   { stance: 'NEGATIVE', label: 'NOE', from: 315, to: 360 },
 ]
 

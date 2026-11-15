@@ -1,7 +1,7 @@
 import VerdictSheet from '../ui/VerdictSheet'
 import Table from '../ui/Table'
 import Label from '../ui/Label'
-import PositionMark from '../ui/PositionMark'
+import PositionMark, { stanceWord } from '../ui/PositionMark'
 import { fmtPct, fmtScore } from '../../utils/format'
 import type { ReportModel } from './exportReport'
 
@@ -37,7 +37,7 @@ export default function ReportDocument({ report }: { report: ReportModel }) {
                 Positive
               </th>
               <th scope="col" className="num">
-                No view
+                {stanceWord('ABSTAIN')}
               </th>
             </tr>
           }

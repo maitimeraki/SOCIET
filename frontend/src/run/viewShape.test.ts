@@ -150,6 +150,27 @@ describe('verdict stances', () => {
   it('still completes a verdict whose stances are all in the closed set, ABSTAIN included', () => {
     const state = applyEvent(PRIOR, completeWith({ 'D. Weber': 'abstain' }), NOW)
     expect(state.status).toBe('complete')
-    expect(state.verdict?.finalStances).toEqual({ 'D. Weber': 'abstain' })
+    expect(state.verdict?.finalStances).toEqual({ 'D. Weber': 'ABSTAIN' })
+  })
+
+  it('keeps the skip warnings a legacy run folded when the complete event arrives', () => {
+    const skipped = applyEvent(PRIOR, { type: 'agent', index: 4, total: 4, profile: legacyProfile() } as unknown as RunEvent, NOW)
+    const state = applyEvent(skipped, completeWith({ 'D. Weber': 'POSITIVE' }) as RunEvent, NOW)
+    expect(state.status).toBe('complete')
+    expect(state.warnings).toContain(INVALID_AGENT_WARNING)
+  })
+
+  it('merges the server warnings into the folded ones, without exact duplicates', () => {
+    const skipped = applyEvent(PRIOR, { type: 'agent', index: 4, total: 4, profile: legacyProfile() } as unknown as RunEvent, NOW)
+    const withServer = { ...(completeWith({ 'D. Weber': 'POSITIVE' }) as object), warnings: ['Server note.', INVALID_AGENT_WARNING] } as unknown as RunEvent
+    const state = applyEvent(skipped, withServer, NOW)
+    expect(state.warnings).toEqual([INVALID_AGENT_WARNING, 'Server note.'])
+  })
+
+  it('shows one warning for N skipped legacy profiles, not N', () => {
+    const legacy = { type: 'agent', index: 1, total: 3, profile: legacyProfile() } as unknown as RunEvent
+    const state = fold([legacy, legacy, legacy], () => NOW)
+    expect(state.warnings).toEqual([INVALID_AGENT_WARNING])
+    expect(state.roster).toEqual([])
   })
 })

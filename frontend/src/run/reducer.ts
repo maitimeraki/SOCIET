@@ -113,10 +113,20 @@ function skipWith(base: RunState, reduce: () => RunState): RunState {
   try {
     return reduce()
   } catch (error) {
-    if (error instanceof UnknownStanceError) return { ...base, warnings: [...base.warnings, UNKNOWN_STANCE_WARNING] }
-    if (error instanceof InvalidAgentError) return { ...base, warnings: [...base.warnings, INVALID_AGENT_WARNING] }
+    if (error instanceof UnknownStanceError) return { ...base, warnings: withWarning(base.warnings, UNKNOWN_STANCE_WARNING) }
+    if (error instanceof InvalidAgentError) return { ...base, warnings: withWarning(base.warnings, INVALID_AGENT_WARNING) }
     throw error
   }
+}
+
+/** Adds a warning once: the same text from many skipped events reads as one line. Exact-string, order kept. */
+function withWarning(warnings: readonly string[], text: string): string[] {
+  return warnings.includes(text) ? [...warnings] : [...warnings, text]
+}
+
+/** Folded warnings and the server's list, merged in order with exact duplicates dropped. */
+function mergeWarnings(folded: readonly string[], server: readonly string[]): string[] {
+  return [...new Set([...folded, ...server])]
 }
 
 /** Every stance a verdict carries, read through the closed set. A false means the verdict cannot be shown. */
@@ -224,12 +234,12 @@ function reduceEvent(state: RunState, event: RunEvent, now: number): RunState {
           evidence: event.evidence ?? [],
           confidence: event.confidence_score ?? null,
           clusters: event.cluster_details ?? null,
-          finalStances: event.final_stances ?? {},
+          finalStances: Object.fromEntries(Object.entries(event.final_stances ?? {}).map(([agent, stance]) => [agent, asStance(stance)])),
           supporting: event.supporting_entities ?? [],
           opposing: event.opposing_entities ?? [],
         },
         // The complete event's warnings are the server's full list — they replace the streamed deltas.
-        warnings: event.warnings ?? base.warnings,
+        warnings: mergeWarnings(base.warnings, event.warnings ?? []),
       }
     case 'error':
       return { ...base, status: 'failed', error: event.error }
