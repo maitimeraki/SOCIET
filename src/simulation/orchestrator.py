@@ -338,6 +338,7 @@ class DebateOrchestrator:
                     society=snapshot,
                     max_opinions=config.snapshot_top_k,
                 )
+                warnings.extend(round_result.warnings)
                 rounds.append(round_result)
                 stage_index = await self._emit_stage(
                     on_stage,

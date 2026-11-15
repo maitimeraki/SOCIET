@@ -20,7 +20,7 @@ from tests.agent_factory import slim_agent
 
 
 def make_turn(
-    agent_name: str, stance: str, content: str, reasoning: str = ""
+    agent_name: str, stance: str, content: str
 ) -> AgentTurn:
     return AgentTurn(
         agent_id=f"id-{agent_name}",
@@ -29,7 +29,7 @@ def make_turn(
         stance=stance,
         confidence=0.7,
         references=[],
-        reasoning=reasoning,
+        strength=0.5,
     )
 
 
@@ -122,13 +122,11 @@ class TestGoldenPathNarrative:
                         "Strategist",
                         "POSITIVE",
                         "Expanding to Europe opens a large new market.",
-                        reasoning="Europe has strong demand signals for us.",
                     ),
                     make_turn(
                         "Controller",
                         "NEGATIVE",
                         "Expanding to Europe brings heavy compliance costs.",
-                        reasoning="GDPR and data residency raise our costs.",
                     ),
                 ],
             ),
@@ -139,7 +137,6 @@ class TestGoldenPathNarrative:
                         "Operator",
                         "POSITIVE",
                         "A phased Europe entry balances upside and risk.",
-                        reasoning="Pilot in the Nordics first.",
                     ),
                 ],
             ),

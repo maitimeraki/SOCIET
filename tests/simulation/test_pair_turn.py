@@ -21,6 +21,7 @@ class TestPairTurnImports:
             content="Hi",
             stance="POS",
             confidence=0.8,
+            strength=0.5,
         )
         assert turn.agent_id == "a1"
         assert turn.references == []

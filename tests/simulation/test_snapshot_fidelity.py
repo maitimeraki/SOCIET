@@ -131,7 +131,9 @@ def test_user_prompt_renders_configured_snapshot_count():
 @pytest.mark.asyncio
 async def test_execute_round_threads_max_opinions_into_every_prompt():
     mock_llm = AsyncMock()
-    mock_llm.generate = AsyncMock(return_value="ok")
+    mock_llm.generate = AsyncMock(
+        return_value="REASONING: r\nPOSITION: POSITIVE 0.5\nCITES:\nANSWER: ok"
+    )
     rr = RoundRunner(BatchedLLMRunner(mock_llm))
     entries = [_entry(f"Other{i}", 1.0 - i * 0.01, f"line {i}") for i in range(8)]
     snap = SocietySnapshot(round=2, entries=entries)

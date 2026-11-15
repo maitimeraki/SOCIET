@@ -1,9 +1,8 @@
-"""A deliberation step in the turn: reason first, then answer.
+"""A deliberation step in the turn: private REASONING, a declared POSITION, then the ANSWER.
 
-The user prompt asks the model to emit a short REASONING: section then an
-ANSWER: section. Stance is parsed from the ANSWER only, never the reasoning --
-otherwise the verdict would read an agent's private thinking instead of its
-stated position. A response without the delimiter degrades to whole-text-as-answer.
+The stance comes from the POSITION line only. The REASONING is dropped after parsing, so the
+verdict never reads an agent's private thinking. The protocol itself is tested in
+test_turn_protocol.py; these tests cover the prompt and the round-level result.
 """
 
 from unittest.mock import AsyncMock
@@ -13,17 +12,14 @@ import pytest
 from src.persona.agent import Agent
 from src.simulation.llm_batch import BatchedLLMRunner
 from src.simulation.pair_turn import CommPair
-from src.simulation.round_runner import (
-    RoundRunner,
-    _build_user_prompt,
-    _parse_response_stance,
-    _split_reasoning_answer,
-)
+from src.simulation.round_runner import RoundRunner, _build_user_prompt
 from tests.agent_factory import slim_agent
 
 DELIBERATION = (
     "REASONING: Bob argues margins collapse. I am tempted to oppose the move for that "
     "reason, but scale absorbs it. We clash on whether volume offsets price.\n"
+    "POSITION: POSITIVE 0.7\n"
+    "CITES:\n"
     "ANSWER: I support the proposal: scale economics outweigh the short-term margin dip."
 )
 
@@ -32,104 +28,16 @@ def _agent(name: str) -> Agent:
     return slim_agent(name, bio=f"{name} bio", details_raw=f"{name} perspective", confidence=0.6)
 
 
-# ------------------------------------------------------------------
-# Prompt instruction (Step 3)
-# ------------------------------------------------------------------
-
-
-def test_user_prompt_instructs_reason_then_answer():
+def test_user_prompt_instructs_the_declared_form():
     prompt = _build_user_prompt(_agent("Alice"), _agent("Bob"), "Expand to Europe?", [])
     assert "REASONING:" in prompt
+    assert "POSITION:" in prompt
+    assert "CITES:" in prompt
     assert "ANSWER:" in prompt
 
 
-# ------------------------------------------------------------------
-# Splitter (Step 3)
-# ------------------------------------------------------------------
-
-
-def test_splitter_separates_reasoning_from_answer():
-    reasoning, answer = _split_reasoning_answer(DELIBERATION)
-    assert reasoning.startswith("Bob argues margins collapse")
-    assert "REASONING:" not in reasoning
-    assert (
-        answer
-        == "I support the proposal: scale economics outweigh the short-term margin dip."
-    )
-    assert "ANSWER:" not in answer
-
-
-def test_splitter_without_delimiter_treats_whole_text_as_answer():
-    raw = "I support this but I am uncertain."
-    reasoning, answer = _split_reasoning_answer(raw)
-    assert reasoning == ""
-    assert answer == raw
-
-
-def test_splitter_with_empty_answer_degrades_to_whole_text():
-    raw = "REASONING: thinking only, no answer marker content."
-    reasoning, answer = _split_reasoning_answer(raw)
-    assert reasoning == ""
-    assert answer == raw
-
-
-def test_splitter_ignores_a_lowercase_answer_line():
-    """The delimiter is uppercase (as prompted); prose 'answer:' is content, not a split.
-
-    Case-insensitive matching truncated the answer at a lowercase prose line and
-    could flip stance; the split must happen only at the real `ANSWER:` marker.
-    """
-    raw = (
-        "REASONING: weighing the margin risk.\n"
-        "The real answer: scale wins only if volumes hold.\n"
-        "ANSWER: I support the proposal."
-    )
-    reasoning, answer = _split_reasoning_answer(raw)
-
-    assert answer == "I support the proposal."
-    # the lowercase prose line stayed in the reasoning, uncut
-    assert "The real answer: scale wins only if volumes hold." in reasoning
-
-
-def test_splitter_with_only_lowercase_answer_degrades_to_whole_text():
-    raw = "reasoning first\nanswer: this is not the delimiter"
-    reasoning, answer = _split_reasoning_answer(raw)
-    assert reasoning == ""
-    assert answer == raw
-
-
-# ------------------------------------------------------------------
-# Stance from answer, not reasoning (Steps 2, 5)
-# ------------------------------------------------------------------
-
-
-def test_parse_response_stance_still_reads_markers():
-    # Regression: markers parsed identically when handed the answer section.
-    assert (
-        _parse_response_stance("I support the proposal.", "NEUTRAL", 0.5)[0]
-        == "POSITIVE"
-    )
-    assert (
-        _parse_response_stance("I oppose the proposal.", "NEUTRAL", 0.5)[0]
-        == "NEGATIVE"
-    )
-
-
-def test_parse_response_stance_ignores_reasoning_markers():
-    # Reasoning says "oppose", answer says "support": stance must come from the answer.
-    _, answer = _split_reasoning_answer(DELIBERATION)
-    assert _parse_response_stance(answer, "NEUTRAL", 0.5)[0] == "POSITIVE"
-    # Without the split the whole text would read NEGATIVE (negative markers win).
-    assert _parse_response_stance(DELIBERATION, "NEUTRAL", 0.5)[0] == "NEGATIVE"
-
-
-# ------------------------------------------------------------------
-# End-to-end through execute_round (Definition of done)
-# ------------------------------------------------------------------
-
-
 @pytest.mark.asyncio
-async def test_execute_round_content_is_answer_and_stance_from_answer():
+async def test_execute_round_takes_the_answer_and_the_declared_position():
     mock_llm = AsyncMock()
     mock_llm.generate = AsyncMock(return_value=DELIBERATION)
     rr = RoundRunner(BatchedLLMRunner(mock_llm))
@@ -148,12 +56,13 @@ async def test_execute_round_content_is_answer_and_stance_from_answer():
         alice_turn.content
         == "I support the proposal: scale economics outweigh the short-term margin dip."
     )
-    assert "REASONING:" not in alice_turn.content
+    assert "REASONING" not in alice_turn.content
     assert alice_turn.stance == "POSITIVE"
+    assert alice_turn.strength == 0.7
 
 
 @pytest.mark.asyncio
-async def test_execute_round_no_delimiter_keeps_whole_response():
+async def test_execute_round_drops_a_reply_without_the_form_after_a_retry():
     mock_llm = AsyncMock()
     mock_llm.generate = AsyncMock(return_value="I oppose expansion outright.")
     rr = RoundRunner(BatchedLLMRunner(mock_llm))
@@ -167,6 +76,6 @@ async def test_execute_round_no_delimiter_keeps_whole_response():
         history=[],
     )
 
-    alice_turn = next(t for t in result.turns if t.agent_name == "Alice")
-    assert alice_turn.content == "I oppose expansion outright."
-    assert alice_turn.stance == "NEGATIVE"
+    assert result.turns == []
+    assert len(result.warnings) == 2
+    assert all("text outside a labelled section" in w for w in result.warnings)

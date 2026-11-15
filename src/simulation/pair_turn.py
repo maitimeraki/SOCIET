@@ -1,7 +1,7 @@
 """PairTurn types shared across simulation modules."""
 
 from dataclasses import dataclass, field
-from typing import Dict, List
+from typing import Dict, List, Tuple
 
 from src.persona.agent import Stance
 from src.persona.models_persona import ProvenanceLink
@@ -29,17 +29,23 @@ class ActivationCandidate:
 
 @dataclass
 class AgentTurn:
-    """Single agent turn in the debate."""
+    """Single agent turn in the debate. REASONING is parsed and dropped, never stored here."""
 
     agent_id: str
     agent_name: str
+    #: The ANSWER section: the stated reply.
     content: str
+    #: The held stance after the position-change rule, in wire casing.
     stance: str
+    #: The speaker's profile confidence.
     confidence: float
+    #: The declared POSITION strength, in [0, 1].
+    strength: float
     references: List[str] = field(default_factory=list)
-    #: The agent's private REASONING section — grounding material for synthesis,
-    #: never the stated position (that is `content`).
-    reasoning: str = ""
+    #: Evidence ids the turn cites; they stay server-side (never on the wire).
+    cites: Tuple[str, ...] = ()
+    #: "" when the declared position was taken, else why the held stance stood.
+    position_reason: str = ""
 
 
 @dataclass
@@ -49,6 +55,8 @@ class RoundResult:
     round_num: int
     turns: List[AgentTurn]
     pairs: List[CommPair]
+    #: Warnings from this round, each naming an agent and a class of failure.
+    warnings: List[str] = field(default_factory=list)
 
 
 @dataclass

@@ -41,6 +41,7 @@ def make_turn(
         stance=stance,
         confidence=confidence,
         references=refs or [],
+        strength=0.5,
     )
 
 

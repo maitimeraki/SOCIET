@@ -68,6 +68,7 @@ def _turn(name, content, stance="POSITIVE", conf=0.8):
         stance=stance,
         confidence=conf,
         references=[],
+        strength=0.5,
     )
 
 
@@ -351,6 +352,7 @@ def _round_with_two_opinions() -> RoundResult:
                 stance="POSITIVE",
                 confidence=0.8,
                 references=["expansion"],
+                strength=0.5,
             ),
             AgentTurn(
                 agent_id="a2",
@@ -359,6 +361,7 @@ def _round_with_two_opinions() -> RoundResult:
                 stance="NEGATIVE",
                 confidence=0.7,
                 references=["logistics"],
+                strength=0.5,
             ),
         ],
     )

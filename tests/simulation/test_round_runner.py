@@ -13,10 +13,11 @@ from src.simulation.round_runner import (
     RoundRunner,
     _build_system_prompt,
     _build_user_prompt,
-    _parse_response_stance,
 )
 from src.utils.queryIntend import QueryIntent
 from tests.agent_factory import slim_agent
+
+DECLARED = "REASONING: private\nPOSITION: POSITIVE 0.8\nCITES:\nANSWER: I support the proposal."
 
 
 def make_profile(
@@ -36,69 +37,6 @@ def make_profile(
 
 def make_pair(name_a: str, name_b: str, shared: list[str]) -> CommPair:
     return CommPair(agent_a=name_a, agent_b=name_b, shared_entities=shared, evidence=[])
-
-
-# ------------------------------------------------------------------
-# _parse_response_stance
-# ------------------------------------------------------------------
-
-
-def test_parse_stance_positive():
-    stance, _ = _parse_response_stance("I fully support this approach", "NEUTRAL", 0.5)
-    assert stance == "POSITIVE"
-
-
-def test_parse_stance_negative():
-    stance, _ = _parse_response_stance(
-        "I oppose this decision strongly", "NEUTRAL", 0.5
-    )
-    assert stance == "NEGATIVE"
-
-
-def test_parse_stance_negative_markers_beat_positive_substrings():
-    """`disagree` contains `agree`; a positive-first check reads disagreement as POSITIVE."""
-    assert (
-        _parse_response_stance(
-            "I disagree with Bob about carbon pricing.", "NEUTRAL", 0.5
-        )[0]
-        == "NEGATIVE"
-    )
-    assert (
-        _parse_response_stance("I do not agree with the proposal.", "NEUTRAL", 0.5)[0]
-        == "NEGATIVE"
-    )
-    assert (
-        _parse_response_stance("I support this proposal.", "NEUTRAL", 0.5)[0]
-        == "POSITIVE"
-    )
-
-
-def test_parse_stance_neutral():
-    stance, _ = _parse_response_stance(
-        "This is a balanced view with both pros and cons", "POSITIVE", 0.5
-    )
-    assert stance == "NEUTRAL"
-
-
-def test_parse_confidence_boost():
-    _, conf = _parse_response_stance(
-        "This is definitely the right choice", "POSITIVE", 0.5
-    )
-    assert conf == 0.6
-
-
-def test_parse_confidence_deduct():
-    _, conf = _parse_response_stance(
-        "This might perhaps be the right choice", "POSITIVE", 0.5
-    )
-    assert conf == 0.4
-
-
-def test_parse_confidence_capped():
-    _, conf = _parse_response_stance(
-        "This is absolutely, clearly, definitely the right choice", "POSITIVE", 0.95
-    )
-    assert conf == 1.0
 
 
 # ------------------------------------------------------------------
@@ -158,7 +96,7 @@ def test_user_prompt_shows_opponent_name():
 @pytest.mark.asyncio
 async def test_execute_round_returns_round_result():
     mock_llm = AsyncMock()
-    mock_llm.generate = AsyncMock(return_value="I support the proposal.")
+    mock_llm.generate = AsyncMock(return_value=DECLARED)
     runner = BatchedLLMRunner(mock_llm)
     rr = RoundRunner(runner)
 
@@ -179,7 +117,7 @@ async def test_execute_round_returns_round_result():
 @pytest.mark.asyncio
 async def test_execute_round_uses_profile_fields_in_prompts():
     mock_llm = AsyncMock()
-    mock_llm.generate = AsyncMock(return_value="Response")
+    mock_llm.generate = AsyncMock(return_value=DECLARED)
     runner = BatchedLLMRunner(mock_llm)
     rr = RoundRunner(runner)
 
@@ -208,7 +146,7 @@ async def test_execute_round_uses_profile_fields_in_prompts():
 @pytest.mark.asyncio
 async def test_execute_round_ws_broadcast_called():
     mock_llm = AsyncMock()
-    mock_llm.generate = AsyncMock(return_value="Response")
+    mock_llm.generate = AsyncMock(return_value=DECLARED)
     runner = BatchedLLMRunner(mock_llm)
     ws_calls = []
 
@@ -238,7 +176,7 @@ async def test_execute_round_error_continues():
         call_count["total"] += 1
         if call_count["total"] == 2:
             raise ValueError("intentional failure")
-        return "ok response"
+        return DECLARED
 
     mock_llm = AsyncMock()
     mock_llm.generate = tracking_generate
@@ -259,11 +197,9 @@ async def test_execute_round_error_continues():
 
 
 @pytest.mark.asyncio
-async def test_execute_round_retains_reasoning():
+async def test_execute_round_drops_reasoning_and_keeps_the_answer():
     mock_llm = AsyncMock()
-    mock_llm.generate = AsyncMock(
-        return_value="REASONING: Markets self-correct.\nANSWER: I support the proposal."
-    )
+    mock_llm.generate = AsyncMock(return_value=DECLARED)
     rr = RoundRunner(BatchedLLMRunner(mock_llm))
 
     _, alice = make_profile("Alice", ["x"], "x", 0.8)
@@ -276,17 +212,16 @@ async def test_execute_round_retains_reasoning():
         history=[],
     )
 
+    assert result.turns
     for turn in result.turns:
-        assert turn.reasoning == "Markets self-correct."
         assert turn.content == "I support the proposal."
+        assert "private" not in repr(turn)
 
 
 @pytest.mark.asyncio
 async def test_execute_round_turn_contains_profile_data():
     mock_llm = AsyncMock()
-    mock_llm.generate = AsyncMock(
-        return_value="I am certain this is the right approach."
-    )
+    mock_llm.generate = AsyncMock(return_value=DECLARED)
     runner = BatchedLLMRunner(mock_llm)
     rr = RoundRunner(runner)
 
@@ -301,10 +236,8 @@ async def test_execute_round_turn_contains_profile_data():
 
     names = {t.agent_name for t in result.turns}
     assert names == {"Alice", "Bob"}
-    confidences = {t.confidence for t in result.turns}
-    # Both are boosted by "certain" word: Alice 0.8->0.9, Bob 0.6->0.7
-    assert 0.9 in confidences
-    assert 0.7 in confidences
+    confidences = {t.agent_name: t.confidence for t in result.turns}
+    assert confidences == {"Alice": 0.8, "Bob": 0.6}
 
 
 # ------------------------------------------------------------------
@@ -332,7 +265,7 @@ def test_extract_references_caps_at_five():
 async def test_execute_round_fills_references():
     mock_llm = AsyncMock()
     mock_llm.generate = AsyncMock(
-        return_value="I disagree with Bob about carbon pricing."
+        return_value=DECLARED.replace("I support the proposal.", "I disagree with Bob about carbon pricing.")
     )
     rr = RoundRunner(BatchedLLMRunner(mock_llm))
     _, alice = make_profile("Alice", ["x"], "x", 0.8)
@@ -398,7 +331,7 @@ def test_user_prompt_shows_opponent_latest_stance_from_history():
 @pytest.mark.asyncio
 async def test_execute_round_passes_society_into_prompts():
     mock_llm = AsyncMock()
-    mock_llm.generate = AsyncMock(return_value="ok")
+    mock_llm.generate = AsyncMock(return_value=DECLARED)
     rr = RoundRunner(BatchedLLMRunner(mock_llm))
     _, alice = make_profile("Alice", ["x"], "x", 0.8)
     _, bob = make_profile("Bob", ["y"], "y", 0.7)
@@ -481,7 +414,7 @@ def test_user_prompt_includes_partial_intent_block():
 @pytest.mark.asyncio
 async def test_execute_round_passes_intent_into_prompts():
     mock_llm = AsyncMock()
-    mock_llm.generate = AsyncMock(return_value="Response")
+    mock_llm.generate = AsyncMock(return_value=DECLARED)
     rr = RoundRunner(BatchedLLMRunner(mock_llm), intent=make_intent())
     _, alice = make_profile("Alice", ["x"], "x", 0.8)
     _, bob = make_profile("Bob", ["y"], "y", 0.7)
@@ -500,7 +433,7 @@ async def test_execute_round_passes_intent_into_prompts():
 
 @pytest.mark.asyncio
 async def test_pair_turn_broadcast_never_carries_response_or_provider_error_text():
-    secret_response = "SECRET-RESPONSE-TEXT"
+    secret_response = "REASONING: r\nPOSITION: POSITIVE 0.5\nCITES:\nANSWER: SECRET-RESPONSE-TEXT"
     secret_error = "SECRET-PROVIDER-ERROR"
     replies = iter([secret_response, RuntimeError(secret_error)])
 

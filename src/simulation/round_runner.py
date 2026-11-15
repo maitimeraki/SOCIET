@@ -1,14 +1,21 @@
 """RoundRunner: dispatches pair prompts via BatchedLLMRunner and assembles RoundResult."""
 
-import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field, replace
 from typing import Callable, Optional
 
+from src.billing import metering
+from src.llm.config_llm import LLMConfig
 from src.persona.agent import Agent
 from src.simulation.llm_batch import BatchedLLMRunner, PairPrompt
 from src.simulation.pair_turn import AgentTurn, CommPair, RoundResult
-from src.simulation.profile_generator import evidence_block
+from src.simulation.profile_generator import attr_text, evidence_block
 from src.simulation.society_memory import SocietySnapshot
+from src.simulation.turn_protocol import (
+    PositionState,
+    TurnParse,
+    accept_position,
+    parse_turn,
+)
 from src.utils.queryIntend import QueryIntent
 
 OPPONENT_STATEMENT_CHARS = 600
@@ -16,71 +23,24 @@ OPPONENT_STATEMENT_CHARS = 600
 #: Evidence items rendered into one agent's turn prompt.
 PROMPT_EVIDENCE_MAX = 12
 
+#: Sampling temperature for every debate turn call.
+ROUND_TEMPERATURE = 0.7
 
-def _split_reasoning_answer(response: str) -> tuple[str, str]:
-    """Split a deliberation response into (reasoning, answer).
-
-    The turn prompt asks for a REASONING: section then an ANSWER: section. Only
-    the answer is the agent's stated position, so stance parses from it — never
-    from the private reasoning. The delimiter is matched case-sensitively: the
-    prompt asks for uppercase, so a lowercase prose line starting `answer:` is
-    content, not a delimiter. A response without the delimiter degrades to the
-    whole text as the answer (empty reasoning), so a malformed turn is never lost.
-    """
-    match = re.search(r"^\s*ANSWER:\s*", response, flags=re.MULTILINE)
-    if not match:
-        return "", response.strip()
-    answer = response[match.end() :].strip()
-    if not answer:
-        return "", response.strip()
-    reasoning = re.sub(
-        r"^\s*REASONING:\s*",
-        "",
-        response[: match.start()].strip(),
-        count=1,
-        flags=re.IGNORECASE,
-    ).strip()
-    return reasoning, answer
+RETRY_NOTE = (
+    "Your previous reply did not follow the required form and was discarded. "
+    "Reply again in exactly this form:"
+)
 
 
-def _parse_response_stance(
-    response: str, default_stance: str, default_confidence: float
-) -> tuple[str, float]:
-    """Parse stance and confidence from agent response using simple heuristics."""
-    stance = default_stance
-    confidence = default_confidence
-    response_lower = response.lower()
-
-    # Negative markers first: "disagree" contains "agree", and "do not agree" contains
-    # "agree" too, so a positive-first test reads a disagreement as POSITIVE. `not agree`
-    # catches the negated-affirmative phrasing a bare "disagree" misses.
-    if any(
-        word in response_lower
-        for word in ["oppose", "disagree", "not agree", "reject", "against", "negative"]
-    ):
-        stance = "NEGATIVE"
-    elif any(
-        word in response_lower
-        for word in ["support", "agree", "favor", "endorse", "positive"]
-    ):
-        stance = "POSITIVE"
-    elif any(
-        word in response_lower for word in ["neutral", "balanced", "both", "neither"]
-    ):
-        stance = "NEUTRAL"
-
-    if any(
-        word in response_lower
-        for word in ["certain", "definitely", "clearly", "absolutely"]
-    ):
-        confidence = min(1.0, confidence + 0.1)
-    elif any(
-        word in response_lower
-        for word in ["maybe", "perhaps", "uncertain", "might", "could"]
-    ):
-        confidence = max(0.0, confidence - 0.1)
-
-    return stance, confidence
+def _format_instruction(opponent_name: str) -> str:
+    """The declared turn form. The only place it is written; the retry restates it verbatim."""
+    return (
+        "Reply in exactly this form, one label per line, in this order, with nothing before REASONING:\n"
+        "REASONING: <your private thinking, briefly>\n"
+        "POSITION: <POSITIVE|NEGATIVE|NEUTRAL|ABSTAIN> <strength from 0 to 1>\n"
+        "CITES: <the evidence ids you rely on, comma separated, e.g. e1, e3; leave empty if none>\n"
+        f"ANSWER: <your reply to {opponent_name}, engaging with specific arguments>"
+    )
 
 
 def _extract_references(content: str, candidates: list[str]) -> list[str]:
@@ -105,6 +65,11 @@ def _truncate_snippet(text: str, budget: int) -> str:
         return text
     cut = text[:budget]
     return cut.rsplit(" ", 1)[0] if " " in cut else cut
+
+
+def _shown_evidence_ids(agent: Agent) -> set[str]:
+    """The evidence ids the agent's system prompt shows: the ids a turn may cite."""
+    return {attr_text(item.id) for item in agent.evidence[:PROMPT_EVIDENCE_MAX]}
 
 
 def _build_system_prompt(agent: Agent, shared_entities: list[str]) -> str:
@@ -169,9 +134,10 @@ def _build_user_prompt(
         (h for h in reversed(history) if h.get("agent_name") == opponent.identity.name),
         None,
     )
-    their_stance = opp_last["stance"] if opp_last else getattr(opponent, "stance", None)
-    if hasattr(their_stance, "value"):
-        their_stance = their_stance.value
+    their_stance = opp_last.get("stance") if opp_last else None
+    their_line = (
+        f"{their_stance} (latest on record)" if their_stance else "no position yet"
+    )
 
     opponent_str = ""
     if opp_last and opp_last.get("content"):
@@ -200,15 +166,12 @@ def _build_user_prompt(
         f"DEBATE TOPIC: {query}\n\n"
         f"{intent_str}"
         f"You are responding to: {opponent.identity.name}\n"
-        f"Their stance: {their_stance or 'NEUTRAL'} (latest on record)\n\n"
+        f"Their stance: {their_line}\n\n"
         f"{opponent_str}"
         f"{society_str}"
         f"{self_str}"
         f"CONVERSATION HISTORY:\n{history_str or '(No previous turns)'}\n\n"
-        f"Think it through before you answer:\n"
-        f"REASONING: (briefly: your position, {opponent.identity.name}'s point, "
-        f"where you clash — your private thinking)\n"
-        f"ANSWER: (your reply to {opponent.identity.name}, engaging with specific arguments)"
+        f"{_format_instruction(opponent.identity.name)}"
     )
 
 
@@ -219,6 +182,8 @@ class RoundRunner:
     _llm: BatchedLLMRunner
     ws_broadcast: Optional[Callable] = None
     intent: Optional[QueryIntent] = None
+    #: Each speaker's held position across the rounds of one debate (one RoundRunner per run).
+    _positions: dict[str, PositionState] = field(default_factory=dict)
 
     async def execute_round(
         self,
@@ -246,80 +211,127 @@ class RoundRunner:
                 continue
 
             shared = [str(e) for e in (pair.shared_entities or [])]
-
-            meta_a = {"pair": pair, "speaker": agent_a, "opponent": agent_b}
-            prompt_a = PairPrompt(
-                system_prompt=_build_system_prompt(agent_a, shared),
-                user_prompt=_build_user_prompt(
-                    agent_a,
-                    agent_b,
-                    query,
-                    history,
-                    society=society,
-                    intent=self.intent,
-                    max_opinions=max_opinions,
-                ),
-                pair_id=f"{dataset_id}:{pair.agent_a}:{pair.agent_b}",
-            )
-            prompts.append(prompt_a)
-            prompt_meta[prompt_a.pair_id] = meta_a
-
-            meta_b = {"pair": pair, "speaker": agent_b, "opponent": agent_a}
-            prompt_b = PairPrompt(
-                system_prompt=_build_system_prompt(agent_b, shared),
-                user_prompt=_build_user_prompt(
-                    agent_b,
-                    agent_a,
-                    query,
-                    history,
-                    society=society,
-                    intent=self.intent,
-                    max_opinions=max_opinions,
-                ),
-                pair_id=f"{dataset_id}:{pair.agent_b}:{pair.agent_a}",
-            )
-            prompts.append(prompt_b)
-            prompt_meta[prompt_b.pair_id] = meta_b
+            for speaker, opponent, speaker_name, opponent_name in (
+                (agent_a, agent_b, pair.agent_a, pair.agent_b),
+                (agent_b, agent_a, pair.agent_b, pair.agent_a),
+            ):
+                prompt = PairPrompt(
+                    system_prompt=_build_system_prompt(speaker, shared),
+                    user_prompt=_build_user_prompt(
+                        speaker,
+                        opponent,
+                        query,
+                        history,
+                        society=society,
+                        intent=self.intent,
+                        max_opinions=max_opinions,
+                    ),
+                    pair_id=f"{dataset_id}:{speaker_name}:{opponent_name}",
+                    model=LLMConfig.debate_model,
+                    temperature=ROUND_TEMPERATURE,
+                    max_tokens=LLMConfig.max_output_tokens,
+                )
+                prompts.append(prompt)
+                prompt_meta[prompt.pair_id] = {
+                    "pair": pair,
+                    "speaker": speaker,
+                    "opponent": opponent,
+                    "own_ids": _shown_evidence_ids(speaker),
+                }
 
         turns: list[AgentTurn] = []
         collected_pairs: list[CommPair] = []
+        warnings: list[str] = []
+        with metering.source_scope("debate"):
+            failed = await self._collect(
+                prompts, prompt_meta, turns, collected_pairs, warnings, retrying=False
+            )
+            if failed:
+                retries = [
+                    replace(
+                        prompt,
+                        user_prompt=(
+                            f"{prompt.user_prompt}\n\n{RETRY_NOTE}\n"
+                            + _format_instruction(
+                                prompt_meta[prompt.pair_id]["opponent"].identity.name
+                            )
+                        ),
+                    )
+                    for prompt in failed
+                ]
+                await self._collect(
+                    retries, prompt_meta, turns, collected_pairs, warnings, retrying=True
+                )
 
+        return RoundResult(
+            round_num=round_num,
+            turns=turns,
+            pairs=collected_pairs,
+            warnings=warnings,
+        )
+
+    async def _collect(
+        self,
+        prompts: list[PairPrompt],
+        prompt_meta: dict[str, dict],
+        turns: list[AgentTurn],
+        collected_pairs: list[CommPair],
+        warnings: list[str],
+        *,
+        retrying: bool,
+    ) -> list[PairPrompt]:
+        """Parse each result into a turn. Returns the prompts whose reply broke the form (first pass)."""
+        by_id = {prompt.pair_id: prompt for prompt in prompts}
+        failed: list[PairPrompt] = []
         async for result in self._llm.gather(prompts):
             if self.ws_broadcast:
                 await self.ws_broadcast({"type": "pair_turn", "pair_id": result.pair_id})
 
             meta = prompt_meta.get(result.pair_id)
-            if meta is None or result.error:
+            if meta is None:
+                continue
+            speaker_name = meta["speaker"].identity.name
+            if result.error:
+                warnings.append(f"{speaker_name}: turn dropped, the LLM call failed")
+                continue
+            try:
+                parsed = parse_turn(result.response, meta["own_ids"])
+            except ValueError as exc:
+                if retrying:
+                    warnings.append(f"{speaker_name}: turn dropped, {exc}")
+                else:
+                    failed.append(by_id[result.pair_id])
                 continue
 
-            reasoning, answer = _split_reasoning_answer(result.response)
-
-            stance, confidence = _parse_response_stance(
-                answer,
-                default_stance="NEUTRAL",
-                default_confidence=meta["speaker"].confidence,
-            )
-            turn = AgentTurn(
-                agent_id=str(meta["speaker"].agent_id),
-                agent_name=meta["speaker"].identity.name,
-                content=answer,
-                stance=stance,
-                confidence=confidence,
-                reasoning=reasoning,
-                references=_extract_references(
-                    answer,
-                    list(
-                        dict.fromkeys(
-                            (meta["pair"].shared_entities or [])
-                            + [meta["opponent"].identity.name]
-                        )
-                    ),
-                ),
-            )
-            turns.append(turn)
-
+            turns.append(self._turn(meta, parsed))
             pair = meta["pair"]
             if pair not in collected_pairs:
                 collected_pairs.append(pair)
+        return failed
 
-        return RoundResult(round_num=round_num, turns=turns, pairs=collected_pairs)
+    def _turn(self, meta: dict, parsed: TurnParse) -> AgentTurn:
+        speaker = meta["speaker"]
+        name = speaker.identity.name
+        held = self._positions.get(name)
+        stance, reason = accept_position(held, parsed)
+        cites_used = (held.cites_used if held else set()) | set(parsed.cites)
+        self._positions[name] = PositionState(stance, cites_used)
+        return AgentTurn(
+            agent_id=str(speaker.agent_id),
+            agent_name=name,
+            content=parsed.answer,
+            stance=stance.value,
+            confidence=speaker.confidence,
+            strength=parsed.strength,
+            cites=parsed.cites,
+            position_reason=reason,
+            references=_extract_references(
+                parsed.answer,
+                list(
+                    dict.fromkeys(
+                        (meta["pair"].shared_entities or [])
+                        + [meta["opponent"].identity.name]
+                    )
+                ),
+            ),
+        )

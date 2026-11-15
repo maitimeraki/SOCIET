@@ -89,6 +89,7 @@ def _make_turn(agent_id: str, agent_name: str, stance: str = "POSITIVE") -> Agen
         stance=stance,
         confidence=0.8,
         references=[],
+        strength=0.5,
     )
 
 

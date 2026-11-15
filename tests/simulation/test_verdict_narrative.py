@@ -36,6 +36,7 @@ def make_turn(agent_name: str, stance: str, content: str) -> AgentTurn:
         stance=stance,
         confidence=0.7,
         references=[],
+        strength=0.5,
     )
 
 

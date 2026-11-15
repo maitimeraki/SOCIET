@@ -20,6 +20,7 @@ def _make_turn(
         stance=stance,
         confidence=confidence,
         references=["EntityA", "EntityB"],
+        strength=0.5,
     )
 
 

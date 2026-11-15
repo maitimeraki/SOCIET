@@ -17,6 +17,7 @@ class PairPrompt:
     provider: Optional[str] = None
     model: Optional[str] = None
     temperature: Optional[float] = None
+    max_tokens: Optional[int] = None
 
 
 @dataclass
@@ -41,6 +42,7 @@ class BatchedLLMRunner:
                     provider=prompt.provider,
                     model=prompt.model,
                     temperature=prompt.temperature,
+                    max_tokens=prompt.max_tokens,
                 )
                 return PairResult(pair_id=prompt.pair_id, response=response, error=None)
             except MeteringError:
