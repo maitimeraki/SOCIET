@@ -1,5 +1,6 @@
 """Tests for DebateOrchestrator."""
 
+import copy
 import dataclasses
 import json
 import re
@@ -1633,7 +1634,14 @@ async def test_a_node_tried_in_the_initial_synthesis_is_not_drawn_as_a_joiner():
     assert handed == [["Lumen", "Alice"], ["Carol"]]
 
 
+
+
 # --- end to end: no provenance, evidence, reasoning or cite id reaches a client payload ---
+#
+# The run is the real path: a real ProfileSynthesizer over the fake graph and fake profile model,
+# a seeded QueryIntent, a fake round gather and a fake verdict. Several brief markers never occur
+# in a real run (no code path writes them), so each marker is also planted as a canary in the
+# unprojected events and result, and the projection must remove it there.
 
 _LEAK_QUESTION = "Should we enter Berlin?"
 _LEAK_ENTITIES = [
@@ -1644,7 +1652,7 @@ _LEAK_ENTITIES = [
 _LEAK_CHUNK_ID = uuid.UUID("c0ffee00-0000-4000-8000-0000000000c1")
 _LEAK_DOC_ID = "doc-market-memo"
 # Every evidence sentence the fake graph serves, taken from the fixture's own chunks.
-EVIDENCE_SENTENCES = sorted(
+_EVIDENCE_SENTENCES = sorted(
     {
         sentence
         for hit in _chunks_for(_LEAK_ENTITIES).vector
@@ -1652,13 +1660,25 @@ EVIDENCE_SENTENCES = sorted(
         if sentence
     }
 )
-LEAK_MARKERS = (
+_LEAK_MARKERS = (
     "chunk_id", "doc_id", "version_hash", "dossier_hash", "graph_snapshot", "summary_provenance",
     "source_evidence", "evidence", "REASONING", "[e1]", "llm_model", "anchors", "source_count",
 )
 _TURN_REPLY = (
     "REASONING: the memo's pricing section decides it, privately.\n"
     "ANSWER: POSITIVE. The pilot rollout timing decides it."
+)
+_LEAK_INTENT = QueryIntent(
+    direct_keywords=["Berlin", "pilot"],
+    latent_sectors=["logistics"],
+    search_perspectives=["Economic"],
+    core_question="Should the company enter Berlin?",
+    domain_tags=["economic"],
+    entity_frame=["Kestra"],
+    stance_axis="support means entering Berlin",
+    extraction_confidence=0.82,
+    llm_model="fixture-extraction-model",
+    llm_provider="fixture-provider",
 )
 
 
@@ -1701,7 +1721,7 @@ def _leak_verdict() -> DebateVerdict:
             {
                 "entity": "Kestra",
                 "claim": "The pilot is priced per seat",
-                "quote": EVIDENCE_SENTENCES[0],
+                "quote": _EVIDENCE_SENTENCES[0],
                 "chunk_id": str(_LEAK_CHUNK_ID),
             }
         ],
@@ -1743,12 +1763,15 @@ async def _run_leak_debate() -> SimpleNamespace:
         society_memory=society_memory,
     )
 
+    # The job broadcasts the intent before the run (debate_api.py:312); the run is handed the same intent.
+    events.append({"type": "intent", "intent": _LEAK_INTENT.model_dump()})
     result = await orchestrator.run(
         _LEAK_QUESTION,
         "ds1",
         DebateConfig(max_agents=2, max_rounds=2),
         ws_broadcast,
         llm_client=llm,
+        intent=_LEAK_INTENT,
         on_records=on_records,
     )
     return SimpleNamespace(
@@ -1760,74 +1783,145 @@ def _as_text(payload) -> str:
     return json.dumps(payload, sort_keys=True, default=str)
 
 
-def _client_payloads(run: SimpleNamespace) -> SimpleNamespace:
-    """What a client can receive: the projected stream, the projected result and the roster."""
-    stream = [event for event in map(project_event, run.events) if event is not None]
-    result = project_result(dataclasses.asdict(run.result))
+def _result_payload(run: SimpleNamespace) -> dict:
+    """The result as the job stores it: asdict, with the intent as model_dump (debate_api.py:403)."""
+    payload = dataclasses.asdict(run.result)
+    payload["intent"] = run.result.intent.model_dump() if run.result.intent else None
+    return payload
+
+
+def _projected(events: list[dict], result: dict) -> SimpleNamespace:
+    """The projected stream and result, as text per surface, plus the verdict's evidence list."""
+    stream = [event for event in map(project_event, events) if event is not None]
+    projected = project_result(result)
     # `evidence` is a verdict key by contract (spec 4b): its items are narrowed to {entity, claim},
-    # which its own assertion checks. The key is renamed here so the substring scan still covers
-    # every value it carries, while the permitted key name itself is not counted as a leak.
-    verdict_evidence = result["evidence"]
-    result = {("verdict_claims" if key == "evidence" else key): value for key, value in result.items()}
+    # which an exact assertion checks. Top-level keys named `evidence` (the verdict in the result and
+    # in a `complete` event) are renamed so the substring scan still covers every value they carry,
+    # while the permitted key name itself is not counted as a leak.
+    verdict_evidence = projected["evidence"]
+    return SimpleNamespace(
+        surfaces={
+            "stream": _as_text([_scan_keys(event) for event in stream]),
+            "result": _as_text(_scan_keys(projected)),
+        },
+        stream=stream,
+        verdict_evidence=verdict_evidence,
+    )
+
+
+def _scan_keys(payload: dict) -> dict:
+    return {("verdict_claims" if key == "evidence" else key): value for key, value in payload.items()}
+
+
+_CANARY_CONTAINERS = ("profile", "intent")
+_CANARY_ITEMS = ("evidence", "dissenting_views")
+
+
+def _canaried(obj: dict, marker: str) -> dict:
+    """A copy of one event or result dict with `marker` planted where the projection must drop it.
+
+    It goes in as an unlisted top-level key with the marker as its value, and as an unlisted key
+    inside every dict the projection narrows (profile, intent, evidence and dissent items, links).
+    """
+    out = copy.deepcopy(obj)
+    out.setdefault(marker, marker)
+    for key in _CANARY_CONTAINERS:
+        if isinstance(out.get(key), dict):
+            out[key][marker] = marker
+    for key in _CANARY_ITEMS:
+        for item in out.get(key) or []:
+            if isinstance(item, dict):
+                item[marker] = marker
+    for links in (out.get("provenance_by_claim") or {}).values():
+        for link in links or []:
+            if isinstance(link, dict):
+                link[marker] = marker
+    return out
+
+
+def _canaried_inputs(run: SimpleNamespace, marker: str) -> tuple[list[dict], dict]:
+    """The unprojected events (plus a `complete` built from the result) and result, each with the canary."""
+    result = _result_payload(run)
+    events = [_canaried(event, marker) for event in run.events]
+    events.append(_canaried({"type": "complete", **result}, marker))
+    return events, _canaried(result, marker)
+
+
+async def _client_payloads(run: SimpleNamespace) -> SimpleNamespace:
+    """What a client can receive: the projected stream, the projected result and the roster."""
+    projection = _projected(run.events, _result_payload(run))
+    # Roster leg: the pure projection over the stored view, as read_roster builds it. The SQL read
+    # itself (record -> 'view', published rows only) is DB-gated and not exercised here.
     published = [
         record.model_dump(mode="json")["view"] for record in run.records if record.status == "published"
     ]
     roster = [view.model_dump(mode="json") for view in roster_views(published)]
-    surfaces = {"stream": _as_text(stream), "result": _as_text(result), "roster": _as_text(roster)}
-    types = {event["profile"].get("type") for event in stream if event["type"] == "agent"}
+    surfaces = {**projection.surfaces, "roster": _as_text(roster)}
+    types = {event["profile"].get("type") for event in projection.stream if event["type"] == "agent"}
     types |= {view["type"] for view in roster}
-    return SimpleNamespace(surfaces=surfaces, verdict_evidence=verdict_evidence, types=types)
+    return SimpleNamespace(surfaces=surfaces, verdict_evidence=projection.verdict_evidence, types=types)
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("marker", LEAK_MARKERS, ids=LEAK_MARKERS)
-async def test_no_client_payload_carries_a_provenance_or_cite_marker(marker):
-    payloads = _client_payloads(await _run_leak_debate())
+@pytest.mark.parametrize("marker", _LEAK_MARKERS, ids=_LEAK_MARKERS)
+async def test_no_client_payload_carries_a_leak_marker(marker):
+    payloads = await _client_payloads(await _run_leak_debate())
 
     assert [name for name, text in payloads.surfaces.items() if marker in text] == []
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("sentence", EVIDENCE_SENTENCES, ids=EVIDENCE_SENTENCES)
+@pytest.mark.parametrize("marker", _LEAK_MARKERS, ids=_LEAK_MARKERS)
+async def test_canary_marker_is_removed_by_the_projection(marker):
+    events, result = _canaried_inputs(await _run_leak_debate(), marker)
+
+    projection = _projected(events, result)
+
+    assert [name for name, text in projection.surfaces.items() if marker in text] == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("sentence", _EVIDENCE_SENTENCES, ids=_EVIDENCE_SENTENCES)
 async def test_no_client_payload_carries_an_evidence_sentence(sentence):
-    payloads = _client_payloads(await _run_leak_debate())
+    payloads = await _client_payloads(await _run_leak_debate())
 
     assert [name for name, text in payloads.surfaces.items() if sentence in text] == []
 
 
 @pytest.mark.asyncio
 async def test_no_client_agent_is_typed_entity():
-    payloads = _client_payloads(await _run_leak_debate())
+    payloads = await _client_payloads(await _run_leak_debate())
 
     assert "Entity" not in payloads.types
 
 
 @pytest.mark.asyncio
 async def test_seated_agents_carry_the_fixture_labels():
-    payloads = _client_payloads(await _run_leak_debate())
+    payloads = await _client_payloads(await _run_leak_debate())
 
     assert payloads.types == {"Company", "Person"}
 
 
 @pytest.mark.asyncio
 async def test_verdict_evidence_keeps_only_entity_and_claim():
-    payloads = _client_payloads(await _run_leak_debate())
+    payloads = await _client_payloads(await _run_leak_debate())
 
     assert payloads.verdict_evidence == [{"entity": "Kestra", "claim": "The pilot is priced per seat"}]
 
 
 @pytest.mark.asyncio
-async def test_positive_control_unprojected_run_carries_the_markers():
+async def test_positive_control_every_marker_and_sentence_is_in_the_unprojected_data():
     run = await _run_leak_debate()
     raw_records = [record.model_dump(mode="json") for record in run.records]
     raw = _as_text(
         {
             "events": run.events,
-            "result": dataclasses.asdict(run.result),
+            "result": _result_payload(run),
             "records": raw_records,
             "model_replies": run.llm.raw_replies,
         }
     )
+    canaried = "".join(_as_text(_canaried_inputs(run, marker)) for marker in _LEAK_MARKERS)
 
-    assert [m for m in ("chunk_id", "doc_id", "dossier_hash", "evidence", "REASONING", "[e1]") if m not in raw] == []
-    assert any(sentence in _as_text(raw_records) for sentence in EVIDENCE_SENTENCES)
+    assert [marker for marker in _LEAK_MARKERS if marker not in raw + canaried] == []
+    assert [sentence for sentence in _EVIDENCE_SENTENCES if sentence not in _as_text(raw_records)] == []
