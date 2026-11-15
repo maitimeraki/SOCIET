@@ -22,6 +22,7 @@ from sqlalchemy import delete
 from src.api import run_doc
 from src.api.debate_api import (
     _DEBATE_JOBS,
+    AGENT_RECORDS_NOT_STORED,
     DebateConfigRequest,
     DebateRequest,
     _DebateWSManager,
@@ -464,6 +465,7 @@ async def _run_stubbed_job(
     query="Should we tax carbon?",
     pre_stored_ws_manager=None,
     chunks=None,
+    round_error=None,
 ):
     """Run the real job path — real orchestrator, S4 selection and S9 wiring —
     with only the graph (Neo4j), round LLM calls and verdict seams stubbed.
@@ -549,8 +551,10 @@ async def _run_stubbed_job(
             patch("src.api.debate_api._DebateWSManager", return_value=ws_manager),
         ):
             rr_instance = MagicMock()
-            rr_instance.execute_round = AsyncMock(
-                return_value=RoundResult(round_num=1, turns=[], pairs=[])
+            rr_instance.execute_round = (
+                AsyncMock(side_effect=round_error)
+                if round_error is not None
+                else AsyncMock(return_value=RoundResult(round_num=1, turns=[], pairs=[]))
             )
             rr_cls.return_value = rr_instance
             await _run_debate_async(
@@ -571,6 +575,45 @@ def _stage_events(ws_manager):
         for call in ws_manager.broadcast.call_args_list
         if call.args and call.args[0].get("type") == "stage"
     ]
+
+
+class TestAgentRecordsAtTheSynthesisBoundary:
+    """Records are stored as synthesis produces them, not after the debate."""
+
+    @pytest.mark.asyncio
+    async def test_records_are_stored_even_when_a_later_round_raises(self, monkeypatch):
+        stored: list[tuple[str, list[str]]] = []
+
+        async def capture(run_id, records):
+            stored.append((run_id, [record.node_id for record in records]))
+
+        monkeypatch.setattr(run_doc, "write_agent_records", capture)
+        job_id = f"records-{uuid.uuid4()}"
+        config = DebateConfig(max_agents=5, max_rounds=1, max_new_agents_per_round=0)
+
+        job, _ = await _run_stubbed_job(
+            job_id, config, round_error=RuntimeError("round boom")
+        )
+
+        assert job["status"] == "failed"
+        assert len(stored) == 1
+        assert stored[0][0] == job_id
+        assert stored[0][1]
+
+    @pytest.mark.asyncio
+    async def test_a_failed_record_write_is_a_generic_warning_on_a_complete_run(self, monkeypatch):
+        async def write_down(run_id, records):
+            raise RuntimeError("db secret detail")
+
+        monkeypatch.setattr(run_doc, "write_agent_records", write_down)
+        config = DebateConfig(max_agents=5, max_rounds=1, max_new_agents_per_round=0)
+
+        job, _ = await _run_stubbed_job(f"records-{uuid.uuid4()}", config)
+
+        assert job["status"] == "complete"
+        warnings = job["result"]["warnings"]
+        assert AGENT_RECORDS_NOT_STORED in warnings
+        assert not any("db secret detail" in warning for warning in warnings)
 
 
 class TestDebateJobPayload:

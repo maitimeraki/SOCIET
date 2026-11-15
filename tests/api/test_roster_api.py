@@ -205,14 +205,26 @@ async def test_a_required_audit_write_re_raises_its_failure():
         await audit.record(_DownSession(), "agent_record_read", required=True)
 
 
-async def test_a_failed_record_write_is_logged_and_never_raised(monkeypatch):
+async def test_a_failed_record_write_is_logged_and_reported_as_false(monkeypatch):
     from src.api import debate_api
 
     async def write_fails(run_id, records):
         raise RuntimeError("db down")
 
     monkeypatch.setattr(run_doc, "write_agent_records", write_fails)
-    await debate_api._persist_agent_records(str(uuid.uuid4()), [agent_record("n1")])
+    stored = await debate_api._persist_agent_records(str(uuid.uuid4()), [agent_record("n1")])
+    assert stored is False
+
+
+async def test_a_successful_record_write_is_reported_as_true(monkeypatch):
+    from src.api import debate_api
+
+    async def write_ok(run_id, records):
+        return None
+
+    monkeypatch.setattr(run_doc, "write_agent_records", write_ok)
+    stored = await debate_api._persist_agent_records(str(uuid.uuid4()), [agent_record("n1")])
+    assert stored is True
 
 
 # --- Postgres: the stored roster, seat order and idempotent write -------------
@@ -273,6 +285,36 @@ async def test_a_foreign_owner_reads_an_empty_roster(owner):
     run_id = await _run_for(owner.id)
     await run_doc.write_agent_records(run_id, [agent_record("n1", run_id=run_id)])
     assert await run_doc.read_roster(run_id, uuid.uuid4()) == []
+
+
+@requires_db
+async def test_a_seated_joiner_follows_the_initial_seats_and_a_rejected_one_is_absent(owner):
+    run_id = await _run_for(owner.id)
+    await run_doc.write_agent_records(
+        run_id,
+        [
+            agent_record("n-initial-1", run_id=run_id, seat=1, name="Initial One"),
+            agent_record("n-initial-2", run_id=run_id, seat=2, name="Initial Two"),
+        ],
+    )
+    await run_doc.write_agent_records(
+        run_id,
+        [
+            agent_record("n-joiner", run_id=run_id, seat=3, name="Joiner"),
+            agent_record("n-joiner-out", run_id=run_id, status="rejected"),
+        ],
+    )
+    roster = await run_doc.read_roster(run_id, owner.id)
+    assert [view.name for view in roster] == ["Initial One", "Initial Two", "Joiner"]
+
+
+@requires_db
+async def test_a_later_record_for_the_same_node_replaces_the_rejected_one(owner):
+    run_id = await _run_for(owner.id)
+    await run_doc.write_agent_records(run_id, [agent_record("n1", run_id=run_id, status="rejected")])
+    await run_doc.write_agent_records(run_id, [agent_record("n1", run_id=run_id, seat=3, name="Later")])
+    roster = await run_doc.read_roster(run_id, owner.id)
+    assert [view.name for view in roster] == ["Later"]
 
 
 @requires_db

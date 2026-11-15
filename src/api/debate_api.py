@@ -346,31 +346,35 @@ async def _run_debate_async(
                 society_memory=SocietyMemory(ctx._driver, ctx._db),
             )
 
-            # Seat decisions and agent records: the caller-owned sinks the seated set
-            # and the backend-only records are read from.
+            # Seat decisions: the caller-owned sink the seated set is read from.
             seat_decisions: list = []
-            agent_records: list = []
+
+            # Agent records are stored at each synthesis boundary (initial seats, then each
+            # joiner batch), so a debate that stops later still keeps them.
+            records_stored = True
+
+            async def _store_agent_records(batch: list) -> None:
+                nonlocal records_stored
+                if not await _persist_agent_records(job_id, batch):
+                    records_stored = False
 
             # Run debate with orchestrator. The S9 stage emitter is the job's
             # own WS manager: real transitions, pushed alongside round events.
-            try:
-                result = await orchestrator.run(
-                    query=query,
-                    dataset_id=graph_id,
-                    config=config,
-                    ws_broadcast=ws_manager.broadcast,
-                    llm_client=llm,
-                    on_stage=ws_manager.broadcast,
-                    intent=intent,
-                    context=context,
-                    cancel_check=cancel_check,
-                    decisions=seat_decisions,
-                    records=agent_records,
-                )
-            finally:
-                # Written once, after synthesis, even when the debate then fails.
-                if agent_records:
-                    await _persist_agent_records(job_id, agent_records)
+            result = await orchestrator.run(
+                query=query,
+                dataset_id=graph_id,
+                config=config,
+                ws_broadcast=ws_manager.broadcast,
+                llm_client=llm,
+                on_stage=ws_manager.broadcast,
+                intent=intent,
+                context=context,
+                cancel_check=cancel_check,
+                decisions=seat_decisions,
+                on_records=_store_agent_records,
+            )
+            if not records_stored:
+                result.warnings.append(AGENT_RECORDS_NOT_STORED)
 
         # S9: this layer owns the intent extraction, so it reports the
         # degradation the run cannot see (the fallback intent is a valid
@@ -539,14 +543,25 @@ _TERMINAL_STATUSES = {"complete", "failed", "cancelled"}
 _LAST_PERSIST_AT: Dict[str, float] = {}
 
 
-async def _persist_agent_records(job_id: str, records: list) -> None:
-    """Write a run's backend-only agent records once. Best-effort, as `_persist_debate_run`:
-    a failed write is logged, never raised, so persistence cannot break a finished debate.
+# Shown to the user when a run's agent records could not be stored. Generic on purpose:
+# the cause is logged server-side, never sent.
+AGENT_RECORDS_NOT_STORED = (
+    "The agent records for this run could not be stored; its agent roster is unavailable."
+)
+
+
+async def _persist_agent_records(job_id: str, records: list) -> bool:
+    """Write a batch of a run's backend-only agent records. True when stored.
+
+    Best-effort, as `_persist_debate_run`: a failed write is logged, never raised, so
+    persistence cannot break a live debate. The caller reports a False as a warning.
     """
     try:
         await run_doc.write_agent_records(job_id, records)
+        return True
     except Exception:
         logger.exception("agent records write failed for run %s", job_id)
+        return False
 
 
 async def _persist_debate_run(job_id: str) -> None:

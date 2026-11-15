@@ -35,6 +35,7 @@ from typing import Any, Optional
 
 from pydantic import BaseModel
 from sqlalchemy import func, select, tuple_, update
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from src.db.engine import get_session_factory
@@ -454,11 +455,13 @@ async def list_run_summaries(
 
 
 async def write_agent_records(run_id: str, records: Sequence[BaseModel]) -> None:
-    """Persist a run's agent records. A repeated write inserts nothing new.
+    """Upsert a batch of a run's agent records, keyed by (run_id, node_id).
 
-    Keyed by (run_id, node_id) and inserted ON CONFLICT DO NOTHING, the same
-    idempotency `run_events` uses, so a second write neither duplicates nor fails.
-    The stored record's run_id is the owning run, whatever the synthesizer minted.
+    A repeated write of the same records changes nothing. A later record for the same
+    node replaces the earlier one: a candidate rejected at synthesis can be seated later
+    as an activation joiner, and the later record is the true one. Earlier batches of the
+    run are never touched. The stored record's run_id is the owning run, whatever the
+    synthesizer minted.
     """
     key = _as_uuid(run_id)
     if key is None:
@@ -480,10 +483,16 @@ async def write_agent_records(run_id: str, records: Sequence[BaseModel]) -> None
     if not rows:
         return
     async with get_session_factory()() as session:
+        statement = pg_insert(AgentRecordRow).values(rows)
         await session.execute(
-            pg_insert(AgentRecordRow)
-            .values(rows)
-            .on_conflict_do_nothing(index_elements=["run_id", "node_id"])
+            statement.on_conflict_do_update(
+                index_elements=["run_id", "node_id"],
+                set_={
+                    "status": statement.excluded.status,
+                    "seat": statement.excluded.seat,
+                    "record": statement.excluded.record,
+                },
+            )
         )
         await session.commit()
 
@@ -491,9 +500,11 @@ async def write_agent_records(run_id: str, records: Sequence[BaseModel]) -> None
 async def read_roster(run_id: str, owner_id: uuid.UUID | str) -> list[AgentView]:
     """The published agents of a run the owner holds, in seat order.
 
-    Seat order is the persisted `seat`, with node_id as the stable tiebreak. The
-    join on runs.user_id keeps a foreign run empty even if a caller skips its own
-    ownership check. Callers that need to tell "not found" from "empty" check the run first.
+    Selects only the stored `view` JSON path, never the whole record (evidence and
+    details_raw stay in the database). Seat order is the persisted `seat`, with node_id
+    as the stable tiebreak. The join on runs.user_id keeps a foreign run empty even if a
+    caller skips its own ownership check; callers that must tell "not found" from "empty"
+    check the run first.
     """
     key = _as_uuid(run_id)
     owner = _as_uuid(owner_id)
@@ -503,7 +514,7 @@ async def read_roster(run_id: str, owner_id: uuid.UUID | str) -> list[AgentView]
         records = (
             (
                 await session.execute(
-                    select(AgentRecordRow.record)
+                    select(AgentRecordRow.record.op("->", return_type=JSONB)("view"))
                     .join(Run, Run.id == AgentRecordRow.run_id)
                     .where(
                         AgentRecordRow.run_id == key,

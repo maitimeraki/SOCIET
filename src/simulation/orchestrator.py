@@ -163,7 +163,7 @@ class DebateOrchestrator:
         context: Optional[dict] = None,
         cancel_check: Optional[Callable[[], bool]] = None,
         decisions: Optional[list[SeatDecision]] = None,
-        records: Optional[list[AgentRecord]] = None,
+        on_records: Optional[Callable[[list[AgentRecord]], Awaitable[None]]] = None,
     ) -> OrchestratedDebateResult:
         """
         Run the full debate pipeline with WebSocket streaming.
@@ -195,15 +195,16 @@ class DebateOrchestrator:
         streamed: the roster UI's table still reads score fields that no longer
         exist (Task 3.2 removes it).
 
-        `records` is the caller-owned sink for the backend-only AgentRecord of each
-        candidate that reached generation. It is filled during synthesis, so it holds
-        the records even when the debate fails afterwards. Never sent to a client.
+        `on_records` receives the backend-only AgentRecords as they are produced: once
+        after the initial synthesis (also when it raises: rejected records exist then),
+        and once per activation batch of joiners. Each batch is handed over exactly once,
+        before the debate continues. Never sent to a client.
         """
         warnings: list[str] = []
         all_turns: list = []
         profiles: List[Agent] = []
         seat_sink: list[SeatDecision] = decisions if decisions is not None else []
-        profile_records: list[AgentRecord] = records if records is not None else []
+        profile_records: list[AgentRecord] = []
         stage_index = await self._emit_stage(on_stage, 0, "intake", query=query)
 
         async def _emit_profile(profile: Agent, index: int, total: int) -> None:
@@ -218,18 +219,21 @@ class DebateOrchestrator:
 
         # Step 1: Synthesize profiles from graph (S4 selection consumes the intent)
         stage_index = await self._emit_stage(on_stage, stage_index, "selection")
-        profiles = await self._profile_synthesizer.synthesize(
-            query=query,
-            dataset_id=dataset_id,
-            max_agents=config.max_agents,
-            intent=intent,
-            warnings=warnings,
-            decisions=seat_sink,
-            records=profile_records,
-            llm_client=llm_client,
-            on_profile=_emit_profile,
-            llm_concurrency=config.llm_concurrency,
-        )
+        try:
+            profiles = await self._profile_synthesizer.synthesize(
+                query=query,
+                dataset_id=dataset_id,
+                max_agents=config.max_agents,
+                intent=intent,
+                warnings=warnings,
+                decisions=seat_sink,
+                records=profile_records,
+                llm_client=llm_client,
+                on_profile=_emit_profile,
+                llm_concurrency=config.llm_concurrency,
+            )
+        finally:
+            await self._store_records(on_records, profile_records)
         stage_index = await self._emit_stage(
             on_stage, stage_index, "synthesis", agents=len(profiles)
         )
@@ -283,6 +287,7 @@ class DebateOrchestrator:
                         ws_broadcast=ws_broadcast,
                         intent=intent,
                         llm_client=llm_client,
+                        on_records=on_records,
                     )
                     continue
 
@@ -426,6 +431,7 @@ class DebateOrchestrator:
                     ws_broadcast=ws_broadcast,
                     intent=intent,
                     llm_client=llm_client,
+                    on_records=on_records,
                 )
 
                 if self._check_convergence(rounds, profiles, config=config):
@@ -543,6 +549,7 @@ class DebateOrchestrator:
         ws_broadcast: Callable[[dict[str, Any]], Awaitable[None]],
         intent: Optional[QueryIntent],
         llm_client: Any,
+        on_records: Optional[Callable[[list[AgentRecord]], Awaitable[None]]] = None,
     ) -> None:
         """Pull related non-participants in (they debate from next round).
 
@@ -566,20 +573,26 @@ class DebateOrchestrator:
             )
             if candidates:
                 names = [c.agent_name for c in candidates]
-                new_profiles = await self._profile_synthesizer.synthesize_from_names(
-                    names=names,
-                    query=query,
-                    dataset_id=dataset_id,
-                    relevance_by_name={
-                        c.agent_name: min(1.0, len(c.shared_entities) / 3.0)
-                        for c in candidates
-                    },
-                    roster=profiles,
-                    intent=intent,
-                    warnings=warnings,
-                    llm_client=llm_client,
-                    llm_concurrency=config.llm_concurrency,
-                )
+                joiner_records: list[AgentRecord] = []
+                try:
+                    new_profiles = await self._profile_synthesizer.synthesize_from_names(
+                        names=names,
+                        query=query,
+                        dataset_id=dataset_id,
+                        relevance_by_name={
+                            c.agent_name: min(1.0, len(c.shared_entities) / 3.0)
+                            for c in candidates
+                        },
+                        roster=profiles,
+                        intent=intent,
+                        warnings=warnings,
+                        llm_client=llm_client,
+                        llm_concurrency=config.llm_concurrency,
+                        records=joiner_records,
+                        seat_offset=len(profiles),
+                    )
+                finally:
+                    await self._store_records(on_records, joiner_records)
                 seated = {p.identity.name for p in new_profiles}
                 warnings.extend(
                     JOINER_NOT_PROFILED for name in names if name not in seated
@@ -606,6 +619,15 @@ class DebateOrchestrator:
         except Exception as exc:
             logger.warning("Round %s: activation failed", round_num, exc_info=exc)
             warnings.append(f"Round {round_num}: activation failed")
+
+    @staticmethod
+    async def _store_records(
+        on_records: Optional[Callable[[list[AgentRecord]], Awaitable[None]]],
+        batch: list[AgentRecord],
+    ) -> None:
+        """Hand one batch of records to the caller's seam. Nothing to do when there is none."""
+        if on_records is not None and batch:
+            await on_records(list(batch))
 
     async def _with_self_history(
         self,

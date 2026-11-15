@@ -18,6 +18,7 @@ are 404 and the debate list is caller-scoped).
 """
 
 import inspect
+from enum import Enum
 
 from fastapi import Depends, FastAPI, WebSocket
 from starlette.routing import WebSocketRoute
@@ -56,15 +57,14 @@ PUBLIC_PATHS = {
 PUBLIC_WS_PATHS: set[str] = set()
 
 # Operator routes are cross-tenant by design: they are guarded by the router-level
-# role check, not by require_owner. Every one must carry that guard.
+# role check, not by require_owner. Every one must carry that exact guard.
 OPERATOR_PREFIX = "/operator/"
-# The inner dependency that require_role() returns (src/auth/deps.py).
-ROLE_GUARD = "_dep"
+OPERATOR_ROLES = frozenset({"support", "admin"})
 
 
-def _dependency_names(route) -> set[str]:
-    """Callable names in the route's dependency closure, recursively."""
-    names: set[str] = set()
+def _dependency_calls(route) -> list:
+    """Every dependency callable in the route's dependency closure, recursively."""
+    calls: list = []
     seen: set[int] = set()
 
     def walk(dependant) -> None:
@@ -73,12 +73,34 @@ def _dependency_names(route) -> set[str]:
         seen.add(id(dependant))
         call = getattr(dependant, "call", None)
         if call is not None:
-            names.add(getattr(call, "__name__", repr(call)))
+            calls.append(call)
         for child in getattr(dependant, "dependencies", None) or ():
             walk(child)
 
     walk(getattr(route, "dependant", None))
-    return names
+    return calls
+
+
+def _dependency_names(route) -> set[str]:
+    """Callable names in the route's dependency closure, recursively."""
+    return {getattr(call, "__name__", repr(call)) for call in _dependency_calls(route)}
+
+
+def _role_guard_sets(route) -> set[frozenset]:
+    """The role set of every require_role guard in the route's closure.
+
+    require_role returns an inner ``_dep`` that closes over the allowed roles
+    (src/auth/deps.py); the role set is read from that closure, not from the name alone.
+    """
+    sets: set[frozenset] = set()
+    for call in _dependency_calls(route):
+        if getattr(call, "__name__", None) != "_dep":
+            continue
+        for cell in call.__closure__ or ():
+            value = cell.cell_contents
+            if isinstance(value, tuple) and value and all(isinstance(a, (str, Enum)) for a in value):
+                sets.add(frozenset(a.value if isinstance(a, Enum) else a for a in value))
+    return sets
 
 
 def _http_routes(routes) -> list:
@@ -122,12 +144,12 @@ def _unguarded_resources(routes) -> list[str]:
 
 
 def _unguarded_operator(routes) -> list[str]:
-    """Operator routes that never pass the role guard."""
+    """Operator routes whose role guard is not exactly support and admin."""
     return [
         route.path
         for route in _http_routes(routes)
         if route.path.startswith(OPERATOR_PREFIX)
-        and ROLE_GUARD not in _dependency_names(route)
+        and OPERATOR_ROLES not in _role_guard_sets(route)
     ]
 
 
@@ -217,6 +239,18 @@ def test_the_helper_flags_an_operator_route_without_a_role_guard():
 
     @probe.get("/operator/things/{thing_id}")
     async def unguarded(thing_id: str, user=Depends(current_user)) -> dict:
+        return {"id": thing_id}
+
+    assert _unguarded_operator(probe.routes) == ["/operator/things/{thing_id}"]
+
+
+def test_the_helper_flags_an_operator_route_guarded_by_the_wrong_roles():
+    from src.auth.deps import require_role
+
+    probe = FastAPI()
+
+    @probe.get("/operator/things/{thing_id}", dependencies=[Depends(require_role("user"))])
+    async def wrong_roles(thing_id: str, user=Depends(current_user)) -> dict:
         return {"id": thing_id}
 
     assert _unguarded_operator(probe.routes) == ["/operator/things/{thing_id}"]

@@ -328,18 +328,7 @@ class ProfileSynthesizer:
         if decisions is not None:
             decisions.extend(queue.decisions())
         if records is not None:
-            report = _uniqueness(seats)
-            info = UniquenessInfo(
-                max_bio_sim=report.max_bio_sim,
-                max_details_sim=report.max_details_sim,
-                max_cite_overlap=report.max_cite_overlap,
-            )
-            run_id = uuid4().hex
-            by_id = {d.entity_id: d for d in queue.decisions()}
-            records.extend(
-                self._record(run_id, query, attempt, by_id[entity_id], info)
-                for entity_id, attempt in latest.items()
-            )
+            self._emit_records(records, queue, query, latest, seats)
         if latest and not seats:
             raise NoAgentsDerivableError(
                 "no profile could be seated (every drawn candidate was rejected)"
@@ -358,12 +347,18 @@ class ProfileSynthesizer:
         warnings: list[str] | None = None,
         llm_client: Any = None,
         llm_concurrency: int | None = None,
+        records: list[AgentRecord] | None = None,
+        seat_offset: int = 0,
     ) -> list[Agent]:
         """Seat the activation joiners named in `names`, through the same path as a roster member.
 
         Each joiner is drawn, generated, validated and checked for uniqueness against the roster
         and the other joiners. Only a joiner is ever regenerated or unseated: a roster member is
         fixed. A joiner that cannot be seated is absent from the result; the caller warns.
+
+        `records` is the caller-owned sink for one AgentRecord per joiner that reached generation,
+        seated or rejected. `seat_offset` is the number of agents already seated, so a seated
+        joiner's record carries the next contiguous seat number.
         """
         wanted = list(dict.fromkeys(names))
         if not wanted:
@@ -375,9 +370,12 @@ class ProfileSynthesizer:
         pool = await self._joiner_pool(wanted, query, dataset_id, relevance_by_name or {}, warnings, llm_client)
         run = _Run(query, dataset_id, intent.stance_axis if intent is not None else "", llm_client)
         queue = SeatQueue(pool.candidates, n=len(wanted), max_draws=len(wanted) + DRAW_SLACK)
-        seats = await self._roster(queue, pool, run, width, {}, fixed=fixed)
+        latest: dict[str, _Attempt] = {}
+        seats = await self._roster(queue, pool, run, width, latest, fixed=fixed)
         for seat in seats:
             await self._persist_links(seat.agent, dataset_id, warnings)
+        if records is not None:
+            self._emit_records(records, queue, query, latest, seats, seat_offset)
         return [seat.agent for seat in seats]
 
     async def _fixed_entry(self, agent: Agent) -> Entry:
@@ -744,6 +742,30 @@ class ProfileSynthesizer:
         except Exception as exc:
             logger.warning("on_profile emitter failed for %r: %s", agent.identity.name, exc)
 
+    @classmethod
+    def _emit_records(
+        cls,
+        sink: list[AgentRecord],
+        queue: SeatQueue,
+        query: str,
+        latest: dict[str, _Attempt],
+        seats: list[_Seat],
+        seat_offset: int = 0,
+    ) -> None:
+        """Append one record per candidate that reached generation, with the final roster's uniqueness."""
+        report = _uniqueness(seats)
+        info = UniquenessInfo(
+            max_bio_sim=report.max_bio_sim,
+            max_details_sim=report.max_details_sim,
+            max_cite_overlap=report.max_cite_overlap,
+        )
+        run_id = uuid4().hex
+        by_id = {d.entity_id: d for d in queue.decisions()}
+        sink.extend(
+            cls._record(run_id, query, attempt, by_id[entity_id], info, seat_offset)
+            for entity_id, attempt in latest.items()
+        )
+
     @staticmethod
     def _record(
         run_id: str,
@@ -751,6 +773,7 @@ class ProfileSynthesizer:
         attempt: _Attempt,
         decision: SeatDecision,
         uniqueness: UniquenessInfo,
+        seat_offset: int = 0,
     ) -> AgentRecord:
         """The backend-only record of one candidate's final attempt. Never sent to a client."""
         draft = attempt.generated.draft
@@ -774,7 +797,7 @@ class ProfileSynthesizer:
                 score=decision.score,
                 seated=decision.seated,
                 reason=decision.reason,
-                order=decision.order,
+                order=None if decision.order is None else decision.order + seat_offset,
             ),
             evidence=list(attempt.pack.items),
             relations=list(attempt.pack.relations),

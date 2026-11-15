@@ -615,6 +615,20 @@ async def test_joiners_need_an_llm_client():
 
 
 @pytest.mark.asyncio
+async def test_joiner_records_hold_seated_and_rejected_joiners_with_continuing_seats():
+    records: list = []
+
+    await _join(
+        _synth([KESTRA, LUMEN]), ["Kestra", "Lumen"], FakeLLM(fail={"Lumen"}), records=records, seat_offset=2
+    )
+
+    assert sorted((r.node.name, r.status, r.rank.order) for r in records) == [
+        ("Kestra", "published", 3),
+        ("Lumen", "rejected", None),
+    ]
+
+
+@pytest.mark.asyncio
 async def test_an_empty_joiner_list_is_a_no_op():
     assert await _synth([KESTRA]).synthesize_from_names([], QUESTION, "ds-A") == []
 
