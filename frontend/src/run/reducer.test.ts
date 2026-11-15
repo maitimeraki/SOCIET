@@ -16,7 +16,7 @@ describe('reducer', () => {
     expect(state.intent?.core_question).toBe('market-entry risk vs opportunity in EU steel')
   })
   it('builds the roster in agent-event order', () => {
-    expect(fold(RUN_SAMPLE, NOW).roster.map((p) => p.identity.name)).toEqual(['D. Weber', 'M. Chen', 'P. Silva'])
+    expect(fold(RUN_SAMPLE, NOW).roster.map((p) => p.name)).toEqual(['D. Weber', 'M. Chen', 'P. Silva'])
   })
   it('fills the selection table from the selection event', () => {
     expect(fold(RUN_SAMPLE, NOW).selection[0]?.name).toBe('D. Weber')

@@ -37,22 +37,6 @@ export const CORPUS_COLOR = '#3B82F6'
 export const EXPERT_COLOR = '#E2E8F0'
 
 /**
- * §2.4/§2.5 The four positions' colours on the dark ground, in the spec's frozen order —
- * POSITIVE, NEUTRAL, AMBIVALENT, NEGATIVE. Literal hex, not a `var()`: Sigma's WebGL colour path
- * draws black on anything it cannot parse, and the store loads under Vitest's Node environment,
- * where there is no document to resolve a token against.
- */
-export const POSITION_COLORS: Record<Stance, string> = {
-  POSITIVE: '#4ADE80',
-  NEUTRAL: '#94A3B8',
-  AMBIVALENT: '#FBBF24',
-  NEGATIVE: '#F87171',
-}
-
-/** The frozen order the legend draws the four positions in (§2.5). */
-export const POSITION_ORDER: readonly Stance[] = ['POSITIVE', 'NEUTRAL', 'AMBIVALENT', 'NEGATIVE']
-
-/**
  * The colour an opinion draws in when the stored events carry no position for it — a stream that
  * dropped a pass's turns, say. It is the neutral family's darker step (`--color-ink-3`, and the
  * NEUTRAL mark on the light ground), chosen so it clears the 3:1 graphical floor on the map ground
@@ -60,6 +44,22 @@ export const POSITION_ORDER: readonly Stance[] = ['POSITIVE', 'NEUTRAL', 'AMBIVA
  * one (D7).
  */
 export const UNPOSITIONED_COLOR = '#64748B'
+
+/**
+ * §2.4/§2.5 The four positions' colours on the dark ground, in the spec's frozen order —
+ * POSITIVE, NEUTRAL, ABSTAIN, NEGATIVE. ABSTAIN ("No view") draws a quiet warm grey, never a position hue. Literal hex, not a `var()`: Sigma's WebGL colour path
+ * draws black on anything it cannot parse, and the store loads under Vitest's Node environment,
+ * where there is no document to resolve a token against.
+ */
+export const POSITION_COLORS: Record<Stance, string> = {
+  POSITIVE: '#4ADE80',
+  NEUTRAL: '#94A3B8',
+  ABSTAIN: '#A8A29E',
+  NEGATIVE: '#F87171',
+}
+
+/** The frozen order the legend draws the four positions in (§2.5). */
+export const POSITION_ORDER: readonly Stance[] = ['POSITIVE', 'NEUTRAL', 'ABSTAIN', 'NEGATIVE']
 
 /**
  * The colour an entry draws in (§2.4, §9.2): the material's blue, an expert's luminous white, or —

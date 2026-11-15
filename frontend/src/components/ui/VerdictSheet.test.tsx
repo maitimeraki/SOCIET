@@ -12,7 +12,6 @@ const sheet = (over: Partial<Parameters<typeof VerdictSheet>[0]> = {}) =>
       caseAgainst="If the upgrade lands on time, the Mill Street economics hold."
       reasoning={['The panel divided on timing, not on the location.']}
       whoHeldWhichView={[{ position: 'NEGATIVE', names: ['Market analyst', 'Lease counsel'] }]}
-      sources={[{ document: 'Mill Street lease.pdf', reference: 'p.4' }]}
       {...over}
     />,
   )
@@ -55,7 +54,6 @@ describe('the verdict sheet', () => {
   it('crops to the filed fragment when a surface only needs the proof', () => {
     const html = sheet({ cropped: true })
     expect(html).toContain('The case against')
-    expect(html).toContain('Mill Street lease.pdf')
     expect(html).not.toContain('The reasoning')
     expect(html).not.toContain('Who held which view')
   })

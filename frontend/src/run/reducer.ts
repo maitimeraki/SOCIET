@@ -1,6 +1,6 @@
 import type { DebateConfig } from '../api/types'
-import { parsePairId } from './events'
-import type { AgentProfile, ClusterSummary, ConsensusInfo, DissentingView, EvidenceItem, PairInfo, QueryIntent, RunEvent, SelectionRow, Stance, TurnInfo, WrittenLink, WrittenNode } from './events'
+import { asStance, parsePairId, UnknownStanceError } from './events'
+import type { AgentView, ClusterSummary, ConsensusInfo, DissentingView, EvidenceItem, PairInfo, QueryIntent, RunEvent, SelectionRow, Stance, TurnInfo, WrittenLink, WrittenNode } from './events'
 
 export interface StageEntry {
   stage: string
@@ -57,7 +57,7 @@ export interface RunState {
   config: DebateConfig | null
   stages: StageEntry[]
   intent: QueryIntent | null
-  roster: AgentProfile[]
+  roster: AgentView[]
   rosterTotal: number | null
   selection: SelectionRow[]
   rounds: RunRound[]
@@ -99,6 +99,29 @@ export const initialState: RunState = {
   version: 0,
 }
 
+export const UNKNOWN_STANCE_WARNING = 'Unknown stance from the server; shown as not available.'
+
+/** A stance the server sent that is outside the closed set keeps the previous state and warns; it never reads as NEUTRAL. */
+function guardStances(state: RunState, reduce: () => RunState): RunState {
+  try {
+    return reduce()
+  } catch (error) {
+    if (error instanceof UnknownStanceError) return { ...state, warnings: [...state.warnings, UNKNOWN_STANCE_WARNING] }
+    throw error
+  }
+}
+
+function parseWeights(weights: Record<string, number>): Record<Stance, number> {
+  const parsed = {} as Record<Stance, number>
+  for (const [stance, share] of Object.entries(weights)) parsed[asStance(stance)] = share
+  return parsed
+}
+
+function parseConsensus(consensus: ConsensusInfo | null | undefined): ConsensusInfo | null {
+  if (!consensus) return null
+  return { ...consensus, stance: asStance(consensus.stance), weights: consensus.weights && parseWeights(consensus.weights) }
+}
+
 /** Pure and total — unknown events are warnings, never crashes (forward-compatible with backend additions). */
 function reduceEvent(state: RunState, event: RunEvent, now: number): RunState {
   const base = state.status === 'queued' && event.type !== 'ping' && event.type !== 'ack' ? { ...state, status: 'running' as const } : state
@@ -117,7 +140,11 @@ function reduceEvent(state: RunState, event: RunEvent, now: number): RunState {
     case 'selection':
       return { ...base, selection: event.rows }
     case 'agent':
-      return { ...base, roster: [...base.roster, event.profile], rosterTotal: event.total }
+      return guardStances(state, () => ({
+        ...base,
+        roster: [...base.roster, { ...event.profile, stance: asStance(event.profile.stance) }],
+        rosterTotal: event.total,
+      }))
     case 'pair_turn': {
       const parsed = parsePairId(event.pair_id)
       if (!parsed) return { ...base, warnings: [...base.warnings, `Unparseable pair id: ${event.pair_id}`] }
@@ -128,11 +155,19 @@ function reduceEvent(state: RunState, event: RunEvent, now: number): RunState {
       }
     }
     case 'round':
-      return {
+      return guardStances(state, () => ({
         ...base,
-        rounds: [...base.rounds, { round: event.round, pairs: event.pairs, turns: event.turns, consensus: event.consensus ?? null }],
+        rounds: [
+          ...base.rounds,
+          {
+            round: event.round,
+            pairs: event.pairs,
+            turns: event.turns.map((turn) => ({ ...turn, stance: asStance(turn.stance) })),
+            consensus: parseConsensus(event.consensus),
+          },
+        ],
         livePairs: {},
-      }
+      }))
     case 'commit':
       return {
         ...base,
@@ -152,25 +187,30 @@ function reduceEvent(state: RunState, event: RunEvent, now: number): RunState {
     case 'activation':
       return { ...base, activations: [...base.activations, { round: event.round, agents: event.agents, reasons: event.reasons }] }
     case 'complete':
-      return {
-        ...base,
-        status: 'complete',
-        verdict: {
-          converged: event.converged,
-          summary: event.verdict,
-          narrative: event.narrative ?? '',
-          narrativeStatus: event.narrative_status ?? 'ok',
-          dissentingViews: event.dissenting_views ?? [],
-          evidence: event.evidence ?? [],
-          confidence: event.confidence_score ?? null,
-          clusters: event.cluster_details ?? null,
-          finalStances: event.final_stances ?? {},
-          supporting: event.supporting_entities ?? [],
-          opposing: event.opposing_entities ?? [],
-        },
-        // The complete event's warnings are the server's full list — they replace the streamed deltas.
-        warnings: event.warnings ?? base.warnings,
-      }
+      // Stances the verdict view reads back are checked here so an unknown one cannot throw at render.
+      return guardStances(state, () => {
+        for (const stance of Object.values(event.final_stances ?? {})) asStance(stance)
+        for (const stance of Object.keys(event.cluster_details ?? {})) asStance(stance)
+        return {
+          ...base,
+          status: 'complete',
+          verdict: {
+            converged: event.converged,
+            summary: event.verdict,
+            narrative: event.narrative ?? '',
+            narrativeStatus: event.narrative_status ?? 'ok',
+            dissentingViews: event.dissenting_views ?? [],
+            evidence: event.evidence ?? [],
+            confidence: event.confidence_score ?? null,
+            clusters: event.cluster_details ?? null,
+            finalStances: event.final_stances ?? {},
+            supporting: event.supporting_entities ?? [],
+            opposing: event.opposing_entities ?? [],
+          },
+          // The complete event's warnings are the server's full list — they replace the streamed deltas.
+          warnings: event.warnings ?? base.warnings,
+        }
+      })
     case 'error':
       return { ...base, status: 'failed', error: event.error }
     case 'ping':

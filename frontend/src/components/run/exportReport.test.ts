@@ -13,18 +13,15 @@ const REPORT: ReportModel = {
     { position: 'NEGATIVE', names: ['Market analyst'] },
     { position: 'POSITIVE', names: ['Site analyst'] },
   ],
-  sources: [{ document: 'Mill Street lease.pdf', reference: 'p.4' }],
-  passes: [{ pass: 'P1', negative: 0.61, positive: 0.28, ambivalent: 0.11 }],
+  passes: [{ pass: 'P1', negative: 0.61, positive: 0.28, abstain: 0.11 }],
   panel: [
     {
       name: 'Tom Okafor',
       role: 'local regulator',
       position: 'NEGATIVE',
       confidence: 0.94,
-      conviction: 0.95,
-      receptivity: 0.1,
+      strength: 0.95,
       turns: 4,
-      weight: 0.89,
     },
   ],
   warnings: ['The demand study is a proxy.'],
@@ -56,7 +53,6 @@ describe('the exports speak the customer words', () => {
       question: '<script>alert(1)</script>',
       caseAgainst: 'Rent < 4,200 & rising > 3%',
       reasoning: ['<img src=x onerror=alert(1)>'],
-      sources: [{ document: '<b>lease</b>.pdf', reference: 'p.4 < 5' }],
       warnings: ['<em>proxy</em>'],
     })
     expect(html).not.toContain('<script>')
@@ -64,6 +60,6 @@ describe('the exports speak the customer words', () => {
     expect(html).not.toContain('<em>')
     expect(html).toContain('&lt;script&gt;alert(1)&lt;/script&gt;')
     expect(html).toContain('&amp;')
-    expect(html).toContain('&lt;b&gt;lease&lt;/b&gt;')
+    expect(html).toContain('&lt;em&gt;proxy&lt;/em&gt;')
   })
 })

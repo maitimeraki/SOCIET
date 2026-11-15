@@ -3,7 +3,7 @@ import { ApiError } from '../api/rest'
 import type { RunDoc } from '../api/types'
 import { useGraphStore } from '../graph/graphStore'
 import { RUN_SAMPLE } from './__fixtures__/run-sample'
-import type { AgentProfile, RunEvent } from './events'
+import type { AgentView, RunEvent } from './events'
 import { fold, initialState } from './reducer'
 import { useRunStore } from './runStore'
 
@@ -32,14 +32,6 @@ const doc = (patch: Partial<RunDoc> = {}): RunDoc => ({
   events: [],
   ...patch,
 })
-
-/** The live allowlist sends no snapshot on a profile; the run doc's dataset keys the expert instead. */
-const withoutSnapshot = (event: RunEvent): RunEvent => {
-  if (event.type !== 'agent') return event
-  const profile: Partial<AgentProfile> = { ...event.profile }
-  delete profile.graph_snapshot
-  return { ...event, profile: profile as AgentProfile }
-}
 
 beforeEach(() => {
   connectRun.mockReset()
@@ -154,7 +146,7 @@ describe('runStore rAF batching', () => {
 
   it('grows the one map from a dispatched agent and commit as the frame lands (the live path)', () => {
     const seated = RUN_SAMPLE.find((event) => event.type === 'agent') as Extract<RunEvent, { type: 'agent' }>
-    const agent: RunEvent = withoutSnapshot(seated)
+    const agent: RunEvent = seated
     useRunStore.setState({ run: { ...initialState, datasetId: 'ds-1' } })
     const commit: RunEvent = {
       type: 'commit',
@@ -206,20 +198,15 @@ describe('runStore reopened-run map (replay = live)', () => {
 
   /** One expert the debate stream seats, keyed under the dataset the backend keys the person with. */
   const seat = (name: string): RunEvent => {
-    const profile: AgentProfile = {
-      agent_id: name,
-      identity: { name, archetype: 'analyst', communication_style: 'measured' },
-      bio: '',
-      detailed_perspective: '',
+    const profile: AgentView = {
+      name,
+      type: 'analyst',
+      role: 'analyst',
       stance: 'NEUTRAL',
-      intensity: 0.5,
+      strength: 0.5,
+      bio: '',
+      details: '',
       confidence: 0.5,
-      conviction: 0.5,
-      cior: 0,
-      domain_tags: [],
-      communication_radius: 1,
-      summary_provenance: [],
-      confidence_breakdown: { source_breadth: 0, node_density: 0, relationship_connectivity: 0 },
     }
     return { type: 'agent', index: 1, total: 2, profile }
   }
@@ -273,14 +260,14 @@ describe('runStore reopened-run map (replay = live)', () => {
     // The socket opens (the reset runs), then the round-1 roster streams in.
     const [, handlers] = connectRun.mock.calls[0]
     handlers.onOpen()
-    handlers.onEvent(withoutSnapshot(EVENTS[0]))
+    handlers.onEvent(EVENTS[0])
     flushFrame()
 
     expect(Object.keys(useGraphStore.getState().nodes)).toContain(`${DATASET}:D. Weber`)
   })
 
   it('a reopened run seats its experts from the run doc dataset when the profiles carry no snapshot', async () => {
-    getRun.mockResolvedValue(doc({ dataset_id: DATASET, status: 'complete', events: EVENTS.map(withoutSnapshot) }))
+    getRun.mockResolvedValue(doc({ dataset_id: DATASET, status: 'complete', events: EVENTS }))
     getRunGraph.mockResolvedValue(CORPUS)
     await useRunStore.getState().loadAndConnect('run-1')
 

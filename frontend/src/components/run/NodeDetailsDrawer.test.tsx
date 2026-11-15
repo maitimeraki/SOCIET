@@ -12,7 +12,7 @@ import { EXPERT_TYPE } from '../../graph/graphStore'
 import type { GraphEdge, GraphNode } from '../../graph/graphStore'
 import { useSelectionStore } from '../../graph/selectionStore'
 import { fold } from '../../run/reducer'
-import type { AgentProfile, ProvenanceLink, RunEvent, Stance } from '../../run/events'
+import type { AgentView, RunEvent, Stance } from '../../run/events'
 import { NodeDetailsView, entryDetails, resolveSelection } from './NodeDetailsDrawer'
 // §13 — the one copy-law guard, shared with every rendered-string test.
 import { BANNED_TERMS, renderedText } from '../../test/copyLaw'
@@ -20,32 +20,19 @@ import type { MapDetails } from './NodeDetailsDrawer'
 
 const OPINION_TYPE = 'Opinion'
 
-function profile(name: string, stance: Stance, sources: ProvenanceLink[]): AgentProfile {
+function profile(name: string, stance: Stance): AgentView {
   return {
-    agent_id: name,
-    identity: { name, archetype: 'Trade analyst', communication_style: 'measured' },
-    bio: `${name} reads the record closely.`,
-    detailed_perspective: 'I read the record as a trade analyst.',
+    name,
+    type: 'Organisation',
+    role: 'Trade analyst',
     stance,
-    intensity: 0.6,
+    strength: 0.65,
+    bio: `${name} reads the record closely.`,
+    details: 'I read the record as a trade analyst.',
     confidence: 0.7,
-    conviction: 0.65,
-    cior: 0.4,
-    domain_tags: ['trade'],
-    communication_radius: 1,
-    summary_provenance: sources,
-    confidence_breakdown: { source_breadth: 2, node_density: 5, relationship_connectivity: 0.6 },
   }
 }
 
-const EXPANSION: ProvenanceLink = {
-  doc_id: 'doc-1',
-  title: 'European Expansion Analysis.pdf',
-  breadcrumb: 'Market outlook',
-  chunk_id: 'chunk-1',
-}
-const EXPANSION_DISTRIBUTION: ProvenanceLink = { ...EXPANSION, breadcrumb: 'Distribution', chunk_id: 'chunk-2' }
-const COMPETITORS: ProvenanceLink = { doc_id: 'doc-2', title: 'competitor-research.md', chunk_id: 'chunk-3' }
 
 const turn = (name: string, stance: string, confidence: number, content: string, references: string[]) => ({
   agent_id: name,
@@ -56,12 +43,12 @@ const turn = (name: string, stance: string, confidence: number, content: string,
   references,
 })
 
-/** A run with a material entry two experts cite, an expert with sources, and one filed opinion. */
+/** A run with a material entry two experts cite, an expert, and one filed opinion. */
 const EVENTS: RunEvent[] = [
   // The dataset id rides the pair id; the run folds it into state.
   { type: 'pair_turn', pair_id: 'ds-1:Market Analyst:Supply Chain Lead', response: null, error: null },
-  { type: 'agent', index: 1, total: 2, profile: profile('Market Analyst', 'POSITIVE', [EXPANSION, EXPANSION_DISTRIBUTION, COMPETITORS]) },
-  { type: 'agent', index: 2, total: 2, profile: profile('Supply Chain Lead', 'NEGATIVE', []) },
+  { type: 'agent', index: 1, total: 2, profile: profile('Market Analyst', 'POSITIVE') },
+  { type: 'agent', index: 2, total: 2, profile: profile('Supply Chain Lead', 'NEGATIVE') },
   {
     type: 'round',
     round: 1,
@@ -130,24 +117,9 @@ describe('one entry, as the drawer reads it (§9.5)', () => {
     expect(opinion.kindLabel).toBe('an opinion held by Market Analyst')
   })
 
-  it('reads an expert’s source material as document titles, one row per document', () => {
-    expect(entryDetails(run, EXPERT).sources).toEqual([
-      { title: 'European Expansion Analysis.pdf', where: ['Market outlook', 'Distribution'] },
-      { title: 'competitor-research.md', where: [] },
-    ])
-  })
-
   it('never renders a chunk id — the FROM block is the material, not the internals', () => {
     expect(drawn(EXPERT)).not.toContain('chunk-1')
     expect(drawn(EXPERT)).not.toMatch(/\bchunks?\b/i)
-  })
-
-  it('says in words when an entry has no source material to name', () => {
-    const material = sectionOf(drawn(MATERIAL), 'From')
-    expect(material).toContain('No source documents were recorded for this entry.')
-    expect(material).not.toContain('<li')
-
-    expect(sectionOf(drawn(SILENT_MATERIAL), 'From')).toContain('No source documents were recorded for this entry.')
   })
 
   it('names every expert who cited the entry, and the passes they cited it in', () => {
@@ -201,7 +173,6 @@ describe('the drawer’s panel (§9.5)', () => {
     const html = drawn(MATERIAL)
     expect(html).toContain('Distribution capacity')
     expect(html).toContain('an entry from your material')
-    expect(html).toContain('>From<')
     expect(html).toContain('>Referenced by<')
 
     // The kind line carries the mark and the word: the icon is hidden, the phrase is the reading.

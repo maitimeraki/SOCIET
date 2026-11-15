@@ -11,7 +11,7 @@ import { BANNED_TERMS, renderedText } from '../../test/copyLaw'
 const SYMBOL: Record<string, string> = {
   POSITIVE: '▲',
   NEUTRAL: '●',
-  AMBIVALENT: '◐',
+  ABSTAIN: '○',
   NEGATIVE: '▼',
 }
 

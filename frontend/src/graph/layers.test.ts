@@ -50,7 +50,7 @@ describe('entryColor — an entry’s colour, by kind and by position (§2.4, §
   })
 
   it('draws an opinion in its own position’s colour', () => {
-    const positions: Stance[] = ['POSITIVE', 'NEUTRAL', 'AMBIVALENT', 'NEGATIVE']
+    const positions: Stance[] = ['POSITIVE', 'NEUTRAL', 'ABSTAIN', 'NEGATIVE']
     for (const stance of positions) expect(entryColor({ ...opinion, stance })).toBe(POSITION_COLORS[stance])
   })
 
@@ -61,7 +61,7 @@ describe('entryColor — an entry’s colour, by kind and by position (§2.4, §
   })
 
   it('names the four positions with the spec’s own colours (§2.4)', () => {
-    expect(POSITION_COLORS).toEqual({ POSITIVE: '#4ADE80', NEUTRAL: '#94A3B8', AMBIVALENT: '#FBBF24', NEGATIVE: '#F87171' })
+    expect(POSITION_COLORS).toEqual({ POSITIVE: '#4ADE80', NEUTRAL: '#94A3B8', ABSTAIN: '#A8A29E', NEGATIVE: '#F87171' })
   })
 })
 

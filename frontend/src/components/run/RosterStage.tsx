@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react'
 import { motion, useReducedMotion } from 'framer-motion'
 import { CheckCircle } from '@phosphor-icons/react'
-import type { AgentProfile, QueryIntent, SelectionRow } from '../../run/events'
+import type { AgentView, QueryIntent, SelectionRow } from '../../run/events'
 import type { RosterProgress } from '../../run/selectors'
 import IntentCard from './IntentCard'
 import SelectionTable from './SelectionTable'
@@ -56,7 +56,7 @@ export default function RosterStage({
   question: string
   intent: QueryIntent | null
   selection: SelectionRow[]
-  profiles: AgentProfile[]
+  profiles: AgentView[]
   progress: RosterProgress
   onSkip: () => void
   floorSlot?: ReactNode
@@ -114,7 +114,7 @@ export default function RosterStage({
         ) : (
           <div className="grid gap-3 md:grid-cols-2">
             {profiles.map((profile) => (
-              <motion.div key={profile.agent_id} {...cardMotion}>
+              <motion.div key={profile.name} {...cardMotion}>
                 <ProfileCard profile={profile} />
               </motion.div>
             ))}

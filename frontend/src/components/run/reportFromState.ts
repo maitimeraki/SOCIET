@@ -1,10 +1,8 @@
-import type { AgentProfile } from '../../run/events'
 import type { RunState } from '../../run/reducer'
 import { STANCE_ORDER, convergenceSeries, verdictView } from '../../run/selectors'
 import type { VerdictView } from '../../run/selectors'
 import { splitSections } from '../verdict/narrative'
 import { fmtDay } from '../../utils/format'
-import { sourceTitles } from './AnswerDocument'
 import type { ReportModel } from './exportReport'
 
 /**
@@ -29,31 +27,15 @@ export function reportFromState(state: RunState, filedAt: string | null): Report
     caseAgainst: view.dissentingViews[0]?.view ?? 'No dissent was recorded.',
     reasoning: reasoningOf(view),
     whoHeldWhichView: heldViews(view),
-    sources: sourceRows(state.roster),
     passes: convergenceSeries(state).map((tick) => ({
       pass: `P${tick.round}`,
       negative: tick.weights.NEGATIVE,
       positive: tick.weights.POSITIVE,
-      ambivalent: tick.weights.AMBIVALENT,
+      abstain: tick.weights.ABSTAIN,
     })),
     panel: panelRows(state, view),
     warnings: state.warnings,
   }
-}
-
-/**
- * The distinct source titles in first-seen order (the one `sourceTitles` reader), each with the first
- * breadcrumb the roster recorded for it. A title with no breadcrumb keeps an empty reference; the
- * document still stands, nothing is invented.
- */
-function sourceRows(profiles: AgentProfile[]): ReportModel['sources'] {
-  const references = new Map<string, string>()
-  for (const profile of profiles) {
-    for (const link of profile.summary_provenance ?? []) {
-      if (link.title && link.breadcrumb && !references.has(link.title)) references.set(link.title, link.breadcrumb)
-    }
-  }
-  return sourceTitles(profiles).map((document) => ({ document, reference: references.get(document) ?? '' }))
 }
 
 /**
@@ -75,9 +57,8 @@ function heldViews(view: VerdictView): ReportModel['whoHeldWhichView'] {
 
 /**
  * The panel matrix, read off the roster the run seated plus the turns it recorded. Position is the
- * expert's final stance when one was filed (the profile's opening stance otherwise); receptivity is
- * the profile's `cior`; weight is the backend's CIOR weight (confidence × conviction × (1 + cior) / 2),
- * derived here because no event carries a per-expert weight.
+ * expert's final stance when one was filed (the profile's opening stance otherwise); strength is the
+ * profile's mean strength, the value the backend now reports where it once reported conviction.
  */
 function panelRows(state: RunState, view: VerdictView): ReportModel['panel'] {
   const finalStances = new Map(view.finalStances.map((row) => [row.agent, row.stance]))
@@ -86,16 +67,13 @@ function panelRows(state: RunState, view: VerdictView): ReportModel['panel'] {
     for (const turn of round.turns) turns.set(turn.agent_name, (turns.get(turn.agent_name) ?? 0) + 1)
   }
   return state.roster.map((profile) => {
-    const name = profile.identity.name
     return {
-      name,
-      role: profile.identity.archetype,
-      position: finalStances.get(name) ?? profile.stance,
+      name: profile.name,
+      role: profile.role,
+      position: finalStances.get(profile.name) ?? profile.stance,
       confidence: profile.confidence,
-      conviction: profile.conviction,
-      receptivity: profile.cior,
-      turns: turns.get(name) ?? 0,
-      weight: (profile.confidence * profile.conviction * (1 + profile.cior)) / 2,
+      strength: profile.strength,
+      turns: turns.get(profile.name) ?? 0,
     }
   })
 }

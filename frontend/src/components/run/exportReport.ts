@@ -10,17 +10,14 @@ export interface ReportModel {
   caseAgainst: string
   reasoning: string[]
   whoHeldWhichView: { position: Position; names: string[] }[]
-  sources: { document: string; reference: string }[]
-  passes: { pass: string; negative: number; positive: number; ambivalent: number }[]
+  passes: { pass: string; negative: number; positive: number; abstain: number }[]
   panel: {
     name: string
     role: string
     position: Position
     confidence: number
-    conviction: number
-    receptivity: number
+    strength: number
     turns: number
-    weight: number
   }[]
   warnings: string[]
 }
@@ -59,26 +56,18 @@ export function reportMarkdown(report: ReportModel): string {
   out.push('')
   out.push('## The passes')
   out.push('')
-  out.push('| Pass | Negative | Positive | Ambivalent |')
+  out.push('| Pass | Negative | Positive | Abstain |')
   out.push('|---|---|---|---|')
   report.passes.forEach((row) => {
-    out.push(`| ${row.pass} | ${fmtPct(row.negative)} | ${fmtPct(row.positive)} | ${fmtPct(row.ambivalent)} |`)
+    out.push(`| ${row.pass} | ${fmtPct(row.negative)} | ${fmtPct(row.positive)} | ${fmtPct(row.abstain)} |`)
   })
   out.push('')
   out.push('## The panel')
   out.push('')
-  out.push('| Expert | Position | Turns | Conf. | Conv. | Recept. | Weight |')
-  out.push('|---|---|---|---|---|---|---|')
+  out.push('| Expert | Position | Turns | Conf. | Str. |')
+  out.push('|---|---|---|---|---|')
   report.panel.forEach((row) => {
-    out.push(
-      `| ${row.name} (${row.role}) | ${stanceWord(row.position)} | ${row.turns} | ${fmtScore(row.confidence)} | ${fmtScore(row.conviction)} | ${fmtScore(row.receptivity)} | ${fmtScore(row.weight)} |`,
-    )
-  })
-  out.push('')
-  out.push('## Sources')
-  out.push('')
-  report.sources.forEach((source) => {
-    out.push(`- ${source.document} — ${source.reference}`)
+    out.push(`| ${row.name} (${row.role}) | ${stanceWord(row.position)} | ${row.turns} | ${fmtScore(row.confidence)} | ${fmtScore(row.strength)} |`)
   })
   out.push('')
   if (report.warnings.length > 0) {
@@ -97,16 +86,16 @@ export function reportHtml(report: ReportModel): string {
   const passRows = report.passes
     .map(
       (row) =>
-        `<tr><td>${escape(row.pass)}</td><td>${fmtPct(row.negative)}</td><td>${fmtPct(row.positive)}</td><td>${fmtPct(row.ambivalent)}</td></tr>`,
+        `<tr><td>${escape(row.pass)}</td><td>${fmtPct(row.negative)}</td><td>${fmtPct(row.positive)}</td><td>${fmtPct(row.abstain)}</td></tr>`,
     )
     .join('')
   const panelRows = report.panel
     .map(
       (row) =>
-        `<tr><td>${escape(row.name)} (${escape(row.role)})</td><td>${stanceWord(row.position)}</td><td>${row.turns}</td><td>${fmtScore(row.confidence)}</td><td>${fmtScore(row.conviction)}</td><td>${fmtScore(row.receptivity)}</td><td>${fmtScore(row.weight)}</td></tr>`,
+        `<tr><td>${escape(row.name)} (${escape(row.role)})</td><td>${stanceWord(row.position)}</td><td>${row.turns}</td><td>${fmtScore(row.confidence)}</td><td>${fmtScore(row.strength)}</td></tr>`,
     )
     .join('')
-  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>${escape(report.question)}</title></head><body><h1>${escape(report.question)}</h1><p><strong>Filed ${escape(report.filed)}</strong></p><p><strong>${outcome}</strong></p><h2>The case against</h2><p>${escape(report.caseAgainst)}</p><h2>The reasoning</h2>${report.reasoning.map((paragraph) => `<p>${escape(paragraph)}</p>`).join('')}<h2>Who held which view</h2><ul>${report.whoHeldWhichView.map((row) => `<li><strong>${stanceWord(row.position)}</strong> — ${escape(row.names.join(', '))}</li>`).join('')}</ul><h2>The passes</h2><table><thead><tr><th scope="col">Pass</th><th scope="col">Negative</th><th scope="col">Positive</th><th scope="col">Ambivalent</th></tr></thead><tbody>${passRows}</tbody></table><h2>The panel</h2><table><thead><tr><th scope="col">Expert</th><th scope="col">Position</th><th scope="col">Turns</th><th scope="col">Conf.</th><th scope="col">Conv.</th><th scope="col">Recept.</th><th scope="col">Weight</th></tr></thead><tbody>${panelRows}</tbody></table><h2>Sources</h2><ul>${report.sources.map((source) => `<li>${escape(source.document)} — ${escape(source.reference)}</li>`).join('')}</ul>${report.warnings.length > 0 ? `<h2>Warnings</h2><ul>${report.warnings.map((warning) => `<li>${escape(warning)}</li>`).join('')}</ul>` : ''}</body></html>`
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>${escape(report.question)}</title></head><body><h1>${escape(report.question)}</h1><p><strong>Filed ${escape(report.filed)}</strong></p><p><strong>${outcome}</strong></p><h2>The case against</h2><p>${escape(report.caseAgainst)}</p><h2>The reasoning</h2>${report.reasoning.map((paragraph) => `<p>${escape(paragraph)}</p>`).join('')}<h2>Who held which view</h2><ul>${report.whoHeldWhichView.map((row) => `<li><strong>${stanceWord(row.position)}</strong> — ${escape(row.names.join(', '))}</li>`).join('')}</ul><h2>The passes</h2><table><thead><tr><th scope="col">Pass</th><th scope="col">Negative</th><th scope="col">Positive</th><th scope="col">Abstain</th></tr></thead><tbody>${passRows}</tbody></table><h2>The panel</h2><table><thead><tr><th scope="col">Expert</th><th scope="col">Position</th><th scope="col">Turns</th><th scope="col">Conf.</th><th scope="col">Str.</th></tr></thead><tbody>${panelRows}</tbody></table>${report.warnings.length > 0 ? `<h2>Warnings</h2><ul>${report.warnings.map((warning) => `<li>${escape(warning)}</li>`).join('')}</ul>` : ''}</body></html>`
 }
 
 export function reportJson(report: ReportModel): string {

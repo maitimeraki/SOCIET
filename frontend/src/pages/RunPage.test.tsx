@@ -7,7 +7,7 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import { MemoryRouter } from 'react-router-dom'
 import { RunPageView, shouldAutoOpenVerdict } from './RunPage'
 import { busiestEntries } from '../components/workspace/GraphPane'
-import type { AgentProfile } from '../run/events'
+import type { AgentView } from '../run/events'
 import { initialState, type RunState } from '../run/reducer'
 // §13 — the one copy-law guard, shared with every rendered-string test.
 import { BANNED_TERMS, renderedText } from '../test/copyLaw'
@@ -22,20 +22,15 @@ const RUN_CREATED_AT = '2026-10-22T09:30:00Z'
 const TABS = ['roster', 'floor', 'verdict', 'agents', 'artifacts'] as const
 type Tab = (typeof TABS)[number]
 
-const profile = (name: string, stance: AgentProfile['stance']): AgentProfile => ({
-  agent_id: name,
-  identity: { name, archetype: 'analyst', communication_style: 'plain' },
-  bio: '',
-  detailed_perspective: '',
+const profile = (name: string, stance: AgentView['stance']): AgentView => ({
+  name,
+  type: 'analyst',
+  role: 'analyst',
   stance,
-  intensity: 0.5,
+  strength: 0.6,
+  bio: '',
+  details: '',
   confidence: 0.6,
-  conviction: 0.6,
-  cior: 0,
-  domain_tags: [],
-  communication_radius: 1,
-  summary_provenance: [],
-  confidence_breakdown: { source_breadth: 1, node_density: 1, relationship_connectivity: 1 },
 })
 
 const RUN: RunState = {

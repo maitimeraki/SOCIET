@@ -3,15 +3,6 @@ import { describe, expect, it } from 'vitest'
 import { fold } from '../../run/reducer'
 import { RUN_SAMPLE } from '../../run/__fixtures__/run-sample'
 import { reportFromState } from './reportFromState'
-import type { AgentProfile, RunEvent } from '../../run/events'
-
-/** The allowlist no longer sends `summary_provenance` to the client: the roster profile has no such key. */
-const withoutProvenance = (event: RunEvent): RunEvent => {
-  if (event.type !== 'agent') return event
-  const profile: Partial<AgentProfile> = { ...event.profile }
-  delete profile.summary_provenance
-  return { ...event, profile: profile as AgentProfile }
-}
 
 // The fold clock is deliberately NOT the stored day: the report reads the run doc's stored date, not
 // the moment the buffer was refolded (R59).
@@ -21,11 +12,6 @@ const STATE = fold(RUN_SAMPLE, () => FOLD_CLOCK)
 const REPORT = reportFromState(STATE, STORED_AT)!
 
 describe('the filed report is derived from folded run state (R57)', () => {
-  it('builds the report from a roster whose profiles carry no source links, without throwing', () => {
-    const bare = fold(RUN_SAMPLE.map(withoutProvenance), () => FOLD_CLOCK)
-    expect(reportFromState(bare, STORED_AT)?.sources).toEqual([])
-  })
-
   it('carries the question, the stored filing day, the position and the share', () => {
     expect(REPORT.question).toBe('Should we expand into the European market in 2027?')
     expect(REPORT.filed).toBe('22 Oct 2026')
@@ -71,43 +57,23 @@ describe('the filed report is derived from folded run state (R57)', () => {
     ])
   })
 
-  it('names the sources from the roster provenance, once each, with their breadcrumb', () => {
-    expect(REPORT.sources).toEqual([{ document: 'eu-market-2027.pdf', reference: 'Section 3' }])
-  })
-
-  it('keeps an empty reference when the roster recorded no breadcrumb', () => {
-    const bare = {
-      ...STATE,
-      roster: STATE.roster.map((profile) => ({
-        ...profile,
-        summary_provenance: profile.summary_provenance.map((link) => ({ ...link, breadcrumb: undefined })),
-      })),
-    }
-    expect(reportFromState(bare, STORED_AT)?.sources).toEqual([{ document: 'eu-market-2027.pdf', reference: '' }])
-  })
-
   it('reads the passes through the convergence series the tape reads', () => {
     expect(REPORT.passes).toEqual([
-      { pass: 'P1', negative: 0.2, positive: 0.55, ambivalent: 0.1 },
-      { pass: 'P2', negative: 0.15, positive: 0.72, ambivalent: 0.05 },
+      { pass: 'P1', negative: 0.2, positive: 0.55, abstain: 0.1 },
+      { pass: 'P2', negative: 0.15, positive: 0.72, abstain: 0.05 },
     ])
   })
 
-  it('reads the panel from the roster and the turns, with the CIOR weight', () => {
+  it('reads the panel from the roster and the turns, with each expert’s strength', () => {
     expect(REPORT.panel.map((row) => [row.name, row.role, row.position, row.turns])).toEqual([
       ['D. Weber', 'Trade analyst', 'POSITIVE', 2],
       // The final stance wins over the opening one: P. Silva opened NEUTRAL and ended POSITIVE.
       ['M. Chen', 'Entry-cost strategist', 'NEGATIVE', 2],
       ['P. Silva', 'Policy analyst', 'POSITIVE', 2],
     ])
-    const [weber, chen, silva] = REPORT.panel
+    const [weber] = REPORT.panel
     expect(weber.confidence).toBe(0.7)
-    expect(weber.conviction).toBe(0.65)
-    expect(weber.receptivity).toBe(0.4)
-    expect(weber.weight).toBeCloseTo((0.7 * 0.65 * 1.4) / 2)
-    expect(chen.receptivity).toBe(-0.4)
-    expect(chen.weight).toBeCloseTo((0.7 * 0.65 * 0.6) / 2)
-    expect(silva.weight).toBeCloseTo((0.7 * 0.65) / 2)
+    expect(weber.strength).toBe(0.65)
   })
 
   it('carries the run warnings', () => {

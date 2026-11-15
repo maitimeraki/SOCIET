@@ -10,9 +10,8 @@ export interface VerdictSheetProps {
   caseAgainst: string
   reasoning: string[]
   whoHeldWhichView: { position: Position; names: string[] }[]
-  sources: { document: string; reference: string }[]
   onExport?: () => void
-  /** §7.2 — render only the filed fragment (outcome, case against, sources) for the auth evidence
+  /** §7.2 — render only the filed fragment (outcome, case against) for the auth evidence
    *  panel. The reasoning and the view split belong to the full document. */
   cropped?: boolean
 }
@@ -34,7 +33,6 @@ export default function VerdictSheet({
   caseAgainst,
   reasoning,
   whoHeldWhichView,
-  sources,
   onExport,
   cropped = false,
 }: VerdictSheetProps) {
@@ -94,15 +92,6 @@ export default function VerdictSheet({
         </>
       )}
 
-      <section className="py-6">
-        <p className="font-ui text-label uppercase tracking-[0.1em] text-ink-3">Sources</p>
-        {sources.map((source) => (
-          <div key={source.document} className="mt-3 flex items-baseline justify-between gap-4 border-t border-hairline py-2.5 first:border-t-0">
-            <span className="font-ui text-body-sm text-ink-2">{source.document}</span>
-            <span className="font-mono text-micro text-ink-3">{source.reference}</span>
-          </div>
-        ))}
-      </section>
     </article>
   )
 }

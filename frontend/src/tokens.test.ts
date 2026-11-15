@@ -87,11 +87,11 @@ const FLOORS = [
   { fg: '--color-map-accent', bg: '--color-map-ground', floor: 4.5, label: 'the map live mark on pine' },
   { fg: '--color-pos-light', bg: '--color-bone', floor: 4.5, label: 'a positive mark on bone' },
   { fg: '--color-neu-light', bg: '--color-bone', floor: 4.5, label: 'a neutral mark on bone' },
-  { fg: '--color-amb-light', bg: '--color-bone', floor: 4.5, label: 'an ambivalent mark on bone' },
+  { fg: '--color-amb-light', bg: '--color-bone', floor: 4.5, label: 'an amber mark on bone' },
   { fg: '--color-neg-light', bg: '--color-bone', floor: 4.5, label: 'a negative mark on bone' },
   { fg: '--color-pos', bg: '--color-map-ground', floor: 4.5, label: 'a positive mark on pine' },
   { fg: '--color-neu', bg: '--color-map-ground', floor: 4.5, label: 'a neutral mark on pine' },
-  { fg: '--color-amb', bg: '--color-map-ground', floor: 4.5, label: 'an ambivalent mark on pine' },
+  { fg: '--color-amb', bg: '--color-map-ground', floor: 4.5, label: 'an amber mark on pine' },
   { fg: '--color-neg', bg: '--color-map-ground', floor: 4.5, label: 'a negative mark on pine' },
 ]
 

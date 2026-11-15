@@ -7,7 +7,7 @@ import EmptyState from '../ui/EmptyState'
 
 export default function AgentsTab({ run }: { run: RunState }) {
   const [selected, setSelected] = useState<string | null>(null)
-  const profile = selected ? run.roster.find((entry) => entry.identity.name === selected) ?? null : null
+  const profile = selected ? run.roster.find((entry) => entry.name === selected) ?? null : null
   if (run.roster.length === 0) {
     return <EmptyState line="No panel for this decision. Nothing in the corpus matched the question." />
   }
@@ -21,7 +21,7 @@ export default function AgentsTab({ run }: { run: RunState }) {
       </div>
       <div className="grid gap-3 md:grid-cols-2">
         {run.roster.map((entry) => (
-          <AgentCard key={entry.agent_id} profile={entry} onOpen={() => setSelected(entry.identity.name)} />
+          <AgentCard key={entry.name} profile={entry} onOpen={() => setSelected(entry.name)} />
         ))}
       </div>
       {run.activations.length > 0 && (

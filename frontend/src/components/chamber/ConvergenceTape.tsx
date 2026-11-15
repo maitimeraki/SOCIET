@@ -9,7 +9,7 @@ import { fmtPct } from '../../utils/format'
 const SEGMENT_FILL: Record<Stance, string> = {
   POSITIVE: 'bg-pos-light',
   NEUTRAL: 'bg-neu-light',
-  AMBIVALENT: 'bg-amb-light',
+  ABSTAIN: 'bg-ink-3',
   NEGATIVE: 'bg-neg-light',
 }
 

@@ -3,13 +3,13 @@ import { describe, expect, it } from 'vitest'
 import { renderToStaticMarkup } from 'react-dom/server'
 import PositionMark, { PositionGlyph, stanceWord } from './PositionMark'
 
-const POSITIONS = ['POSITIVE', 'NEUTRAL', 'AMBIVALENT', 'NEGATIVE'] as const
+const POSITIONS = ['POSITIVE', 'NEUTRAL', 'ABSTAIN', 'NEGATIVE'] as const
 
 /** §4.6's symbols — the symbol is the character, never a picture. */
 const SYMBOL: Record<(typeof POSITIONS)[number], string> = {
   POSITIVE: '▲',
   NEUTRAL: '●',
-  AMBIVALENT: '◐',
+  ABSTAIN: '○',
   NEGATIVE: '▼',
 }
 

@@ -345,7 +345,7 @@ describe('the hover reducer — the neighbourhood keeps its strength (§12.4 Wav
     graph.addNode('far-expert', { color: EXPERT_COLOR, size: 7 })
     graph.addNode('far-pos', { color: POSITION_COLORS.POSITIVE, size: 7 })
     graph.addNode('far-neu', { color: POSITION_COLORS.NEUTRAL, size: 7 })
-    graph.addNode('far-amb', { color: POSITION_COLORS.AMBIVALENT, size: 7 })
+    graph.addNode('far-abstain', { color: POSITION_COLORS.ABSTAIN, size: 7 })
     graph.addNode('far-neg', { color: POSITION_COLORS.NEGATIVE, size: 7 })
     graph.addNode('far-unpositioned', { color: UNPOSITIONED_COLOR, size: 7 })
     graph.addEdge('hub', 'near-a')
@@ -356,7 +356,7 @@ describe('the hover reducer — the neighbourhood keeps its strength (§12.4 Wav
   it('dims every entry outside the hovered entry’s neighbourhood, and nothing else', () => {
     const dimmed = hoverDimmedEntries(build(), 'hub', DIM_FLOOR)
     expect([...dimmed.keys()].sort()).toEqual(
-      ['far-amb', 'far-corpus', 'far-expert', 'far-neg', 'far-neu', 'far-pos', 'far-unpositioned'].sort(),
+      ['far-abstain', 'far-corpus', 'far-expert', 'far-neg', 'far-neu', 'far-pos', 'far-unpositioned'].sort(),
     )
     expect(dimmed.has('hub')).toBe(false)
     expect(dimmed.has('near-a')).toBe(false)
@@ -635,7 +635,7 @@ describe('GraphLegend — the map’s key (§6, §9)', () => {
   it('names every colour the map draws, each with its own word', () => {
     const html = renderToStaticMarkup(<GraphLegend hasEntries />)
 
-    for (const word of ['Corpus', 'Experts', 'POSITIVE', 'NEUTRAL', 'AMBIVALENT', 'NEGATIVE', 'No position']) {
+    for (const word of ['Corpus', 'Experts', 'POSITIVE', 'NEUTRAL', 'ABSTAIN', 'NEGATIVE', 'No position']) {
       expect(html).toContain(word)
     }
     // The swatches carry the very hues the canvas paints, so the key and the map cannot drift.

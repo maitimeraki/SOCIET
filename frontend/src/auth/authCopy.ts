@@ -62,8 +62,4 @@ export const EXAMPLE_VERDICT: VerdictSheetProps = {
   // The panel is cropped to the fragment; the reasoning and the view split are not shown here.
   reasoning: [],
   whoHeldWhichView: [],
-  sources: [
-    { document: 'Mill Street lease.pdf', reference: 'p.4' },
-    { document: 'Demand study', reference: 'p.11' },
-  ],
 }

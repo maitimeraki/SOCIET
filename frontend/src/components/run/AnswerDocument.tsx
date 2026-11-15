@@ -1,4 +1,4 @@
-import type { AgentProfile, DissentingView, EvidenceItem, Stance } from '../../run/events'
+import type { DissentingView, EvidenceItem, Stance } from '../../run/events'
 import type { VerdictView } from '../../run/selectors'
 import { fmtScore } from '../../utils/format'
 import { NARRATIVE_FALLBACK_COPY } from '../verdict/NarrativeFallbackNotice'
@@ -37,34 +37,13 @@ export interface AnswerInput {
   /** The decision the document answers — the export's own title, so the file reads alone. */
   question: string
   view: VerdictView
-  /** The distinct source titles the run read from; empty is stated, never shown blank. */
-  sources: string[]
   /** The material behind the run is gone — the export must say so, never omit the section silently. */
   corpusMissing: boolean
 }
 
-/**
- * The distinct source titles a run's experts read from, in first-seen order — read off the roster's
- * `summary_provenance` (the payload's own source links, D7). Pure, so the two callers share it.
- */
-// eslint-disable-next-line react-refresh/only-export-components -- the source reader is the pure helper the document and its callers share
-export function sourceTitles(profiles: AgentProfile[]): string[] {
-  const seen = new Set<string>()
-  const titles: string[] = []
-  for (const profile of profiles) {
-    for (const link of profile.summary_provenance ?? []) {
-      if (link.title && !seen.has(link.title)) {
-        seen.add(link.title)
-        titles.push(link.title)
-      }
-    }
-  }
-  return titles
-}
-
 /** The document's sections — derived once, rendered twice. */
 // eslint-disable-next-line react-refresh/only-export-components -- the section builder is the document's single source, read by the view, the export and the test
-export function answerSections({ view, sources, corpusMissing }: AnswerInput): AnswerSection[] {
+export function answerSections({ view, corpusMissing }: AnswerInput): AnswerSection[] {
   const sections: AnswerSection[] = [...answerParts(view), confidenceSection(view), caseAgainst(view)]
 
   if (view.evidence.length > 0) {
@@ -87,7 +66,7 @@ export function answerSections({ view, sources, corpusMissing }: AnswerInput): A
         : [{ kind: 'text', text: 'No final positions were recorded.' }],
   })
 
-  sections.push({ heading: 'Sources', blocks: sourceBlocks(sources, corpusMissing) })
+  if (corpusMissing) sections.push({ heading: 'Sources', blocks: [{ kind: 'text', text: 'The material behind this decision is no longer available.' }] })
 
   if (view.warnings.length > 0) {
     sections.push({ heading: 'Warnings', blocks: [{ kind: 'warnings', items: view.warnings }] })
@@ -131,14 +110,6 @@ function caseAgainst(view: VerdictView): AnswerSection {
         ? [{ kind: 'listing', items: view.dissentingViews.map(dissentLine) }]
         : [{ kind: 'text', text: 'No dissent was recorded.' }],
   }
-}
-
-function sourceBlocks(sources: string[], corpusMissing: boolean): AnswerBlock[] {
-  const blocks: AnswerBlock[] = []
-  if (corpusMissing) blocks.push({ kind: 'text', text: 'The material behind this decision is no longer available.' })
-  if (sources.length > 0) blocks.push({ kind: 'listing', items: sources })
-  else if (!corpusMissing) blocks.push({ kind: 'text', text: 'No sources were recorded for this decision.' })
-  return blocks
 }
 
 const dissentLine = (view: DissentingView): string => `${stanceWord(view.stance)} — ${view.view}`
@@ -194,7 +165,6 @@ export default function AnswerDocument({
   runId,
   question,
   view,
-  sources,
   corpusMissing,
   variant = 'full',
 }: AnswerDocumentProps) {
@@ -205,18 +175,14 @@ export default function AnswerDocument({
     position: view.stance,
     share: view.confidence,
     caseAgainst: view.dissentingViews[0]?.view ?? 'No dissent was recorded.',
-    sources: corpusMissing
-      ? 'The material behind this decision is no longer available.'
-      : sources.length > 0
-        ? sources.join(' · ')
-        : 'No sources were recorded for this decision.',
+    sources: corpusMissing ? 'The material behind this decision is no longer available.' : undefined,
   }
   if (variant === 'sheet') return <FiledSheet decision={filed} />
 
-  const sections = answerSections({ question, view, sources, corpusMissing })
+  const sections = answerSections({ question, view, corpusMissing })
 
   const download = () => {
-    const blob = new Blob([answerText({ question, view, sources, corpusMissing })], { type: 'text/markdown' })
+    const blob = new Blob([answerText({ question, view, corpusMissing })], { type: 'text/markdown' })
     const url = URL.createObjectURL(blob)
     const anchor = document.createElement('a')
     anchor.href = url

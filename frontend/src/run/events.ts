@@ -1,8 +1,12 @@
-export type Stance = 'POSITIVE' | 'NEGATIVE' | 'NEUTRAL' | 'AMBIVALENT'
+export type Stance = 'POSITIVE' | 'NEGATIVE' | 'NEUTRAL' | 'ABSTAIN'
 
-/** Coerce an arbitrary backend stance string to the closed set — unknown values read as NEUTRAL. */
+export class UnknownStanceError extends Error {}
+
+/** Parse a backend stance string to the closed set. Anything else throws; it is never read as NEUTRAL. */
 export function asStance(value: string): Stance {
-  return value === 'POSITIVE' || value === 'NEGATIVE' || value === 'AMBIVALENT' ? value : 'NEUTRAL'
+  const upper = value.toUpperCase()
+  if (upper === 'POSITIVE' || upper === 'NEGATIVE' || upper === 'NEUTRAL' || upper === 'ABSTAIN') return upper
+  throw new UnknownStanceError(`Unknown stance "${value}"`)
 }
 
 export interface QueryIntent {
@@ -24,40 +28,18 @@ export interface SelectionRow {
   anchors?: Record<string, string>[]
 }
 
-export interface ProvenanceLink {
-  doc_id: string
-  title: string
-  breadcrumb?: string
-  chunk_id: string
-}
-
-export interface ConfidenceBreakdown {
-  source_breadth: number
-  node_density: number
-  relationship_connectivity: number
-}
-
-export interface AgentProfile {
-  agent_id: string
-  identity: { name: string; archetype: string; communication_style: string }
-  bio: string
-  detailed_perspective: string
-  role_description?: string
-  discovery_type?: string
-  expertise_level?: string
+/** The one agent shape the backend sends. Nothing else about an agent reaches the client. */
+export interface AgentView {
+  name: string
+  /** Free-text entity type; may be the literal "type unknown". Render as is. */
+  type: string
+  role: string
   stance: Stance
-  intensity: number
+  /** Mean strength of the agent's position, 0..1. */
+  strength: number
+  bio: string
+  details: string
   confidence: number
-  conviction: number
-  cior: number
-  domain_tags: string[]
-  instinct_tags?: string[]
-  entity_affinity?: string[]
-  communication_radius: number
-  /** Not sent by the allowlist; readers default it (`?? []`). */
-  summary_provenance?: ProvenanceLink[]
-  confidence_breakdown: ConfidenceBreakdown
-  graph_snapshot?: { dataset_id: string; ontology_id?: string | null; chunk_count: number; version_hash: string }
 }
 
 export interface PairInfo {
@@ -88,6 +70,7 @@ export interface ClusterSummary {
   count: number
   total_weight: number
   avg_confidence: number
+  /** Wire name kept; the value is the mean agent strength (not conviction). */
   avg_conviction: number
   agents: string[]
 }
@@ -139,7 +122,7 @@ export type RunEvent =
     }
   | { type: 'intent'; intent: QueryIntent }
   | { type: 'selection'; rows: SelectionRow[] }
-  | { type: 'agent'; profile: AgentProfile; index: number; total: number }
+  | { type: 'agent'; profile: AgentView; index: number; total: number }
   | { type: 'pair_turn'; pair_id: string; response: string | null; error: string | null }
   | { type: 'round'; round: number; pairs: PairInfo[]; turns: TurnInfo[]; consensus?: ConsensusInfo | null }
   | {

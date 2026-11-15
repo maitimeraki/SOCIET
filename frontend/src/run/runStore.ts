@@ -87,7 +87,7 @@ const foldIntoMap = (event: RunEvent): void => {
     // The run's own dataset keys the expert (the run doc, or the first pair turn). Without one there is
     // no Persona key to mirror: leave the entry unseated rather than key it off a fabricated id.
     const datasetId = useRunStore.getState().run.datasetId
-    if (datasetId) mergeExpert({ datasetId, name: event.profile.identity.name })
+    if (datasetId) mergeExpert({ datasetId, name: event.profile.name })
     return
   }
   if (event.type === 'commit') {

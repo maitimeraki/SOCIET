@@ -1,35 +1,20 @@
-import { SealCheck } from '@phosphor-icons/react'
-import type { AgentProfile } from '../../run/events'
+import type { AgentView } from '../../run/events'
 import PositionMark from '../ui/PositionMark'
 import Chip from '../ui/Chip'
 import { ruleClasses } from '../ui/Rule'
 
-export default function ProfileCard({ profile }: { profile: AgentProfile }) {
-  const sources = profile.summary_provenance ?? []
+export default function ProfileCard({ profile }: { profile: AgentView }) {
   return (
     <article className={`${ruleClasses('top')} pt-4`}>
       <header className="flex items-center justify-between gap-2">
         <span className="text-body text-ink">
-          {profile.identity.name} · {profile.identity.archetype.toLowerCase()}
+          {profile.name} · {profile.role.toLowerCase()}
         </span>
         <PositionMark position={profile.stance} size="sm" ground="light" />
       </header>
       <p className="mt-2 line-clamp-2 text-body text-ink-2">{profile.bio}</p>
       <div className="mt-2 flex flex-wrap items-center gap-1">
-        <span className="text-micro text-ink-3">from cluster:</span>
-        {profile.domain_tags.map((tag) => (
-          <Chip key={tag}>{tag}</Chip>
-        ))}
-      </div>
-      <div className="mt-2 text-micro">
-        {sources.length > 0 ? (
-          <span className="flex items-start gap-1.5 text-ink-3">
-            <SealCheck size={12} className="mt-0.5 shrink-0 text-warn" aria-hidden="true" />
-            sources: {sources.map((source) => `${source.title}${source.breadcrumb ? ` §${source.breadcrumb}` : ''}`).join(' · ')}
-          </span>
-        ) : (
-          <span className="text-ink-3">no provenance recovered</span>
-        )}
+        <Chip>{profile.type}</Chip>
       </div>
     </article>
   )

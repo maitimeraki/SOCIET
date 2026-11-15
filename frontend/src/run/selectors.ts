@@ -1,8 +1,8 @@
-import type { AgentProfile, ClusterSummary, DissentingView, EvidenceItem, Stance, TurnInfo } from './events'
+import type { AgentView, ClusterSummary, DissentingView, EvidenceItem, Stance, TurnInfo } from './events'
 import { asStance } from './events'
 import type { RunRound, RunState } from './reducer'
 
-export const STANCE_ORDER: Stance[] = ['POSITIVE', 'NEUTRAL', 'AMBIVALENT', 'NEGATIVE']
+export const STANCE_ORDER: Stance[] = ['POSITIVE', 'NEUTRAL', 'ABSTAIN', 'NEGATIVE']
 
 // ---------------------------------------------------------------------------
 // Roster (profile creation) — the ①→④ sequence state
@@ -90,19 +90,19 @@ export function convergenceSeries(state: RunState): TapeTick[] {
 
 /** Pre-consensus runs: approximate the round's shares from turn counts (equal weight per turn). */
 function fallbackWeights(round: RunRound): Record<Stance, number> {
-  const counts: Record<Stance, number> = { POSITIVE: 0, NEUTRAL: 0, AMBIVALENT: 0, NEGATIVE: 0 }
+  const counts: Record<Stance, number> = { POSITIVE: 0, NEUTRAL: 0, NEGATIVE: 0, ABSTAIN: 0 }
   for (const turn of round.turns) counts[asStance(turn.stance)] += 1
   const total = round.turns.length || 1
   return {
     POSITIVE: counts.POSITIVE / total,
     NEUTRAL: counts.NEUTRAL / total,
-    AMBIVALENT: counts.AMBIVALENT / total,
+    ABSTAIN: counts.ABSTAIN / total,
     NEGATIVE: counts.NEGATIVE / total,
   }
 }
 
-export function rosterById(state: RunState): Map<string, AgentProfile> {
-  return new Map(state.roster.map((profile) => [profile.identity.name, profile]))
+export function rosterById(state: RunState): Map<string, AgentView> {
+  return new Map(state.roster.map((profile) => [profile.name, profile]))
 }
 
 export const isLive = (state: RunState): boolean => state.status === 'queued' || state.status === 'running'
@@ -192,7 +192,7 @@ export function verdictView(state: RunState): VerdictView | null {
 }
 
 function dominantFromFinalStances(finalStances: Record<string, string>): Stance {
-  const counts: Record<Stance, number> = { POSITIVE: 0, NEUTRAL: 0, AMBIVALENT: 0, NEGATIVE: 0 }
+  const counts: Record<Stance, number> = { POSITIVE: 0, NEUTRAL: 0, NEGATIVE: 0, ABSTAIN: 0 }
   for (const value of Object.values(finalStances)) counts[asStance(value)] += 1
   return STANCE_ORDER.reduce((best, stance) => (counts[stance] > counts[best] ? stance : best))
 }

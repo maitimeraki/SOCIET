@@ -21,7 +21,6 @@ export default function ReportDocument({ report }: { report: ReportModel }) {
         caseAgainst={report.caseAgainst}
         reasoning={report.reasoning}
         whoHeldWhichView={report.whoHeldWhichView}
-        sources={report.sources}
       />
 
       <section className="rounded-xl bg-paper p-12 shadow-sheet">
@@ -38,7 +37,7 @@ export default function ReportDocument({ report }: { report: ReportModel }) {
                 Positive
               </th>
               <th scope="col" className="num">
-                Ambivalent
+                Abstain
               </th>
             </tr>
           }
@@ -48,7 +47,7 @@ export default function ReportDocument({ report }: { report: ReportModel }) {
               <td>{row.pass}</td>
               <td className="num">{fmtPct(row.negative)}</td>
               <td className="num">{fmtPct(row.positive)}</td>
-              <td className="num">{fmtPct(row.ambivalent)}</td>
+              <td className="num">{fmtPct(row.abstain)}</td>
             </tr>
           ))}
         </Table>
@@ -69,13 +68,7 @@ export default function ReportDocument({ report }: { report: ReportModel }) {
                 Conf.
               </th>
               <th scope="col" className="num">
-                Conv.
-              </th>
-              <th scope="col" className="num">
-                Recept.
-              </th>
-              <th scope="col" className="num">
-                Weight
+                Str.
               </th>
             </tr>
           }
@@ -90,9 +83,7 @@ export default function ReportDocument({ report }: { report: ReportModel }) {
               </td>
               <td className="num">{row.turns}</td>
               <td className="num">{fmtScore(row.confidence)}</td>
-              <td className="num">{fmtScore(row.conviction)}</td>
-              <td className="num">{fmtScore(row.receptivity)}</td>
-              <td className="num">{fmtScore(row.weight)}</td>
+              <td className="num">{fmtScore(row.strength)}</td>
             </tr>
           ))}
         </Table>

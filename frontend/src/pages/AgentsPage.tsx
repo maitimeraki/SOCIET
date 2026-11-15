@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { getRun, listRuns } from '../api/rest'
-import type { AgentProfile } from '../run/events'
+import type { AgentView } from '../run/events'
 import AgentCard from '../components/agents/AgentCard'
 import AgentDrawer from '../components/agents/AgentDrawer'
 import Select from '../components/ui/Select'
@@ -11,7 +11,7 @@ import Skeleton from '../components/ui/Skeleton'
 export default function AgentsPage() {
   const [datasets, setDatasets] = useState<{ id: string; runId: string }[]>([])
   const [datasetId, setDatasetId] = useState<string>('')
-  const [roster, setRoster] = useState<AgentProfile[]>([])
+  const [roster, setRoster] = useState<AgentView[]>([])
   const [runsLoaded, setRunsLoaded] = useState(false)
   const [loadedDatasetId, setLoadedDatasetId] = useState<string | null>(null)
   const [selected, setSelected] = useState<string | null>(null)
@@ -60,7 +60,7 @@ export default function AgentsPage() {
       })
   }, [datasetId, datasets])
 
-  const profile = selected ? roster.find((entry) => entry.identity.name === selected) ?? null : null
+  const profile = selected ? roster.find((entry) => entry.name === selected) ?? null : null
   const note = useMemo(() => {
     const entry = datasets.find((dataset) => dataset.id === datasetId)
     return entry ? `Showing your panel from decision ${entry.runId} — experts are synthesized per question.` : ''
@@ -95,7 +95,7 @@ export default function AgentsPage() {
       ) : (
         <div className="grid gap-3 md:grid-cols-2">
           {roster.map((entry) => (
-            <AgentCard key={entry.agent_id} profile={entry} onOpen={() => setSelected(entry.identity.name)} />
+            <AgentCard key={entry.name} profile={entry} onOpen={() => setSelected(entry.name)} />
           ))}
         </div>
       )}

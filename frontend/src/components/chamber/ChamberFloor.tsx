@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import { X } from '@phosphor-icons/react'
-import type { AgentProfile, Stance } from '../../run/events'
+import type { AgentView, Stance } from '../../run/events'
 import type { RunRound } from '../../run/reducer'
 import { FLOOR_VIEWBOX, RADIUS_FRONT, SECTORS, arcSlots, pointAt } from './geometry'
 import Seat from './Seat'
@@ -12,7 +12,7 @@ import { ruleClasses } from '../ui/Rule'
 const SLOTS_PER_SECTOR = 12
 
 export interface ChamberFloorProps {
-  roster: AgentProfile[]
+  roster: AgentView[]
   rounds: RunRound[]
   /** null = live (latest round drawn); a number = replaying that round. */
   activeRound: number | null
@@ -25,7 +25,7 @@ export default function ChamberFloor({ roster, rounds, activeRound, livePairs, o
   const [selected, setSelected] = useState<string | null>(null)
 
   const { seats, seatPositions } = useMemo(() => {
-    const byStance: Record<Stance, AgentProfile[]> = { POSITIVE: [], NEUTRAL: [], AMBIVALENT: [], NEGATIVE: [] }
+    const byStance: Record<Stance, AgentView[]> = { POSITIVE: [], NEUTRAL: [], ABSTAIN: [], NEGATIVE: [] }
     for (const profile of roster) byStance[profile.stance as Stance].push(profile)
 
     const drawn = activeRound === null ? rounds[rounds.length - 1] : rounds.find((round) => round.round === activeRound)
@@ -39,7 +39,7 @@ export default function ChamberFloor({ roster, rounds, activeRound, livePairs, o
       const slots = arcSlots(sector.from, sector.to, Math.max(SLOTS_PER_SECTOR, members.length))
       members.forEach((profile, index) => {
         const slot = slots[index]
-        const name = profile.identity.name
+        const name = profile.name
         seatPositions.set(name, slot)
         seats.push({
           profile,
@@ -71,7 +71,7 @@ export default function ChamberFloor({ roster, rounds, activeRound, livePairs, o
     return [...build(previous, 0.45), ...build(drawn, 1)]
   }, [rounds, activeRound, livePairs, seatPositions])
 
-  const seated = seats.find((seat) => seat.profile.identity.name === selected)
+  const seated = seats.find((seat) => seat.profile.name === selected)
 
   const focusSeat = (name: string) => {
     document.querySelector<SVGGElement>(`[aria-label^="${name.replace(/"/g, '')}"]`)?.focus()
@@ -127,12 +127,12 @@ export default function ChamberFloor({ roster, rounds, activeRound, livePairs, o
         ))}
         {seats.map((seat) => (
           <Seat
-            key={seat.profile.agent_id}
+            key={seat.profile.name}
             seat={seat}
             tabIndex={0}
             onKeyNav={(delta) => {
-              const list = seats.map((entry) => entry.profile.identity.name)
-              const index = list.indexOf(seat.profile.identity.name)
+              const list = seats.map((entry) => entry.profile.name)
+              const index = list.indexOf(seat.profile.name)
               const next = list[(index + delta + list.length) % list.length]
               setSelected(null)
               focusSeat(next)
@@ -144,12 +144,12 @@ export default function ChamberFloor({ roster, rounds, activeRound, livePairs, o
       {seated && (
         <div className={`${ruleClasses('top')} absolute right-3 top-3 w-[240px] bg-paper pt-3`}>
           <div className="flex items-start justify-between gap-2">
-            <p className="text-body text-ink">{seated.profile.identity.name}</p>
+            <p className="text-body text-ink">{seated.profile.name}</p>
             <button type="button" aria-label="Close popover" onClick={closePopover} className="text-ink-3 hover:text-ink">
               <X size={12} aria-hidden="true" />
             </button>
           </div>
-          <p className="text-micro text-ink-3">{seated.profile.identity.archetype}</p>
+          <p className="text-micro text-ink-3">{seated.profile.role}</p>
           <div className="mt-2">
             <PositionMark position={seated.profile.stance} size="sm" ground="light" />
           </div>
@@ -165,9 +165,9 @@ export default function ChamberFloor({ roster, rounds, activeRound, livePairs, o
       {/* <640px: the floor degrades to the seats list (§17) */}
       <ul className="space-y-1 sm:hidden">
         {roster.map((profile) => (
-          <li key={profile.agent_id} className="flex items-center gap-2 text-body text-ink-2">
+          <li key={profile.name} className="flex items-center gap-2 text-body text-ink-2">
             <PositionMark position={profile.stance} size="sm" ground="light" />
-            {profile.identity.name}
+            {profile.name}
           </li>
         ))}
       </ul>

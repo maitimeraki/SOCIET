@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { EXPERT_TYPE } from '../graph/graphStore'
 import type { GraphSnapshot } from '../graph/graphStore'
-import type { AgentProfile, RunEvent, WrittenNode } from './events'
+import type { AgentView, RunEvent, WrittenNode } from './events'
 import { fold } from './reducer'
 import { composeRunGraph } from './runGraphStore'
 
@@ -13,20 +13,15 @@ const folded = (events: RunEvent[], now: () => number) => ({ ...fold(events, now
 
 /** An `agent` event seating one expert, as the live allowlist sends it (no snapshot: the run's dataset keys it). */
 const agent = (name: string): RunEvent => {
-  const profile: AgentProfile = {
-    agent_id: name,
-    identity: { name, archetype: 'analyst', communication_style: 'measured' },
-    bio: '',
-    detailed_perspective: '',
+  const profile: AgentView = {
+    name,
+    type: 'analyst',
+    role: 'analyst',
     stance: 'NEUTRAL',
-    intensity: 0.5,
+    strength: 0.5,
+    bio: '',
+    details: '',
     confidence: 0.5,
-    conviction: 0.5,
-    cior: 0,
-    domain_tags: [],
-    communication_radius: 1,
-    summary_provenance: [],
-    confidence_breakdown: { source_breadth: 0, node_density: 0, relationship_connectivity: 0 },
   }
   return { type: 'agent', index: 1, total: 1, profile }
 }

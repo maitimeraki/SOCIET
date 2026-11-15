@@ -1,6 +1,6 @@
 /* eslint-disable react-refresh/only-export-components -- this module deliberately exports its pure derivations (entryDetails, resolveSelection) so the no-DOM suite can read every kind of entry without a renderer. */
 import type { ReactNode } from 'react'
-import { FileText, X } from '@phosphor-icons/react'
+import { X } from '@phosphor-icons/react'
 import Drawer from '../ui/Drawer'
 import IconButton from '../ui/IconButton'
 import PositionMark from '../ui/PositionMark'
@@ -13,15 +13,9 @@ import type { LayerName } from '../../graph/layers'
 import { useSelectionStore } from '../../graph/selectionStore'
 import type { MapSelection } from '../../graph/selectionStore'
 import { asStance } from '../../run/events'
-import type { ProvenanceLink, Stance, TurnInfo } from '../../run/events'
+import type { Stance, TurnInfo } from '../../run/events'
 import { useRunStore } from '../../run/runStore'
 import type { RunState } from '../../run/reducer'
-
-/** One document an entry came from, with the places inside it the reading was taken from. */
-export interface SourceDoc {
-  title: string
-  where: string[]
-}
 
 /** An expert who cited an entry, and the passes they cited it in. */
 export interface ReferencingExpert {
@@ -43,7 +37,6 @@ export interface EntryDetails {
   layer: LayerName
   /** The kind, as a phrase a customer reads ("an entry from your material"). */
   kindLabel: string
-  sources: SourceDoc[]
   referencedBy: ReferencingExpert[]
   held: HeldView | null
 }
@@ -105,19 +98,8 @@ function turnFor(run: RunState, expert: string, round: number | null): TurnInfo 
 function heldView(run: RunState, holder: string, round: number | null): HeldView | null {
   const turn = turnFor(run, holder, round)
   if (turn) return { stance: asStance(turn.stance), confidence: turn.confidence, view: turn.content }
-  const profile = run.roster.find((entry) => entry.identity.name === holder)
-  return profile ? { stance: profile.stance, confidence: profile.confidence, view: profile.detailed_perspective } : null
-}
-
-/** One row per source document, carrying the places inside it the reading was taken from. */
-export function sourceDocs(links: ProvenanceLink[]): SourceDoc[] {
-  const byTitle = new Map<string, string[]>()
-  for (const link of links) {
-    const where = byTitle.get(link.title) ?? []
-    if (link.breadcrumb && !where.includes(link.breadcrumb)) where.push(link.breadcrumb)
-    byTitle.set(link.title, where)
-  }
-  return [...byTitle].map(([title, where]) => ({ title, where }))
+  const profile = run.roster.find((entry) => entry.name === holder)
+  return profile ? { stance: profile.stance, confidence: profile.confidence, view: profile.details } : null
 }
 
 /** Every expert whose turns cited an entry, with the passes they cited it in, in first-cited order. */
@@ -147,7 +129,6 @@ export function entryDetails(run: RunState, node: GraphNode): EntryDetails {
       name: node.label,
       layer,
       kindLabel: 'an entry from your material',
-      sources: [],
       referencedBy: referencingExperts(run, node.label),
       held: null,
     }
@@ -155,14 +136,11 @@ export function entryDetails(run: RunState, node: GraphNode): EntryDetails {
 
   const opinion = layer === 'opinions' ? opinionSource(run, node.id) : null
   const holder = layer === 'experts' ? node.label : opinion?.holder ?? null
-  const profile = holder ? run.roster.find((entry) => entry.identity.name === holder) : undefined
   return {
     kind: 'entry',
     name: node.label,
     layer,
     kindLabel: layer === 'experts' ? 'an expert in your panel' : holder ? `an opinion held by ${holder}` : 'an opinion',
-    // An expert's own sources; an opinion's are its holder's — the material the position was read from.
-    sources: sourceDocs(profile?.summary_provenance ?? []),
     referencedBy: referencingExperts(run, node.label),
     held: holder ? heldView(run, holder, opinion?.round ?? null) : null,
   }
@@ -215,24 +193,6 @@ export function NodeDetailsView({ details, onClose }: { details: MapDetails; onC
 
         {details.kind === 'entry' && (
           <>
-            <Reading heading="From">
-              {details.sources.length > 0 ? (
-                <ul className="space-y-2">
-                  {details.sources.map((doc) => (
-                    <li key={doc.title} className="text-body text-ink-2">
-                      <span className="flex items-center gap-2">
-                        <FileText size={14} aria-hidden="true" className="shrink-0" />
-                        {doc.title}
-                      </span>
-                      {doc.where.length > 0 && <p className="ml-6 text-micro text-ink-2">{doc.where.join(' · ')}</p>}
-                    </li>
-                  ))}
-                </ul>
-              ) : (
-                <p className="text-body text-ink-2">No source documents were recorded for this entry.</p>
-              )}
-            </Reading>
-
             <Reading heading="Referenced by">
               {details.referencedBy.length > 0 ? (
                 <ul className="space-y-1">

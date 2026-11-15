@@ -23,7 +23,8 @@ export type FiledDecision = {
   /** The weighted share; `null` when the decision recorded no confidence — stated, never invented. */
   share: number | null
   caseAgainst: string
-  sources: string
+  /** Omitted when the run carries no source material to name; the sources line is then not drawn. */
+  sources?: string
 }
 
 export default function FiledSheet({
@@ -68,10 +69,12 @@ export default function FiledSheet({
         <p className="mt-1 font-ui text-[13px] leading-[20px] text-ink-2">{decision.caseAgainst}</p>
       </div>
 
-      <div className={`${ruleClasses('top')} mt-4 pt-4`}>
-        <p className="font-mono text-mono uppercase tracking-[0.14em] text-ink-3">Sources</p>
-        <p className="mt-1 font-mono text-[11px] leading-[18px] text-ink-3">{decision.sources}</p>
-      </div>
+      {decision.sources !== undefined && (
+        <div className={`${ruleClasses('top')} mt-4 pt-4`}>
+          <p className="font-mono text-mono uppercase tracking-[0.14em] text-ink-3">Sources</p>
+          <p className="mt-1 font-mono text-[11px] leading-[18px] text-ink-3">{decision.sources}</p>
+        </div>
+      )}
 
       {sample ? (
         <p className={`${ruleClasses('top')} mt-4 pt-3 font-mono text-[11px] leading-[17px] text-ink-3`}>

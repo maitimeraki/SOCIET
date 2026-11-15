@@ -1,21 +1,15 @@
-import type { AgentProfile, RunEvent, Stance, TurnInfo } from '../events'
+import type { AgentView, RunEvent, Stance, TurnInfo } from '../events'
 
-function profile(id: string, name: string, archetype: string, stance: Stance, tags: string[]): AgentProfile {
+function profile(name: string, role: string, stance: Stance, type: string): AgentView {
   return {
-    agent_id: id,
-    identity: { name, archetype, communication_style: 'measured' },
-    bio: `${name} reads the record as a ${archetype.toLowerCase()}.`,
-    detailed_perspective: `I read the record as a ${archetype.toLowerCase()}; the evidence is on my side.`,
+    name,
+    type,
+    role,
     stance,
-    intensity: 0.6,
+    strength: 0.65,
+    bio: `${name} reads the record as a ${role.toLowerCase()}.`,
+    details: `I read the record as a ${role.toLowerCase()}; the evidence is on my side.`,
     confidence: 0.7,
-    conviction: 0.65,
-    cior: stance === 'POSITIVE' ? 0.4 : stance === 'NEGATIVE' ? -0.4 : 0,
-    domain_tags: tags,
-    instinct_tags: [],
-    communication_radius: 1,
-    summary_provenance: [{ doc_id: 'doc-1', title: 'eu-market-2027.pdf', breadcrumb: 'Section 3', chunk_id: 'chunk-1' }],
-    confidence_breakdown: { source_breadth: 2, node_density: 5, relationship_connectivity: 0.6 },
   }
 }
 
@@ -48,9 +42,9 @@ export const RUN_SAMPLE: RunEvent[] = [
       { name: 'L. Novak', semantic: 0.22, density: 0.4, blended: 0.29 },
     ],
   },
-  { type: 'agent', index: 1, total: 3, profile: profile('a1', 'D. Weber', 'Trade analyst', 'POSITIVE', ['steel tariffs', 'EU']) },
-  { type: 'agent', index: 2, total: 3, profile: profile('a2', 'M. Chen', 'Entry-cost strategist', 'NEGATIVE', ['entry cost']) },
-  { type: 'agent', index: 3, total: 3, profile: profile('a3', 'P. Silva', 'Policy analyst', 'NEUTRAL', ['regulatory risk']) },
+  { type: 'agent', index: 1, total: 3, profile: profile('D. Weber', 'Trade analyst', 'POSITIVE', 'Trade body') },
+  { type: 'agent', index: 2, total: 3, profile: profile('M. Chen', 'Entry-cost strategist', 'NEGATIVE', 'Company') },
+  { type: 'agent', index: 3, total: 3, profile: profile('P. Silva', 'Policy analyst', 'NEUTRAL', 'Regulator') },
   { type: 'stage', stage: 'synthesis', index: 2, agents: 3 },
   { type: 'stage', stage: 'round', index: 3, round: 1, pairs: 2, turns: 3 },
   { type: 'pair_turn', pair_id: 'ds-fixture:D. Weber:M. Chen', response: 'Tariff alignment matters more than entry cost.', error: null },
@@ -67,7 +61,7 @@ export const RUN_SAMPLE: RunEvent[] = [
       turn('a2', 'M. Chen', 'NEGATIVE', 0.64, 'Entry costs compound in the first year.'),
       turn('a3', 'P. Silva', 'NEUTRAL', 0.58, 'The regulatory path is conditional.'),
     ],
-    consensus: { stance: 'POSITIVE', weight_share: 0.55, threshold: 0.8, weights: { POSITIVE: 0.55, NEUTRAL: 0.15, AMBIVALENT: 0.1, NEGATIVE: 0.2 } },
+    consensus: { stance: 'POSITIVE', weight_share: 0.55, threshold: 0.8, weights: { POSITIVE: 0.55, NEUTRAL: 0.15, ABSTAIN: 0.1, NEGATIVE: 0.2 } },
   },
   { type: 'commit', round: 1, opinions: 3, edges: 2, failed: false },
   { type: 'stage', stage: 'round', index: 4, round: 2, pairs: 2, turns: 3 },
@@ -84,7 +78,7 @@ export const RUN_SAMPLE: RunEvent[] = [
       turn('a2', 'M. Chen', 'NEGATIVE', 0.66, 'Staging delays the payoff.'),
       turn('a3', 'P. Silva', 'POSITIVE', 0.61, 'Conditions can be met by 2027.'),
     ],
-    consensus: { stance: 'POSITIVE', weight_share: 0.72, threshold: 0.8, weights: { POSITIVE: 0.72, NEUTRAL: 0.08, AMBIVALENT: 0.05, NEGATIVE: 0.15 } },
+    consensus: { stance: 'POSITIVE', weight_share: 0.72, threshold: 0.8, weights: { POSITIVE: 0.72, NEUTRAL: 0.08, ABSTAIN: 0.05, NEGATIVE: 0.15 } },
   },
   { type: 'commit', round: 2, opinions: 3, edges: 2, failed: false },
   { type: 'activation', round: 2, agents: ['L. Novak'], reasons: { 'L. Novak': 'invited via "steel tariffs"' } },
@@ -104,7 +98,7 @@ export const RUN_SAMPLE: RunEvent[] = [
     cluster_details: {
       POSITIVE: { stance: 'POSITIVE', count: 3, total_weight: 0.61, avg_confidence: 0.7, avg_conviction: 0.68, agents: ['D. Weber', 'P. Silva'] },
       NEGATIVE: { stance: 'NEGATIVE', count: 2, total_weight: 0.24, avg_confidence: 0.65, avg_conviction: 0.6, agents: ['M. Chen'] },
-      AMBIVALENT: { stance: 'AMBIVALENT', count: 0, total_weight: 0, avg_confidence: 0, avg_conviction: 0, agents: [] },
+      ABSTAIN: { stance: 'ABSTAIN', count: 0, total_weight: 0, avg_confidence: 0, avg_conviction: 0, agents: [] },
       NEUTRAL: { stance: 'NEUTRAL', count: 1, total_weight: 0.15, avg_confidence: 0.58, avg_conviction: 0.5, agents: ['L. Novak'] },
     },
     supporting_entities: ['EU single market', 'steel tariffs'],

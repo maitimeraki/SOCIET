@@ -10,7 +10,7 @@ export const RADIUS_BACK = 510
 export const SECTORS: { stance: Stance; label: string; from: number; to: number }[] = [
   { stance: 'POSITIVE', label: 'AYE', from: 180, to: 225 },
   { stance: 'NEUTRAL', label: 'CROSSBENCH', from: 225, to: 270 },
-  { stance: 'AMBIVALENT', label: 'CROSSBENCH', from: 270, to: 315 },
+  { stance: 'ABSTAIN', label: 'NO VIEW', from: 270, to: 315 },
   { stance: 'NEGATIVE', label: 'NOE', from: 315, to: 360 },
 ]
 

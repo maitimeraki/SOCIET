@@ -61,7 +61,6 @@ export function VerdictsPageView({ latest, earlier, loading, failed, failDetail,
               caseAgainst={latest.report.caseAgainst}
               reasoning={latest.report.reasoning}
               whoHeldWhichView={latest.report.whoHeldWhichView}
-              sources={latest.report.sources}
               onExport={() => window.print()}
             />
           </div>

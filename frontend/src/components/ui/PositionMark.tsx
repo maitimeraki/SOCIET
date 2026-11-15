@@ -7,7 +7,7 @@ import type { Stance } from '../../run/events'
  * Colour is never the only signal and a position hue is never used as text: the hue belongs to the
  * drawn symbol, the word is always ink — the light ink on a light surface, the map's ink on pine.
  *
- * The four positions are in the frozen order POSITIVE, NEUTRAL, AMBIVALENT, NEGATIVE
+ * The four positions are in the frozen order POSITIVE, NEUTRAL, ABSTAIN, NEGATIVE
  * (`STANCE_ORDER` in `run/selectors.ts` is the one list of that order).
  */
 export type Position = Stance
@@ -19,7 +19,7 @@ export type PositionMarkSize = 'sm' | 'md'
 const WORD: Record<Position, string> = {
   POSITIVE: 'Positive',
   NEUTRAL: 'Neutral',
-  AMBIVALENT: 'Ambivalent',
+  ABSTAIN: 'No view',
   NEGATIVE: 'Negative',
 }
 
@@ -36,7 +36,7 @@ export function stanceWord(stance: string): string {
 const SYMBOL: Record<Position, string> = {
   POSITIVE: '▲',
   NEUTRAL: '●',
-  AMBIVALENT: '◐',
+  ABSTAIN: '○',
   NEGATIVE: '▼',
 }
 
@@ -44,7 +44,7 @@ const SYMBOL: Record<Position, string> = {
 const LIGHT: Record<Position, string> = {
   POSITIVE: 'var(--color-pos-light)',
   NEUTRAL: 'var(--color-neu-light)',
-  AMBIVALENT: 'var(--color-amb-light)',
+  ABSTAIN: 'var(--color-ink-3)',
   NEGATIVE: 'var(--color-neg-light)',
 }
 
@@ -52,7 +52,7 @@ const LIGHT: Record<Position, string> = {
 const MAP: Record<Position, string> = {
   POSITIVE: 'var(--color-pos)',
   NEUTRAL: 'var(--color-neu)',
-  AMBIVALENT: 'var(--color-amb)',
+  ABSTAIN: 'var(--color-map-ink-2)',
   NEGATIVE: 'var(--color-neg)',
 }
 

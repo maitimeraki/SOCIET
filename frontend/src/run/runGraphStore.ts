@@ -90,9 +90,11 @@ export function composeRunGraph(run: RunState, corpus: GraphSnapshot | null, max
   // Expert layer — one entry per agent, keyed as the backend keys the stored person (`{dataset_id}:{name}`).
   // Without a dataset there is no Persona key to mirror: seat nothing rather than key a fabricated id.
   const datasetId = run.datasetId
-  for (const profile of datasetId ? run.roster : []) {
-    const id = expertKey({ datasetId, name: profile.identity.name })
-    nodes[id] = { id, label: profile.identity.name, type: EXPERT_TYPE }
+  if (datasetId) {
+    for (const profile of run.roster) {
+      const id = expertKey({ datasetId, name: profile.name })
+      nodes[id] = { id, label: profile.name, type: EXPERT_TYPE }
+    }
   }
 
   // Opinion layer — the entries and connections the commits report they wrote, taken verbatim (D7),

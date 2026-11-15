@@ -48,8 +48,6 @@ describe('VerdictsPageView', () => {
     expect(html).toContain('0.83')
     expect(html).toContain('The case against')
     expect(html).toContain('Entry cost outweighs the single market.')
-    // The source row keeps its real provenance breadcrumb (R62) instead of a dangling dash.
-    expect(html).toContain('Section 3')
     // The earlier row carries its own date, position and share.
     expect(html).toContain('1 Sept 2026')
     expect(html).toContain('Positive')
@@ -152,7 +150,6 @@ describe('loadVerdicts', () => {
 
     expect(loaded.latest?.runId).toBe('r-good')
     expect(loaded.latest?.report.filed).toBe('9 Oct 2026')
-    expect(loaded.latest?.report.sources).toEqual([{ document: 'eu-market-2027.pdf', reference: 'Section 3' }])
     expect(loaded.earlier).toEqual([
       {
         runId: 'r-bad',

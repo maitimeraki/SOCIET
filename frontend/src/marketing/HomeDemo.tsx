@@ -50,12 +50,11 @@ const CAPTURES = {
 const WORDMARK = 'Societas'
 
 /** The four positions, frozen order. A position is shape + colour + word, never colour alone. */
-type Position = 'POSITIVE' | 'NEUTRAL' | 'AMBIVALENT' | 'NEGATIVE'
+type Position = 'POSITIVE' | 'NEUTRAL' | 'NEGATIVE'
 
 const POSITION_COLOR: Record<Position, string> = {
   POSITIVE: '#4ade80',
   NEUTRAL: '#94a3b8',
-  AMBIVALENT: '#fbbf24',
   NEGATIVE: '#f87171',
 }
 
@@ -65,7 +64,6 @@ function PositionMark({ position, size = 12 }: { position: Position; size?: numb
     <svg width={size} height={size} viewBox="0 0 16 16" aria-hidden="true" className="shrink-0">
       {position === 'POSITIVE' && <path d="M8 2.5 14 13.5H2Z" fill={color} />}
       {position === 'NEUTRAL' && <circle cx="8" cy="8" r="5.5" fill={color} />}
-      {position === 'AMBIVALENT' && <path d="M8 1.5 14.5 8 8 14.5 1.5 8Z" fill={color} />}
       {position === 'NEGATIVE' && <path d="M2 2.5h12L8 13.5Z" fill={color} />}
     </svg>
   )
@@ -167,7 +165,7 @@ const TURNS: { position: Position; who: string; said: string }[] = [
     said: 'The grease-trap upgrade at 214 Mill Street is not signed, and occupancy is conditional on it.',
   },
   {
-    position: 'AMBIVALENT',
+    position: 'NEUTRAL',
     who: 'Finance lead',
     said: 'The lease runs $4,200 a month, but the clock only starts at occupancy, not at signing.',
   },
