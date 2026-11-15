@@ -6,8 +6,9 @@ What it measures, per question, from the real seating (`ProfileSynthesizer.synth
     a question whose every profile failed still has its ranking measured.
   * recall@n, n = the seat count (`DebateConfig().max_agents`), over the labelled entities.
   * Brier of each seated agent's confidence against whether its stance matches the label.
-    Only seated agents with a label other than ABSTAIN are scored. An agent stance the
-    labels cannot express (AMBIVALENT) never matches a label, so it scores as wrong.
+    Only seated agents with a label other than ABSTAIN are scored. An agent seated as
+    ABSTAIN never matches a POSITIVE, NEGATIVE or NEUTRAL label, so it scores as wrong.
+    This is the current rule; the product owner may change it.
     A question with no seated agent adds no Brier pairs.
   The three numbers are the mean NDCG, the mean recall, and the Brier over every scored pair.
 
@@ -252,8 +253,8 @@ def test_a_question_the_graph_does_not_cover_has_an_empty_ranking():
     assert (ranked, agents) == ([], [])
 
 
-def test_an_ambivalent_agent_scores_as_wrong_against_any_label():
-    agent = SimpleNamespace(identity=SimpleNamespace(name="Alpha"), confidence=0.8, stance=SimpleNamespace(value="AMBIVALENT"))
+def test_an_abstaining_agent_scores_as_wrong_against_a_positive_label():
+    agent = SimpleNamespace(identity=SimpleNamespace(name="Alpha"), confidence=0.8, stance=SimpleNamespace(value="ABSTAIN"))
     assert _brier_pairs([agent], {"Alpha": "POSITIVE"}) == [(0.8, False)]
 
 

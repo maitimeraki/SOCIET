@@ -6,7 +6,7 @@ from typing import Callable, Optional
 from src.billing import metering
 from src.llm.config_llm import LLMConfig
 from src.persona.agent import Agent
-from src.simulation.llm_batch import BatchedLLMRunner, PairPrompt
+from src.simulation.llm_batch import BatchedLLMRunner, PairPrompt, PairResult
 from src.simulation.pair_turn import AgentTurn, CommPair, RoundResult
 from src.simulation.profile_generator import attr_text, evidence_block
 from src.simulation.society_memory import SocietySnapshot
@@ -26,6 +26,11 @@ PROMPT_EVIDENCE_MAX = 12
 #: Sampling temperature for every debate turn call.
 ROUND_TEMPERATURE = 0.7
 
+#: The reason a turn carries when its LLM call raised; such a turn is not retried.
+LLM_FAILED = "the LLM call failed"
+#: The reason a turn carries when its batch returned no result for it.
+NO_REPLY = "no reply came back"
+
 RETRY_NOTE = (
     "Your previous reply did not follow the required form and was discarded. "
     "Reply again in exactly this form:"
@@ -36,10 +41,33 @@ def _format_instruction(opponent_name: str) -> str:
     """The declared turn form. The only place it is written; the retry restates it verbatim."""
     return (
         "Reply in exactly this form, one label per line, in this order, with nothing before REASONING:\n"
-        "REASONING: <your private thinking, briefly>\n"
+        "REASONING: <your private thinking, at most 60 words>\n"
         "POSITION: <POSITIVE|NEGATIVE|NEUTRAL|ABSTAIN> <strength from 0 to 1>\n"
-        "CITES: <the evidence ids you rely on, comma separated, e.g. e1, e3; leave empty if none>\n"
+        "CITES: <ids from the evidence above, comma separated, or leave empty>\n"
         f"ANSWER: <your reply to {opponent_name}, engaging with specific arguments>"
+    )
+
+
+def _read_reply(result: Optional[PairResult], own_ids: set[str]) -> tuple[Optional[TurnParse], str]:
+    """(parsed, "") for a valid reply; otherwise (None, reason), where reason is a fixed class string."""
+    if result is None:
+        return None, NO_REPLY
+    if result.error:
+        return None, LLM_FAILED
+    try:
+        return parse_turn(result.response, own_ids), ""
+    except ValueError as exc:
+        return None, str(exc)
+
+
+def _with_retry_note(prompt: PairPrompt, opponent: Agent) -> PairPrompt:
+    """The prompt for the one retry: the same prompt with the declared form restated."""
+    return replace(
+        prompt,
+        user_prompt=(
+            f"{prompt.user_prompt}\n\n{RETRY_NOTE}\n"
+            + _format_instruction(opponent.identity.name)
+        ),
     )
 
 
@@ -243,25 +271,26 @@ class RoundRunner:
         collected_pairs: list[CommPair] = []
         warnings: list[str] = []
         with metering.source_scope("debate"):
-            failed = await self._collect(
-                prompts, prompt_meta, turns, collected_pairs, warnings, retrying=False
-            )
-            if failed:
-                retries = [
-                    replace(
-                        prompt,
-                        user_prompt=(
-                            f"{prompt.user_prompt}\n\n{RETRY_NOTE}\n"
-                            + _format_instruction(
-                                prompt_meta[prompt.pair_id]["opponent"].identity.name
-                            )
-                        ),
-                    )
-                    for prompt in failed
-                ]
-                await self._collect(
-                    retries, prompt_meta, turns, collected_pairs, warnings, retrying=True
-                )
+            replies = await self._replies(prompts, prompt_meta)
+            retries = [
+                _with_retry_note(prompt, prompt_meta[prompt.pair_id]["opponent"])
+                for prompt in prompts
+                if replies[prompt.pair_id][1] not in ("", LLM_FAILED)
+            ]
+            if retries:
+                replies.update(await self._replies(retries, prompt_meta))
+
+        # Applied in prompt order, never completion order: a speaker in two pairs of one round
+        # takes its held position from the same sequence on every run.
+        for prompt in prompts:
+            meta = prompt_meta[prompt.pair_id]
+            parsed, reason = replies[prompt.pair_id]
+            if parsed is None:
+                warnings.append(f"{meta['speaker'].identity.name}: turn dropped, {reason}")
+                continue
+            turns.append(self._turn(meta, parsed))
+            if meta["pair"] not in collected_pairs:
+                collected_pairs.append(meta["pair"])
 
         return RoundResult(
             round_num=round_num,
@@ -270,44 +299,21 @@ class RoundRunner:
             warnings=warnings,
         )
 
-    async def _collect(
-        self,
-        prompts: list[PairPrompt],
-        prompt_meta: dict[str, dict],
-        turns: list[AgentTurn],
-        collected_pairs: list[CommPair],
-        warnings: list[str],
-        *,
-        retrying: bool,
-    ) -> list[PairPrompt]:
-        """Parse each result into a turn. Returns the prompts whose reply broke the form (first pass)."""
-        by_id = {prompt.pair_id: prompt for prompt in prompts}
-        failed: list[PairPrompt] = []
+    async def _replies(
+        self, prompts: list[PairPrompt], prompt_meta: dict[str, dict]
+    ) -> dict[str, tuple[Optional[TurnParse], str]]:
+        """Run one batch and read every reply, keyed by pair_id (results arrive in completion order)."""
+        results: dict[str, PairResult] = {}
         async for result in self._llm.gather(prompts):
             if self.ws_broadcast:
                 await self.ws_broadcast({"type": "pair_turn", "pair_id": result.pair_id})
-
-            meta = prompt_meta.get(result.pair_id)
-            if meta is None:
-                continue
-            speaker_name = meta["speaker"].identity.name
-            if result.error:
-                warnings.append(f"{speaker_name}: turn dropped, the LLM call failed")
-                continue
-            try:
-                parsed = parse_turn(result.response, meta["own_ids"])
-            except ValueError as exc:
-                if retrying:
-                    warnings.append(f"{speaker_name}: turn dropped, {exc}")
-                else:
-                    failed.append(by_id[result.pair_id])
-                continue
-
-            turns.append(self._turn(meta, parsed))
-            pair = meta["pair"]
-            if pair not in collected_pairs:
-                collected_pairs.append(pair)
-        return failed
+            results[result.pair_id] = result
+        return {
+            prompt.pair_id: _read_reply(
+                results.get(prompt.pair_id), prompt_meta[prompt.pair_id]["own_ids"]
+            )
+            for prompt in prompts
+        }
 
     def _turn(self, meta: dict, parsed: TurnParse) -> AgentTurn:
         speaker = meta["speaker"]

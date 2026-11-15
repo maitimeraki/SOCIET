@@ -203,7 +203,7 @@ UNITS_PER_CALL_TYPICAL = billing_units.units_for_tokens(
 
 def debate_worst_call_units() -> int:
     """Units one debate call settles at most: prompt_char_bound() characters (one token each) plus the
-    largest completion cap. Used only for the ceiling in debate_worst_case_units, never for the hold."""
+    largest completion cap. Used only for the first-attempt bound in debate_worst_case_units, never for the hold."""
     cfg = get_llm_config()
     max_completion = max(
         cfg.profile_max_tokens,
@@ -216,13 +216,15 @@ def debate_worst_call_units() -> int:
 
 
 def debate_worst_case_units(*, agents: int, rounds: int, max_new_per_round: int, max_pairs_per_round: int) -> int:
-    """A ceiling on what a debate run can settle, pinned by a test. It is conditional: the profile and
-    judge prompts are bounded in code (prompt_char_bound), but round, verdict, intent and actor
-    classification prompts are NOT byte-bounded in code. Charging them the same per-call bound is an
-    assumption, so this is a ceiling only if those prompts stay within prompt_char_bound(). It is
-    documented for the record and is not the admission reserve.
+    """An estimate bound over first attempts, pinned by a test. It is not a ceiling over retries: a
+    malformed turn is re-asked once and those retries are not counted here, so a run whose turns retry
+    can settle above this figure. It is conditional: the profile and judge prompts are bounded in code
+    (prompt_char_bound), but round, verdict, intent and actor classification prompts are NOT
+    byte-bounded in code. Charging them the same per-call bound is an assumption, so the bound holds
+    only if those prompts stay within prompt_char_bound(). It is documented for the record and is not
+    the admission reserve.
 
-    Worst-case calls, counted at their caps: intent (1); the pool's actor classification (one call per
+    Calls counted at their caps, one attempt per turn: intent (1); the pool's actor classification (one call per
     ACTOR_BATCH labels, the pool keeps at most POOL_CAP candidates); verdict attempts (VERDICT_MAX_ATTEMPTS);
     the roster's draws, at most (agents + DRAW_SLACK) x CALLS_PER_DRAW; per round, activation's
     classification and its joiner draws; and per round two turns per pair, pairs capped by the request
@@ -252,7 +254,7 @@ def debate_reserve_units(*, agents: int, rounds: int, max_new_per_round: int, ma
     judge calls (EXPECTED_CALLS_PER_SEAT); the draw slack's rejections (DRAW_SLACK draws at
     REJECTED_DRAW_CALLS); per round, activation's classification and its joiners (max_new at
     EXPECTED_CALLS_PER_SEAT, plus the same rejection allowance); and rounds x 2 turns per pair. An
-    overrun is settled and charged to the period as usual (units.py); the run stops at plan exhaustion.
+    overrun is settled and charged to the period as usual (units.py); the run stops at plan exhaustion. Turn retries are not in the expected count: a malformed turn is re-asked once, so a run that retries settles above this hold, and that overrun is charged to units_used as settled.
     """
     rejections = DRAW_SLACK * REJECTED_DRAW_CALLS
     per_round_activation = (

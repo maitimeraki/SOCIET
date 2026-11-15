@@ -807,14 +807,14 @@ async def test_a_typical_run_with_rejections_settles_within_the_reserve(monkeypa
 
 
 @pytest.mark.asyncio
-async def test_the_ceiling_is_pinned_conditional_on_the_unbounded_prompts():
-    """Pins the ceiling so a change to a cap or constant is noticed.
+async def test_the_first_attempt_bound_is_pinned_conditional_on_the_unbounded_prompts():
+    """Pins the first-attempt bound so a change to a cap or constant is noticed.
 
     CONDITIONAL: the profile and judge prompts are bounded in code; round, verdict, intent and actor
     classification prompts are not, and are assumed to fit prompt_char_bound(). This is not the
     admission reserve (see debate_reserve_units).
 
-    Ceiling, 8 seats and 3 rounds: 234 calls x 36 units = 8424. Per call: prompt_char_bound() 32,947
+    First-attempt bound (retries of malformed turns are not counted), 8 seats and 3 rounds: 234 calls x 36 units = 8424. Per call: prompt_char_bound() 32,947
     characters + 3,000 completion = 35,947 tokens -> 36 units.
     """
     assert debate_worst_call_units() == 36

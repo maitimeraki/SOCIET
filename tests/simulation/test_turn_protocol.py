@@ -1,5 +1,6 @@
 """The declared POSITION turn protocol: parse, retry, and the position-change rule."""
 
+import asyncio
 from unittest.mock import AsyncMock
 
 import pytest
@@ -9,7 +10,12 @@ from src.persona.agent import Stance
 from src.simulation.evidence import EvidenceItem
 from src.simulation.llm_batch import BatchedLLMRunner
 from src.simulation.pair_turn import CommPair
-from src.simulation.round_runner import RoundRunner, _build_user_prompt
+from src.simulation.round_runner import (
+    RETRY_NOTE,
+    RoundRunner,
+    _build_user_prompt,
+    _format_instruction,
+)
 from src.simulation.turn_protocol import (
     PositionState,
     TurnParse,
@@ -182,7 +188,7 @@ async def test_the_retry_restates_the_declared_form():
 
     async def generate(system_prompt, user_prompt, **_kwargs):
         seen.append(user_prompt)
-        alice_first_try = system_prompt.startswith("You are Alice") and len(seen) <= 2
+        alice_first_try = system_prompt.startswith("You are Alice") and RETRY_NOTE not in user_prompt
         return "no form" if alice_first_try else DECLARED
 
     llm = AsyncMock()
@@ -197,8 +203,9 @@ async def test_the_retry_restates_the_declared_form():
     )
 
     assert len(seen) == 3
-    retry = seen[2]
-    assert retry.count("POSITION: <POSITIVE|NEGATIVE|NEUTRAL|ABSTAIN>") == 2
+    retries = [prompt for prompt in seen if RETRY_NOTE in prompt]
+    assert len(retries) == 1
+    assert retries[0].count("POSITION: <POSITIVE|NEGATIVE|NEUTRAL|ABSTAIN>") == 2
 
 
 def test_the_turn_prompt_names_the_four_labels_and_no_position_yet_for_a_missing_opponent_stance():
@@ -230,3 +237,77 @@ async def test_a_position_change_without_a_new_cite_keeps_the_held_stance_across
 
     assert [t.stance for t in alice_turns] == ["POSITIVE", "POSITIVE", "NEGATIVE"]
     assert [t.position_reason for t in alice_turns] == ["", "kept: no new cite", ""]
+
+
+def test_the_form_instruction_gives_a_reasoning_limit_and_no_copyable_evidence_ids():
+    text = _format_instruction("Bob")
+
+    assert "at most 60 words" in text
+    assert "e1" not in text
+    assert "e3" not in text
+
+
+@pytest.mark.asyncio
+async def test_a_speaker_in_two_pairs_takes_its_position_in_prompt_order_whatever_the_completion_order():
+    alice = slim_agent("Alice", evidence=[_item("e1")])
+    bob = slim_agent("Bob")
+    carol = slim_agent("Carol")
+    finished: list[str] = []
+
+    async def generate(system_prompt, user_prompt, **_kwargs):
+        if not system_prompt.startswith("You are Alice"):
+            reply = DECLARED
+        elif "You are responding to: Bob" in user_prompt:
+            # Alice's first pair is slow, so its reply completes last.
+            await asyncio.sleep(0.05)
+            reply = "REASONING: r\nPOSITION: NEGATIVE 0.6\nCITES: e1\nANSWER: against Bob"
+        else:
+            reply = "REASONING: r\nPOSITION: POSITIVE 0.6\nCITES:\nANSWER: for Carol"
+        if system_prompt.startswith("You are Alice"):
+            finished.append("Alice->Bob" if "responding to: Bob" in user_prompt else "Alice->Carol")
+        return reply
+
+    llm = AsyncMock()
+    llm.generate = generate
+    runner = RoundRunner(BatchedLLMRunner(llm))
+    result = await runner.execute_round(
+        [alice, bob, carol],
+        [
+            CommPair(agent_a="Alice", agent_b="Bob", shared_entities=[]),
+            CommPair(agent_a="Alice", agent_b="Carol", shared_entities=[]),
+        ],
+        round_num=1,
+        query="Q?",
+        history=[],
+    )
+
+    assert finished.index("Alice->Carol") < finished.index("Alice->Bob")
+    alice_turns = [turn for turn in result.turns if turn.agent_name == "Alice"]
+    assert [(t.stance, t.position_reason) for t in alice_turns] == [
+        ("NEGATIVE", ""),
+        ("NEGATIVE", "kept: no new cite"),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_a_batch_that_returns_no_result_for_a_turn_drops_it_with_a_warning():
+    llm_runner = AsyncMock(spec=BatchedLLMRunner)
+
+    async def no_results(prompts):
+        return
+        yield  # pragma: no cover - makes this an async generator
+
+    llm_runner.gather = lambda prompts: no_results(prompts)
+    result = await RoundRunner(llm_runner).execute_round(
+        [slim_agent("Alice"), slim_agent("Bob")],
+        [CommPair(agent_a="Alice", agent_b="Bob", shared_entities=[])],
+        round_num=1,
+        query="Q?",
+        history=[],
+    )
+
+    assert result.turns == []
+    assert sorted(result.warnings) == [
+        "Alice: turn dropped, no reply came back",
+        "Bob: turn dropped, no reply came back",
+    ]
