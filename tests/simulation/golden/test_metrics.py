@@ -71,3 +71,44 @@ def test_brier_of_nothing_raises():
 def test_brier_rejects_a_probability_outside_the_unit_interval():
     with pytest.raises(ValueError):
         brier([(1.2, True)])
+
+
+def test_brier_rejects_a_nan_probability():
+    with pytest.raises(ValueError):
+        brier([(float("nan"), True)])
+
+
+def test_brier_scores_a_true_outcome_as_one():
+    assert brier([(0.0, True)]) == 1.0
+
+
+def test_a_duplicate_name_does_not_push_ndcg_above_one():
+    assert ndcg_at_k(["a", "a"], {"a": 1}) == pytest.approx(1.0)
+
+
+def test_a_repeated_name_does_not_take_a_second_recall_slot():
+    assert recall_at_n(["a", "a", "b"], {"a": 1, "b": 1}, 2) == 1.0
+
+
+def test_a_repeated_name_counts_once_for_recall():
+    assert recall_at_n(["a", "a"], {"a": 1, "b": 1}, 2) == 0.5
+
+
+def test_ndcg_rejects_a_label_above_three():
+    with pytest.raises(ValueError):
+        ndcg_at_k(["a"], {"a": 4})
+
+
+def test_ndcg_rejects_a_negative_label():
+    with pytest.raises(ValueError):
+        ndcg_at_k(["a"], {"a": -1})
+
+
+def test_recall_rejects_a_label_above_three():
+    with pytest.raises(ValueError):
+        recall_at_n(["a"], {"a": 4}, 1)
+
+
+def test_a_boolean_label_is_rejected():
+    with pytest.raises(ValueError):
+        ndcg_at_k(["a"], {"a": True})
