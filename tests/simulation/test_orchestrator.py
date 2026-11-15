@@ -1634,8 +1634,6 @@ async def test_a_node_tried_in_the_initial_synthesis_is_not_drawn_as_a_joiner():
     assert handed == [["Lumen", "Alice"], ["Carol"]]
 
 
-
-
 # --- end to end: no provenance, evidence, reasoning or cite id reaches a client payload ---
 #
 # The run is the real path: a real ProfileSynthesizer over the fake graph and fake profile model,
@@ -1664,6 +1662,9 @@ _LEAK_MARKERS = (
     "chunk_id", "doc_id", "version_hash", "dossier_hash", "graph_snapshot", "summary_provenance",
     "source_evidence", "evidence", "REASONING", "[e1]", "llm_model", "anchors", "source_count",
 )
+# Markers a real run produces. The other six in _LEAK_MARKERS never occur in a run: they are
+# guarded by their per-marker removal cases, not by the positive control.
+_NATURAL_MARKERS = ("chunk_id", "doc_id", "dossier_hash", "evidence", "REASONING", "[e1]", "llm_model")
 _TURN_REPLY = (
     "REASONING: the memo's pricing section decides it, privately.\n"
     "ANSWER: POSITIVE. The pilot rollout timing decides it."
@@ -1923,5 +1924,6 @@ async def test_positive_control_every_marker_and_sentence_is_in_the_unprojected_
     )
     canaried = "".join(_as_text(_canaried_inputs(run, marker)) for marker in _LEAK_MARKERS)
 
+    assert [marker for marker in _NATURAL_MARKERS if marker not in raw] == []
     assert [marker for marker in _LEAK_MARKERS if marker not in raw + canaried] == []
     assert [sentence for sentence in _EVIDENCE_SENTENCES if sentence not in _as_text(raw_records)] == []
