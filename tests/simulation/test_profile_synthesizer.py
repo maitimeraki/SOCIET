@@ -6,6 +6,7 @@ prompt it is given. The graph is a fake that answers the tenant-scoped reads.
 
 import asyncio
 import json
+import math
 import random
 import re
 from contextlib import contextmanager
@@ -13,13 +14,19 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from src.api.debate_api import debate_call_units, debate_reserve_units
+from src.api.debate_api import (
+    debate_reserve_units,
+    debate_worst_call_units,
+    debate_worst_case_units,
+)
 from src.billing import metering
+from src.billing import units as billing_units
 from src.billing.metering import MeteringError
 from src.llm.config_llm import get_llm_config
 from src.persona.agent import Stance
 from src.persona.graph_context import ChunkHit, ChunkSearch, EntityNode, RelationHit
 from src.simulation.evidence import MAX_RELATIONS
+from src.simulation.profile_generator import typical_prompt_chars
 from src.simulation.profile_synthesizer import (
     DRAW_SLACK,
     NEIGHBOUR_CAP,
@@ -765,20 +772,41 @@ async def test_draws_stop_at_the_seat_count_plus_the_slack_when_most_are_rejecte
 
 
 @pytest.mark.asyncio
-async def test_a_run_where_most_candidates_are_rejected_settles_within_the_reserve(monkeypatch):
+async def test_a_typical_run_with_rejections_settles_within_the_reserve(monkeypatch):
+    """Two rejected draws (within the draw slack) and two joiners: calls at the typical per-call units stay under the hold."""
     entities = [_entity(f"e{i}", f"Firm{i}", score=0.9 - i * 0.01) for i in range(8)]
-    llm = FakeLLM(fail={e.name for e in entities[1:]})
+    llm = FakeLLM(fail={"Firm1", "Firm2"})
     synth = _synth(entities)
     _record_queues(monkeypatch)
 
     roster = await _run(synth, llm, max_agents=2, llm_concurrency=2)
-    await synth.synthesize_from_names(
+    joiners = await synth.synthesize_from_names(
         ["Firm6", "Firm7"], QUESTION, "ds-A", roster=roster, llm_client=llm
     )
 
-    settled_units = llm.calls * debate_call_units()
-    reserve = debate_reserve_units(agents=2, rounds=1, max_new_per_round=2, max_pairs_per_round=1)
-    assert (len(roster), settled_units <= reserve) == (1, True)
+    typical_units = billing_units.units_for_tokens(
+        math.ceil(typical_prompt_chars() / 4), get_llm_config().profile_max_tokens
+    )
+    settled_units = llm.calls * typical_units
+    reserve = debate_reserve_units(agents=2, rounds=1, max_new_per_round=2, max_pairs_per_round=2)
+    assert (len(roster), len(joiners), settled_units <= reserve) == (2, 2, True)
+
+
+@pytest.mark.asyncio
+async def test_the_documented_worst_case_is_pinned():
+    """Pins the absolute ceiling so a change to a cap or a constant is noticed.
+
+    Worst case, 8 seats and 3 rounds: 234 calls x 36 units = 8424. Per call: prompt_char_bound() 32,947
+    characters + 3,000 completion = 35,947 tokens -> 36 units.
+    """
+    assert debate_worst_call_units() == 36
+    assert debate_worst_case_units(agents=8, rounds=3, max_new_per_round=2, max_pairs_per_round=8) == 8424
+
+
+@pytest.mark.asyncio
+async def test_the_hold_admits_a_two_seat_run_on_the_free_plan():
+    """The free plan has 1,000 units per period (settings.plan_free_units)."""
+    assert debate_reserve_units(agents=2, rounds=1, max_new_per_round=2, max_pairs_per_round=2) <= 1_000
 
 
 def _embedder_down_for_kestra(text: str) -> list[float]:

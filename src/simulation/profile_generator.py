@@ -44,6 +44,10 @@ JUDGE_ATTEMPTS = 2
 CALLS_PER_GENERATION = MAX_ATTEMPTS + JUDGE_ATTEMPTS
 #: Model calls one draw can make at most: its generation and one uniqueness regeneration.
 CALLS_PER_DRAW = 2 * CALLS_PER_GENERATION
+#: Expected model calls for a seated profile in a typical run: one profile call and one judge call.
+EXPECTED_CALLS_PER_SEAT = 2
+#: Expected model calls for a rejected draw: its profile attempts (no judge runs on a rejected draw).
+REJECTED_DRAW_CALLS = MAX_ATTEMPTS
 #: Characters of any one attribute value (names, aliases, titles, types, ids) in a prompt.
 ATTR_MAX_CHARS = 120
 #: Aliases a node contributes to its prompt; the rest are dropped.
@@ -125,6 +129,21 @@ def prompt_char_bound() -> int:
         + 12 * (attr + 60) + DETAILS_MAX + DETAILS_MAX // 5 + 20 + shared
     )
     judge = len(JUDGE_SYSTEM_PROMPT) + DETAILS_MAX + (DETAILS_MAX // 5) * 40 + 200 + shared
+    return max(profile, judge)
+
+
+def typical_prompt_chars() -> int:
+    """Characters of a typical profile or judge prompt, from the caps: six evidence items at the
+    item cap with 40-character attributes, four relations, and the system prompt. The judge's
+    typical prompt carries the details text at its cap instead of the header, and is the larger of
+    the two. This is a size the caps make ordinary, not the largest possible prompt (see prompt_char_bound).
+    """
+    from src.simulation.evidence import MAX_ITEM_CHARS
+
+    item = 3 * 40 + MAX_ITEM_CHARS + 120
+    relation = 2 * 40 + 120
+    profile = len(SYSTEM_PROMPT) + 600 + 6 * item + 4 * relation
+    judge = len(JUDGE_SYSTEM_PROMPT) + DETAILS_MAX + 6 * item + 4 * relation + 200
     return max(profile, judge)
 
 

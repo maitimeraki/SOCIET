@@ -160,13 +160,13 @@ async def test_omitted_config_uses_the_eight_seat_default_and_reserves_the_plan(
     assert doc["config"]["max_pairs_per_round"] == 8
 
     job = await _job_row(job_id)
-    # 8 seats (under the free cap of 10), 3 rounds (clamped from 5), 2 turns per pair
-    # at 8 pairs per round: calls = 7 base + (8+2)*8 roster + 3*(1 + (2+2)*8) activation
-    # + 3*2*8 turns = 234 calls; 234 * 36 units per call = 8424.
-    assert job.reserved_units == 8424
+    # 8 seats (under the free cap of 10), 3 rounds (clamped from 5), 8 pairs per round.
+    # Expected calls: 3 base + (8*2 + 2*2) roster + 3*(1 + 2*2 + 2*2) activation + 3*2*8 turns
+    #   = 3 + 20 + 27 + 48 = 98 calls; 98 * UNITS_PER_CALL_TYPICAL (4) = 392.
+    assert job.reserved_units == 392
     expected_start, _ = _calendar_month_bounds(datetime.datetime.now(datetime.UTC))
     assert job.reserved_period_start == expected_start
-    assert await _balance(account.id) == (0, 8424)
+    assert await _balance(account.id) == (0, 392)
 
 
 async def test_default_seats_are_clamped_to_the_plan_cap_and_reserved(
@@ -187,9 +187,10 @@ async def test_default_seats_are_clamped_to_the_plan_cap_and_reserved(
     assert doc["config"]["max_pairs_per_round"] == 6
 
     job = await _job_row(job_id)
-    # 6 seats, 3 rounds, 6 pairs: 7 + (6+2)*8 + 3*(1 + (2+2)*8) + 3*2*6 = 206 calls; 206 * 36 = 7416.
-    assert job.reserved_units == 7416
-    assert await _balance(account.id) == (0, 7416)
+    # 6 seats, 3 rounds, 6 pairs: 3 + (6*2 + 2*2) + 3*(1 + 2*2 + 2*2) + 3*2*6
+    #   = 3 + 16 + 27 + 36 = 82 calls; 82 * 4 = 328.
+    assert job.reserved_units == 328
+    assert await _balance(account.id) == (0, 328)
 
     clamps = await _plan_clamp_audits(account.id)
     assert len(clamps) == 1

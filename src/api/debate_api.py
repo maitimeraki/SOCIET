@@ -54,8 +54,11 @@ from src.simulation.actor_filter import ACTOR_BATCH, TOKENS_PER_LABEL
 from src.simulation.debate_config import DebateConfig
 from src.simulation.profile_generator import (
     CALLS_PER_DRAW,
+    EXPECTED_CALLS_PER_SEAT,
     JUDGE_MAX_TOKENS,
+    REJECTED_DRAW_CALLS,
     prompt_char_bound,
+    typical_prompt_chars,
 )
 from src.simulation.profile_synthesizer import DRAW_SLACK, POOL_CAP
 from src.simulation.verdict import VERDICT_MAX_ATTEMPTS
@@ -189,8 +192,17 @@ async def _ensure_live_job(job_id: str) -> dict:
     }
 
 
-def debate_call_units() -> int:
-    """Units one debate model call settles at most: its prompt-character bound and the largest completion cap."""
+#: Units one typical debate call settles: the typical prompt at four characters per token, plus the
+#: profile completion cap, rounded up per call as units.py settles it. Typical prompt = the larger of
+#: the profile and judge prompts at the caps (typical_prompt_chars). This sizes the hold.
+UNITS_PER_CALL_TYPICAL = billing_units.units_for_tokens(
+    math.ceil(typical_prompt_chars() / 4), get_llm_config().profile_max_tokens
+)
+
+
+def debate_worst_call_units() -> int:
+    """Units one debate call settles at most: prompt_char_bound() characters (one token each) plus the
+    largest completion cap. Used only for the documented absolute worst case, never for the hold."""
     cfg = get_llm_config()
     max_completion = max(
         cfg.profile_max_tokens,
@@ -202,19 +214,15 @@ def debate_call_units() -> int:
     return billing_units.units_for_tokens(prompt_char_bound(), max_completion)
 
 
-def debate_reserve_units(*, agents: int, rounds: int, max_new_per_round: int, max_pairs_per_round: int) -> int:
-    """Worst-case units a debate run can settle, reserved before it starts.
+def debate_worst_case_units(*, agents: int, rounds: int, max_new_per_round: int, max_pairs_per_round: int) -> int:
+    """The absolute worst case a debate run can settle, documented and pinned by a test.
 
-    Calls, counted at their caps: the intent call; the pool's actor classification (one call
-    per ACTOR_BATCH labels, the pool holds at most POOL_CAP candidates); the verdict attempts;
-    the roster's draws, each at most CALLS_PER_DRAW calls (generation, judge, repairs, one
-    uniqueness regeneration), with at most agents + DRAW_SLACK draws; per round, activation's
-    classification and its joiner draws; and per round two turns for each pair, pairs capped by
-    the request and by agents choose 2.
-
-    Units: each call settles ceil(tokens / unit_tokens). A call's tokens are bounded by its prompt
-    characters (prompt_char_bound, one token per character as the assumption) plus the largest
-    completion cap, so every call is charged that same bound.
+    Worst-case calls, counted at their caps: intent (1); the pool's actor classification (one call per
+    ACTOR_BATCH labels, the pool keeps at most POOL_CAP candidates); verdict attempts (VERDICT_MAX_ATTEMPTS);
+    the roster's draws, at most (agents + DRAW_SLACK) x CALLS_PER_DRAW; per round, activation's
+    classification and its joiner draws; and per round two turns per pair, pairs capped by the request
+    and by agents choose 2. Each call charged debate_worst_call_units(). Overruns of the hold are
+    charged by settlement, so this is a ceiling for the record, not the admission reserve.
     """
     per_round_activation = (
         math.ceil(max_new_per_round / ACTOR_BATCH) + (max_new_per_round + DRAW_SLACK) * CALLS_PER_DRAW
@@ -229,7 +237,30 @@ def debate_reserve_units(*, agents: int, rounds: int, max_new_per_round: int, ma
         + (agents + DRAW_SLACK) * CALLS_PER_DRAW
         + rounds * (per_round_activation + turns_per_round)
     )
-    return calls * debate_call_units()
+    return calls * debate_worst_call_units()
+
+
+def debate_reserve_units(*, agents: int, rounds: int, max_new_per_round: int, max_pairs_per_round: int) -> int:
+    """The hold a debate reserves at admission: the expected call count times UNITS_PER_CALL_TYPICAL.
+
+    Expected calls: intent, actor classification and the verdict (one each); per seat its profile and
+    judge calls (EXPECTED_CALLS_PER_SEAT); the draw slack's rejections (DRAW_SLACK draws at
+    REJECTED_DRAW_CALLS); per round, activation's classification and its joiners (max_new at
+    EXPECTED_CALLS_PER_SEAT, plus the same rejection allowance); and rounds x 2 turns per pair. An
+    overrun is settled and charged to the period as usual (units.py); the run stops at plan exhaustion.
+    """
+    rejections = DRAW_SLACK * REJECTED_DRAW_CALLS
+    per_round_activation = (
+        1 + max_new_per_round * EXPECTED_CALLS_PER_SEAT + rejections if max_new_per_round > 0 else 0
+    )
+    calls = (
+        3
+        + agents * EXPECTED_CALLS_PER_SEAT
+        + rejections
+        + rounds * per_round_activation
+        + rounds * 2 * max_pairs_per_round
+    )
+    return calls * UNITS_PER_CALL_TYPICAL
 
 
 async def _run_debate_async(
