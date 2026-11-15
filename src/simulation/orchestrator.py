@@ -163,6 +163,7 @@ class DebateOrchestrator:
         context: Optional[dict] = None,
         cancel_check: Optional[Callable[[], bool]] = None,
         decisions: Optional[list[SeatDecision]] = None,
+        records: Optional[list[AgentRecord]] = None,
     ) -> OrchestratedDebateResult:
         """
         Run the full debate pipeline with WebSocket streaming.
@@ -193,12 +194,16 @@ class DebateOrchestrator:
         (best first). The caller reads it after the run. No `selection` event is
         streamed: the roster UI's table still reads score fields that no longer
         exist (Task 3.2 removes it).
+
+        `records` is the caller-owned sink for the backend-only AgentRecord of each
+        candidate that reached generation. It is filled during synthesis, so it holds
+        the records even when the debate fails afterwards. Never sent to a client.
         """
         warnings: list[str] = []
         all_turns: list = []
         profiles: List[Agent] = []
         seat_sink: list[SeatDecision] = decisions if decisions is not None else []
-        profile_records: list[AgentRecord] = []
+        profile_records: list[AgentRecord] = records if records is not None else []
         stage_index = await self._emit_stage(on_stage, 0, "intake", query=query)
 
         async def _emit_profile(profile: Agent, index: int, total: int) -> None:

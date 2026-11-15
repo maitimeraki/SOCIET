@@ -998,8 +998,11 @@ app.include_router(jobs_router, prefix="/simulate")
 
 # Account lifecycle (delete/export) — new surface, v1-only (R15).
 from src.api.account_api import router as account_router
+from src.api.operator_api import router as operator_router
 
 app.include_router(account_router)
+# Operator reads of agent records: role-guarded (support, admin), no legacy alias.
+app.include_router(operator_router)
 
 
 if __name__ == "__main__":

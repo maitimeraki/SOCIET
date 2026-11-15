@@ -55,6 +55,12 @@ PUBLIC_PATHS = {
 # A WebSocket route may be public only if named here (none are today).
 PUBLIC_WS_PATHS: set[str] = set()
 
+# Operator routes are cross-tenant by design: they are guarded by the router-level
+# role check, not by require_owner. Every one must carry that guard.
+OPERATOR_PREFIX = "/operator/"
+# The inner dependency that require_role() returns (src/auth/deps.py).
+ROLE_GUARD = "_dep"
+
 
 def _dependency_names(route) -> set[str]:
     """Callable names in the route's dependency closure, recursively."""
@@ -104,13 +110,24 @@ def _unguarded_websockets(routes) -> list[str]:
 
 
 def _unguarded_resources(routes) -> list[str]:
-    """Non-public resource routes whose handler never calls ``require_owner``."""
+    """Non-public owner-scoped resource routes whose handler never calls ``require_owner``."""
     return [
         route.path
         for route in _http_routes(routes)
         if "{" in route.path
         and route.path not in PUBLIC_PATHS
+        and not route.path.startswith(OPERATOR_PREFIX)
         and "require_owner" not in inspect.getsource(route.endpoint)
+    ]
+
+
+def _unguarded_operator(routes) -> list[str]:
+    """Operator routes that never pass the role guard."""
+    return [
+        route.path
+        for route in _http_routes(routes)
+        if route.path.startswith(OPERATOR_PREFIX)
+        and ROLE_GUARD not in _dependency_names(route)
     ]
 
 
@@ -132,10 +149,27 @@ def test_every_resource_route_enforces_ownership():
     resource_paths = [
         route.path
         for route in _http_routes(app.routes)
-        if "{" in route.path and route.path not in PUBLIC_PATHS
+        if "{" in route.path
+        and route.path not in PUBLIC_PATHS
+        and not route.path.startswith(OPERATOR_PREFIX)
     ]
     assert resource_paths  # the check is not vacuous
     assert _unguarded_resources(app.routes) == []
+
+
+def test_the_roster_route_is_owner_scoped():
+    roster = [route for route in _http_routes(app.routes) if route.path.endswith("/roster")]
+    assert [route.path for route in roster] == [
+        "/simulate/debates/{run_id}/roster",
+        "/api/v1/simulate/debates/{run_id}/roster",
+    ]
+    assert all("require_owner" in inspect.getsource(route.endpoint) for route in roster)
+
+
+def test_every_operator_route_passes_the_role_guard():
+    operator = [route for route in _http_routes(app.routes) if route.path.startswith(OPERATOR_PREFIX)]
+    assert operator  # the check is not vacuous
+    assert _unguarded_operator(app.routes) == []
 
 
 def test_the_allowlist_is_not_accidentally_stale():
@@ -176,6 +210,16 @@ def test_the_helper_flags_a_missing_owner_guard():
         return {"id": thing_id}
 
     assert _unguarded_resources(probe.routes) == ["/things/{thing_id}"]
+
+
+def test_the_helper_flags_an_operator_route_without_a_role_guard():
+    probe = FastAPI()
+
+    @probe.get("/operator/things/{thing_id}")
+    async def unguarded(thing_id: str, user=Depends(current_user)) -> dict:
+        return {"id": thing_id}
+
+    assert _unguarded_operator(probe.routes) == ["/operator/things/{thing_id}"]
 
 
 def test_the_helper_flags_an_unauthenticated_websocket():

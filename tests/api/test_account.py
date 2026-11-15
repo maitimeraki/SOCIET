@@ -23,9 +23,10 @@ from src.api.jobs_api import router as jobs_router
 from src.auth.deps import current_user
 from src.db.engine import get_db, get_session_factory
 from src.billing import stripe_client
-from src.db.models import Job, Run, Subscription, Upload, User, UserSession
+from src.db.models import AgentRecordRow, Job, Run, Subscription, Upload, User, UserSession
 from src.ingest import repository, storage
 from src.jobs import queue as jobs_queue
+from tests.agent_factory import agent_record
 
 if sys.platform == "win32":
     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
@@ -143,6 +144,9 @@ async def _seed(
         )
         await session.commit()
     storage.put_upload(owner, upload_id, b"data")
+    await run_doc.write_agent_records(
+        run_id, [agent_record(f"{run_id}-n1", run_id=run_id), agent_record(f"{run_id}-n2", run_id=run_id, status="rejected")]
+    )
     return {"run_id": run_id, "upload_id": upload_id}
 
 
@@ -158,8 +162,22 @@ async def _count(model, owner_id: str) -> int:
         ).scalar_one()
 
 
+async def _count_agent_records(owner_id: str) -> int:
+    factory = get_session_factory()
+    async with factory() as session:
+        return (
+            await session.execute(
+                select(func.count())
+                .select_from(AgentRecordRow)
+                .join(Run, Run.id == AgentRecordRow.run_id)
+                .where(Run.user_id == uuid.UUID(owner_id))
+            )
+        ).scalar_one()
+
+
 async def test_delete_soft_disables_then_purges(owner, s3, inline_queue):
     seeded = await _seed(owner)
+    assert await _count_agent_records(owner) == 2  # the seeded records exist
     client, session, user = await _authed_client(owner)
     try:
         response = await client.request(
@@ -186,6 +204,7 @@ async def test_delete_soft_disables_then_purges(owner, s3, inline_queue):
     assert await _count(Run, owner) == 0
     assert await _count(Job, owner) == 0
     assert await _count(Upload, owner) == 0
+    assert await _count_agent_records(owner) == 0
     with pytest.raises(Exception):
         storage.get_upload(f"{owner}/{seeded['upload_id']}")
     assert job_id  # the purge job ran under the id we were handed

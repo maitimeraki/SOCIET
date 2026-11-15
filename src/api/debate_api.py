@@ -51,6 +51,7 @@ from src.db.engine import get_db
 from src.db.models import User
 from src.llm.config_llm import get_llm_config
 from src.simulation.actor_filter import ACTOR_BATCH, TOKENS_PER_LABEL
+from src.simulation.agent_record import AgentView
 from src.simulation.debate_config import DebateConfig
 from src.simulation.profile_generator import (
     CALLS_PER_DRAW,
@@ -345,23 +346,31 @@ async def _run_debate_async(
                 society_memory=SocietyMemory(ctx._driver, ctx._db),
             )
 
-            # Seat decisions: the caller-owned sink the seated set is read from.
+            # Seat decisions and agent records: the caller-owned sinks the seated set
+            # and the backend-only records are read from.
             seat_decisions: list = []
+            agent_records: list = []
 
             # Run debate with orchestrator. The S9 stage emitter is the job's
             # own WS manager: real transitions, pushed alongside round events.
-            result = await orchestrator.run(
-                query=query,
-                dataset_id=graph_id,
-                config=config,
-                ws_broadcast=ws_manager.broadcast,
-                llm_client=llm,
-                on_stage=ws_manager.broadcast,
-                intent=intent,
-                context=context,
-                cancel_check=cancel_check,
-                decisions=seat_decisions,
-            )
+            try:
+                result = await orchestrator.run(
+                    query=query,
+                    dataset_id=graph_id,
+                    config=config,
+                    ws_broadcast=ws_manager.broadcast,
+                    llm_client=llm,
+                    on_stage=ws_manager.broadcast,
+                    intent=intent,
+                    context=context,
+                    cancel_check=cancel_check,
+                    decisions=seat_decisions,
+                    records=agent_records,
+                )
+            finally:
+                # Written once, after synthesis, even when the debate then fails.
+                if agent_records:
+                    await _persist_agent_records(job_id, agent_records)
 
         # S9: this layer owns the intent extraction, so it reports the
         # degradation the run cannot see (the fallback intent is a valid
@@ -528,6 +537,16 @@ class _DebateWSManager:
 _PERSIST_MIN_INTERVAL_S = 0.5
 _TERMINAL_STATUSES = {"complete", "failed", "cancelled"}
 _LAST_PERSIST_AT: Dict[str, float] = {}
+
+
+async def _persist_agent_records(job_id: str, records: list) -> None:
+    """Write a run's backend-only agent records once. Best-effort, as `_persist_debate_run`:
+    a failed write is logged, never raised, so persistence cannot break a finished debate.
+    """
+    try:
+        await run_doc.write_agent_records(job_id, records)
+    except Exception:
+        logger.exception("agent records write failed for run %s", job_id)
 
 
 async def _persist_debate_run(job_id: str) -> None:
@@ -789,6 +808,19 @@ async def get_debate_doc(run_id: str, user: User = Depends(current_user)):
     doc["events"] = [e for e in map(project_event, doc["events"]) if e]
     doc["result"] = project_result(doc["result"])
     return doc
+
+
+@router.get("/debates/{run_id}/roster", response_model=list[AgentView])
+async def get_debate_roster(run_id: str, user: User = Depends(current_user)):
+    """The run's published agents, as the client may see them: AgentView only, in seat order.
+
+    Unknown and foreign runs are the same 404, so existence is not leaked.
+    """
+    head = await run_doc.read_run_head(run_id)
+    if head is None:
+        raise HTTPException(status_code=404, detail=_FLAT_NOT_FOUND)
+    await require_owner(head.get("user_id"), user)
+    return await run_doc.read_roster(run_id, user.id)
 
 
 # --- a run's corpus (the replay path's seed) ---------------------------------

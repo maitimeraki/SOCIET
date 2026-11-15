@@ -226,6 +226,30 @@ class RunEvent(Base):
     )
 
 
+class AgentRecordRow(Base):
+    """One backend-only record per candidate of a run. Operator-readable only."""
+
+    __tablename__ = "agent_records"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
+    run_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("runs.id", ondelete="CASCADE"), nullable=False
+    )
+    node_id: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[str] = mapped_column(Text, nullable=False)
+    # Final seat index of a seated candidate (rank.order); null when not seated.
+    seat: Mapped[int | None] = mapped_column(Integer)
+    record: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    created_at: Mapped[datetime.datetime] = _timestamptz_default()
+
+    __table_args__ = (
+        UniqueConstraint("run_id", "node_id", name="uq_agent_records_run_id_node_id"),
+        CheckConstraint(
+            "status IN ('published','rejected','stale')", name="ck_agent_records_status"
+        ),
+    )
+
+
 class Subscription(Base):
     __tablename__ = "subscriptions"
 

@@ -30,13 +30,16 @@ import base64
 import datetime
 import logging
 import uuid
+from collections.abc import Sequence
 from typing import Any, Optional
 
+from pydantic import BaseModel
 from sqlalchemy import func, select, tuple_, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from src.db.engine import get_session_factory
-from src.db.models import Job, Run, RunEvent
+from src.db.models import AgentRecordRow, Job, Run, RunEvent
+from src.simulation.agent_record import AgentView
 
 logger = logging.getLogger(__name__)
 
@@ -442,6 +445,93 @@ async def list_run_summaries(
         _encode_cursor(page[-1][0].created_at, page[-1][0].id) if has_more else None
     )
     return {"items": items, "next_cursor": next_cursor}
+
+
+# --- agent records (backend-only, spec §5) -----------------------------------
+# AgentRecord is never imported here: the store keeps each record's JSON, the
+# roster projects only the AgentView, and the operator route returns the stored
+# JSON as written. The writer duck-types on model_dump().
+
+
+async def write_agent_records(run_id: str, records: Sequence[BaseModel]) -> None:
+    """Persist a run's agent records. A repeated write inserts nothing new.
+
+    Keyed by (run_id, node_id) and inserted ON CONFLICT DO NOTHING, the same
+    idempotency `run_events` uses, so a second write neither duplicates nor fails.
+    The stored record's run_id is the owning run, whatever the synthesizer minted.
+    """
+    key = _as_uuid(run_id)
+    if key is None:
+        raise ValueError(f"agent records for non-uuid run id {run_id!r}")
+    rows = []
+    for record in records:
+        body = record.model_dump(mode="json")
+        body["run_id"] = str(key)
+        rows.append(
+            {
+                "id": uuid.uuid4(),
+                "run_id": key,
+                "node_id": str(body["node_id"]),
+                "status": body["status"],
+                "seat": (body.get("rank") or {}).get("order"),
+                "record": body,
+            }
+        )
+    if not rows:
+        return
+    async with get_session_factory()() as session:
+        await session.execute(
+            pg_insert(AgentRecordRow)
+            .values(rows)
+            .on_conflict_do_nothing(index_elements=["run_id", "node_id"])
+        )
+        await session.commit()
+
+
+async def read_roster(run_id: str, owner_id: uuid.UUID | str) -> list[AgentView]:
+    """The published agents of a run the owner holds, in seat order.
+
+    Seat order is the persisted `seat`, with node_id as the stable tiebreak. The
+    join on runs.user_id keeps a foreign run empty even if a caller skips its own
+    ownership check. Callers that need to tell "not found" from "empty" check the run first.
+    """
+    key = _as_uuid(run_id)
+    owner = _as_uuid(owner_id)
+    if key is None or owner is None:
+        return []
+    async with get_session_factory()() as session:
+        records = (
+            (
+                await session.execute(
+                    select(AgentRecordRow.record)
+                    .join(Run, Run.id == AgentRecordRow.run_id)
+                    .where(
+                        AgentRecordRow.run_id == key,
+                        Run.user_id == owner,
+                        AgentRecordRow.status == "published",
+                    )
+                    .order_by(AgentRecordRow.seat, AgentRecordRow.node_id)
+                )
+            )
+            .scalars()
+            .all()
+        )
+    return [AgentView.model_validate(record["view"]) for record in records]
+
+
+async def read_agent_record(run_id: str, node_id: str) -> Optional[dict[str, Any]]:
+    """One stored agent record as written (operator read) — None when unknown."""
+    key = _as_uuid(run_id)
+    if key is None:
+        return None
+    async with get_session_factory()() as session:
+        return (
+            await session.execute(
+                select(AgentRecordRow.record).where(
+                    AgentRecordRow.run_id == key, AgentRecordRow.node_id == node_id
+                )
+            )
+        ).scalar_one_or_none()
 
 
 # --- job lifecycle (the queue's running/terminal transitions) ----------------

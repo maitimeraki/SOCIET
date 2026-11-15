@@ -37,6 +37,7 @@ ACTIONS = frozenset(
         "account_delete",
         "account_export",
         "ws_ticket_issue",
+        "agent_record_read",
     }
 )
 
@@ -65,12 +66,15 @@ async def record(
     target: str | None = None,
     ip: str | None = None,
     meta: dict | None = None,
+    *,
+    required: bool = False,
 ) -> None:
-    """Append one audit row; never raise.
+    """Append one audit row; never raise unless ``required``.
 
     A failure is logged and rolled back so the caller's session is usable for
     whatever it does next. Callers commit their business work first, so the
-    rollback can only ever discard the audit insert itself.
+    rollback can only ever discard the audit insert itself. ``required=True``
+    re-raises after the rollback, for a read that must not proceed unaudited.
     """
     try:
         db.add(
@@ -94,3 +98,5 @@ async def record(
             # A session too broken to roll back is exactly the case this guard
             # exists for; the request must still proceed.
             pass
+        if required:
+            raise
