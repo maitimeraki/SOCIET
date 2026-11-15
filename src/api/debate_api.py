@@ -254,7 +254,7 @@ def debate_reserve_units(*, agents: int, rounds: int, max_new_per_round: int, ma
     judge calls (EXPECTED_CALLS_PER_SEAT); the draw slack's rejections (DRAW_SLACK draws at
     REJECTED_DRAW_CALLS); per round, activation's classification and its joiners (max_new at
     EXPECTED_CALLS_PER_SEAT, plus the same rejection allowance); and rounds x 2 turns per pair. An
-    overrun is settled and charged to the period as usual (units.py); the run stops at plan exhaustion. Turn retries are not in the expected count: a malformed turn is re-asked once, so a run that retries settles above this hold, and that overrun is charged to units_used as settled.
+    overrun is settled and charged to the period as usual (units.py); the run stops at plan exhaustion. Turn retries are not in the expected count: a malformed turn is re-asked once, so a run that retries can settle above this hold, and that overrun is charged to units_used as settled.
     """
     rejections = DRAW_SLACK * REJECTED_DRAW_CALLS
     per_round_activation = (

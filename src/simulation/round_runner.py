@@ -30,6 +30,8 @@ ROUND_TEMPERATURE = 0.7
 LLM_FAILED = "the LLM call failed"
 #: The reason a turn carries when its batch returned no result for it.
 NO_REPLY = "no reply came back"
+#: Reasons that are not a parse failure, so they are never retried: "" is a valid turn.
+NOT_RETRIED = ("", LLM_FAILED, NO_REPLY)
 
 RETRY_NOTE = (
     "Your previous reply did not follow the required form and was discarded. "
@@ -275,7 +277,7 @@ class RoundRunner:
             retries = [
                 _with_retry_note(prompt, prompt_meta[prompt.pair_id]["opponent"])
                 for prompt in prompts
-                if replies[prompt.pair_id][1] not in ("", LLM_FAILED)
+                if replies[prompt.pair_id][1] not in NOT_RETRIED
             ]
             if retries:
                 replies.update(await self._replies(retries, prompt_meta))

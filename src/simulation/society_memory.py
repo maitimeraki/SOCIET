@@ -12,28 +12,16 @@ from __future__ import annotations
 import logging
 from collections import Counter
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Dict, List, Optional
+from typing import Dict, List, Optional
 
 from src.graph.scope import entity_in_dataset
+from src.persona.agent import Stance
 from src.simulation.pair_turn import RoundResult
-
-if TYPE_CHECKING:
-    from src.persona.agent import Agent
 
 logger = logging.getLogger(__name__)
 
 #: Fixed budget for each self-history summary rendered into the prompt.
 SELF_HISTORY_SUMMARY_CHARS = 200
-
-
-def _profile_float(profile, attr: str, default: float) -> float:
-    """Read a float off a profile, falling back only when it is absent or None.
-
-    `Agent.strength` is `ge=0.0`, so 0.0 is a legitimate value: `value or default`
-    would silently rewrite it to the default and fabricate debate weight.
-    """
-    value = getattr(profile, attr, None) if profile is not None else None
-    return default if value is None else float(value)
 
 
 def _opinion_key(dataset_id: str, query_hash: str, opinion: dict) -> str:
@@ -116,7 +104,7 @@ def _opinion_entry(r: dict) -> dict:
     return {
         "agent": r["agent"],
         "round": r.get("round_no") or 0,
-        "stance": r.get("stance") or "NEUTRAL",
+        "stance": r.get("stance") or Stance.ABSTAIN.value,
         "confidence": float(r.get("confidence") or 0.0),
         "weight": float(r.get("weight") or 0.0),
         "summary": r.get("summary") or "",
@@ -150,7 +138,7 @@ class SocietySnapshot:
         lines = [f"SOCIETY STATE (through round {self.round}):"]
         if self.consensus:
             lines.append(
-                f"Consensus: {self.consensus['stance']} holds {self.consensus['weight_share']:.0%} of CIOR weight."
+                f"Consensus: {self.consensus['stance']} holds {self.consensus['weight_share']:.0%} of the weight in the last two rounds."
             )
         neighbors = set(self.neighbor_map.get(speaker, []))
         picked = 0
@@ -187,7 +175,7 @@ class SocietySnapshot:
         lines = [f"YOUR PRIOR POSITIONS (through round {self.round}):"]
         for e in sorted(mine, key=lambda x: x.get("round", 0)):
             lines.append(
-                f"- R{e.get('round', 0)} ({e.get('stance') or 'NEUTRAL'}): {e.get('summary') or ''}"
+                f"- R{e.get('round', 0)} ({e.get('stance') or Stance.ABSTAIN.value}): {e.get('summary') or ''}"
             )
         text = "\n".join(lines)
         if len(text) > max_chars:
@@ -207,7 +195,6 @@ class SocietyMemory:
         round_result: RoundResult,
         dataset_id: str,
         query_hash: str,
-        profile_map: Dict[str, "Agent"],
     ) -> dict:
         """Commit one round atomically. MERGE — idempotent. Returns receipt dict."""
         turns_by_agent: Dict[str, list] = {}
@@ -241,14 +228,6 @@ class SocietyMemory:
 
         opinions: List[dict] = []
         for agent_name, turns in turns_by_agent.items():
-            profile = profile_map.get(agent_name)
-            if profile is None:
-                logger.warning(
-                    "SocietyMemory: agent '%s' absent from profile_map; opinion weight "
-                    "falls back to strength=0.5 (reduced weight)",
-                    agent_name,
-                )
-            strength = _profile_float(profile, "strength", 0.5)
             last = turns[-1]  # final position in this round is the canonical stance
             entities: list[str] = []
             for t in turns:
@@ -263,8 +242,8 @@ class SocietyMemory:
                     "text": "\n\n".join(t.content for t in turns),
                     "stance": last.stance,
                     "confidence": last.confidence,
-                    "strength": strength,
-                    "weight": round(last.confidence * strength, 6),
+                    "strength": last.strength,
+                    "weight": round(last.confidence * last.strength, 6),
                     "entities": entities[:8],
                 }
             )
@@ -493,7 +472,7 @@ class SocietyMemory:
             (
                 {
                     "round": r.get("round_no") or 0,
-                    "stance": r.get("stance") or "NEUTRAL",
+                    "stance": r.get("stance") or Stance.ABSTAIN.value,
                     "summary": (r.get("summary") or "")[:SELF_HISTORY_SUMMARY_CHARS],
                 }
                 for r in rows

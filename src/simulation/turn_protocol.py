@@ -17,9 +17,11 @@ from __future__ import annotations
 
 import math
 import re
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 
-from src.persona.agent import Stance
+from src.persona.agent import WIRE_STANCES, Agent, Stance
+from src.simulation.pair_turn import AgentTurn, RoundResult
 
 #: Stated once; the retry prompt restates the same text through _format_instruction.
 KEPT_NO_NEW_CITE = "kept: no new cite"
@@ -131,3 +133,61 @@ def accept_position(
     if any(cite not in previous.cites_used for cite in parse.cites):
         return parse.position, ""
     return previous.stance, KEPT_NO_NEW_CITE
+
+
+#: The stances that can carry weight: a position a turn takes. ABSTAIN is not one.
+POSITION_STANCES: tuple[Stance, ...] = tuple(s for s in WIRE_STANCES if s is not Stance.ABSTAIN)
+
+
+def consensus_window(rounds: Sequence[RoundResult]) -> list[AgentTurn]:
+    """The turns the consensus reads: the last two rounds, the same window the stop test uses."""
+    return [turn for round_result in rounds[-2:] for turn in round_result.turns]
+
+
+def _unit(value: float, field_name: str, speaker: str) -> float:
+    """A strength or confidence as a float in [0, 1]; anything else is a ValueError, never clamped."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ValueError(f"{field_name} of {speaker!r} is not a number")
+    if not math.isfinite(value) or not 0.0 <= value <= 1.0:
+        raise ValueError(f"{field_name} of {speaker!r} is outside [0, 1]")
+    return float(value)
+
+
+def stance_weights(turns: Iterable[AgentTurn], profiles: Mapping[str, Agent]) -> dict[Stance, float]:
+    """Weight per wire stance: the sum over the turns taking it of strength x profile confidence.
+
+    Every turn's speaker must be in `profiles`, else ValueError: a missing profile is a
+    broken run, not a 0.5 default. ABSTAIN weighs 0. The sums are exact (math.fsum), so the
+    weights do not depend on the order of the turns.
+    """
+    parts: dict[Stance, list[float]] = {stance: [] for stance in WIRE_STANCES}
+    for turn in turns:
+        profile = profiles.get(turn.agent_name)
+        if profile is None:
+            raise ValueError(f"no profile for turn speaker {turn.agent_name!r}")
+        strength = _unit(turn.strength, "strength", turn.agent_name)
+        confidence = _unit(profile.confidence, "confidence", turn.agent_name)
+        try:
+            stance = Stance.parse(turn.stance)
+        except ValueError:
+            continue
+        if stance is not Stance.ABSTAIN:
+            parts[stance].append(strength * confidence)
+    return {stance: math.fsum(values) for stance, values in parts.items()}
+
+
+def weighted_share(
+    turns: Sequence[AgentTurn], profiles: Mapping[str, Agent]
+) -> tuple[Stance, float] | None:
+    """The one consensus number: the dominant position's share of the counted weight.
+
+    Weight is strength x profile confidence; ABSTAIN contributes nothing. Returns None when no
+    turn takes a position or the counted weight is zero: that is no verdict, never NEUTRAL.
+    A tie goes to the first stance in WIRE_STANCES order (POSITIVE, then NEGATIVE, then NEUTRAL).
+    """
+    weights = stance_weights(turns, profiles)
+    total = math.fsum(weights[stance] for stance in POSITION_STANCES)
+    if total <= 0.0:
+        return None
+    dominant = max(POSITION_STANCES, key=lambda stance: weights[stance])
+    return dominant, weights[dominant] / total

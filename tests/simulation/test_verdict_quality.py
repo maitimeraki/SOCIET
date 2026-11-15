@@ -2,7 +2,7 @@
 
 Pins four properties the final report must have:
   - the summary is grounded in the debate text (not a template count),
-  - the CIOR factor never zeroes a cluster (a hostile dissenter still counts),
+  - a declared strength of 0 carries no weight, and a strong minority can win,
   - a near-tie reads as a share, flagged contested,
   - `provenance_by_claim` is populated from reachable provenance, never faked.
 """
@@ -33,6 +33,7 @@ def make_turn(
     confidence: float,
     content: str | None = None,
     refs: list[str] | None = None,
+    strength: float = 1.0,
 ) -> AgentTurn:
     return AgentTurn(
         agent_id=f"id-{agent_name}",
@@ -41,7 +42,7 @@ def make_turn(
         stance=stance,
         confidence=confidence,
         references=refs or [],
-        strength=0.5,
+        strength=strength,
     )
 
 
@@ -51,10 +52,10 @@ def make_round(num: int, turns: list[AgentTurn]) -> RoundResult:
 
 def make_agent(
     name: str,
-    strength: float = 1.0,
+    confidence: float = 0.5,
     provenance: list[EvidenceItem] | None = None,
 ) -> Agent:
-    return slim_agent(name, strength=strength, evidence=provenance or [])
+    return slim_agent(name, confidence=confidence, evidence=provenance or [])
 
 
 def provenance_of(title: str) -> EvidenceItem:
@@ -278,7 +279,7 @@ class TestTranscriptBound:
         assert f"TURN-{len(turns) - 1}" in prompt
 
 
-# --- Step 4/5: the CIOR factor never erases a cluster -----------------------
+# --- Step 4/5: declared strength weights the consensus ----------------------
 
 
 class TestStrengthWeighting:
@@ -288,14 +289,14 @@ class TestStrengthWeighting:
             make_round(
                 1,
                 [
-                    make_turn("Milquetoast", "POSITIVE", 0.4),
-                    make_turn("Gut", "NEGATIVE", 1.0),
+                    make_turn("Milquetoast", "POSITIVE", 0.4, strength=0.2),
+                    make_turn("Gut", "NEGATIVE", 1.0, strength=1.0),
                 ],
             )
         ]
         profiles = [
-            make_agent("Milquetoast", strength=1.0),
-            make_agent("Gut", strength=1.0),
+            make_agent("Milquetoast", confidence=0.4),
+            make_agent("Gut", confidence=1.0),
         ]
         verdict = synthesizer.synthesize(rounds, profiles)
         assert verdict.overall_stance == Stance.NEGATIVE
@@ -315,7 +316,7 @@ class TestWeightShare:
                 ],
             )
         ]
-        profiles = [make_agent("Alice"), make_agent("Bob")]
+        profiles = [make_agent("Alice", confidence=0.51), make_agent("Bob", confidence=0.49)]
         return rounds, profiles
 
     def test_weight_share_exposes_the_dominant_share(self):
@@ -345,7 +346,7 @@ class TestWeightShare:
                 ],
             )
         ]
-        profiles = [make_agent("Alice"), make_agent("Bob")]
+        profiles = [make_agent("Alice", confidence=0.9), make_agent("Bob", confidence=0.1)]
         verdict = VerdictSynthesizer().synthesize(rounds, profiles)
         assert verdict.contested is False
         assert verdict.weight_share >= CONTESTED_THRESHOLD

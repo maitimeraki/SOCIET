@@ -81,7 +81,9 @@ def _make_verdict(summary: str = "Test verdict.") -> DebateVerdict:
     )
 
 
-def _make_turn(agent_id: str, agent_name: str, stance: str = "POSITIVE") -> AgentTurn:
+def _make_turn(
+    agent_id: str, agent_name: str, stance: str = "POSITIVE", strength: float = 0.5
+) -> AgentTurn:
     return AgentTurn(
         agent_id=agent_id,
         agent_name=agent_name,
@@ -89,7 +91,7 @@ def _make_turn(agent_id: str, agent_name: str, stance: str = "POSITIVE") -> Agen
         stance=stance,
         confidence=0.8,
         references=[],
-        strength=0.5,
+        strength=strength,
     )
 
 
@@ -454,7 +456,7 @@ async def test_check_convergence_domimant_stance_threshold():
 
     # Test _check_convergence directly
     assert orchestrator._check_convergence([r1]) is False  # < 2 rounds
-    assert orchestrator._check_convergence([r1, r2]) is True  # 100% dominant
+    assert orchestrator._check_convergence([r1, r2], profiles) is True  # 100% dominant
 
 
 @pytest.mark.asyncio
@@ -531,7 +533,8 @@ async def test_convergence_uses_config_threshold():
         MagicMock(spec=BatchedLLMRunner),
         MagicMock(spec=VerdictSynthesizer),
     )
-    synth.synthesize.return_value = [_make_profile(1, "Alice")]
+    profiles = [_make_profile(1, "Alice")]
+    synth.synthesize.return_value = profiles
     topo.compute_round_pairs.side_effect = lambda *a, **kw: [
         CommPair(agent_a="Alice", agent_b="Bob", shared_entities=[], score=0.5)
     ]
@@ -552,7 +555,7 @@ async def test_convergence_uses_config_threshold():
     r2 = RoundResult(round_num=2, turns=[t], pairs=[])
     assert (
         orchestrator._check_convergence(
-            [r1, r2], None, config=DebateConfig(convergence_threshold=0.8)
+            [r1, r2], profiles, config=DebateConfig(convergence_threshold=0.8)
         )
         is True
     )
@@ -561,13 +564,13 @@ async def test_convergence_uses_config_threshold():
     r2b = RoundResult(round_num=2, turns=[t, n], pairs=[])
     assert (
         orchestrator._check_convergence(
-            [r1, r2b], None, config=DebateConfig(convergence_threshold=0.8)
+            [r1, r2b], profiles, config=DebateConfig(convergence_threshold=0.8)
         )
         is False
     )
     assert (
         orchestrator._check_convergence(
-            [r1, r2b], None, config=DebateConfig(convergence_threshold=0.4)
+            [r1, r2b], profiles, config=DebateConfig(convergence_threshold=0.4)
         )
         is True
     )
@@ -1001,10 +1004,11 @@ async def test_stage_events_follow_the_documented_sequence():
     pair = CommPair(agent_a="Alice", agent_b="Bob", shared_entities=[], score=0.5)
     with patch("src.simulation.orchestrator.RoundRunner") as rr_cls:
         rr_instance = MagicMock()
+        # An even split every round keeps the window share at 0.5, so the loop runs all three rounds.
         rr_instance.execute_round = AsyncMock(
             side_effect=lambda **kw: RoundResult(
                 round_num=kw["round_num"],
-                turns=[_make_turn("1", "Alice")],
+                turns=[_make_turn("1", "Alice"), _make_turn("2", "Bob", "NEGATIVE")],
                 pairs=[pair],
             )
         )
@@ -1033,7 +1037,7 @@ async def test_stage_events_follow_the_documented_sequence():
     assert events[0]["query"] == "q"
     assert events[2]["agents"] == 2
     # the round event reports that round's own execution
-    assert (events[3]["round"], events[3]["pairs"], events[3]["turns"]) == (1, 1, 1)
+    assert (events[3]["round"], events[3]["pairs"], events[3]["turns"]) == (1, 1, 2)
     assert events[4]["round"] == 2 and events[5]["round"] == 3
     assert events[-2]["converged"] is result.converged
     assert events[-2]["rounds_executed"] == result.rounds_executed == 3
@@ -1143,12 +1147,6 @@ async def test_round_events_carry_consensus_weights():
         CommPair(agent_a="Alice", agent_b="Bob", shared_entities=[], score=0.5)
     ]
     verdict_synth.asynthesize.return_value = _make_verdict()
-    verdict_synth._calibrate_cior.return_value = {
-        Stance.POSITIVE: 60.0,
-        Stance.NEGATIVE: 40.0,
-        Stance.NEUTRAL: 0.0,
-        Stance.ABSTAIN: 0.0,
-    }
     society_memory.commit_round.return_value = _ok_receipt()
 
     rounds = [
@@ -1158,8 +1156,8 @@ async def test_round_events_carry_consensus_weights():
                 CommPair(agent_a="Alice", agent_b="Bob", shared_entities=[], score=0.5)
             ],
             turns=[
-                _make_turn("id-1", "Alice", "POSITIVE"),
-                _make_turn("id-2", "Bob", "NEGATIVE"),
+                _make_turn("id-1", "Alice", "POSITIVE", strength=0.6),
+                _make_turn("id-2", "Bob", "NEGATIVE", strength=0.4),
             ],
         )
     ]
@@ -1258,12 +1256,6 @@ async def test_convergence_stage_carries_share_and_threshold():
         CommPair(agent_a="Alice", agent_b="Bob", shared_entities=[], score=0.5)
     ]
     verdict_synth.asynthesize.return_value = _make_verdict()
-    verdict_synth._calibrate_cior.return_value = {
-        Stance.POSITIVE: 60.0,
-        Stance.NEGATIVE: 40.0,
-        Stance.NEUTRAL: 0.0,
-        Stance.ABSTAIN: 0.0,
-    }
     society_memory.commit_round.return_value = _ok_receipt()
 
     rounds = [

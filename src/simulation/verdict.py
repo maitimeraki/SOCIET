@@ -1,10 +1,10 @@
-"""VerdictSynthesizer: cluster-weighted CIOR synthesis for debate verdicts."""
+"""VerdictSynthesizer: consensus-weighted synthesis for debate verdicts."""
 
 from __future__ import annotations
 
 import logging
 from collections.abc import Iterable
-from typing import TYPE_CHECKING, List
+from typing import TYPE_CHECKING
 from uuid import UUID
 
 from pydantic import BaseModel
@@ -18,6 +18,11 @@ from src.simulation.pair_turn import (
     ClusterSummary,
     DebateVerdict,
     RoundResult,
+)
+from src.simulation.turn_protocol import (
+    consensus_window,
+    stance_weights,
+    weighted_share,
 )
 from src.utils.json_extract import extract_json_object
 
@@ -49,12 +54,8 @@ def cluster_by_stance(turns: Iterable[AgentTurn]) -> dict[Stance, list[AgentTurn
     return clusters
 
 
-def count_weights(clusters: dict[Stance, list[AgentTurn]]) -> dict[Stance, float]:
-    """Profile-free weights: one per turn. ABSTAIN carries no weight."""
-    return {
-        stance: 0.0 if stance is Stance.ABSTAIN else float(len(clusters.get(stance, [])))
-        for stance in WIRE_STANCES
-    }
+#: The summary of a debate with no consensus: no turn took a position (none spoke, or all abstained).
+NO_VERDICT_SUMMARY = "No verdict: no agent took a position."
 
 # Step 9: bound the transcript the answer-writer prompt may carry. Bound the
 # input, never the answer — there is no character cap on the narrative itself.
@@ -136,7 +137,7 @@ def _provenance_link(item: EvidenceItem) -> ProvenanceLink | None:
 
 
 class VerdictSynthesizer:
-    """Cluster-weighted CIOR synthesizer.
+    """Consensus-weighted synthesizer.
 
     Reads `strength` and `confidence` directly from the canonical `Agent`.
     """
@@ -275,62 +276,46 @@ class VerdictSynthesizer:
         profiles: list[Agent],
         llm_client: "LLMClient | None" = None,
     ) -> DebateVerdict:
-        all_turns: list[AgentTurn] = []
-        for round_result in rounds:
-            all_turns.extend(round_result.turns)
+        """The verdict over the consensus window (the last two rounds).
 
-        if not all_turns:
-            return DebateVerdict(
-                overall_stance=Stance.NEUTRAL,
-                confidence_score=0.0,
-                supporting_entities=[],
-                opposing_entities=[],
-                summary="No debate occurred.",
-                cluster_details={},
-                rounds_executed=len(rounds),
-                weight_share=0.0,
-                contested=False,
-            )
-
-        clusters = cluster_by_stance(all_turns)
+        Stance, weight share, clusters and the supporting or opposing references all read the
+        same window `weighted_share` reads, so the screen, the stop rule and the verdict show one
+        number. With no position in the window the verdict is explicitly "no verdict"
+        (overall ABSTAIN, zero share), never NEUTRAL.
+        """
+        window = consensus_window(rounds)
         profile_map = {p.identity.name: p for p in profiles}
-
-        warned_missing: set[str] = set()
-        weights = self._calibrate_cior(clusters, profile_map, warned=warned_missing)
+        weights = stance_weights(window, profile_map)
+        clusters = cluster_by_stance(window)
 
         cluster_details: dict[Stance, ClusterSummary] = {}
         for stance, turns in clusters.items():
             if not turns:
                 continue
-            avg_conf = sum(t.confidence for t in turns) / len(turns)
-            total_weight = weights.get(stance, 0.0)
-
-            strengths: List[float] = []
-            for turn in turns:
-                profile = profile_map.get(turn.agent_name)
-                if profile is None:
-                    self._warn_missing_profile(turn.agent_name, warned_missing)
-                strengths.append(profile.strength if profile else 0.5)
-            avg_strength = sum(strengths) / len(strengths) if strengths else 0.5
-
             cluster_details[stance] = ClusterSummary(
                 stance=stance,
                 count=len(turns),
-                total_weight=total_weight,
-                avg_confidence=avg_conf,
-                avg_conviction=avg_strength,
+                total_weight=weights[stance],
+                avg_confidence=sum(t.confidence for t in turns) / len(turns),
+                avg_conviction=sum(t.strength for t in turns) / len(turns),
                 agents=[t.agent_name for t in turns],
             )
 
-        overall_stance = Stance.NEUTRAL
-        max_weight = 0.0
-        for stance, weight in weights.items():
-            if weight > max_weight:
-                max_weight = weight
-                overall_stance = stance
+        consensus = weighted_share(window, profile_map)
+        if consensus is None:
+            return DebateVerdict(
+                overall_stance=Stance.ABSTAIN,
+                confidence_score=0.0,
+                supporting_entities=[],
+                opposing_entities=[],
+                summary=NO_VERDICT_SUMMARY,
+                cluster_details=cluster_details,
+                rounds_executed=len(rounds),
+                weight_share=0.0,
+                contested=False,
+            )
 
-        total_weight_sum = sum(weights.values())
-        weight_share = max_weight / total_weight_sum if total_weight_sum > 0 else 0.0
+        overall_stance, weight_share = consensus
         # `confidence_score` keeps its long-standing number; `weight_share` is
         # the same value under its honest name. `contested` stops a near-tie
         # from reading as a mandate.
@@ -340,7 +325,7 @@ class VerdictSynthesizer:
         supporting: list[str] = []
         opposing: list[str] = []
         provenance_by_claim: dict[str, list] = {}
-        for turn in all_turns:
+        for turn in window:
             turn_stance = wire_stance(turn.stance)
             # No stance this turn, or ABSTAIN: the turn takes no side in the race.
             if turn_stance is None or turn_stance is Stance.ABSTAIN:
@@ -362,18 +347,8 @@ class VerdictSynthesizer:
                         if link is not None and link not in links:
                             links.append(link)
 
-        dominant_count = cluster_details.get(
-            overall_stance,
-            ClusterSummary(
-                stance=overall_stance,
-                count=0,
-                total_weight=0.0,
-                avg_confidence=0.0,
-                avg_conviction=0.0,
-                agents=[],
-            ),
-        ).count
-        dominant_pct = (dominant_count / len(all_turns) * 100) if all_turns else 0
+        dominant_count = cluster_details[overall_stance].count
+        dominant_pct = dominant_count / len(window) * 100
 
         summary = (
             f"The debate concluded with {dominant_pct:.0f}% of turns expressing "
@@ -392,40 +367,3 @@ class VerdictSynthesizer:
             weight_share=weight_share,
             contested=contested,
         )
-
-    @staticmethod
-    def _warn_missing_profile(agent_name: str, warned: set[str]) -> None:
-        """One warning per agent per synthesis: the speaker is absent from profile_map."""
-        if agent_name in warned:
-            return
-        warned.add(agent_name)
-        logger.warning(
-            "VerdictSynthesizer: agent '%s' absent from profile_map; "
-            "falling back to strength=0.5 (reduced weight)",
-            agent_name,
-        )
-
-    def _calibrate_cior(
-        self,
-        clusters: dict[Stance, list[AgentTurn]],
-        profile_map: dict[str, Agent],
-        warned: set[str] | None = None,
-    ) -> dict[Stance, float]:
-        """weight = confidence * strength. A turn with no profile counts at 0.5 strength."""
-        warned = set() if warned is None else warned
-        weights: dict[Stance, float] = {s: 0.0 for s in WIRE_STANCES}
-        for stance, turns in clusters.items():
-            cluster_weight = 0.0
-            if stance is Stance.ABSTAIN:
-                # ABSTAIN never carries weight, so it can never win the race.
-                weights[stance] = cluster_weight
-                continue
-            for turn in turns:
-                profile = profile_map.get(turn.agent_name)
-                if profile is not None:
-                    cluster_weight += turn.confidence * profile.strength
-                else:
-                    self._warn_missing_profile(turn.agent_name, warned)
-                    cluster_weight += turn.confidence * 0.5
-            weights[stance] = cluster_weight
-        return weights

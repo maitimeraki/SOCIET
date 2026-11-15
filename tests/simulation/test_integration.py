@@ -8,6 +8,7 @@ from src.persona.agent import Stance
 from src.simulation.pair_turn import AgentTurn, CommPair, RoundResult
 from src.simulation.society_memory import SocietyMemory
 from src.simulation.verdict import VerdictSynthesizer
+from tests.agent_factory import slim_agent
 
 
 def _make_turn(
@@ -49,7 +50,8 @@ class TestVerdictSynthesizerFromRound:
         round_result = RoundResult(round_num=1, turns=turns, pairs=pairs)
 
         synthesizer = VerdictSynthesizer()
-        verdict = synthesizer.synthesize(rounds=[round_result], profiles=[])
+        profiles = [slim_agent(t.agent_name, confidence=t.confidence) for t in turns]
+        verdict = synthesizer.synthesize(rounds=[round_result], profiles=profiles)
 
         assert verdict.overall_stance is not None
         assert isinstance(verdict.overall_stance, Stance)
@@ -67,11 +69,11 @@ class TestVerdictSynthesizerFromRound:
         assert verdict.rounds_executed == 1
         assert verdict.summary != ""
 
-    def test_empty_rounds_returns_neutral_verdict(self):
+    def test_empty_rounds_returns_no_verdict(self):
         synthesizer = VerdictSynthesizer()
         verdict = synthesizer.synthesize(rounds=[], profiles=[])
 
-        assert verdict.overall_stance == Stance.NEUTRAL
+        assert verdict.overall_stance == Stance.ABSTAIN
         assert verdict.confidence_score == 0.0
         assert verdict.cluster_details == {}
 
@@ -107,7 +109,6 @@ class TestSocietyMemoryCommitsRound:
             round_result=round_result,
             dataset_id="test-ds-42",
             query_hash="qh42",
-            profile_map={},
         )
 
         # session() called with the configured database name
@@ -151,13 +152,11 @@ class TestSocietyMemoryCommitsRound:
             round_result=round1,
             dataset_id="multi-round",
             query_hash="qh",
-            profile_map={},
         )
         receipt2 = await service.commit_round(
             round_result=round2,
             dataset_id="multi-round",
             query_hash="qh",
-            profile_map={},
         )
 
         # one session (and one committed transaction) per round

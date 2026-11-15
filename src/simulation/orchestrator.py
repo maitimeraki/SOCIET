@@ -54,11 +54,12 @@ from src.simulation.ranking import SeatDecision
 from src.simulation.round_runner import RoundRunner
 from src.simulation.society_memory import SocietyMemory, SocietySnapshot
 from src.simulation.topology import CommunicationTopology
-from src.simulation.verdict import (
-    VerdictSynthesizer,
-    cluster_by_stance,
-    count_weights,
+from src.simulation.turn_protocol import (
+    consensus_window,
+    stance_weights,
+    weighted_share,
 )
+from src.simulation.verdict import VerdictSynthesizer
 from src.utils.queryIntend import QueryIntent
 
 logger = logging.getLogger(__name__)
@@ -312,7 +313,9 @@ class DebateOrchestrator:
                         snapshot = None
 
                 if snapshot is not None:
-                    share = self._weighted_share(rounds, profiles)
+                    share = weighted_share(
+                        consensus_window(rounds), {p.identity.name: p for p in profiles}
+                    )
                     if share:
                         snapshot.consensus = {
                             "stance": share[0],
@@ -362,18 +365,22 @@ class DebateOrchestrator:
                     )
                     all_turns.append(turn)
 
-                share = self._weighted_share([round_result], profiles)
-                weights = self._round_weight_shares(round_result, profiles)
+                window = consensus_window(rounds)
+                profile_map = {p.identity.name: p for p in profiles}
+                share = weighted_share(window, profile_map)
+                weights = stance_weights(window, profile_map)
+                total = sum(weights.values())
                 consensus = (
                     {
                         "stance": share[0],
                         "weight_share": round(share[1], 4),
                         "threshold": config.convergence_threshold,
                         "weights": {
-                            key: round(value, 4) for key, value in weights.items()
+                            stance.value: round(value / total, 4)
+                            for stance, value in weights.items()
                         },
                     }
-                    if share and weights
+                    if share
                     else None
                 )
                 await ws_broadcast(
@@ -410,7 +417,6 @@ class DebateOrchestrator:
                         round_result=round_result,
                         dataset_id=dataset_id,
                         query_hash=query_hash,
-                        profile_map={p.identity.name: p for p in profiles},
                     )
                     if receipt.get("failed"):
                         logger.warning(
@@ -469,7 +475,9 @@ class DebateOrchestrator:
                 warnings=warnings,
             )
         converged = self._check_convergence(rounds, profiles, config=config)
-        share = self._weighted_share(rounds[-2:], profiles)
+        share = weighted_share(
+            consensus_window(rounds), {p.identity.name: p for p in profiles}
+        )
         stage_index = await self._emit_stage(
             on_stage,
             stage_index,
@@ -517,7 +525,8 @@ class DebateOrchestrator:
                     final_stances[profile.identity.name] = turn.stance
                     break
             else:
-                final_stances[profile.identity.name] = "NEUTRAL"
+                # Never spoke: no position, so no stance. Not NEUTRAL.
+                final_stances[profile.identity.name] = Stance.ABSTAIN.value
 
         return OrchestratedDebateResult(
             converged=converged,
@@ -706,46 +715,6 @@ class DebateOrchestrator:
             )
         return index + 1
 
-    def _weighted_share(
-        self, rounds: list[RoundResult], profiles: List[Agent]
-    ) -> Optional[tuple[str, float]]:
-        """(dominant stance, weight share) via CIOR weights. None when no turns."""
-        clusters = cluster_by_stance(t for rnd in rounds for t in rnd.turns)
-        total_turns = sum(len(v) for v in clusters.values())
-        if total_turns == 0:
-            return None
-        if profiles:
-            profile_map = {p.identity.name: p for p in profiles}
-            weights = self._verdict_synthesizer._calibrate_cior(clusters, profile_map)
-        else:
-            weights = count_weights(clusters)
-        total = sum(weights.values())
-        if total <= 0:
-            return None
-        dominant = max(weights, key=lambda s: weights[s])
-        share_val = max(weights.values()) / total
-        return (
-            dominant.value if hasattr(dominant, "value") else str(dominant),
-            share_val,
-        )
-
-    def _round_weight_shares(
-        self, round_result: RoundResult, profiles: List[Agent]
-    ) -> Optional[dict[str, float]]:
-        """Normalized CIOR weight share per stance for one round (sums to 1). None when no turns."""
-        clusters = cluster_by_stance(round_result.turns)
-        if not profiles:
-            weights: dict[Stance, float] = count_weights(clusters)
-        else:
-            profile_map = {p.identity.name: p for p in profiles}
-            weights = dict(
-                self._verdict_synthesizer._calibrate_cior(clusters, profile_map)
-            )
-        total = sum(weights.values())
-        if total <= 0:
-            return None
-        return {stance.value: weight / total for stance, weight in weights.items()}
-
     def _check_convergence(
         self,
         rounds: list[RoundResult],
@@ -755,7 +724,9 @@ class DebateOrchestrator:
         """Quality-weighted convergence on the LAST TWO rounds, with configured threshold."""
         if len(rounds) < 2:
             return False
-        share = self._weighted_share(rounds[-2:], profiles)
+        share = weighted_share(
+            consensus_window(rounds), {p.identity.name: p for p in profiles or []}
+        )
         if share is None:
             return False
         threshold = config.convergence_threshold if config is not None else 0.8

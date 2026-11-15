@@ -1,7 +1,6 @@
 """Tests for SocietyMemory (per-round commit + snapshot read)."""
 
 import asyncio
-import logging
 import sys
 import uuid
 from unittest.mock import AsyncMock, MagicMock
@@ -60,7 +59,7 @@ class FakeSession:
         return FakeTx(self)
 
 
-def _turn(name, content, stance="POSITIVE", conf=0.8):
+def _turn(name, content, stance="POSITIVE", conf=0.8, strength=0.5):
     return AgentTurn(
         agent_id=str(uuid.uuid4()),
         agent_name=name,
@@ -68,18 +67,12 @@ def _turn(name, content, stance="POSITIVE", conf=0.8):
         stance=stance,
         confidence=conf,
         references=[],
-        strength=0.5,
+        strength=strength,
     )
 
 
 def _round(n, turns, pairs):
     return RoundResult(round_num=n, turns=turns, pairs=pairs)
-
-
-class FakeProfile:
-    def __init__(self, name, strength=0.5):
-        self.identity = type("I", (), {"name": name})()
-        self.strength = strength
 
 
 @pytest.mark.asyncio
@@ -96,9 +89,7 @@ async def test_commit_round_writes_opinions_and_round_keyed_edges():
         ],
         [CommPair(agent_a="Alice", agent_b="Bob")],
     )
-    receipt = await svc.commit_round(
-        rnd, "ds1", "qh1", {"Alice": FakeProfile("Alice"), "Bob": FakeProfile("Bob")}
-    )
+    receipt = await svc.commit_round(rnd, "ds1", "qh1")
     # The receipt is additive: the four pre-existing fields keep their exact
     # values, and written_nodes/written_links ride along beside them.
     assert {k: receipt[k] for k in ("round", "opinions", "edges", "failed")} == {
@@ -133,7 +124,7 @@ async def test_commit_round_failure_isolated():
     driver.session.return_value = session
     svc = SocietyMemory(driver, "db")
     rnd = _round(1, [_turn("A", "a")], [CommPair(agent_a="A", agent_b="B")])
-    receipt = await svc.commit_round(rnd, "ds", "qh", {})
+    receipt = await svc.commit_round(rnd, "ds", "qh")
     assert receipt["failed"] is True and receipt["opinions"] == 1
 
 
@@ -144,7 +135,7 @@ async def test_commit_failure_receipt_names_the_exception_type_not_its_text():
     driver.session.return_value = session
     svc = SocietyMemory(driver, "db")
     rnd = _round(1, [_turn("A", "a")], [CommPair(agent_a="A", agent_b="B")])
-    receipt = await svc.commit_round(rnd, "ds", "qh", {})
+    receipt = await svc.commit_round(rnd, "ds", "qh")
     assert receipt["error"] == "RuntimeError"
 
 
@@ -153,7 +144,7 @@ async def test_commit_round_no_turns_noop():
     driver = MagicMock()
     svc = SocietyMemory(driver, "db")
     receipt = await svc.commit_round(
-        _round(1, [], [CommPair(agent_a="A", agent_b="B")]), "ds", "qh", {}
+        _round(1, [], [CommPair(agent_a="A", agent_b="B")]), "ds", "qh"
     )
     assert receipt["opinions"] == 0
     driver.session.assert_not_called()
@@ -264,7 +255,7 @@ async def test_commit_round_multi_pair_agent_text_not_duplicated():
             CommPair(agent_a="Alice", agent_b="Bob"),
         ],
     )  # duplicate pair must not inflate edges
-    receipt = await svc.commit_round(rnd, "ds", "qh", {})
+    receipt = await svc.commit_round(rnd, "ds", "qh")
     opinions = session.calls[0][1]["opinions"]
     alice = next(o for o in opinions if o["agent_name"] == "Alice")
     assert (
@@ -282,7 +273,7 @@ async def test_commit_round_self_pair_writes_no_reaction():
     driver.session.return_value = session
     svc = SocietyMemory(driver, "db")
     rnd = _round(1, [_turn("X", "x content")], [CommPair(agent_a="X", agent_b="X")])
-    receipt = await svc.commit_round(rnd, "ds", "qh", {})
+    receipt = await svc.commit_round(rnd, "ds", "qh")
     assert receipt["opinions"] == 1
     assert receipt["edges"] == 0
     _, params = next((q, kw) for (q, kw) in session.calls if "REACTED_TO" in q)
@@ -298,39 +289,31 @@ async def test_commit_round_zero_strength_keeps_zero_weight():
     svc = SocietyMemory(driver, "db")
     rnd = _round(
         1,
-        [_turn("Zero", "z content", stance="NEUTRAL", conf=0.8)],
+        [_turn("Zero", "z content", stance="NEUTRAL", conf=0.8, strength=0.0)],
         [CommPair(agent_a="Zero", agent_b="Other")],
     )
-    await svc.commit_round(
-        rnd, "ds", "qh", {"Zero": FakeProfile("Zero", strength=0.0)}
-    )
+    await svc.commit_round(rnd, "ds", "qh")
     op = session.calls[0][1]["opinions"][0]
     assert op["strength"] == 0.0
     assert op["weight"] == 0.0  # not 0.8 * 0.5 == 0.4
 
 
 @pytest.mark.asyncio
-async def test_commit_round_missing_profile_warns(caplog):
-    """A speaker absent from profile_map gets the fallback weight — observably (P0-T4)."""
+async def test_opinion_strength_is_the_declared_turn_strength():
+    """The opinion carries the turn's declared strength; no profile lookup, no 0.5 fallback."""
     session = FakeSession()
     driver = MagicMock()
     driver.session.return_value = session
     svc = SocietyMemory(driver, "db")
     rnd = _round(
         1,
-        [_turn("Ghost", "g content", conf=0.8)],
+        [_turn("Ghost", "g content", conf=0.8, strength=0.9)],
         [CommPair(agent_a="Ghost", agent_b="Other")],
     )
-    with caplog.at_level(logging.WARNING, logger="src.simulation.society_memory"):
-        await svc.commit_round(rnd, "ds", "qh", {})
-    records = [r for r in caplog.records if "absent from profile_map" in r.getMessage()]
-    assert len(records) == 1
-    assert records[0].levelno == logging.WARNING
-    assert "Ghost" in records[0].getMessage()
+    await svc.commit_round(rnd, "ds", "qh")
     op = session.calls[0][1]["opinions"][0]
-    assert op["weight"] == pytest.approx(
-        0.8 * 0.5
-    )  # unchanged fallback math
+    assert op["strength"] == 0.9
+    assert op["weight"] == pytest.approx(0.8 * 0.9)
 
 
 # The commit receipt carries what Neo4j actually wrote — the map's honesty.
@@ -393,7 +376,6 @@ async def test_receipt_carries_written_nodes(memory):
         round_result=_round_with_two_opinions(),
         dataset_id="ds1",
         query_hash="q1",
-        profile_map={},  # both agents fall back to strength=0.5
     )
     nodes = receipt["written_nodes"]
     assert len(nodes) == 2
@@ -409,7 +391,6 @@ async def test_receipt_carries_written_links(memory):
         round_result=_round_with_two_opinions(),
         dataset_id="ds1",
         query_hash="q1",
-        profile_map={},
     )
     kinds = {link["kind"] for link in receipt["written_links"]}
     assert "STATED" in kinds  # Persona->Opinion, two opinions
@@ -424,7 +405,6 @@ async def test_mention_targets_use_entity_keys(memory):
         round_result=_round_with_two_opinions(),
         dataset_id="ds1",
         query_hash="q1",
-        profile_map={},
     )
     mentions = [l for l in receipt["written_links"] if l["kind"] == "MENTIONS"]
     assert any(l["to"] == "expansion" for l in mentions)
@@ -436,7 +416,6 @@ async def test_preexisting_fields_unchanged(memory):
         round_result=_round_with_two_opinions(),
         dataset_id="ds1",
         query_hash="q1",
-        profile_map={},
     )
     assert receipt["round"] == 1
     assert receipt["opinions"] == 2
@@ -450,7 +429,6 @@ async def test_empty_round_writes_nothing_new(memory):
         round_result=RoundResult(round_num=1, turns=[], pairs=[]),
         dataset_id="ds1",
         query_hash="q1",
-        profile_map={},
     )
     assert receipt["opinions"] == 0
     assert receipt["written_nodes"] == []
@@ -466,7 +444,6 @@ async def test_failure_receipt_still_shapes_correctly():
         round_result=_round_with_two_opinions(),
         dataset_id="ds1",
         query_hash="q1",
-        profile_map={},
     )
     assert receipt["failed"] is True
     assert receipt["error"]
@@ -485,7 +462,6 @@ async def test_mentions_writer_scopes_the_entity_to_the_dataset():
         round_result=_round_with_two_opinions(),
         dataset_id="ds-A",
         query_hash="q1",
-        profile_map={},
     )
     query, kwargs = next(
         (c.args[0], c.kwargs) for c in tx.run.await_args_list if "$rows" in c.args[0]

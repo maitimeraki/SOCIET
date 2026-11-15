@@ -1,15 +1,17 @@
 """The declared POSITION turn protocol: parse, retry, and the position-change rule."""
 
 import asyncio
+import math
+from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
 
 from src.billing.metering import MeteringError
-from src.persona.agent import Stance
+from src.persona.agent import WIRE_STANCES, Stance
 from src.simulation.evidence import EvidenceItem
 from src.simulation.llm_batch import BatchedLLMRunner
-from src.simulation.pair_turn import CommPair
+from src.simulation.pair_turn import AgentTurn, CommPair
 from src.simulation.round_runner import (
     RETRY_NOTE,
     RoundRunner,
@@ -21,6 +23,8 @@ from src.simulation.turn_protocol import (
     TurnParse,
     accept_position,
     parse_turn,
+    stance_weights,
+    weighted_share,
 )
 from tests.agent_factory import slim_agent
 
@@ -297,7 +301,13 @@ async def test_a_batch_that_returns_no_result_for_a_turn_drops_it_with_a_warning
         return
         yield  # pragma: no cover - makes this an async generator
 
-    llm_runner.gather = lambda prompts: no_results(prompts)
+    gather_calls = []
+
+    def gather(prompts):
+        gather_calls.append(list(prompts))
+        return no_results(prompts)
+
+    llm_runner.gather = gather
     result = await RoundRunner(llm_runner).execute_round(
         [slim_agent("Alice"), slim_agent("Bob")],
         [CommPair(agent_a="Alice", agent_b="Bob", shared_entities=[])],
@@ -306,8 +316,75 @@ async def test_a_batch_that_returns_no_result_for_a_turn_drops_it_with_a_warning
         history=[],
     )
 
+    assert len(gather_calls) == 1
     assert result.turns == []
     assert sorted(result.warnings) == [
         "Alice: turn dropped, no reply came back",
         "Bob: turn dropped, no reply came back",
     ]
+
+
+def turn(name: str, stance: Stance, strength: float) -> AgentTurn:
+    return AgentTurn(
+        agent_id=name,
+        agent_name=name,
+        content="x",
+        stance=stance.value,
+        confidence=0.5,
+        strength=strength,
+    )
+
+
+def profiles(**confidence: float) -> dict:
+    return {name: slim_agent(name, confidence=value) for name, value in confidence.items()}
+
+
+def test_abstain_does_not_count_toward_the_share():
+    turns = [turn("A", Stance.POSITIVE, 0.8), turn("B", Stance.ABSTAIN, 0.9)]
+    assert weighted_share(turns, profiles(A=0.5, B=0.5)) == (Stance.POSITIVE, 1.0)
+
+
+def test_no_positions_means_no_verdict_not_neutral():
+    assert weighted_share([turn("A", Stance.ABSTAIN, 0.9)], profiles(A=0.5)) is None
+
+
+def test_weight_is_strength_times_profile_confidence():
+    turns = [turn("A", Stance.POSITIVE, 0.8), turn("B", Stance.NEGATIVE, 0.6)]
+    stance, share = weighted_share(turns, profiles(A=0.5, B=1.0))
+    assert stance is Stance.NEGATIVE
+    assert share == pytest.approx(0.6 / (0.4 + 0.6))
+
+
+def test_a_tie_goes_to_the_first_stance_in_wire_order_whatever_the_turn_order():
+    turns = [turn("A", Stance.NEGATIVE, 0.5), turn("B", Stance.POSITIVE, 0.5)]
+    forward = weighted_share(turns, profiles(A=1.0, B=1.0))
+    backward = weighted_share(list(reversed(turns)), profiles(A=1.0, B=1.0))
+    assert forward == backward == (Stance.POSITIVE, 0.5)
+
+
+def test_zero_counted_weight_means_no_verdict():
+    assert weighted_share([turn("A", Stance.POSITIVE, 0.0)], profiles(A=1.0)) is None
+
+
+def test_a_turn_from_a_speaker_with_no_profile_raises():
+    with pytest.raises(ValueError):
+        weighted_share([turn("Ghost", Stance.POSITIVE, 0.5)], profiles(A=1.0))
+
+
+@pytest.mark.parametrize("strength", [math.nan, math.inf, -0.1, 1.7])
+def test_a_turn_strength_outside_the_unit_interval_raises(strength):
+    with pytest.raises(ValueError):
+        weighted_share([turn("A", Stance.POSITIVE, strength)], profiles(A=1.0))
+
+
+@pytest.mark.parametrize("confidence", [math.nan, math.inf, -0.1, 1.2])
+def test_a_profile_confidence_outside_the_unit_interval_raises(confidence):
+    fake = {"A": SimpleNamespace(confidence=confidence)}
+    with pytest.raises(ValueError):
+        weighted_share([turn("A", Stance.POSITIVE, 0.5)], fake)
+
+
+def test_stance_weights_has_every_wire_stance_and_abstain_weighs_nothing():
+    weights = stance_weights([turn("A", Stance.ABSTAIN, 0.9)], profiles(A=1.0))
+    assert set(weights) == set(WIRE_STANCES)
+    assert weights[Stance.ABSTAIN] == 0.0

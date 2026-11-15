@@ -1,12 +1,17 @@
 """Tests for VerdictSynthesizer."""
 
-import logging
+import math
 
 import pytest
 
 from src.persona.agent import WIRE_STANCES, Stance
 from src.simulation.pair_turn import AgentTurn, DebateVerdict, RoundResult
-from src.simulation.verdict import VerdictSynthesizer, cluster_by_stance, count_weights
+from src.simulation.turn_protocol import stance_weights
+from src.simulation.verdict import (
+    NO_VERDICT_SUMMARY,
+    VerdictSynthesizer,
+    cluster_by_stance,
+)
 from tests.agent_factory import slim_agent
 
 
@@ -23,9 +28,8 @@ def test_debate_verdict_has_narrative():
     assert v.narrative.startswith("## Recommendation")
 
 
-def make_profile(name: str, strength: float = 0.5):
-    return slim_agent(name, strength=strength)
-
+def make_profile(name: str, confidence: float = 0.5):
+    return slim_agent(name, confidence=confidence)
 
 
 def make_turn(
@@ -34,6 +38,7 @@ def make_turn(
     stance: str,
     confidence: float,
     refs: list[str] | None = None,
+    strength: float = 0.5,
 ) -> AgentTurn:
     return AgentTurn(
         agent_id=agent_id,
@@ -42,7 +47,7 @@ def make_turn(
         stance=stance,
         confidence=confidence,
         references=refs or [],
-        strength=0.5,
+        strength=strength,
     )
 
 
@@ -102,80 +107,41 @@ class TestAbstainCarriesNoWeight:
                 [
                     make_turn("a1", "Alice", "ABSTAIN", 1.0),
                     make_turn("a2", "Bob", "ABSTAIN", 1.0),
-                    make_turn("a3", "Carol", "POSITIVE", 0.4),
+                    make_turn("a3", "Carol", "POSITIVE", 1.0, strength=0.4),
                 ],
             )
         ]
-        verdict = VerdictSynthesizer().synthesize(rounds, [])
+        profiles = [make_profile("Alice"), make_profile("Bob"), make_profile("Carol")]
+        verdict = VerdictSynthesizer().synthesize(rounds, profiles)
         assert verdict.overall_stance is Stance.POSITIVE
 
-    def test_all_abstain_never_names_abstain_the_overall_stance(self):
+    def test_all_abstain_is_no_verdict_and_never_neutral(self):
         rounds = [make_round(1, [make_turn("a1", "Alice", "ABSTAIN", 1.0)])]
-        verdict = VerdictSynthesizer().synthesize(rounds, [])
-        assert verdict.overall_stance is not Stance.ABSTAIN
+        verdict = VerdictSynthesizer().synthesize(rounds, [make_profile("Alice")])
+        assert verdict.overall_stance is Stance.ABSTAIN
+        assert verdict.summary == NO_VERDICT_SUMMARY
+        assert verdict.weight_share == 0.0
 
-    def test_abstain_weight_is_zero_with_and_without_profiles(self):
-        synthesizer = VerdictSynthesizer()
-        clusters = cluster_by_stance([make_turn("a1", "Alice", "ABSTAIN", 0.9)])
-        with_profile = synthesizer._calibrate_cior(
-            clusters, {"Alice": make_profile("Alice", strength=1.0)}
-        )
-        without_profile = synthesizer._calibrate_cior(clusters, {})
-        assert with_profile[Stance.ABSTAIN] == 0.0
-        assert without_profile[Stance.ABSTAIN] == 0.0
+    def test_abstain_weighs_zero_in_the_stance_weights(self):
+        turns = [make_turn("a1", "Alice", "ABSTAIN", 0.9, strength=1.0)]
+        weights = stance_weights(turns, {"Alice": make_profile("Alice", confidence=1.0)})
+        assert weights[Stance.ABSTAIN] == 0.0
 
-    def test_weight_key_set_is_identical_with_and_without_profiles(self):
-        synthesizer = VerdictSynthesizer()
-        clusters = cluster_by_stance(
-            [
-                make_turn("a1", "Alice", "POSITIVE", 0.5),
-                make_turn("a2", "Bob", "ABSTAIN", 0.5),
-            ]
-        )
-        with_profile = synthesizer._calibrate_cior(
-            clusters, {"Alice": make_profile("Alice")}
-        )
-        without_profile = count_weights(clusters)
-        assert set(with_profile) == set(without_profile) == set(WIRE_STANCES)
-
-
-class TestCalibrateCIOR:
-    """Unit tests for _calibrate_cior."""
-
-    def test_weights_zero_for_empty_clusters(self):
-        synthesizer = VerdictSynthesizer()
-        clusters = {s: [] for s in Stance}
-        weights = synthesizer._calibrate_cior(clusters, {})
-        assert all(w == 0.0 for w in weights.values())
-
-    def test_unrecognized_agent_uses_confidence_half(self):
-        synthesizer = VerdictSynthesizer()
-        clusters = {s: [] for s in Stance}
-        clusters[Stance.POSITIVE] = [make_turn("unknown", "Unknown", "POSITIVE", 0.8)]
-        weights = synthesizer._calibrate_cior(clusters, {})  # no profiles
-        # weight = confidence * 0.5 = 0.4
-        assert pytest.approx(weights[Stance.POSITIVE], rel=1e-6) == 0.4
-
-    def test_known_agent_weight_is_confidence_times_strength(self):
-        synthesizer = VerdictSynthesizer()
-        p_alice = make_profile("Alice", strength=0.8)
-        clusters = {s: [] for s in Stance}
-        clusters[Stance.POSITIVE] = [make_turn("a1", "Alice", "POSITIVE", 0.5)]
-        weights = synthesizer._calibrate_cior(clusters, {"Alice": p_alice})
-        # weight = 0.5 * 0.8 = 0.4
-        assert pytest.approx(weights[Stance.POSITIVE], rel=1e-6) == 0.4
-
-    def test_zero_strength_carries_zero_weight(self):
-        synthesizer = VerdictSynthesizer()
-        p_gut = make_profile("GutAgent", strength=0.0)
-        clusters = {s: [] for s in Stance}
-        clusters[Stance.NEGATIVE] = [make_turn("g1", "GutAgent", "NEGATIVE", 1.0)]
-        weights = synthesizer._calibrate_cior(clusters, {"GutAgent": p_gut})
-        assert weights[Stance.NEGATIVE] == 0.0
+    def test_weight_key_set_is_every_wire_stance(self):
+        turns = [
+            make_turn("a1", "Alice", "POSITIVE", 0.5),
+            make_turn("a2", "Bob", "ABSTAIN", 0.5),
+        ]
+        profiles = {"Alice": make_profile("Alice"), "Bob": make_profile("Bob")}
+        assert set(stance_weights(turns, profiles)) == set(WIRE_STANCES)
 
 
 class TestSynthesize:
-    """Integration tests for synthesize()."""
+    """Integration tests for synthesize(): the verdict reads the last two rounds.
+
+    Turn strength x profile confidence is each agent's weight: Alice 0.81, Bob 0.49 (round 1,
+    outside the window), Carol 0.64, Dave 0.25, Eve 0.36, Frank 0.16.
+    """
 
     @pytest.fixture
     def fixture_rounds(self):
@@ -184,8 +150,8 @@ class TestSynthesize:
             make_round(
                 1,
                 [
-                    make_turn("a1", "Alice", "POSITIVE", 0.9, refs=["entity_alpha"]),
-                    make_turn("a2", "Bob", "NEGATIVE", 0.7, refs=["entity_beta"]),
+                    make_turn("a1", "Alice", "POSITIVE", 0.9, refs=["entity_alpha"], strength=0.9),
+                    make_turn("a2", "Bob", "NEGATIVE", 0.7, refs=["entity_beta"], strength=0.7),
                 ],
             ),
             make_round(
@@ -197,155 +163,117 @@ class TestSynthesize:
                         "POSITIVE",
                         0.8,
                         refs=["entity_alpha", "entity_gamma"],
+                        strength=0.8,
                     ),
-                    make_turn("a4", "Dave", "NEUTRAL", 0.5, refs=["entity_delta"]),
+                    make_turn("a4", "Dave", "NEUTRAL", 0.5, refs=["entity_delta"], strength=0.5),
                 ],
             ),
             make_round(
                 3,
                 [
-                    make_turn("a5", "Eve", "POSITIVE", 0.6, refs=["entity_gamma"]),
-                    make_turn("a6", "Frank", "NEGATIVE", 0.4, refs=["entity_epsilon"]),
+                    make_turn("a5", "Eve", "POSITIVE", 0.6, refs=["entity_gamma"], strength=0.6),
+                    make_turn("a6", "Frank", "NEGATIVE", 0.4, refs=["entity_epsilon"], strength=0.4),
                 ],
             ),
         ]
 
     @pytest.fixture
     def fixture_profiles(self):
-        """AgentProfiles matching fixture_rounds."""
+        """AgentProfiles matching fixture_rounds: confidence equals the turn confidence."""
         return [
-            make_profile("Alice", strength=0.9),
-            make_profile("Bob", strength=0.7),
-            make_profile("Carol", strength=0.8),
-            make_profile("Dave", strength=0.5),
-            make_profile("Eve", strength=0.6),
-            make_profile("Frank", strength=0.4),
+            make_profile("Alice", confidence=0.9),
+            make_profile("Bob", confidence=0.7),
+            make_profile("Carol", confidence=0.8),
+            make_profile("Dave", confidence=0.5),
+            make_profile("Eve", confidence=0.6),
+            make_profile("Frank", confidence=0.4),
         ]
 
-    def test_empty_rounds_returns_neutral(self):
-        synthesizer = VerdictSynthesizer()
-        verdict = synthesizer.synthesize([], [])
-        assert verdict.overall_stance == Stance.NEUTRAL
+    def test_empty_rounds_is_no_verdict_not_neutral(self):
+        verdict = VerdictSynthesizer().synthesize([], [])
+        assert verdict.overall_stance is Stance.ABSTAIN
+        assert verdict.summary == NO_VERDICT_SUMMARY
         assert verdict.confidence_score == 0.0
 
-    def test_empty_turns_returns_neutral(self):
-        synthesizer = VerdictSynthesizer()
-        verdict = synthesizer.synthesize([make_round(1, [])], [])
-        assert verdict.overall_stance == Stance.NEUTRAL
+    def test_empty_turns_is_no_verdict_not_neutral(self):
+        verdict = VerdictSynthesizer().synthesize([make_round(1, [])], [])
+        assert verdict.overall_stance is Stance.ABSTAIN
+        assert verdict.summary == NO_VERDICT_SUMMARY
 
-    def test_overall_stance_is_max_weight_cluster(
+    def test_overall_stance_is_the_max_weight_cluster_in_the_window(
         self, fixture_rounds, fixture_profiles
     ):
-        synthesizer = VerdictSynthesizer()
-        # POSITIVE: Alice(0.9*0.9) + Carol(0.8*0.8) + Eve(0.6*0.6) = 0.81 + 0.64 + 0.36 = 1.81
-        # NEGATIVE: Bob(0.7*0.7) + Frank(0.4*0.4) = 0.49 + 0.16 = 0.65
-        # NEUTRAL:  Dave(0.5*0.5) = 0.25
-        # max = POSITIVE
-        verdict = synthesizer.synthesize(fixture_rounds, fixture_profiles)
-        assert verdict.overall_stance == Stance.POSITIVE
+        # Window (rounds 2-3): POSITIVE 0.64 + 0.36 = 1.00, NEGATIVE 0.16, NEUTRAL 0.25.
+        verdict = VerdictSynthesizer().synthesize(fixture_rounds, fixture_profiles)
+        assert verdict.overall_stance is Stance.POSITIVE
 
-    def test_cluster_weights_correct(self, fixture_rounds, fixture_profiles):
-        synthesizer = VerdictSynthesizer()
-        verdict = synthesizer.synthesize(fixture_rounds, fixture_profiles)
+    def test_cluster_weights_are_the_window_weights(self, fixture_rounds, fixture_profiles):
+        verdict = VerdictSynthesizer().synthesize(fixture_rounds, fixture_profiles)
         pos = verdict.cluster_details[Stance.POSITIVE]
         neg = verdict.cluster_details[Stance.NEGATIVE]
         neu = verdict.cluster_details[Stance.NEUTRAL]
-        assert pytest.approx(pos.total_weight, rel=1e-6) == 1.81
-        assert pytest.approx(neg.total_weight, rel=1e-6) == 0.65
+        assert pytest.approx(pos.total_weight, rel=1e-6) == 1.00
+        assert pytest.approx(neg.total_weight, rel=1e-6) == 0.16
         assert pytest.approx(neu.total_weight, rel=1e-6) == 0.25
 
-    def test_confidence_score_in_range(self, fixture_rounds, fixture_profiles):
-        synthesizer = VerdictSynthesizer()
-        verdict = synthesizer.synthesize(fixture_rounds, fixture_profiles)
-        # total = 2.71, max = 1.81, score = 1.81/2.71
+    def test_a_round_outside_the_window_does_not_count(self, fixture_rounds, fixture_profiles):
+        verdict = VerdictSynthesizer().synthesize(fixture_rounds, fixture_profiles)
+        assert verdict.cluster_details[Stance.POSITIVE].agents == ["Carol", "Eve"]
+
+    def test_avg_conviction_is_the_mean_declared_strength(self, fixture_rounds, fixture_profiles):
+        verdict = VerdictSynthesizer().synthesize(fixture_rounds, fixture_profiles)
+        assert pytest.approx(verdict.cluster_details[Stance.POSITIVE].avg_conviction) == 0.7
+
+    def test_confidence_score_is_the_dominant_share(self, fixture_rounds, fixture_profiles):
+        verdict = VerdictSynthesizer().synthesize(fixture_rounds, fixture_profiles)
         assert 0.0 <= verdict.confidence_score <= 1.0
-        assert pytest.approx(verdict.confidence_score, rel=1e-6) == 1.81 / 2.71
+        assert pytest.approx(verdict.confidence_score, rel=1e-6) == 1.00 / 1.41
 
     def test_rounds_executed_populated(self, fixture_rounds, fixture_profiles):
-        synthesizer = VerdictSynthesizer()
-        verdict = synthesizer.synthesize(fixture_rounds, fixture_profiles)
+        verdict = VerdictSynthesizer().synthesize(fixture_rounds, fixture_profiles)
         assert verdict.rounds_executed == 3
 
-    def test_supporting_opposing_entities(self, fixture_rounds, fixture_profiles):
-        synthesizer = VerdictSynthesizer()
-        verdict = synthesizer.synthesize(fixture_rounds, fixture_profiles)
-        # POSITIVE = overall stance, so refs from Alice, Carol, Eve are supporting
-        assert "entity_alpha" in verdict.supporting_entities
-        assert "entity_gamma" in verdict.supporting_entities
-        # refs from Bob, Frank, Dave (neutral) are opposing
-        assert "entity_beta" in verdict.opposing_entities
-        assert "entity_epsilon" in verdict.opposing_entities
-        assert "entity_delta" in verdict.opposing_entities
-
-    def test_cluster_details_has_all_stances_with_turns(
+    def test_supporting_opposing_entities_come_from_the_window(
         self, fixture_rounds, fixture_profiles
     ):
-        synthesizer = VerdictSynthesizer()
-        verdict = synthesizer.synthesize(fixture_rounds, fixture_profiles)
+        verdict = VerdictSynthesizer().synthesize(fixture_rounds, fixture_profiles)
+        # POSITIVE is the overall stance, so Carol's and Eve's refs support it.
+        assert "entity_alpha" in verdict.supporting_entities
+        assert "entity_gamma" in verdict.supporting_entities
+        # Dave (neutral) and Frank (negative) oppose it; round 1 is outside the window.
+        assert "entity_delta" in verdict.opposing_entities
+        assert "entity_epsilon" in verdict.opposing_entities
+        assert "entity_beta" not in verdict.opposing_entities
+
+    def test_cluster_details_has_every_stance_with_window_turns(
+        self, fixture_rounds, fixture_profiles
+    ):
+        verdict = VerdictSynthesizer().synthesize(fixture_rounds, fixture_profiles)
         assert Stance.POSITIVE in verdict.cluster_details
         assert Stance.NEGATIVE in verdict.cluster_details
         assert Stance.NEUTRAL in verdict.cluster_details
 
     def test_summary_contains_stance_and_score(self, fixture_rounds, fixture_profiles):
-        synthesizer = VerdictSynthesizer()
-        verdict = synthesizer.synthesize(fixture_rounds, fixture_profiles)
+        verdict = VerdictSynthesizer().synthesize(fixture_rounds, fixture_profiles)
         assert "POSITIVE" in verdict.summary
         assert "Confidence score" in verdict.summary
 
 
-class TestMissingProfileWarning:
-    """A speaker absent from profile_map must be observable (P0-T4)."""
+class TestMissingProfileFailsClosed:
+    """A speaker absent from the profiles is a broken run: the verdict raises, it never guesses."""
 
-    @staticmethod
-    def _missing_records(caplog):
-        return [
-            r for r in caplog.records if "absent from profile_map" in r.getMessage()
-        ]
+    def test_a_speaker_missing_from_the_profiles_raises(self):
+        rounds = [make_round(1, [make_turn("a1", "Ghost", "POSITIVE", 0.8)])]
+        with pytest.raises(ValueError):
+            VerdictSynthesizer().synthesize(rounds, [make_profile("Alice")])
 
-    def test_missing_profile_warns_once_per_synthesis(self, caplog):
-        synthesizer = VerdictSynthesizer()
-        # Same absent speaker twice in one cluster: one warning, not one per turn.
-        rounds = [
-            make_round(
-                1,
-                [
-                    make_turn("a1", "Ghost", "POSITIVE", 0.8),
-                    make_turn("a1", "Ghost", "POSITIVE", 0.6),
-                ],
-            )
-        ]
-        with caplog.at_level(logging.WARNING, logger="src.simulation.verdict"):
-            verdict = synthesizer.synthesize(rounds, [make_profile("Alice")])
+    def test_a_zero_strength_turn_carries_zero_weight(self):
+        rounds = [make_round(1, [make_turn("g1", "GutAgent", "NEGATIVE", 1.0, strength=0.0)])]
+        verdict = VerdictSynthesizer().synthesize(rounds, [make_profile("GutAgent", confidence=1.0)])
+        assert verdict.cluster_details[Stance.NEGATIVE].total_weight == 0.0
+        assert verdict.overall_stance is Stance.ABSTAIN
 
-        records = self._missing_records(caplog)
-        assert len(records) == 1
-        assert records[0].levelno == logging.WARNING
-        assert "Ghost" in records[0].getMessage()
-        # no behavior change: fallback weight is confidence * 0.5 per turn
-        assert (
-            pytest.approx(
-                verdict.cluster_details[Stance.POSITIVE].total_weight, rel=1e-6
-            )
-            == 0.4 + 0.3
-        )
-
-    def test_all_profiles_present_logs_no_warning(self, caplog):
-        synthesizer = VerdictSynthesizer()
-        rounds = [make_round(1, [make_turn("a1", "Alice", "POSITIVE", 0.8)])]
-        with caplog.at_level(logging.WARNING, logger="src.simulation.verdict"):
-            synthesizer.synthesize(
-                rounds, [make_profile("Alice", strength=0.9)]
-            )
-        assert self._missing_records(caplog) == []
-
-    def test_calibrate_cior_direct_call_warns(self, caplog):
-        """The orchestrator's _weighted_share path calls _calibrate_cior directly."""
-        synthesizer = VerdictSynthesizer()
-        clusters = {s: [] for s in Stance}
-        clusters[Stance.POSITIVE] = [make_turn("x", "Ghost", "POSITIVE", 0.8)]
-        with caplog.at_level(logging.WARNING, logger="src.simulation.verdict"):
-            weights = synthesizer._calibrate_cior(clusters, {})
-        assert pytest.approx(weights[Stance.POSITIVE], rel=1e-6) == 0.4
-        records = self._missing_records(caplog)
-        assert len(records) == 1
-        assert "Ghost" in records[0].getMessage()
+    def test_a_known_agent_weight_is_strength_times_confidence(self):
+        rounds = [make_round(1, [make_turn("a1", "Alice", "POSITIVE", 0.5, strength=0.8)])]
+        verdict = VerdictSynthesizer().synthesize(rounds, [make_profile("Alice", confidence=0.5)])
+        assert math.isclose(verdict.cluster_details[Stance.POSITIVE].total_weight, 0.4)
