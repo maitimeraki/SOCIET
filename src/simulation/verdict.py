@@ -5,11 +5,14 @@ from __future__ import annotations
 import logging
 from collections.abc import Iterable
 from typing import TYPE_CHECKING, List
+from uuid import UUID
 
 from pydantic import BaseModel
 
 from src.llm.config_llm import get_llm_config
-from src.persona.agent import SYNTHETIC_PROVENANCE_PREFIX, WIRE_STANCES, Agent, Stance
+from src.persona.agent import WIRE_STANCES, Agent, Stance
+from src.persona.models_persona import ProvenanceLink
+from src.simulation.evidence import EvidenceItem
 from src.simulation.pair_turn import (
     AgentTurn,
     ClusterSummary,
@@ -124,10 +127,21 @@ def _to_markdown(v: Verdict) -> str:
     return "\n\n".join(parts)
 
 
+def _provenance_link(item: EvidenceItem) -> ProvenanceLink | None:
+    """A real source link for one evidence item; None when its chunk id is not a UUID."""
+    try:
+        chunk_id = UUID(item.chunk_id)
+    except ValueError:
+        return None
+    return ProvenanceLink(
+        doc_id=item.doc_id, title=item.doc_title, breadcrumb=item.section, chunk_id=chunk_id
+    )
+
+
 class VerdictSynthesizer:
     """Cluster-weighted CIOR synthesizer.
 
-    Reads `conviction` and `cior` directly from the canonical `Agent`.
+    Reads `strength` and `confidence` directly from the canonical `Agent`.
     """
 
     async def asynthesize(
@@ -298,20 +312,20 @@ class VerdictSynthesizer:
             avg_conf = sum(t.confidence for t in turns) / len(turns)
             total_weight = weights.get(stance, 0.0)
 
-            convictions: List[float] = []
+            strengths: List[float] = []
             for turn in turns:
                 profile = profile_map.get(turn.agent_name)
                 if profile is None:
                     self._warn_missing_profile(turn.agent_name, warned_missing)
-                convictions.append(profile.conviction if profile else 0.5)
-            avg_conv = sum(convictions) / len(convictions) if convictions else 0.5
+                strengths.append(profile.strength if profile else 0.5)
+            avg_strength = sum(strengths) / len(strengths) if strengths else 0.5
 
             cluster_details[stance] = ClusterSummary(
                 stance=stance,
                 count=len(turns),
                 total_weight=total_weight,
                 avg_confidence=avg_conf,
-                avg_conviction=avg_conv,
+                avg_conviction=avg_strength,
                 agents=[t.agent_name for t in turns],
             )
 
@@ -350,10 +364,9 @@ class VerdictSynthesizer:
             if profile is not None:
                 for ref in turn.references:
                     links = provenance_by_claim.setdefault(ref, [])
-                    for link in profile.summary_provenance:
-                        if link.doc_id.startswith(SYNTHETIC_PROVENANCE_PREFIX):
-                            continue
-                        if link not in links:
+                    for item in profile.evidence:
+                        link = _provenance_link(item)
+                        if link is not None and link not in links:
                             links.append(link)
 
         dominant_count = cluster_details.get(
@@ -395,7 +408,7 @@ class VerdictSynthesizer:
         warned.add(agent_name)
         logger.warning(
             "VerdictSynthesizer: agent '%s' absent from profile_map; "
-            "falling back to conviction=0.5, cior=0.0 (reduced weight)",
+            "falling back to strength=0.5 (reduced weight)",
             agent_name,
         )
 
@@ -405,13 +418,7 @@ class VerdictSynthesizer:
         profile_map: dict[str, Agent],
         warned: set[str] | None = None,
     ) -> dict[Stance, float]:
-        """weight = confidence * conviction * cior_factor.
-
-        cior_factor maps cior in [-1, 1] into [0.5, 1.0]:
-            cior_factor = 0.5 + (cior + 1) / 4
-        Receptivity scales a voice's emphasis; it never erases one. A hostile
-        dissenter (cior = -1) keeps half weight instead of dropping to zero.
-        """
+        """weight = confidence * strength. A turn with no profile counts at 0.5 strength."""
         warned = set() if warned is None else warned
         weights: dict[Stance, float] = {s: 0.0 for s in WIRE_STANCES}
         for stance, turns in clusters.items():
@@ -423,8 +430,7 @@ class VerdictSynthesizer:
             for turn in turns:
                 profile = profile_map.get(turn.agent_name)
                 if profile is not None:
-                    cior_factor = 0.5 + (profile.cior + 1.0) / 4.0
-                    cluster_weight += turn.confidence * profile.conviction * cior_factor
+                    cluster_weight += turn.confidence * profile.strength
                 else:
                     self._warn_missing_profile(turn.agent_name, warned)
                     cluster_weight += turn.confidence * 0.5

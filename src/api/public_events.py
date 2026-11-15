@@ -23,11 +23,8 @@ _INTENT_KEYS = frozenset({"core_question", "stance_axis", "direct_keywords", "la
 # interim: no selection event is streamed any more; should one arrive it carries
 # names only (no scores or features). Task 3.2 removes `selection` altogether.
 _ROW_KEYS = frozenset({"name"})
-# interim: the roster UI reads these profile extras; Task 2.x narrows the
-# profile to the ranked seat and Task 3.1 switches the frontend to AgentView.
-_PROFILE_KEYS = frozenset({"agent_id", "identity", "bio", "detailed_perspective", "role_description",
-                           "stance", "intensity", "confidence", "conviction", "cior", "domain_tags",
-                           "expertise_level", "discovery_type", "communication_radius"})
+# The profile a client sees is AgentView (spec 4a) and nothing else.
+_PROFILE_KEYS = frozenset({"name", "type", "role", "stance", "strength", "bio", "details", "confidence"})
 # The verdict keys a client may see, shared by the `complete` event and the
 # stored or served result. One list: a key added here reaches both.
 _VERDICT_KEYS = frozenset({"converged", "verdict", "narrative", "narrative_status", "final_stances", "warnings",

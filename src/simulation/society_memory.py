@@ -29,7 +29,7 @@ SELF_HISTORY_SUMMARY_CHARS = 200
 def _profile_float(profile, attr: str, default: float) -> float:
     """Read a float off a profile, falling back only when it is absent or None.
 
-    `Agent.conviction` is `ge=0.0`, so 0.0 is a legitimate value: `value or default`
+    `Agent.strength` is `ge=0.0`, so 0.0 is a legitimate value: `value or default`
     would silently rewrite it to the default and fabricate debate weight.
     """
     value = getattr(profile, attr, None) if profile is not None else None
@@ -52,7 +52,7 @@ MERGE (o:Opinion {dataset_id: $dataset_id, query_hash: $query_hash,
                   round_no: op.round_no, agent_name: op.agent_name})
 SET o.text = op.text, o.name = op.name, o.stance = op.stance,
     o.confidence = op.confidence,
-    o.conviction = op.conviction, o.cior = op.cior, o.weight = op.weight,
+    o.strength = op.strength, o.weight = op.weight,
     o.entities = op.entities, o.ts = datetime()
 MERGE (p:Persona {name: op.agent_name, dataset_id: $dataset_id})
 MERGE (p)-[:STATED]->(o)
@@ -245,11 +245,10 @@ class SocietyMemory:
             if profile is None:
                 logger.warning(
                     "SocietyMemory: agent '%s' absent from profile_map; opinion weight "
-                    "falls back to conviction=0.5, cior=0.0 (reduced weight)",
+                    "falls back to strength=0.5 (reduced weight)",
                     agent_name,
                 )
-            conviction = _profile_float(profile, "conviction", 0.5)
-            cior = _profile_float(profile, "cior", 0.0)
+            strength = _profile_float(profile, "strength", 0.5)
             last = turns[-1]  # final position in this round is the canonical stance
             entities: list[str] = []
             for t in turns:
@@ -264,9 +263,8 @@ class SocietyMemory:
                     "text": "\n\n".join(t.content for t in turns),
                     "stance": last.stance,
                     "confidence": last.confidence,
-                    "conviction": conviction,
-                    "cior": cior,
-                    "weight": round(last.confidence * conviction * (1 + cior) / 2, 6),
+                    "strength": strength,
+                    "weight": round(last.confidence * strength, 6),
                     "entities": entities[:8],
                 }
             )

@@ -4,22 +4,17 @@ import re
 from dataclasses import dataclass
 from typing import Callable, Optional
 
-from src.persona.agent import (
-    SOURCE_EVIDENCE_MAX_SNIPPETS,
-    SOURCE_EVIDENCE_SNIPPET_CHARS,
-    Agent,
-)
+from src.persona.agent import Agent
 from src.simulation.llm_batch import BatchedLLMRunner, PairPrompt
 from src.simulation.pair_turn import AgentTurn, CommPair, RoundResult
+from src.simulation.profile_generator import evidence_block
 from src.simulation.society_memory import SocietySnapshot
 from src.utils.queryIntend import QueryIntent
 
 OPPONENT_STATEMENT_CHARS = 600
 
-# Prompt budget for the persona's first-person voice. Rich enough to carry the
-# whole `detailed_perspective` the earlier Phase-2 tasks produce, but still a
-# hard bound so a runaway LLM value cannot blow the prompt.
-PERSONA_PERSPECTIVE_CHARS = 1500
+#: Evidence items rendered into one agent's turn prompt.
+PROMPT_EVIDENCE_MAX = 12
 
 
 def _split_reasoning_answer(response: str) -> tuple[str, str]:
@@ -103,7 +98,7 @@ def _extract_references(content: str, candidates: list[str]) -> list[str]:
     return refs[:5]
 
 
-def _truncate_snippet(text: str, budget: int = SOURCE_EVIDENCE_SNIPPET_CHARS) -> str:
+def _truncate_snippet(text: str, budget: int) -> str:
     """Whitespace-normalised snippet, cut to `budget` at a word boundary."""
     text = " ".join(str(text).split())
     if len(text) <= budget:
@@ -112,44 +107,28 @@ def _truncate_snippet(text: str, budget: int = SOURCE_EVIDENCE_SNIPPET_CHARS) ->
     return cut.rsplit(" ", 1)[0] if " " in cut else cut
 
 
-def _evidence_block(agent: Agent) -> str:
-    """Labelled source-evidence block, or "" when the agent carries none.
-
-    At most SOURCE_EVIDENCE_MAX_SNIPPETS render, each truncated by
-    `_truncate_snippet`. Empty evidence returns "" so the prompt is unchanged
-    (no stray header).
-    """
-    snippets = [
-        _truncate_snippet(s)
-        for s in agent.source_evidence[:SOURCE_EVIDENCE_MAX_SNIPPETS]
-    ]
-    snippets = [s for s in snippets if s]
-    if not snippets:
-        return ""
-    body = "\n".join(f"- {s}" for s in snippets)
-    return f"YOUR SOURCE EVIDENCE (from the documents you were built from):\n{body}\n"
-
-
 def _build_system_prompt(
     agent: Agent, opponent: Agent, shared_entities: list[str]
 ) -> str:
-    domains = ", ".join(agent.domain_tags[:3])
+    """The agent's own voice: role, bio, the full profile, stance and its evidence.
+
+    Evidence renders as fenced `<evidence>` blocks (the same fence the profile
+    generator uses), at most PROMPT_EVIDENCE_MAX of them.
+    """
     shared = ", ".join(shared_entities[:3]) if shared_entities else "none"
-    cb = agent.confidence_breakdown
-    provenance_summary = (
-        ", ".join([p.title for p in agent.summary_provenance[:3]])
-        if agent.summary_provenance
-        else "none"
-    )
+    fenced = [
+        line
+        for item in agent.evidence[:PROMPT_EVIDENCE_MAX]
+        for line in evidence_block(item)
+    ]
+    evidence = "\n".join(fenced) if fenced else "none"
     return (
-        f"You are {agent.identity.name}, an expert in {domains}.\n"
-        f"Archetype: {agent.identity.archetype}. Communication style: {agent.identity.communication_style}.\n"
-        f"Your perspective: {_truncate_snippet(agent.detailed_perspective, PERSONA_PERSPECTIVE_CHARS)}\n"
-        f"Role: {_truncate_snippet(agent.role_description)}\n"
-        f"Stance on this topic: {agent.stance.value} (intensity {agent.intensity:.2f}).\n"
-        f"Confidence breakdown: sources={cb.source_breadth}, nodes={cb.node_density}, connectivity={cb.relationship_connectivity:.2f}\n"
-        f"Provenance: {provenance_summary}\n"
-        f"{_evidence_block(agent)}"
+        f"You are {agent.identity.name}. Role: {agent.role}\n"
+        f"Bio: {agent.bio}\n"
+        f"Your full profile:\n{agent.details_raw}\n"
+        f"Stance on this topic: {agent.stance.value} (strength {agent.strength:.2f}).\n"
+        f"Confidence: {agent.confidence:.2f}\n"
+        f"YOUR EVIDENCE (the documents you were built from):\n{evidence}\n"
         f"You share these entities with your opponent: {shared}\n"
         f"Engage genuinely with opposing viewpoints while staying true to your expertise."
     )

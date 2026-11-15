@@ -5,16 +5,9 @@ from unittest.mock import ANY, AsyncMock, MagicMock, patch
 
 import pytest
 
-from src.persona.agent import (
-    Agent,
-    ConfidenceBreakdown,
-    DiscoveryType,
-    ExpertiseLevel,
-    GraphSnapshot,
-    PersonaIdentity,
-    ProvenanceLink,
-    Stance,
-)
+from src.persona.agent import Agent, Stance
+from src.persona.models_persona import ProvenanceLink
+from src.simulation.agent_record import AgentView
 from src.simulation.debate_config import DebateConfig
 from src.simulation.llm_batch import BatchedLLMRunner
 from src.simulation.orchestrator import (
@@ -34,25 +27,18 @@ from src.simulation.society_memory import SocietyMemory
 from src.simulation.topology import CommunicationTopology
 from src.simulation.verdict import VerdictSynthesizer
 from src.utils.queryIntend import QueryIntent
+from tests.agent_factory import slim_agent
 
 
 def _make_profile(agent_id: int, name: str) -> Agent:
     """Canonical Agent stand-in — the debate loop reads it, so every field must resolve."""
-    return Agent(
+    return slim_agent(
+        name,
         agent_id=uuid.UUID(int=agent_id),
-        identity=PersonaIdentity(
-            name=name, archetype="Expert", communication_style="Formal"
-        ),
-        discovery_type=DiscoveryType.INTENT_DRIVEN,
-        expertise_level=ExpertiseLevel.TECHNICAL,
         bio=f"{name} perspective",
-        detailed_perspective=f"{name} perspective",
-        domain_tags=[f"{name}_domain"],
+        details_raw=f"{name} perspective",
+        role=f"{name}_domain",
         confidence=0.7,
-        confidence_breakdown=ConfidenceBreakdown(
-            source_breadth=1, node_density=1, relationship_connectivity=0.5
-        ),
-        graph_snapshot=GraphSnapshot(dataset_id="ds1"),
     )
 
 
@@ -1049,7 +1035,8 @@ async def test_agent_events_are_broadcast_in_order_without_a_selection_event():
     agents = [m for m in ws_calls if m["type"] == "agent"]
     assert [m["index"] for m in agents] == [1, 2]
     assert all(m["total"] == 2 for m in agents)
-    assert agents[0]["profile"]["identity"]["name"] == "Alice"
+    assert agents[0]["profile"]["name"] == "Alice"
+    assert set(agents[0]["profile"]) == set(AgentView.model_fields)
 
 
 @pytest.mark.asyncio

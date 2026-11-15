@@ -294,6 +294,7 @@ class PersonaRepository:
                 or node.get("tone")
                 or "direct and evidence-led"
             ),
+            type_label=_real_type_label([node.get("label")]),
         )
 
         discovery_type = (
@@ -451,6 +452,11 @@ class PersonaRepository:
 
         return Agent(
             identity=identity,
+            node_id=str(node.get("id") or agent_name),
+            dataset_id=str(dataset_id or ""),
+            role=str(node.get("role_description") or description)[:300],
+            strength=conviction,
+            details_raw=str(perspective)[:4000],
             discovery_type=discovery_type,
             expertise_level=expertise_level,
             last_updated=last_updated,

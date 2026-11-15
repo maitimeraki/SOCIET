@@ -6,43 +6,30 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from src.persona.agent import (
-    Agent,
-    ConfidenceBreakdown,
-    DiscoveryType,
-    ExpertiseLevel,
-    PersonaIdentity,
-)
+from src.persona.agent import Agent
 from src.simulation.llm_batch import BatchedLLMRunner, PairPrompt
 from src.simulation.pair_turn import CommPair, RoundResult
 from src.simulation.round_runner import (
-    PERSONA_PERSPECTIVE_CHARS,
     RoundRunner,
     _build_system_prompt,
     _build_user_prompt,
     _parse_response_stance,
 )
 from src.utils.queryIntend import QueryIntent
+from tests.agent_factory import slim_agent
 
 
 def make_profile(
     name: str, domain_tags: list[str], perspective: str, confidence: float
 ) -> tuple[uuid.UUID, Agent]:
     aid = uuid.uuid4()
-    agent = Agent(
+    agent = slim_agent(
+        name,
         agent_id=aid,
-        identity=PersonaIdentity(
-            name=name, archetype="Expert", communication_style="Formal"
-        ),
-        discovery_type=DiscoveryType.INTENT_DRIVEN,
-        expertise_level=ExpertiseLevel.TECHNICAL,
+        role=", ".join(domain_tags),
         bio=f"{name} description",
-        detailed_perspective=perspective,
-        domain_tags=domain_tags,
+        details_raw=perspective,
         confidence=confidence,
-        confidence_breakdown=ConfidenceBreakdown(
-            source_breadth=1, node_density=1, relationship_connectivity=0.5
-        ),
     )
     return aid, agent
 
@@ -132,12 +119,12 @@ def test_system_prompt_uses_profile_fields():
     assert "Markets self-correct efficiently" in prompt
 
 
-def test_system_prompt_truncates_perspective():
-    _, alice = make_profile("Alice", ["x"], "x" * 5000, 0.8)
+def test_system_prompt_carries_the_full_profile():
+    full = "x" * 5000
+    _, alice = make_profile("Alice", ["x"], full, 0.8)
     _, bob = make_profile("Bob", ["y"], "y", 0.7)
     prompt = _build_system_prompt(alice, bob, [])
-    line = next(l for l in prompt.splitlines() if l.startswith("Your perspective: "))
-    assert len(line) - len("Your perspective: ") <= PERSONA_PERSPECTIVE_CHARS
+    assert full in prompt
 
 
 def test_user_prompt_includes_query():

@@ -205,7 +205,7 @@ class DebateOrchestrator:
             await ws_broadcast(
                 {
                     "type": "agent",
-                    "profile": profile.model_dump(mode="json"),
+                    "profile": profile.view().model_dump(mode="json"),
                     "index": index,
                     "total": total,
                 }

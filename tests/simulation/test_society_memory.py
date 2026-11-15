@@ -76,10 +76,9 @@ def _round(n, turns, pairs):
 
 
 class FakeProfile:
-    def __init__(self, name, conviction=0.5, cior=0.0):
+    def __init__(self, name, strength=0.5):
         self.identity = type("I", (), {"name": name})()
-        self.conviction = conviction
-        self.cior = cior
+        self.strength = strength
 
 
 @pytest.mark.asyncio
@@ -121,9 +120,9 @@ async def test_commit_round_writes_opinions_and_round_keyed_edges():
     rx_params = next(kw for (q, kw) in session.calls if "REACTED_TO" in q)
     assert rx_params["query_hash"] == "qh1"
     assert any("current_stance" in q for q in queries)
-    # weight math: 0.8 * 0.5 * (1 + 0) / 2 = 0.2
+    # weight math: confidence 0.8 * strength 0.5 = 0.4
     _, params = session.calls[0]
-    assert abs(params["opinions"][0]["weight"] - 0.2) < 1e-9
+    assert abs(params["opinions"][0]["weight"] - 0.4) < 1e-9
 
 
 @pytest.mark.asyncio
@@ -290,8 +289,8 @@ async def test_commit_round_self_pair_writes_no_reaction():
 
 
 @pytest.mark.asyncio
-async def test_commit_round_zero_conviction_keeps_zero_weight():
-    """conviction == 0.0 is a real value; CIOR weight must not fabricate 0.5 for it."""
+async def test_commit_round_zero_strength_keeps_zero_weight():
+    """strength == 0.0 is a real value; the opinion weight must not fabricate 0.5 for it."""
     session = FakeSession()
     driver = MagicMock()
     driver.session.return_value = session
@@ -302,11 +301,11 @@ async def test_commit_round_zero_conviction_keeps_zero_weight():
         [CommPair(agent_a="Zero", agent_b="Other")],
     )
     await svc.commit_round(
-        rnd, "ds", "qh", {"Zero": FakeProfile("Zero", conviction=0.0, cior=0.0)}
+        rnd, "ds", "qh", {"Zero": FakeProfile("Zero", strength=0.0)}
     )
     op = session.calls[0][1]["opinions"][0]
-    assert op["conviction"] == 0.0
-    assert op["weight"] == 0.0  # not 0.8 * 0.5 * (1 + 0) / 2 == 0.2
+    assert op["strength"] == 0.0
+    assert op["weight"] == 0.0  # not 0.8 * 0.5 == 0.4
 
 
 @pytest.mark.asyncio
@@ -329,7 +328,7 @@ async def test_commit_round_missing_profile_warns(caplog):
     assert "Ghost" in records[0].getMessage()
     op = session.calls[0][1]["opinions"][0]
     assert op["weight"] == pytest.approx(
-        0.8 * 0.5 * (1 + 0.0) / 2
+        0.8 * 0.5
     )  # unchanged fallback math
 
 
@@ -391,7 +390,7 @@ async def test_receipt_carries_written_nodes(memory):
         round_result=_round_with_two_opinions(),
         dataset_id="ds1",
         query_hash="q1",
-        profile_map={},  # both agents fall back to conviction=0.5, cior=0.0
+        profile_map={},  # both agents fall back to strength=0.5
     )
     nodes = receipt["written_nodes"]
     assert len(nodes) == 2

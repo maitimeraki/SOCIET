@@ -13,15 +13,8 @@ from uuid import uuid4
 
 import pytest
 
-from src.persona.agent import (
-    SYNTHETIC_PROVENANCE_PREFIX,
-    Agent,
-    DiscoveryType,
-    ExpertiseLevel,
-    PersonaIdentity,
-    ProvenanceLink,
-    Stance,
-)
+from src.persona.agent import Agent, Stance
+from src.simulation.evidence import EvidenceItem
 from src.simulation.pair_turn import AgentTurn, RoundResult
 from src.simulation.verdict import (
     CONTESTED_THRESHOLD,
@@ -29,6 +22,7 @@ from src.simulation.verdict import (
     SUMMARY_TRANSCRIPT_MAX_TURNS,
     VerdictSynthesizer,
 )
+from tests.agent_factory import slim_agent
 
 # --- fixtures ---------------------------------------------------------------
 
@@ -56,25 +50,23 @@ def make_round(num: int, turns: list[AgentTurn]) -> RoundResult:
 
 def make_agent(
     name: str,
-    conviction: float = 1.0,
-    cior: float = 1.0,
-    provenance: list[ProvenanceLink] | None = None,
+    strength: float = 1.0,
+    provenance: list[EvidenceItem] | None = None,
 ) -> Agent:
-    return Agent(
-        identity=PersonaIdentity(
-            name=name, archetype="Expert", communication_style="direct"
-        ),
-        discovery_type=DiscoveryType.GRAPH_DISCOVERY,
-        expertise_level=ExpertiseLevel.STRATEGIC,
-        conviction=conviction,
-        cior=cior,
-        summary_provenance=provenance or [],
-    )
+    return slim_agent(name, strength=strength, evidence=provenance or [])
 
 
-def provenance_of(title: str) -> ProvenanceLink:
-    return ProvenanceLink(
-        doc_id=f"doc-{title}", title=title, breadcrumb=title, chunk_id=uuid4()
+def provenance_of(title: str) -> EvidenceItem:
+    return EvidenceItem(
+        id=f"e-{title}",
+        chunk_id=str(uuid4()),
+        doc_id=f"doc-{title}",
+        doc_title=title,
+        section=title,
+        span=(0, len(title)),
+        text=title,
+        origin="chunk",
+        retrieval_score=1.0,
     )
 
 
@@ -288,27 +280,8 @@ class TestTranscriptBound:
 # --- Step 4/5: the CIOR factor never erases a cluster -----------------------
 
 
-class TestCiorFloor:
-    def test_hostile_cluster_weight_is_positive(self):
-        synthesizer = VerdictSynthesizer()
-        clusters = {s: [] for s in Stance}
-        clusters[Stance.NEGATIVE] = [make_turn("Gut", "NEGATIVE", 1.0)]
-        weights = synthesizer._calibrate_cior(
-            clusters, {"Gut": make_agent("Gut", conviction=1.0, cior=-1.0)}
-        )
-        assert weights[Stance.NEGATIVE] > 0.0
-
-    def test_cior_floor_maps_minus_one_to_half(self):
-        synthesizer = VerdictSynthesizer()
-        clusters = {s: [] for s in Stance}
-        clusters[Stance.NEGATIVE] = [make_turn("Gut", "NEGATIVE", 1.0)]
-        weights = synthesizer._calibrate_cior(
-            clusters, {"Gut": make_agent("Gut", conviction=1.0, cior=-1.0)}
-        )
-        # cior_factor(-1) = 0.5 => weight = 1.0 * 1.0 * 0.5
-        assert pytest.approx(weights[Stance.NEGATIVE], rel=1e-6) == 0.5
-
-    def test_hostile_cluster_can_win(self):
+class TestStrengthWeighting:
+    def test_a_strong_minority_can_win(self):
         synthesizer = VerdictSynthesizer()
         rounds = [
             make_round(
@@ -320,8 +293,8 @@ class TestCiorFloor:
             )
         ]
         profiles = [
-            make_agent("Milquetoast", conviction=1.0, cior=1.0),
-            make_agent("Gut", conviction=1.0, cior=-1.0),
+            make_agent("Milquetoast", strength=1.0),
+            make_agent("Gut", strength=1.0),
         ]
         verdict = synthesizer.synthesize(rounds, profiles)
         assert verdict.overall_stance == Stance.NEGATIVE
@@ -411,37 +384,4 @@ class TestProvenanceByClaim:
         ]
         profiles = [make_agent("Alice", provenance=[])]
         verdict = VerdictSynthesizer().synthesize(rounds, profiles)
-        assert verdict.provenance_by_claim.get("entity_alpha", []) == []
-
-    @staticmethod
-    def _synthetic(domain: str = "finance") -> ProvenanceLink:
-        return ProvenanceLink(
-            doc_id=f"{SYNTHETIC_PROVENANCE_PREFIX}{domain}@ds1",
-            title=domain,
-            breadcrumb="",
-            chunk_id=uuid4(),
-        )
-
-    def test_synthetic_sector_links_are_never_attributed(self):
-        """The sector fallback is not provenance — it must not reach the claim map."""
-        real = provenance_of("Real Report")
-        rounds = [
-            make_round(1, [make_turn("Alice", "POSITIVE", 0.8, refs=["entity_alpha"])])
-        ]
-        profiles = [make_agent("Alice", provenance=[self._synthetic(), real])]
-
-        verdict = VerdictSynthesizer().synthesize(rounds, profiles)
-
-        assert [l.title for l in verdict.provenance_by_claim["entity_alpha"]] == [
-            "Real Report"
-        ]
-
-    def test_synthetic_only_provenance_yields_no_link(self):
-        rounds = [
-            make_round(1, [make_turn("Alice", "POSITIVE", 0.8, refs=["entity_alpha"])])
-        ]
-        profiles = [make_agent("Alice", provenance=[self._synthetic()])]
-
-        verdict = VerdictSynthesizer().synthesize(rounds, profiles)
-
         assert verdict.provenance_by_claim.get("entity_alpha", []) == []

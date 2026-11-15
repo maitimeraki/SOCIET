@@ -53,21 +53,21 @@ class GenerationResult:
     model: str
 
 
-def _attr(value: object) -> str:
+def attr_text(value: object) -> str:
     """Attribute or free-text value as data: no markup characters, one line."""
     return " ".join(_MARKUP.sub("", str(value)).split())
 
 
-def _body(value: str) -> str:
+def body_text(value: str) -> str:
     """Fenced body as data: angle brackets removed so it cannot close the fence."""
     return value.replace("<", "").replace(">", "")
 
 
-def _evidence_block(item: EvidenceItem) -> list[str]:
+def evidence_block(item: EvidenceItem) -> list[str]:
     return [
-        f'<evidence id="{_attr(item.id)}" doc="{_attr(item.doc_title)}" '
-        f'section="{_attr(item.section)}" origin="{_attr(item.origin)}">',
-        _body(item.text),
+        f'<evidence id="{attr_text(item.id)}" doc="{attr_text(item.doc_title)}" '
+        f'section="{attr_text(item.section)}" origin="{attr_text(item.origin)}">',
+        body_text(item.text),
         "</evidence>",
     ]
 
@@ -99,23 +99,23 @@ def build_prompt(
 ) -> tuple[str, str]:
     lines = [
         "QUESTION",
-        _attr(question),
+        attr_text(question),
         "DECISION AXIS",
-        _attr(axis) or "none",
+        attr_text(axis) or "none",
         "NODE",
-        f"name: {_attr(name)}",
-        f"aliases: {', '.join(_attr(a) for a in aliases) or 'none'}",
-        f"type: {_attr(type_label) or 'unknown'}",
+        f"name: {attr_text(name)}",
+        f"aliases: {', '.join(attr_text(a) for a in aliases) or 'none'}",
+        f"type: {attr_text(type_label) or 'unknown'}",
         "",
         "EVIDENCE",
     ]
     for item in pack.items:
-        lines.extend(_evidence_block(item))
+        lines.extend(evidence_block(item))
     lines.append("RELATIONS")
     for rel in pack.relations:
         lines.append(
-            f'<relation id="{_attr(rel.id)}" type="{_attr(rel.type)}" direction="{_attr(rel.direction)}">'
-            f"{_body(rel.counterpart_name)}</relation>"
+            f'<relation id="{attr_text(rel.id)}" type="{attr_text(rel.type)}" direction="{attr_text(rel.direction)}">'
+            f"{body_text(rel.counterpart_name)}</relation>"
         )
     lines.append(
         f"COUNTS items={len(pack.items)} documents={pack.doc_count} "
@@ -124,7 +124,7 @@ def build_prompt(
     if rejections:
         lines.append("")
         lines.append("REPAIR: the previous reply was rejected for these reasons. Fix them and reply with the full JSON object.")
-        lines.extend(f"- {_attr(r.field)}: {_attr(r.reason)}" for r in rejections)
+        lines.extend(f"- {attr_text(r.field)}: {attr_text(r.reason)}" for r in rejections)
     return SYSTEM_PROMPT, "\n".join(lines)
 
 
@@ -195,7 +195,7 @@ def _judge_prompt(pairs: list[tuple[int, str]], pack: EvidencePack, name: str) -
     cited_relations: dict[str, None] = {}
     lines = ["SENTENCES"]
     for index, sentence in pairs:
-        lines.append(f'<sentence index="{_attr(index)}">{_body(sentence)}</sentence>')
+        lines.append(f'<sentence index="{attr_text(index)}">{body_text(sentence)}</sentence>')
         for marker in CITE_MARKER.findall(sentence):
             if marker in items:
                 cited_items[marker] = None
@@ -203,16 +203,16 @@ def _judge_prompt(pairs: list[tuple[int, str]], pack: EvidencePack, name: str) -
                 cited_relations[marker] = None
     lines.append("EVIDENCE")
     for eid in cited_items:
-        lines.extend(_evidence_block(items[eid]))
+        lines.extend(evidence_block(items[eid]))
     lines.append("RELATIONS")
     for rid in cited_relations:
-        lines.append(f'<relation id="{_attr(rid)}">{_body(_triple(relations[rid], name))}</relation>')
+        lines.append(f'<relation id="{attr_text(rid)}">{body_text(_triple(relations[rid], name))}</relation>')
     return system, "\n".join(lines)
 
 
 def _triple(rel: RelationItem, name: str) -> str:
     subject, counterpart = (name, rel.counterpart_name) if rel.direction == "out" else (rel.counterpart_name, name)
-    return f"{_attr(subject)} {_attr(rel.type)} {_attr(counterpart)}"
+    return f"{attr_text(subject)} {attr_text(rel.type)} {attr_text(counterpart)}"
 
 
 def _parse_unsupported(raw: str, judged: set[int]) -> set[int] | None:

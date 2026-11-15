@@ -1,13 +1,13 @@
 """Tests for VerdictSynthesizer."""
 
 import logging
-from unittest.mock import MagicMock
 
 import pytest
 
 from src.persona.agent import WIRE_STANCES, Stance
 from src.simulation.pair_turn import AgentTurn, DebateVerdict, RoundResult
 from src.simulation.verdict import VerdictSynthesizer, cluster_by_stance, count_weights
+from tests.agent_factory import slim_agent
 
 
 def test_debate_verdict_has_narrative():
@@ -23,20 +23,9 @@ def test_debate_verdict_has_narrative():
     assert v.narrative.startswith("## Recommendation")
 
 
-class MockProfile:
-    """Minimal stand-in for Agent, compatible with _calibrate_cior lookups."""
+def make_profile(name: str, strength: float = 0.5):
+    return slim_agent(name, strength=strength)
 
-    def __init__(self, name: str, conviction: float, cior: float):
-        identity = MagicMock()
-        identity.name = name
-        self.identity = identity
-        self.conviction = conviction
-        self.cior = cior
-        self.summary_provenance = []
-
-
-def make_profile(name: str, conviction: float = 0.5, cior: float = 0.0) -> MockProfile:
-    return MockProfile(name=name, conviction=conviction, cior=cior)
 
 
 def make_turn(
@@ -148,7 +137,7 @@ class TestAbstainCarriesNoWeight:
         synthesizer = VerdictSynthesizer()
         clusters = cluster_by_stance([make_turn("a1", "Alice", "ABSTAIN", 0.9)])
         with_profile = synthesizer._calibrate_cior(
-            clusters, {"Alice": make_profile("Alice", conviction=1.0, cior=1.0)}
+            clusters, {"Alice": make_profile("Alice", strength=1.0)}
         )
         without_profile = synthesizer._calibrate_cior(clusters, {})
         assert with_profile[Stance.ABSTAIN] == 0.0
@@ -186,25 +175,22 @@ class TestCalibrateCIOR:
         # weight = confidence * 0.5 = 0.4
         assert pytest.approx(weights[Stance.POSITIVE], rel=1e-6) == 0.4
 
-    def test_known_agent_uses_conviction_and_cior(self):
+    def test_known_agent_weight_is_confidence_times_strength(self):
         synthesizer = VerdictSynthesizer()
-        # cior_factor(0.5) = 0.5 + (0.5 + 1) / 4 = 0.875
-        p_alice = make_profile("Alice", conviction=0.8, cior=0.5)
+        p_alice = make_profile("Alice", strength=0.8)
         clusters = {s: [] for s in Stance}
         clusters[Stance.POSITIVE] = [make_turn("a1", "Alice", "POSITIVE", 0.5)]
         weights = synthesizer._calibrate_cior(clusters, {"Alice": p_alice})
-        # weight = 0.5 * 0.8 * 0.875 = 0.35
-        assert pytest.approx(weights[Stance.POSITIVE], rel=1e-6) == 0.35
+        # weight = 0.5 * 0.8 = 0.4
+        assert pytest.approx(weights[Stance.POSITIVE], rel=1e-6) == 0.4
 
-    def test_cior_negative_halves_but_never_zeroes_weight(self):
+    def test_zero_strength_carries_zero_weight(self):
         synthesizer = VerdictSynthesizer()
-        # cior_factor(-1.0) = 0.5 + 0 / 4 = 0.5 (the floor, never 0)
-        p_gut = make_profile("GutAgent", conviction=1.0, cior=-1.0)
+        p_gut = make_profile("GutAgent", strength=0.0)
         clusters = {s: [] for s in Stance}
         clusters[Stance.NEGATIVE] = [make_turn("g1", "GutAgent", "NEGATIVE", 1.0)]
         weights = synthesizer._calibrate_cior(clusters, {"GutAgent": p_gut})
-        # weight = 1.0 * 1.0 * 0.5 = 0.5
-        assert pytest.approx(weights[Stance.NEGATIVE], rel=1e-6) == 0.5
+        assert weights[Stance.NEGATIVE] == 0.0
 
 
 class TestSynthesize:
@@ -245,14 +231,14 @@ class TestSynthesize:
 
     @pytest.fixture
     def fixture_profiles(self):
-        """AgentProfiles matching fixture_rounds (cior=1.0 => cior_factor=1.0)."""
+        """AgentProfiles matching fixture_rounds."""
         return [
-            make_profile("Alice", conviction=0.9, cior=1.0),
-            make_profile("Bob", conviction=0.7, cior=1.0),
-            make_profile("Carol", conviction=0.8, cior=1.0),
-            make_profile("Dave", conviction=0.5, cior=1.0),
-            make_profile("Eve", conviction=0.6, cior=1.0),
-            make_profile("Frank", conviction=0.4, cior=1.0),
+            make_profile("Alice", strength=0.9),
+            make_profile("Bob", strength=0.7),
+            make_profile("Carol", strength=0.8),
+            make_profile("Dave", strength=0.5),
+            make_profile("Eve", strength=0.6),
+            make_profile("Frank", strength=0.4),
         ]
 
     def test_empty_rounds_returns_neutral(self):
@@ -368,7 +354,7 @@ class TestMissingProfileWarning:
         rounds = [make_round(1, [make_turn("a1", "Alice", "POSITIVE", 0.8)])]
         with caplog.at_level(logging.WARNING, logger="src.simulation.verdict"):
             synthesizer.synthesize(
-                rounds, [make_profile("Alice", conviction=0.9, cior=1.0)]
+                rounds, [make_profile("Alice", strength=0.9)]
             )
         assert self._missing_records(caplog) == []
 

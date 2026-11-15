@@ -8,7 +8,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from src.api.public_events import project_event, project_result
+from src.api.public_events import _PROFILE_KEYS, project_event, project_result
 from src.persona.models_persona import ProvenanceLink
 
 _PROFILE_LINK_ID = uuid.UUID("c0ffee00-0000-4000-8000-000000000002")
@@ -398,3 +398,9 @@ def test_evidence_item_with_no_surviving_value_is_dropped():
 def test_dissenting_view_with_no_surviving_value_is_dropped():
     out = project_event({"type": "complete", "dissenting_views": [{"stance": 1, "view": None}, {"stance": "NEG", "view": "keep"}]})
     assert out["dissenting_views"] == [{"stance": "NEG", "view": "keep"}]
+
+
+def test_profile_allowlist_is_exactly_the_agent_view_keys():
+    from src.simulation.agent_record import AgentView
+
+    assert _PROFILE_KEYS == frozenset(AgentView.model_fields)

@@ -1,103 +1,86 @@
-"""The debate system prompt renders an agent's own source evidence.
+"""The debate system prompt renders the agent's own voice and fenced evidence.
 
-A non-empty `Agent.source_evidence` adds one labelled block; an empty list adds
-nothing at all (no stray header), so an agent with no fetched chunks looks
-exactly as it did before this feature existed.
+Evidence renders as `<evidence id=...>` blocks (at most PROMPT_EVIDENCE_MAX); an
+agent with no evidence renders the word "none" and no fence at all. Attribute
+values are stripped of markup so an id cannot close the fence (audit L-G4).
 """
 
-from src.persona.agent import (
-    SOURCE_EVIDENCE_MAX_SNIPPETS,
-    SOURCE_EVIDENCE_SNIPPET_CHARS,
-    Agent,
-    DiscoveryType,
-    PersonaIdentity,
-)
-from src.simulation.round_runner import PERSONA_PERSPECTIVE_CHARS, _build_system_prompt
+from src.simulation.evidence import EvidenceItem
+from src.simulation.round_runner import PROMPT_EVIDENCE_MAX, _build_system_prompt
+from tests.agent_factory import slim_agent
 
 
-def _agent(**over) -> Agent:
-    base = dict(
-        identity=PersonaIdentity(name="A", archetype="x", communication_style="y"),
-        discovery_type=DiscoveryType.GRAPH_DISCOVERY,
+def _item(i: int, text: str = "chunk text", item_id: str | None = None) -> EvidenceItem:
+    return EvidenceItem(
+        id=item_id or f"e{i}",
+        chunk_id="00000000-0000-0000-0000-000000000001",
+        doc_id="doc-1",
+        doc_title="Filing",
+        section="Risks",
+        span=(0, len(text)),
+        text=text,
+        origin="chunk",
+        retrieval_score=1.0,
     )
-    base.update(over)
-    return Agent(**base)
 
 
 def test_prompt_includes_evidence_block():
     prompt = _build_system_prompt(
-        _agent(source_evidence=["chunk one text"]), _agent(), []
+        slim_agent(evidence=[_item(1, "chunk one text")]), slim_agent("B"), []
     )
 
-    assert "SOURCE EVIDENCE" in prompt
+    assert '<evidence id="e1"' in prompt
     assert "chunk one text" in prompt
 
 
-def test_prompt_omits_block_when_empty():
-    prompt = _build_system_prompt(_agent(), _agent(), [])
+def test_prompt_renders_none_and_no_fence_when_no_evidence():
+    prompt = _build_system_prompt(slim_agent(), slim_agent("B"), [])
 
-    assert "SOURCE EVIDENCE" not in prompt
+    assert "<evidence" not in prompt
     assert "\n\n\n" not in prompt
 
 
-def test_prompt_keeps_existing_lines():
+def test_prompt_keeps_role_bio_stance_and_shared_entities():
     prompt = _build_system_prompt(
-        _agent(role_description="my role", detailed_perspective="my perspective"),
-        _agent(),
+        slim_agent(role="my role", bio="my bio", details_raw="my perspective"),
+        slim_agent("B"),
         ["SharedEntity"],
     )
 
     assert "my role" in prompt
+    assert "my bio" in prompt
     assert "my perspective" in prompt
     assert "SharedEntity" in prompt
 
 
-def test_full_perspective_reaches_prompt():
-    """A ~1200-char perspective reaches the prompt whole (the old [:500] slice cut it)."""
-    perspective = ("alpha beta gamma delta " * 50).strip()
-    assert len(perspective) > 1000
+def test_full_profile_reaches_prompt_untruncated():
+    details = ("alpha beta gamma delta " * 50).strip()
+    assert len(details) > 1000
 
+    prompt = _build_system_prompt(slim_agent(details_raw=details), slim_agent("B"), [])
+
+    assert details in prompt
+
+
+def test_prompt_renders_at_most_max_evidence_items():
+    evidence = [_item(i) for i in range(PROMPT_EVIDENCE_MAX + 3)]
+    prompt = _build_system_prompt(slim_agent(evidence=evidence), slim_agent("B"), [])
+
+    assert prompt.count("<evidence ") == PROMPT_EVIDENCE_MAX
+
+
+def test_evidence_id_cannot_break_the_fence():
     prompt = _build_system_prompt(
-        _agent(detailed_perspective=perspective), _agent(), []
+        slim_agent(evidence=[_item(1, item_id='e1"><x>')]), slim_agent("B"), []
     )
 
-    assert perspective in prompt
+    assert "<x>" not in prompt
+    assert '<evidence id="e1x"' in prompt
 
 
-def test_prompt_truncates_long_snippet_at_word_boundary():
-    prompt = _build_system_prompt(_agent(source_evidence=["word " * 500]), _agent(), [])
-
-    rendered = [line[2:] for line in prompt.splitlines() if line.startswith("- ")]
-    assert len(rendered) == 1
-    assert len(rendered[0]) <= SOURCE_EVIDENCE_SNIPPET_CHARS
-    assert not rendered[0].endswith(" ")  # cut on a boundary, not mid-space
-
-
-def test_prompt_renders_at_most_max_snippets():
-    evidence = [f"snippet number {i}" for i in range(SOURCE_EVIDENCE_MAX_SNIPPETS + 3)]
-    prompt = _build_system_prompt(_agent(source_evidence=evidence), _agent(), [])
-
-    rendered = [line for line in prompt.splitlines() if line.startswith("- ")]
-    assert len(rendered) == SOURCE_EVIDENCE_MAX_SNIPPETS
-
-
-def test_perspective_over_budget_is_bounded():
-    """A runaway perspective is still capped — the prompt cannot blow up."""
+def test_prompt_states_the_stance_and_strength():
     prompt = _build_system_prompt(
-        _agent(detailed_perspective="word " * 2000), _agent(), []
+        slim_agent(strength=0.25), slim_agent("B"), []
     )
 
-    line = next(l for l in prompt.splitlines() if l.startswith("Your perspective: "))
-    assert len(line) - len("Your perspective: ") <= PERSONA_PERSPECTIVE_CHARS
-
-
-def test_prompt_uses_role_description_not_bio():
-    """The prompt's one-liner is the agent's role_description, not a bio slice."""
-    prompt = _build_system_prompt(
-        _agent(bio="a long narrative bio", role_description="Senior Grid Analyst"),
-        _agent(),
-        [],
-    )
-
-    assert "Senior Grid Analyst" in prompt
-    assert "Bio:" not in prompt
+    assert "POSITIVE (strength 0.25)" in prompt

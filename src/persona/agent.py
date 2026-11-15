@@ -22,10 +22,16 @@ from __future__ import annotations
 
 from datetime import datetime
 from enum import Enum
-from typing import Any, List, Optional
+from typing import TYPE_CHECKING, Any, Dict, List, Optional
 from uuid import UUID, uuid4
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+from src.simulation.evidence import EvidenceItem, RelationItem
+from src.simulation.profile_validation import strip_markers
+
+if TYPE_CHECKING:
+    from src.simulation.agent_record import AgentView
 
 # ---------------------------------------------------------------------------
 # Source evidence bounds
@@ -91,6 +97,7 @@ class PersonaIdentity(BaseModel):
         description="Role label (e.g. 'The Visionary', 'REGULATORY_BODY')"
     )
     communication_style: str
+    type_label: str = ""  # the graph entity's real type; "" when the graph carries none
 
 
 class ProvenanceLink(BaseModel):
@@ -156,6 +163,17 @@ class Agent(BaseModel):
 
     # --- 1. Identity & system metadata ---
     agent_id: UUID = Field(default_factory=uuid4)
+    # Slim-Agent fields (Task 2.6a). C1 adds them with temporary defaults; the
+    # old producer maps its values onto them. C3 makes them required.
+    node_id: str = ""
+    dataset_id: str = ""
+    role: str = ""
+    strength: float = Field(default=0.5, ge=0.0, le=1.0)
+    details_raw: str = ""
+    evidence: List[EvidenceItem] = Field(default_factory=list)
+    relations: List[RelationItem] = Field(default_factory=list)
+    cites: Dict[str, List[str]] = Field(default_factory=dict)
+
     identity: PersonaIdentity
     discovery_type: DiscoveryType
     expertise_level: ExpertiseLevel = ExpertiseLevel.STRATEGIC
@@ -219,6 +237,26 @@ class Agent(BaseModel):
         default_factory=list,
         description="This agent's own source chunk snippets, rendered in its debate prompt",
     )
+
+    @property
+    def details(self) -> str:
+        """The profile prose with citation markers stripped; the only form a client sees."""
+        return strip_markers(self.details_raw)
+
+    def view(self) -> "AgentView":
+        """The client-safe projection (spec 4a). Local import: agent_record imports this module."""
+        from src.simulation.agent_record import AgentView
+
+        return AgentView(
+            name=self.identity.name,
+            type=self.identity.type_label or "type unknown",
+            role=self.role,
+            stance=self.stance,
+            strength=self.strength,
+            bio=self.bio,
+            details=self.details,
+            confidence=self.confidence,
+        )
 
     # --- validators ---
     @field_validator("stance", mode="before")
