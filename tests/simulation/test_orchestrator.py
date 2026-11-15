@@ -1,5 +1,7 @@
 """Tests for DebateOrchestrator."""
 
+import dataclasses
+import json
 import re
 import uuid
 from types import SimpleNamespace
@@ -7,12 +9,15 @@ from unittest.mock import ANY, AsyncMock, MagicMock, patch
 
 import pytest
 
+from src.api.public_events import project_event, project_result
+from src.api.run_doc import roster_views
 from src.billing.metering import MeteringError
 from src.persona.agent import Agent, Stance
+from src.persona.graph_context import EntityNode
 from src.persona.models_persona import ProvenanceLink
 from src.simulation.agent_record import AgentView
 from src.simulation.debate_config import DebateConfig
-from src.simulation.llm_batch import BatchedLLMRunner
+from src.simulation.llm_batch import BatchedLLMRunner, PairResult
 from src.simulation.orchestrator import (
     DebateOrchestrator,
     OrchestratedDebateResult,
@@ -31,6 +36,12 @@ from src.simulation.topology import CommunicationTopology
 from src.simulation.verdict import VerdictSynthesizer
 from src.utils.queryIntend import QueryIntent
 from tests.agent_factory import slim_agent
+from tests.simulation.test_profile_synthesizer import (
+    FakeGraph,
+    FakeLLM,
+    _chunks_for,
+    _repo,
+)
 
 
 def _make_profile(agent_id: int, name: str) -> Agent:
@@ -1620,3 +1631,203 @@ async def test_a_node_tried_in_the_initial_synthesis_is_not_drawn_as_a_joiner():
     assert synth.synthesize_from_names.await_args.kwargs["names"] == ["Carol"]
     handed = [[r.node.name for r in call.args[0]] for call in on_records.await_args_list]
     assert handed == [["Lumen", "Alice"], ["Carol"]]
+
+
+# --- end to end: no provenance, evidence, reasoning or cite id reaches a client payload ---
+
+_LEAK_QUESTION = "Should we enter Berlin?"
+_LEAK_ENTITIES = [
+    EntityNode(id="kestra", name="Kestra", label="Company", relevance_score=0.9),
+    EntityNode(id="orbit", name="Orbit", label="Person", relevance_score=0.7),
+    EntityNode(id="lumen", name="Lumen", label="Company", relevance_score=0.8),
+]
+_LEAK_CHUNK_ID = uuid.UUID("c0ffee00-0000-4000-8000-0000000000c1")
+_LEAK_DOC_ID = "doc-market-memo"
+# Every evidence sentence the fake graph serves, taken from the fixture's own chunks.
+EVIDENCE_SENTENCES = sorted(
+    {
+        sentence
+        for hit in _chunks_for(_LEAK_ENTITIES).vector
+        for sentence in re.split(r"(?<=\.)\s+", hit.text)
+        if sentence
+    }
+)
+LEAK_MARKERS = (
+    "chunk_id", "doc_id", "version_hash", "dossier_hash", "graph_snapshot", "summary_provenance",
+    "source_evidence", "evidence", "REASONING", "[e1]", "llm_model", "anchors", "source_count",
+)
+_TURN_REPLY = (
+    "REASONING: the memo's pricing section decides it, privately.\n"
+    "ANSWER: POSITIVE. The pilot rollout timing decides it."
+)
+
+
+class _ReasoningLLM(FakeLLM):
+    """The fake profile model: a private REASONING block ahead of each JSON reply, kept for the control."""
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.raw_replies: list[str] = []
+
+    def _profile(self, name: str, user_prompt: str) -> str:
+        reply = f"REASONING: {name} works through the memo privately first.\n" + super()._profile(
+            name, user_prompt
+        )
+        self.raw_replies.append(reply)
+        return reply
+
+
+def _leak_verdict() -> DebateVerdict:
+    """The verdict as the synthesiser hands it over, with the raw fields a client must not see."""
+    return DebateVerdict(
+        overall_stance=Stance.POSITIVE,
+        confidence_score=0.9,
+        supporting_entities=["Kestra"],
+        opposing_entities=[],
+        summary="Kestra and Orbit back the Berlin pilot.",
+        cluster_details={},
+        provenance_by_claim={
+            "The pilot is priced per seat": [
+                ProvenanceLink(
+                    doc_id=_LEAK_DOC_ID,
+                    title="Market memo",
+                    breadcrumb="Pricing",
+                    chunk_id=_LEAK_CHUNK_ID,
+                )
+            ]
+        },
+        rounds_executed=2,
+        evidence=[
+            {
+                "entity": "Kestra",
+                "claim": "The pilot is priced per seat",
+                "quote": EVIDENCE_SENTENCES[0],
+                "chunk_id": str(_LEAK_CHUNK_ID),
+            }
+        ],
+    )
+
+
+async def _run_leak_debate() -> SimpleNamespace:
+    """A real ProfileSynthesizer over the fake graph and fake profile model, one rejected candidate."""
+    events: list[dict] = []
+    records: list = []
+    llm = _ReasoningLLM(fail={"Lumen"})
+
+    async def ws_broadcast(event: dict) -> None:
+        events.append(event)
+
+    async def on_records(batch) -> None:
+        records.extend(batch)
+
+    async def gather(prompts):
+        for prompt in prompts:
+            yield PairResult(pair_id=prompt.pair_id, response=_TURN_REPLY)
+
+    llm_runner = MagicMock(spec=BatchedLLMRunner)
+    llm_runner.gather = MagicMock(side_effect=gather)
+    topology = AsyncMock(spec=CommunicationTopology)
+    topology.compute_round_pairs.return_value = [CommPair(agent_a="Kestra", agent_b="Orbit")]
+    society_memory = AsyncMock(spec=SocietyMemory)
+    society_memory.read_snapshot.return_value = SocietySnapshot(round=0)
+    society_memory.commit_round.return_value = _ok_receipt()
+    verdict_synth = MagicMock(spec=VerdictSynthesizer)
+    verdict_synth.asynthesize.return_value = _leak_verdict()
+    orchestrator = DebateOrchestrator(
+        profile_synthesizer=ProfileSynthesizer(
+            persona_repo=_repo(), graph_context=FakeGraph(_LEAK_ENTITIES)
+        ),
+        topology=topology,
+        llm_runner=llm_runner,
+        verdict_synthesizer=verdict_synth,
+        society_memory=society_memory,
+    )
+
+    result = await orchestrator.run(
+        _LEAK_QUESTION,
+        "ds1",
+        DebateConfig(max_agents=2, max_rounds=2),
+        ws_broadcast,
+        llm_client=llm,
+        on_records=on_records,
+    )
+    return SimpleNamespace(
+        events=events, records=records, result=result, llm=llm, society_memory=society_memory
+    )
+
+
+def _as_text(payload) -> str:
+    return json.dumps(payload, sort_keys=True, default=str)
+
+
+def _client_payloads(run: SimpleNamespace) -> SimpleNamespace:
+    """What a client can receive: the projected stream, the projected result and the roster."""
+    stream = [event for event in map(project_event, run.events) if event is not None]
+    result = project_result(dataclasses.asdict(run.result))
+    # `evidence` is a verdict key by contract (spec 4b): its items are narrowed to {entity, claim},
+    # which its own assertion checks. The key is renamed here so the substring scan still covers
+    # every value it carries, while the permitted key name itself is not counted as a leak.
+    verdict_evidence = result["evidence"]
+    result = {("verdict_claims" if key == "evidence" else key): value for key, value in result.items()}
+    published = [
+        record.model_dump(mode="json")["view"] for record in run.records if record.status == "published"
+    ]
+    roster = [view.model_dump(mode="json") for view in roster_views(published)]
+    surfaces = {"stream": _as_text(stream), "result": _as_text(result), "roster": _as_text(roster)}
+    types = {event["profile"].get("type") for event in stream if event["type"] == "agent"}
+    types |= {view["type"] for view in roster}
+    return SimpleNamespace(surfaces=surfaces, verdict_evidence=verdict_evidence, types=types)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("marker", LEAK_MARKERS, ids=LEAK_MARKERS)
+async def test_no_client_payload_carries_a_provenance_or_cite_marker(marker):
+    payloads = _client_payloads(await _run_leak_debate())
+
+    assert [name for name, text in payloads.surfaces.items() if marker in text] == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("sentence", EVIDENCE_SENTENCES, ids=EVIDENCE_SENTENCES)
+async def test_no_client_payload_carries_an_evidence_sentence(sentence):
+    payloads = _client_payloads(await _run_leak_debate())
+
+    assert [name for name, text in payloads.surfaces.items() if sentence in text] == []
+
+
+@pytest.mark.asyncio
+async def test_no_client_agent_is_typed_entity():
+    payloads = _client_payloads(await _run_leak_debate())
+
+    assert "Entity" not in payloads.types
+
+
+@pytest.mark.asyncio
+async def test_seated_agents_carry_the_fixture_labels():
+    payloads = _client_payloads(await _run_leak_debate())
+
+    assert payloads.types == {"Company", "Person"}
+
+
+@pytest.mark.asyncio
+async def test_verdict_evidence_keeps_only_entity_and_claim():
+    payloads = _client_payloads(await _run_leak_debate())
+
+    assert payloads.verdict_evidence == [{"entity": "Kestra", "claim": "The pilot is priced per seat"}]
+
+
+@pytest.mark.asyncio
+async def test_positive_control_unprojected_run_carries_the_markers():
+    run = await _run_leak_debate()
+    raw_records = [record.model_dump(mode="json") for record in run.records]
+    raw = _as_text(
+        {
+            "events": run.events,
+            "result": dataclasses.asdict(run.result),
+            "records": raw_records,
+            "model_replies": run.llm.raw_replies,
+        }
+    )
+
+    assert [m for m in ("chunk_id", "doc_id", "dossier_hash", "evidence", "REASONING", "[e1]") if m not in raw] == []
+    assert any(sentence in _as_text(raw_records) for sentence in EVIDENCE_SENTENCES)

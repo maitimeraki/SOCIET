@@ -401,3 +401,17 @@ def test_profile_allowlist_is_exactly_the_agent_view_keys():
     from src.simulation.agent_record import AgentView
 
     assert _PROFILE_KEYS == frozenset(AgentView.model_fields)
+
+
+def test_roster_projection_fails_closed_on_a_raw_key():
+    # The roster is the AgentView schema itself: a stored view with any key beyond it raises
+    # rather than passing the key through to the client.
+    from pydantic import ValidationError
+
+    from src.api.run_doc import roster_views
+
+    view = {"name": "Kestra", "type": "Company", "role": "r", "stance": "POSITIVE", "strength": 0.5,
+            "bio": "b", "details": "d", "confidence": 0.5,
+            "evidence": [{"chunk_id": "X-SECRET", "text": "Some customer text"}]}
+    with pytest.raises(ValidationError):
+        roster_views([view])
