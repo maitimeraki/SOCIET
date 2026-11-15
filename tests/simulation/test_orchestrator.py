@@ -1,7 +1,6 @@
-import re
-
 """Tests for DebateOrchestrator."""
 
+import re
 import uuid
 from unittest.mock import ANY, AsyncMock, MagicMock, patch
 
