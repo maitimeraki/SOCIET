@@ -10,7 +10,7 @@ import time
 import uuid
 from dataclasses import asdict
 from datetime import datetime, timezone
-from typing import Any, Callable, Dict, List, Literal, Optional
+from typing import Any, Awaitable, Callable, Dict, List, Literal, Mapping, Optional
 
 from fastapi import (
     APIRouter,
@@ -34,6 +34,7 @@ from src.api.public_events import (
     RUN_FAILED_MESSAGE,
     project_event,
     project_result,
+    public_source,
     stored_result,
 )
 from src.audit import client_ip
@@ -55,6 +56,7 @@ from src.llm.config_llm import get_llm_config
 from src.simulation.actor_filter import ACTOR_BATCH, TOKENS_PER_LABEL
 from src.simulation.agent_record import AgentView
 from src.simulation.debate_config import DebateConfig
+from src.simulation.evidence import MAX_ITEM_CHARS
 from src.simulation.profile_generator import (
     CALLS_PER_DRAW,
     EXPECTED_CALLS_PER_SEAT,
@@ -823,6 +825,120 @@ async def get_debate_roster(run_id: str, user: User = Depends(current_user)):
         raise HTTPException(status_code=404, detail=_FLAT_NOT_FOUND)
     await require_owner(head.get("user_id"), user)
     return await run_doc.read_roster(run_id, user.id)
+
+
+# --- a report citation's source text (spec §0B.3 rule 1) ---------------------
+
+
+class SourceUnresolved(Exception):
+    """A citation that does not resolve to its stored source text. The reason is logged, never served."""
+
+
+def _evidence_item(record: Mapping[str, Any], evidence_id: Any) -> Optional[Mapping[str, Any]]:
+    items = record.get("evidence")
+    if not isinstance(items, list):
+        return None
+    return next((i for i in items if isinstance(i, Mapping) and i.get("id") == evidence_id), None)
+
+
+def _verified_span(item: Mapping[str, Any], chunk_text: str) -> str:
+    """The stored evidence text, proven equal to the chunk's text at the stored span.
+
+    A mismatch means the chunk changed since the run. The span is never re-aimed at other text.
+    """
+    span, stored = item.get("span"), item.get("text")
+    if not (isinstance(span, (list, tuple)) and len(span) == 2 and all(type(x) is int for x in span)):
+        raise SourceUnresolved("evidence span is not a pair of integers")
+    start, end = span
+    if not 0 <= start < end <= len(chunk_text):
+        raise SourceUnresolved("evidence span lies outside the chunk")
+    if not isinstance(stored, str) or len(stored) > MAX_ITEM_CHARS:
+        raise SourceUnresolved("stored evidence text is missing or over the item bound")
+    if chunk_text[start:end] != stored:
+        raise SourceUnresolved("chunk text at the stored span no longer matches the evidence")
+    return stored
+
+
+async def resolve_source(
+    n: str,
+    result: Mapping[str, Any],
+    *,
+    read_record: Callable[[str], Awaitable[Optional[Mapping[str, Any]]]],
+    read_chunk_text: Callable[[str], Awaitable[Optional[str]]],
+) -> dict[str, str]:
+    """Resolve citation [n] to {document, section, text}, or raise SourceUnresolved.
+
+    The labels are the stored public sources[n], capped as the report's public labels are; the
+    text is the chunk slice at the stored span, verified equal to the stored evidence text. The
+    two lookups are injected, so the logic runs without a database.
+    """
+    refs = result.get("source_refs")
+    ref = refs.get(n) if isinstance(refs, Mapping) else None
+    if not isinstance(ref, Mapping):
+        raise SourceUnresolved("no source ref for this number")
+    sources = result.get("sources")
+    label = public_source(sources.get(n)) if isinstance(sources, Mapping) else None
+    if label is None:
+        raise SourceUnresolved("no public label for this number")
+    node_id = ref.get("node_id")
+    if not isinstance(node_id, str):
+        raise SourceUnresolved("source ref has no node id")
+    record = await read_record(node_id)
+    if record is None:
+        raise SourceUnresolved("no agent record for this source")
+    item = _evidence_item(record, ref.get("evidence_id"))
+    if item is None:
+        raise SourceUnresolved("no evidence item for this source")
+    chunk_id = item.get("chunk_id")
+    if not isinstance(chunk_id, str):
+        raise SourceUnresolved("evidence item has no chunk id")
+    chunk_text = await read_chunk_text(chunk_id)
+    if chunk_text is None:
+        raise SourceUnresolved("chunk is not in the run's dataset")
+    return {**label, "text": _verified_span(item, chunk_text)}
+
+
+@router.get("/debates/{run_id}/sources/{n}")
+async def get_debate_source(run_id: str, n: str, user: User = Depends(current_user)):
+    """One report citation [n], resolved to the passage it cites. Owner only.
+
+    Every failure is the same 404: an unknown or foreign run, an unknown or malformed n, a
+    missing record or chunk, a chunk changed since the run. The reason is logged only.
+    The chunk is read from the run's own dataset, never from the request.
+    """
+    from src.graph.config_graph import GraphConfig
+    from src.persona.graph_context import GraphContext
+
+    doc = await run_doc.read_run_doc(run_id)
+    if doc is None:
+        logger.warning("source %s: run %s is unknown", n, run_id)
+        raise HTTPException(status_code=404, detail=_FLAT_NOT_FOUND)
+    try:
+        await require_owner(doc.get("user_id"), user)
+    except HTTPException:
+        logger.warning("source %s: run %s is not the caller's", n, run_id)
+        raise HTTPException(status_code=404, detail=_FLAT_NOT_FOUND)
+    dataset_id = doc.get("dataset_id")
+    result = doc.get("result")
+    if not dataset_id or not isinstance(result, Mapping):
+        logger.warning("source %s: run %s has no report or no corpus", n, run_id)
+        raise HTTPException(status_code=404, detail=_FLAT_NOT_FOUND)
+
+    async with GraphContext(GraphConfig()) as ctx:
+
+        async def read_chunk_text(chunk_id: str) -> Optional[str]:
+            return await ctx.fetch_chunk_text(chunk_id, str(dataset_id))
+
+        try:
+            return await resolve_source(
+                n,
+                result,
+                read_record=lambda node_id: run_doc.read_agent_record(run_id, node_id),
+                read_chunk_text=read_chunk_text,
+            )
+        except SourceUnresolved as exc:
+            logger.warning("source %s of run %s not resolved: %s", n, run_id, exc)
+            raise HTTPException(status_code=404, detail=_FLAT_NOT_FOUND)
 
 
 # --- a run's corpus (the replay path's seed) ---------------------------------

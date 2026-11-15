@@ -800,6 +800,29 @@ class GraphContext:
 
         return by_key
 
+    async def fetch_chunk_text(self, chunk_id: str, dataset_id: str) -> Optional[str]:
+        """The text of one chunk, only when it belongs to the dataset; None otherwise.
+
+        Matched on chunk_id, the same key the evidence carries, and scoped by
+        chunk_in_dataset: a chunk id from another dataset reads as absent.
+        """
+        cypher = f"""
+        MATCH (chunk:Chunk {{chunk_id: $chunk_id}})
+        WHERE {chunk_in_dataset("chunk")}
+        RETURN chunk.text AS text
+        LIMIT 1
+        """
+        async with self._driver.session(database=self._db) as session:
+            result = await session.run(
+                cast(LiteralString, cypher),
+                chunk_id=chunk_id,
+                dataset_id=dataset_id,
+            )
+            rows = await result.data()
+
+        text = rows[0].get("text") if rows else None
+        return text if isinstance(text, str) else None
+
 
 # ---- Factory ----
 

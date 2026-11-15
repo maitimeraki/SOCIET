@@ -85,19 +85,24 @@ def _narrow_provenance(claims: Any) -> dict[str, list[dict[str, Any]]]:
     }
 
 
+def public_source(source: Any) -> dict[str, str] | None:
+    # One source is exactly {document, section}, both strings (capped). Anything else is None.
+    if not isinstance(source, Mapping):
+        return None
+    document, section = _text(source.get("document")), _text(source.get("section"))
+    if document is None or section is None:
+        return None
+    return {"document": document, "section": section}
+
+
 def _narrow_sources(sources: Any) -> dict[str, dict[str, str]]:
-    # Each source is exactly {document, section}, both strings (capped). An entry that is not a
-    # mapping, or whose document or section is not a string, is dropped whole.
     if not isinstance(sources, Mapping):
         return {}
     narrowed: dict[str, dict[str, str]] = {}
     for number, source in sources.items():
-        if not isinstance(source, Mapping):
-            continue
-        document, section = _text(source.get("document")), _text(source.get("section"))
-        if document is None or section is None:
-            continue
-        narrowed[str(number)] = {"document": document, "section": section}
+        public = public_source(source)
+        if public is not None:
+            narrowed[str(number)] = public
     return narrowed
 
 

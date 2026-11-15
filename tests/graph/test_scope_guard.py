@@ -74,6 +74,10 @@ READS = {
         lambda ctx, **kw: ctx.get_entity_context("a", **kw),
         [entity_in_dataset("n"), entity_in_dataset("m"), chunk_in_dataset("chunk")],
     ),
+    "fetch_chunk_text": (
+        lambda ctx, **kw: ctx.fetch_chunk_text("c1", **kw),
+        [chunk_in_dataset("chunk")],
+    ),
 }
 
 
