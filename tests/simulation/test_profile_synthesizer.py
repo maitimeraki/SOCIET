@@ -4,7 +4,9 @@ The LLM seam is a fake that answers the profile, judge and actor-filter prompts 
 prompt it is given. The graph is a fake that answers the tenant-scoped reads.
 """
 
+import asyncio
 import json
+import random
 import re
 from contextlib import contextmanager
 from unittest.mock import AsyncMock, MagicMock
@@ -13,6 +15,7 @@ import pytest
 
 from src.billing import metering
 from src.billing.metering import MeteringError
+from src.llm.config_llm import get_llm_config
 from src.persona.agent import Stance
 from src.persona.graph_context import ChunkHit, ChunkSearch, EntityNode, RelationHit
 from src.simulation.evidence import MAX_RELATIONS
@@ -23,15 +26,33 @@ QUESTION = "Should we enter Berlin?"
 TEMPLATE_STRINGS = ["Domain expert", "Participant", "direct and evidence-led", "related nodes", "I specialize in"]
 
 
+SHARED_BIO = "Shared bio: the rollout, compliance timing and pilot pricing decide this one question. " * 3
+
+
 class FakeLLM:
     """Answers the profile call with a valid draft that cites the prompt's evidence.
 
     `fail` names get an unparseable reply, `abstain` names an abstain stance. The
     role echoes the question, so the same node asked two questions gives two profiles.
-    `raises` is raised by every call; `raise_on_profile` only by the profile call.
+    `raises` is raised by every call; `raise_on_profile` by every profile call;
+    `raise_for` by the profile call of the named nodes only. `shared_bio` names write
+    SHARED_BIO until they are asked to regenerate; `stubborn` names keep writing it.
+    `delays` slow a named node's profile call. The in-flight count covers every call.
     """
 
-    def __init__(self, actor_flags=None, fail=(), abstain=(), raises=None, raise_on_profile=None, scope_stack=None):
+    def __init__(
+        self,
+        actor_flags=None,
+        fail=(),
+        abstain=(),
+        raises=None,
+        raise_on_profile=None,
+        scope_stack=None,
+        raise_for=(),
+        shared_bio=(),
+        stubborn=(),
+        delays=None,
+    ):
         self.actor_flags = actor_flags or {}
         self.fail = set(fail)
         self.abstain = set(abstain)
@@ -39,35 +60,57 @@ class FakeLLM:
         self.raise_on_profile = raise_on_profile
         self.scope_stack = scope_stack
         self.scopes_seen: list[list[str]] = []
+        self.raise_for = set(raise_for)
+        self.shared_bio = set(shared_bio)
+        self.stubborn = set(stubborn)
+        self.delays = delays or {}
+        self.profile_prompts: list[str] = []
+        self.regenerations = 0
+        self.in_flight = 0
+        self.max_in_flight = 0
 
     async def generate(self, system_prompt, user_prompt, **kwargs):
+        self.in_flight += 1
+        self.max_in_flight = max(self.max_in_flight, self.in_flight)
+        try:
+            return await self._answer(system_prompt, user_prompt, **kwargs)
+        finally:
+            self.in_flight -= 1
+
+    async def _answer(self, system_prompt, user_prompt, **kwargs):
         if self.scope_stack is not None:
             self.scopes_seen.append(list(self.scope_stack))
         if self.raises is not None:
             raise self.raises
         if system_prompt.startswith("You are an analyst"):
-            if self.raise_on_profile is not None:
-                raise self.raise_on_profile
-            return self._profile(user_prompt)
+            name = re.search(r"^name: (.*)$", user_prompt, re.M).group(1)
+            self.profile_prompts.append(user_prompt)
+            if "ALREADY TAKEN" in user_prompt:
+                self.regenerations += 1
+            await asyncio.sleep(self.delays.get(name, 0.0))
+            if self.raise_on_profile is not None or name in self.raise_for:
+                raise self.raise_on_profile or MeteringError("hold gone")
+            return self._profile(name, user_prompt)
         if system_prompt.startswith("You check whether"):
             return json.dumps({"unsupported": []})
         labels = json.loads(user_prompt)
         return json.dumps({label: self.actor_flags.get(label, True) for label in labels})
 
-    def _profile(self, user_prompt: str) -> str:
-        name = re.search(r"^name: (.*)$", user_prompt, re.M).group(1)
+    def _profile(self, name: str, user_prompt: str) -> str:
         question = user_prompt.split("QUESTION\n", 1)[1].split("\n", 1)[0]
         ids = re.findall(r'<evidence id="(e\d+)"', user_prompt)
         if name in self.fail:
             return "this is not json"
+        regenerating = "ALREADY TAKEN" in user_prompt
+        bio = SHARED_BIO if name in self.shared_bio and (not regenerating or name in self.stubborn) else _bio(name)
         if name in self.abstain:
             return json.dumps(
                 {
                     "role": f"sees no bearing on {question}",
                     "stance": "abstain",
                     "strength": 0.2,
-                    "bio": _bio(name),
-                    "details": _details(ids),
+                    "bio": bio,
+                    "details": _details(name, ids),
                     "confidence": 0.3,
                     "cites": {"role": ids[:1], "stance": [], "bio": ids[:1], "confidence": []},
                 }
@@ -77,8 +120,8 @@ class FakeLLM:
                 "role": f"presses {question} as proof of demand",
                 "stance": "positive",
                 "strength": 0.7,
-                "bio": _bio(name),
-                "details": _details(ids),
+                "bio": bio,
+                "details": _details(name, ids),
                 "confidence": 0.4,
                 "cites": {"role": ids[:1], "stance": ids[:1], "bio": ids[:1], "confidence": []},
             }
@@ -89,10 +132,10 @@ def _bio(name: str) -> str:
     return f"{name} weighs the rollout, tracks compliance and prices the pilot. " * 3
 
 
-def _details(ids: list[str]) -> str:
+def _details(name: str, ids: list[str]) -> str:
     markers = ids[:3]
     return " ".join(
-        f"Point {i} weighs the rollout against compliance timing [{markers[i % len(markers)]}]."
+        f"{name} point {i} weighs the rollout against compliance timing [{markers[i % len(markers)]}]."
         for i in range(30)
     )
 
@@ -130,7 +173,8 @@ def _neighbours_for(entities: list[EntityNode], count: int = 1) -> dict[str, lis
 class FakeGraph:
     """The tenant-scoped reads the synthesizer makes, over fixed entities and chunks."""
 
-    def __init__(self, entities, *, chunks=None, hits=None, neighbours=None, relations=None):
+    def __init__(self, entities, *, chunks=None, hits=None, neighbours=None, relations=None, embedding=None):
+        self._embedding = embedding
         self.entities = {e.id: e for e in entities}
         self._chunks = chunks if chunks is not None else _chunks_for(list(entities))
         self._hits = list(entities) if hits is None else hits
@@ -155,6 +199,13 @@ class FakeGraph:
         self.relation_calls.append((entity_id, list(counterpart_ids)))
         self.relation_dataset_ids.append(dataset_id)
         return self._relations.get(entity_id, [])
+
+    async def _get_embedding(self, text):
+        """A deterministic vector per text: equal bios embed equal, different bios near-orthogonal."""
+        if self._embedding is not None:
+            return self._embedding(text)
+        rng = random.Random(text)
+        return [rng.uniform(-1.0, 1.0) for _ in range(get_llm_config().embedding_dimensions)]
 
 
 def _repo() -> MagicMock:
@@ -521,3 +572,124 @@ async def test_joiners_are_refused_until_task_2_6b():
 @pytest.mark.asyncio
 async def test_an_empty_joiner_list_is_a_no_op():
     assert await _synth([KESTRA]).synthesize_from_names([], QUESTION, dataset_id="ds-A") == []
+
+
+# ---- uniqueness: a too-alike seated profile is regenerated once, then unseated ----------------
+
+
+def _duplicate_bio_llm(**kwargs) -> FakeLLM:
+    return FakeLLM(shared_bio={"Kestra", "Lumen"}, **kwargs)
+
+
+@pytest.mark.asyncio
+async def test_duplicate_bios_regenerate_the_later_agent_once():
+    llm = _duplicate_bio_llm()
+
+    agents = await _run(_synth([KESTRA, LUMEN]), llm, max_agents=2)
+
+    assert ([a.identity.name for a in agents], llm.regenerations) == (["Kestra", "Lumen"], 1)
+
+
+@pytest.mark.asyncio
+async def test_a_still_duplicate_agent_is_unseated_and_its_seat_refilled():
+    llm = _duplicate_bio_llm(stubborn={"Lumen"})
+    records: list = []
+
+    agents = await _run(_synth([KESTRA, LUMEN, ORBIT]), llm, max_agents=2, records=records)
+
+    assert ([a.identity.name for a in agents], llm.regenerations) == (["Kestra", "Orbit"], 1)
+    lumen = next(r for r in records if r.node.name == "Lumen")
+    assert (lumen.status, "too alike" in lumen.reason) == ("rejected", True)
+
+
+@pytest.mark.asyncio
+async def test_the_regeneration_is_told_the_earlier_details_and_not_its_bio():
+    llm = _duplicate_bio_llm()
+
+    await _run(_synth([KESTRA, LUMEN]), llm, max_agents=2)
+
+    regeneration = next(p for p in llm.profile_prompts if "ALREADY TAKEN" in p)
+    assert "Kestra point 0 weighs the rollout against compliance timing." in regeneration
+
+
+@pytest.mark.asyncio
+async def test_the_regeneration_never_receives_the_earlier_bio():
+    llm = _duplicate_bio_llm()
+
+    await _run(_synth([KESTRA, LUMEN]), llm, max_agents=2)
+
+    regeneration = next(p for p in llm.profile_prompts if "ALREADY TAKEN" in p)
+    assert SHARED_BIO.strip() not in regeneration
+
+
+@pytest.mark.asyncio
+async def test_every_record_carries_the_roster_uniqueness_numbers():
+    records: list = []
+
+    await _run(_synth([KESTRA, LUMEN]), max_agents=2, records=records)
+
+    assert all(r.uniqueness.max_bio_sim is not None for r in records)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "bad_vector",
+    [[], [0.0] * get_llm_config().embedding_dimensions, [1.0] * (get_llm_config().embedding_dimensions - 1)],
+    ids=["missing", "zero", "wrong-length"],
+)
+async def test_a_bio_without_a_usable_vector_is_not_seated(bad_vector):
+    graph = FakeGraph(
+        [KESTRA, LUMEN],
+        embedding=lambda text: bad_vector if "Lumen" in text else [1.0] * get_llm_config().embedding_dimensions,
+    )
+    records: list = []
+
+    agents = await _run(_synth([KESTRA, LUMEN], graph=graph), max_agents=2, records=records)
+
+    lumen = next(r for r in records if r.node.name == "Lumen")
+    assert ([a.identity.name for a in agents], lumen.reason) == (
+        ["Kestra"],
+        "rejected: bio embedding unusable",
+    )
+
+
+# ---- concurrency: batches of llm_concurrency, seats in draw order -----------------------------
+
+
+@pytest.mark.asyncio
+async def test_batch_concurrency_never_exceeds_llm_concurrency():
+    entities = [_entity(f"e{i}", f"Firm{i}", score=0.9 - i * 0.01) for i in range(6)]
+    llm = FakeLLM(delays={e.name: 0.01 for e in entities})
+
+    await _run(_synth(entities), llm, max_agents=6, llm_concurrency=2)
+
+    assert llm.max_in_flight == 2
+
+
+@pytest.mark.asyncio
+async def test_seat_order_follows_the_queue_not_the_order_calls_finish():
+    llm = FakeLLM(delays={"Kestra": 0.06, "Lumen": 0.01, "Orbit": 0.03})
+
+    agents = await _run(_synth([KESTRA, LUMEN, ORBIT]), llm, max_agents=3, llm_concurrency=3)
+
+    assert [a.identity.name for a in agents] == ["Kestra", "Lumen", "Orbit"]
+
+
+@pytest.mark.asyncio
+async def test_a_metering_error_in_one_batch_member_propagates_and_leaves_no_open_draw(monkeypatch):
+    from src.simulation import profile_synthesizer as module
+
+    queues: list = []
+
+    class RecordingQueue(module.SeatQueue):
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            queues.append(self)
+
+    monkeypatch.setattr(module, "SeatQueue", RecordingQueue)
+    llm = FakeLLM(raise_for={"Lumen"}, delays={"Kestra": 0.05, "Orbit": 0.05})
+
+    with pytest.raises(MeteringError):
+        await _run(_synth([KESTRA, LUMEN, ORBIT]), llm, max_agents=3, llm_concurrency=3)
+
+    assert queues[0]._drawn == {}

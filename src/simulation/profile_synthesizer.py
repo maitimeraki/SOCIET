@@ -1,14 +1,18 @@
 """ProfileSynthesizer: seat the question's most relevant graph entities, then generate one cited profile each.
 
-Sequential: one candidate is drawn, its profile is generated and validated, and only then is the next
-candidate drawn. A failed profile is rejected and frees its seat for the next draw; nothing is written
-in its place.
+Candidates are drawn in batches of `llm_concurrency`. A batch's profiles are generated concurrently,
+then resolved in draw order, so the seat order does not depend on which call finishes first. A
+failed profile is rejected and frees its seat for the next batch. Once the roster is full, any two
+seated profiles that are too alike are settled: the later one is regenerated once against the earlier
+one's claims, and unseated if it is still too alike.
 """
 
+import asyncio
 import hashlib
 import logging
+import math
 from collections import defaultdict
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass, replace
 from typing import Any
 from uuid import uuid4
@@ -29,6 +33,7 @@ from src.simulation.agent_record import (
     ValidationInfo,
     dossier_hash,
 )
+from src.simulation.debate_config import DebateConfig
 from src.simulation.evidence import (
     MAX_RELATIONS,
     ChunkRow,
@@ -42,7 +47,13 @@ from src.simulation.profile_generator import (
     GenerationResult,
     generate_profile,
 )
-from src.simulation.profile_validation import ProfileDraft
+from src.simulation.profile_validation import (
+    ProfileDraft,
+    UniquenessReport,
+    check_uniqueness,
+    split_sentences,
+    strip_markers,
+)
 from src.simulation.ranking import (
     Candidate,
     NoAgentsDerivableError,
@@ -104,6 +115,15 @@ def _embedding(node: EntityNode) -> tuple[float, ...]:
     return ()
 
 
+def _usable_vector(vector: tuple[float, ...]) -> bool:
+    """A bio vector the uniqueness check can trust: configured width, finite, non-zero."""
+    return (
+        len(vector) == get_llm_config().embedding_dimensions
+        and all(math.isfinite(x) for x in vector)
+        and any(x != 0.0 for x in vector)
+    )
+
+
 @dataclass
 class _Pool:
     """The ranked candidates and the per-entity inputs a profile pack is built from."""
@@ -115,8 +135,21 @@ class _Pool:
 
 
 @dataclass(frozen=True)
+class _Run:
+    """What every profile call in one synthesis shares."""
+
+    query: str
+    dataset_id: str
+    axis: str
+    llm_client: Any
+
+
+@dataclass(frozen=True)
 class _Attempt:
-    """One drawn candidate's pass through generation: its pack, its result, and the seated Agent if any."""
+    """One generation for a drawn candidate: its pack, its result, and the seated Agent if it passed.
+
+    `rejected_reason` is "" when the attempt produced an Agent.
+    """
 
     candidate: Candidate
     axis: str
@@ -124,11 +157,59 @@ class _Attempt:
     pack: EvidencePack
     generated: GenerationResult
     agent: Agent | None
+    vector: tuple[float, ...]
+    rejected_reason: str
+
+
+@dataclass
+class _Seat:
+    """A seated profile. `regenerated` is set once its one uniqueness regeneration has been spent."""
+
+    candidate: Candidate
+    attempt: _Attempt
+    regenerated: bool = False
+
+    @property
+    def agent(self) -> Agent:
+        if self.attempt.agent is None:
+            raise RuntimeError("a seat always holds an agent")
+        return self.attempt.agent
 
 
 def _rejection_reason(generated: GenerationResult) -> str:
     fields = ", ".join(sorted({r.field for r in generated.rejections})) or "no draft"
     return f"profile not seated ({fields})"
+
+
+async def _gather_in_order(awaitables: Sequence[Awaitable[_Attempt]]) -> list[_Attempt]:
+    """Run one batch concurrently and return the results in input order.
+
+    The first failure cancels the rest and is raised, so no call outlives the batch.
+    """
+    tasks = [asyncio.ensure_future(awaitable) for awaitable in awaitables]
+    try:
+        await asyncio.wait(tasks, return_when=asyncio.FIRST_EXCEPTION)
+        for task in tasks:
+            if task.done() and not task.cancelled() and task.exception() is not None:
+                raise task.exception()
+        return [task.result() for task in tasks]
+    finally:
+        for task in tasks:
+            task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
+
+
+def _uniqueness(seats: Sequence[_Seat]) -> UniquenessReport:
+    """The roster's uniqueness report. Seats are keyed by their index, so pairs come back as index pairs."""
+    drafts = {str(i): seat.attempt.generated.draft for i, seat in enumerate(seats)}
+    vectors = {str(i): seat.attempt.vector for i, seat in enumerate(seats)}
+    return check_uniqueness(drafts, vectors)
+
+
+def _duplicate_pairs(seats: Sequence[_Seat]) -> list[tuple[int, int]]:
+    """Index pairs (earlier, later) of seats that are too alike, earliest first."""
+    report = _uniqueness(seats)
+    return sorted((min(int(a), int(b)), max(int(a), int(b))) for a, b in report.failing_pairs)
 
 
 class ProfileSynthesizer:
@@ -149,59 +230,57 @@ class ProfileSynthesizer:
         records: list[AgentRecord] | None = None,
         llm_client: Any = None,
         on_profile: "Callable[[Agent, int, int], Awaitable[None]] | None" = None,
+        llm_concurrency: int | None = None,
     ) -> list[Agent]:
         """Seat up to `max_agents` candidates for the question and generate one profile per seat.
 
         Each drawn candidate gets a pack of its own chunks and relations, one generation
         call and a support judge. A profile that fails is rejected and its seat is redrawn.
+        Profiles are generated `llm_concurrency` at a time. Duplicate profiles are settled
+        before anything is persisted or emitted.
 
         Raises `NoAgentsDerivableError` when no candidate reaches the question, or when every
         drawn candidate's profile failed. An empty roster with nothing drawn returns [].
 
         `records`, `decisions` and `warnings` are caller-owned sinks. `records` holds one
-        AgentRecord for every candidate that reached generation, published or rejected.
+        AgentRecord per candidate that reached generation, published or rejected.
         """
         if llm_client is None:
             raise ValueError("profile generation needs an llm_client")
+        width = llm_concurrency or DebateConfig().llm_concurrency
         pool = await self._rank(query, dataset_id, warnings, llm_client)
         if not any(c.vector for c in pool.candidates):
             logger.info("MMR diversity penalty off: no entity embeddings in the candidate pool")
 
+        run = _Run(query, dataset_id, intent.stance_axis if intent is not None else "", llm_client)
         queue = SeatQueue(pool.candidates, n=max_agents)
-        axis = intent.stance_axis if intent is not None else ""
-        run_id = uuid4().hex
-        attempts: list[_Attempt] = []
-        seated: list[Agent] = []
-        while (drawn := queue.next()) is not None:
-            resolved = False
-            try:
-                attempt = await self._attempt(drawn, pool, query, axis, dataset_id, llm_client)
-                attempts.append(attempt)
-                if attempt.agent is None:
-                    queue.reject(drawn, _rejection_reason(attempt.generated))
-                else:
-                    queue.accept(drawn)
-                resolved = True
-            finally:
-                if not resolved:
-                    queue.reject(drawn, "generation interrupted")
-            if attempt.agent is None:
-                continue
-            agent = attempt.agent
-            seated.append(agent)
-            await self._persist_links(agent, dataset_id, warnings)
-            await self._notify(on_profile, agent, len(seated), max_agents)
+        latest: dict[str, _Attempt] = {}
+        seats = await self._roster(queue, pool, run, width, latest)
+
+        for index, seat in enumerate(seats, start=1):
+            await self._persist_links(seat.agent, dataset_id, warnings)
+            await self._notify(on_profile, seat.agent, index, len(seats))
 
         if decisions is not None:
             decisions.extend(queue.decisions())
         if records is not None:
+            report = _uniqueness(seats)
+            info = UniquenessInfo(
+                max_bio_sim=report.max_bio_sim,
+                max_details_sim=report.max_details_sim,
+                max_cite_overlap=report.max_cite_overlap,
+            )
+            run_id = uuid4().hex
             by_id = {d.entity_id: d for d in queue.decisions()}
-            records.extend(self._record(run_id, query, a, by_id[a.candidate.entity_id]) for a in attempts)
-        if attempts and not seated:
+            records.extend(
+                self._record(run_id, query, attempt, by_id[entity_id], info)
+                for entity_id, attempt in latest.items()
+            )
+        if latest and not seats:
             raise NoAgentsDerivableError(
                 "no profile could be seated: every drawn candidate failed profile generation or validation"
             )
-        return seated
+        return [seat.agent for seat in seats]
 
     async def synthesize_from_names(
         self,
@@ -220,6 +299,98 @@ class ProfileSynthesizer:
         raise NotImplementedError(
             "joiner seating lands in task 2.6b: activation cannot seat a generated profile yet"
         )
+
+    async def _roster(
+        self,
+        queue: SeatQueue,
+        pool: _Pool,
+        run: _Run,
+        width: int,
+        latest: dict[str, _Attempt],
+    ) -> list[_Seat]:
+        """Fill the seats, settle duplicates, and refill any seat a duplicate freed, until the roster is unique."""
+        seats: list[_Seat] = []
+        while True:
+            await self._fill(queue, pool, run, width, seats, latest)
+            if not await self._deduplicate(queue, run, seats, latest):
+                return seats
+
+    async def _fill(
+        self,
+        queue: SeatQueue,
+        pool: _Pool,
+        run: _Run,
+        width: int,
+        seats: list[_Seat],
+        latest: dict[str, _Attempt],
+    ) -> None:
+        while batch := queue.draw(width):
+            await self._seat_batch(queue, batch, pool, run, seats, latest)
+
+    async def _seat_batch(
+        self,
+        queue: SeatQueue,
+        batch: list[Candidate],
+        pool: _Pool,
+        run: _Run,
+        seats: list[_Seat],
+        latest: dict[str, _Attempt],
+    ) -> None:
+        """Generate one batch concurrently, then resolve every draw in draw order.
+
+        Every draw is resolved exactly once: accepted or rejected here, or rejected in the
+        finally when the batch is interrupted.
+        """
+        resolved: set[str] = set()
+        try:
+            attempts = await _gather_in_order([self._attempt(c, pool, run) for c in batch])
+            for drawn, attempt in zip(batch, attempts):
+                latest[drawn.entity_id] = attempt
+                if attempt.agent is None:
+                    queue.reject(drawn, attempt.rejected_reason)
+                else:
+                    queue.accept(drawn)
+                    seats.append(_Seat(drawn, attempt))
+                resolved.add(drawn.entity_id)
+        finally:
+            for drawn in batch:
+                if drawn.entity_id not in resolved:
+                    queue.reject(drawn, "generation interrupted")
+
+    async def _deduplicate(
+        self,
+        queue: SeatQueue,
+        run: _Run,
+        seats: list[_Seat],
+        latest: dict[str, _Attempt],
+    ) -> bool:
+        """Settle every too-alike pair: regenerate the later seat once, then unseat it if still too alike.
+
+        Returns True when a seat was freed and the roster needs refilling.
+        """
+        freed = False
+        while (pairs := _duplicate_pairs(seats)):
+            earlier, later = seats[pairs[0][0]], seats[pairs[0][1]]
+            if later.regenerated:
+                self._unseat(queue, seats, later, "too alike to a seated profile")
+                freed = True
+                continue
+            later.regenerated = True
+            taken = split_sentences(strip_markers(earlier.agent.details))
+            prior = later.attempt
+            attempt = await self._generate(prior.candidate, prior.aliases, prior.pack, run, taken=taken)
+            latest[later.candidate.entity_id] = attempt
+            if attempt.agent is None:
+                self._unseat(queue, seats, later, attempt.rejected_reason)
+                freed = True
+            else:
+                later.attempt = attempt
+        return freed
+
+    @staticmethod
+    def _unseat(queue: SeatQueue, seats: list[_Seat], seat: _Seat, reason: str) -> None:
+        queue.unseat(seat.candidate, reason)
+        seats[:] = [s for s in seats if s is not seat]
 
     async def _rank(
         self,
@@ -319,34 +490,41 @@ class ProfileSynthesizer:
             warnings.append("actor filter: unclassified entity types count as actors")
         return [replace(c, is_actor=flags.get(c.type_label, True)) for c in candidates]
 
-    async def _attempt(
-        self,
-        drawn: Candidate,
-        pool: _Pool,
-        query: str,
-        axis: str,
-        dataset_id: str,
-        llm_client: Any,
-    ) -> _Attempt:
-        """Build the drawn candidate's pack, generate its profile, and seat an Agent if it passes."""
+    async def _attempt(self, drawn: Candidate, pool: _Pool, run: _Run) -> _Attempt:
+        """Build the drawn candidate's pack and generate its profile."""
         node = pool.nodes[drawn.entity_id]
         aliases = _aliases(node)
         counterpart_ids = [n.id for n in pool.neighbours[drawn.entity_id][:NEIGHBOUR_CAP]]
-        relations = await self._relations_for(drawn.entity_id, counterpart_ids, dataset_id)
+        relations = await self._relations_for(drawn.entity_id, counterpart_ids, run.dataset_id)
         pack = build_pack(drawn.name, aliases, pool.chunk_rows.get(drawn.entity_id, []), relations)
+        return await self._generate(drawn, aliases, pack, run)
+
+    async def _generate(
+        self,
+        drawn: Candidate,
+        aliases: list[str],
+        pack: EvidencePack,
+        run: _Run,
+        taken: Sequence[str] = (),
+    ) -> _Attempt:
+        """One generation for a candidate. It seats an Agent only if the draft passes and its bio embeds."""
         generated = await generate_profile(
-            llm_client,
-            question=query,
-            axis=axis,
+            run.llm_client,
+            question=run.query,
+            axis=run.axis,
             name=drawn.name,
             aliases=aliases,
             type_label=drawn.type_label,
             pack=pack,
+            taken=taken,
         )
-        agent = (
-            self._agent(drawn, dataset_id, generated.draft, pack) if generated.draft is not None else None
-        )
-        return _Attempt(drawn, axis, aliases, pack, generated, agent)
+        if generated.draft is None:
+            return _Attempt(drawn, run.axis, aliases, pack, generated, None, (), _rejection_reason(generated))
+        agent = self._agent(drawn, run.dataset_id, generated.draft, pack)
+        vector = tuple(float(x) for x in await self._ctx._get_embedding(agent.bio))
+        if not _usable_vector(vector):
+            return _Attempt(drawn, run.axis, aliases, pack, generated, None, (), "bio embedding unusable")
+        return _Attempt(drawn, run.axis, aliases, pack, generated, agent, vector, "")
 
     async def _relations_for(
         self, entity_id: str, counterpart_ids: list[str], dataset_id: str
@@ -426,11 +604,18 @@ class ProfileSynthesizer:
             logger.warning("on_profile emitter failed for %r: %s", agent.identity.name, exc)
 
     @staticmethod
-    def _record(run_id: str, query: str, attempt: _Attempt, decision: SeatDecision) -> AgentRecord:
-        """The backend-only record of one candidate's attempt. Never sent to a client."""
+    def _record(
+        run_id: str,
+        query: str,
+        attempt: _Attempt,
+        decision: SeatDecision,
+        uniqueness: UniquenessInfo,
+    ) -> AgentRecord:
+        """The backend-only record of one candidate's final attempt. Never sent to a client."""
         draft = attempt.generated.draft
         rejections = attempt.generated.rejections
         candidate = attempt.candidate
+        seated = decision.seated and attempt.agent is not None
         return AgentRecord(
             run_id=run_id,
             node_id=candidate.entity_id,
@@ -452,7 +637,7 @@ class ProfileSynthesizer:
             ),
             evidence=list(attempt.pack.items),
             relations=list(attempt.pack.relations),
-            view=attempt.agent.view() if attempt.agent is not None else None,
+            view=attempt.agent.view() if seated and attempt.agent is not None else None,
             details_raw=draft.details if draft is not None else "",
             cites=CiteIds(**{k: v for k, v in (draft.cites if draft else {}).items() if k in CiteIds.model_fields}),
             validation=ValidationInfo(
@@ -462,7 +647,7 @@ class ProfileSynthesizer:
                 details_chars=len(draft.details) if draft is not None else 0,
                 cites_valid=draft is not None,
             ),
-            uniqueness=UniquenessInfo(),
+            uniqueness=uniqueness,
             generation=GenerationInfo(
                 model=attempt.generated.model,
                 prompt_version=PROFILE_PROMPT_VERSION,
@@ -471,6 +656,6 @@ class ProfileSynthesizer:
                 latency_ms=attempt.generated.latency_ms,
             ),
             dossier_hash=dossier_hash(attempt.pack, get_llm_config()),
-            status="published" if attempt.agent is not None else "rejected",
-            reason=None if attempt.agent is not None else decision.reason,
+            status="published" if seated else "rejected",
+            reason=None if seated else decision.reason,
         )

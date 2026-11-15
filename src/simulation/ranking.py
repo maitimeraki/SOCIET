@@ -144,8 +144,9 @@ class SeatQueue:
     """Eligibility, then Maximal Marginal Relevance. A rejected profile frees its
     seat for the next eligible candidate; nothing is re-scored.
 
-    One draw at a time: next() refuses while a draw is unresolved, so accepts never
-    exceed n. Task 1.5 callers must dedupe by entity_id before building the queue."""
+    Open draws (draw, next) plus seated candidates never exceed n, so accepts never
+    exceed n whatever order the draws resolve in. unseat frees a seat again. Task 1.5
+    callers must dedupe by entity_id before building the queue."""
 
     def __init__(self, candidates: Iterable[Candidate], n: int):
         self._n = n
@@ -174,7 +175,9 @@ class SeatQueue:
             self._decisions[c.entity_id] = SeatDecision(c.entity_id, c.name, score(c), features(c), reason=reason)
 
     def _penalty(self, c: Candidate) -> float:
-        return max((cosine(c.vector, s.vector) for s in self._seated), default=0.0)
+        # Open draws count too, so one batch does not draw near-twins of each other.
+        taken = [*self._seated, *self._drawn.values()]
+        return max((cosine(c.vector, s.vector) for s in taken), default=0.0)
 
     def _require_drawn(self, c: Candidate) -> None:
         if not isinstance(c, Candidate):
@@ -187,16 +190,24 @@ class SeatQueue:
         if drawn is not c:
             raise ValueError(f"{c.name} is not the object next() drew")
 
+    def draw(self, k: int) -> list[Candidate]:
+        """Up to k candidates, best first. Each stays open until accepted or rejected.
+
+        Open draws plus seated agents never exceed n, so accepts can never exceed n
+        however the open draws resolve.
+        """
+        drawn: list[Candidate] = []
+        while len(drawn) < k and self._pool and len(self._seated) + len(self._drawn) < self._n:
+            best = min(self._pool, key=lambda c: (-(score(c) - MMR_LAMBDA * self._penalty(c)), c.name, c.entity_id))
+            self._pool.remove(best)
+            self._drawn[best.entity_id] = best
+            self._decisions[best.entity_id].reason = "drawn, unresolved"
+            drawn.append(best)
+        return drawn
+
     def next(self) -> Candidate | None:
-        if self._drawn:
-            raise ValueError("a draw is unresolved: accept or reject it before drawing again")
-        if len(self._seated) >= self._n or not self._pool:
-            return None
-        best = min(self._pool, key=lambda c: (-(score(c) - MMR_LAMBDA * self._penalty(c)), c.name, c.entity_id))
-        self._pool.remove(best)
-        self._drawn[best.entity_id] = best
-        self._decisions[best.entity_id].reason = "drawn, unresolved"
-        return best
+        drawn = self.draw(1)
+        return drawn[0] if drawn else None
 
     def accept(self, c: Candidate) -> None:
         self._require_drawn(c)
@@ -211,6 +222,17 @@ class SeatQueue:
         del self._drawn[c.entity_id]
         self._resolved.add(c.entity_id)
         self._decisions[c.entity_id].reason = f"rejected: {reason}"
+
+    def unseat(self, c: Candidate, reason: str) -> None:
+        """Take a seated candidate back out of its seat; the seat is free for the next draw."""
+        index = next((i for i, s in enumerate(self._seated) if s is c), None)
+        if index is None:
+            raise ValueError(f"{c.name} is not seated")
+        del self._seated[index]
+        d = self._decisions[c.entity_id]
+        d.seated, d.reason, d.order = False, f"rejected: {reason}", None
+        for position, s in enumerate(self._seated, start=1):
+            self._decisions[s.entity_id].order = position
 
     def decisions(self) -> list[SeatDecision]:
         return sorted(self._decisions.values(), key=lambda d: (d.order is None, d.order or 0, -d.score, d.name, d.entity_id))

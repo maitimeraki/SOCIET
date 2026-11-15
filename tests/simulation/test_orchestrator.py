@@ -24,7 +24,7 @@ from src.simulation.pair_turn import (
     RoundResult,
 )
 from src.simulation.profile_synthesizer import ProfileSynthesizer
-from src.simulation.society_memory import SocietyMemory
+from src.simulation.society_memory import SocietyMemory, SocietySnapshot
 from src.simulation.topology import CommunicationTopology
 from src.simulation.verdict import VerdictSynthesizer
 from src.utils.queryIntend import QueryIntent
@@ -96,6 +96,7 @@ async def test_five_step_flow():
     llm_runner = MagicMock(spec=BatchedLLMRunner)
     verdict_synth = MagicMock(spec=VerdictSynthesizer)
     society_memory = AsyncMock(spec=SocietyMemory)
+    society_memory.read_snapshot.return_value = SocietySnapshot(round=0)
 
     profiles = [_make_profile(1, "Alice"), _make_profile(2, "Bob")]
     synth.synthesize.return_value = profiles
@@ -132,6 +133,7 @@ async def test_five_step_flow():
         records=ANY,
         llm_client=None,
         on_profile=ANY,
+        llm_concurrency=8,
     )
 
     # Step 2: topology called per round (max_rounds=3)
@@ -165,6 +167,7 @@ async def test_ws_broadcast_passed_to_round_runner():
     llm_runner = MagicMock(spec=BatchedLLMRunner)
     verdict_synth = MagicMock(spec=VerdictSynthesizer)
     society_memory = AsyncMock(spec=SocietyMemory)
+    society_memory.read_snapshot.return_value = SocietySnapshot(round=0)
 
     profiles = [_make_profile(1, "Alice"), _make_profile(2, "Bob")]
     synth.synthesize.return_value = profiles
@@ -223,6 +226,7 @@ async def test_non_debatable_roster_raises():
     topo = AsyncMock(spec=CommunicationTopology)
     verdict_synth = MagicMock(spec=VerdictSynthesizer)
     society_memory = AsyncMock(spec=SocietyMemory)
+    society_memory.read_snapshot.return_value = SocietySnapshot(round=0)
     orch = _orch(synth, topo, society_memory, verdict_synth)
 
     for roster in ([], [_make_profile(1, "Alice")]):
@@ -243,6 +247,7 @@ async def test_non_debatable_raises_after_the_synthesis_stage_event():
     synth = AsyncMock(spec=ProfileSynthesizer)
     topo = AsyncMock(spec=CommunicationTopology)
     society_memory = AsyncMock(spec=SocietyMemory)
+    society_memory.read_snapshot.return_value = SocietySnapshot(round=0)
     synth.synthesize.return_value = [_make_profile(1, "Alice")]
     orch = _orch(synth, topo, society_memory)
     events, emit = _stage_spy()
@@ -271,6 +276,7 @@ async def test_convergence_check_breaks_loop():
     llm_runner = MagicMock(spec=BatchedLLMRunner)
     verdict_synth = MagicMock(spec=VerdictSynthesizer)
     society_memory = AsyncMock(spec=SocietyMemory)
+    society_memory.read_snapshot.return_value = SocietySnapshot(round=0)
 
     profiles = [_make_profile(1, "Alice"), _make_profile(2, "Bob")]
     synth.synthesize.return_value = profiles
@@ -321,6 +327,7 @@ async def test_non_debatable_raise_carries_the_accumulated_warnings():
     synth = AsyncMock(spec=ProfileSynthesizer)
     topo = AsyncMock(spec=CommunicationTopology)
     society_memory = AsyncMock(spec=SocietyMemory)
+    society_memory.read_snapshot.return_value = SocietySnapshot(round=0)
 
     async def synthesize(**kwargs):
         kwargs["warnings"].append("actor filter degraded")
@@ -344,6 +351,7 @@ async def test_failed_round_raises_cause_aware_message_with_warnings():
     synth = AsyncMock(spec=ProfileSynthesizer)
     topo = AsyncMock(spec=CommunicationTopology)
     society_memory = AsyncMock(spec=SocietyMemory)
+    society_memory.read_snapshot.return_value = SocietySnapshot(round=0)
     synth.synthesize.return_value = [_make_profile(1, "Alice"), _make_profile(2, "Bob")]
     topo.compute_round_pairs.side_effect = RuntimeError("cypher down")
     orch = _orch(synth, topo, society_memory)
@@ -366,6 +374,7 @@ async def test_never_paired_run_raises():
     topo = AsyncMock(spec=CommunicationTopology)
     verdict_synth = MagicMock(spec=VerdictSynthesizer)
     society_memory = AsyncMock(spec=SocietyMemory)
+    society_memory.read_snapshot.return_value = SocietySnapshot(round=0)
     synth.synthesize.return_value = [_make_profile(1, "Alice"), _make_profile(2, "Bob")]
     topo.compute_round_pairs.return_value = []
     orch = _orch(synth, topo, society_memory, verdict_synth)
@@ -386,6 +395,7 @@ async def test_check_convergence_domimant_stance_threshold():
     llm_runner = MagicMock(spec=BatchedLLMRunner)
     verdict_synth = MagicMock(spec=VerdictSynthesizer)
     society_memory = AsyncMock(spec=SocietyMemory)
+    society_memory.read_snapshot.return_value = SocietySnapshot(round=0)
 
     profiles = [_make_profile(1, "Alice"), _make_profile(2, "Bob")]
     synth.synthesize.return_value = profiles
@@ -439,6 +449,7 @@ async def test_commit_failure_degrades_to_warning():
     llm_runner = MagicMock(spec=BatchedLLMRunner)
     verdict_synth = MagicMock(spec=VerdictSynthesizer)
     society_memory = AsyncMock(spec=SocietyMemory)
+    society_memory.read_snapshot.return_value = SocietySnapshot(round=0)
     synth.synthesize.return_value = [_make_profile(1, "Alice"), _make_profile(2, "Bob")]
     topo.compute_round_pairs.side_effect = lambda *a, **kw: [
         CommPair(agent_a="Alice", agent_b="Bob", shared_entities=[], score=0.5)
@@ -468,6 +479,7 @@ async def test_commit_failure_first_round_does_not_abort_loop():
     llm_runner = MagicMock(spec=BatchedLLMRunner)
     verdict_synth = MagicMock(spec=VerdictSynthesizer)
     society_memory = AsyncMock(spec=SocietyMemory)
+    society_memory.read_snapshot.return_value = SocietySnapshot(round=0)
     synth.synthesize.return_value = [_make_profile(1, "Alice"), _make_profile(2, "Bob")]
     topo.compute_round_pairs.side_effect = lambda *a, **kw: [
         CommPair(agent_a="Alice", agent_b="Bob", shared_entities=[], score=0.5)
@@ -511,6 +523,7 @@ async def test_convergence_uses_config_threshold():
     verdict_synth.asynthesize.return_value = _make_verdict()
     llm_runner.gather = MagicMock(side_effect=lambda *a, **kw: _AsyncEmptyIter())
     society_memory = AsyncMock(spec=SocietyMemory)
+    society_memory.read_snapshot.return_value = SocietySnapshot(round=0)
     orchestrator = DebateOrchestrator(
         profile_synthesizer=synth,
         topology=topo,
@@ -564,6 +577,7 @@ async def test_activation_pulls_in_candidates_after_commit():
     synth = AsyncMock(spec=ProfileSynthesizer)
     topo = AsyncMock(spec=CommunicationTopology)
     society_memory = AsyncMock(spec=SocietyMemory)
+    society_memory.read_snapshot.return_value = SocietySnapshot(round=0)
     # Explicit successful receipt: an unset AsyncMock return degrades to the commit-failed branch.
     society_memory.commit_round.return_value = _ok_receipt()
     synth.synthesize.return_value = [_make_profile(1, "Alice"), _make_profile(2, "Bob")]
@@ -608,6 +622,7 @@ async def test_no_activation_event_when_no_candidate_resolves():
     synth = AsyncMock(spec=ProfileSynthesizer)
     topo = AsyncMock(spec=CommunicationTopology)
     society_memory = AsyncMock(spec=SocietyMemory)
+    society_memory.read_snapshot.return_value = SocietySnapshot(round=0)
     society_memory.commit_round.return_value = _ok_receipt()
     synth.synthesize.return_value = [_make_profile(1, "Alice"), _make_profile(2, "Bob")]
     synth.synthesize_from_names = AsyncMock(return_value=[])
@@ -646,6 +661,7 @@ async def test_metering_error_from_activation_propagates_and_is_not_a_warning():
     synth = AsyncMock(spec=ProfileSynthesizer)
     topo = AsyncMock(spec=CommunicationTopology)
     society_memory = AsyncMock(spec=SocietyMemory)
+    society_memory.read_snapshot.return_value = SocietySnapshot(round=0)
     society_memory.commit_round.return_value = _ok_receipt()
     synth.synthesize.return_value = [_make_profile(1, "Alice"), _make_profile(2, "Bob")]
     synth.synthesize_from_names = AsyncMock(side_effect=MeteringError("hold"))
@@ -679,6 +695,7 @@ async def test_activation_disabled_by_config():
     synth = AsyncMock(spec=ProfileSynthesizer)
     topo = AsyncMock(spec=CommunicationTopology)
     society_memory = AsyncMock(spec=SocietyMemory)
+    society_memory.read_snapshot.return_value = SocietySnapshot(round=0)
     # Explicit successful receipt: an unset AsyncMock return degrades to the commit-failed branch.
     society_memory.commit_round.return_value = _ok_receipt()
     synth.synthesize.return_value = [_make_profile(1, "Alice"), _make_profile(2, "Bob")]
@@ -709,7 +726,9 @@ async def test_no_pair_round_attempts_activation_bootstrap():
     synth = AsyncMock(spec=ProfileSynthesizer)
     topo = AsyncMock(spec=CommunicationTopology)
     society_memory = AsyncMock(spec=SocietyMemory)
+    society_memory.read_snapshot.return_value = SocietySnapshot(round=0)
     society_memory.commit_round.return_value = _ok_receipt()
+    society_memory.read_snapshot.return_value = SocietySnapshot(round=1)
     synth.synthesize.return_value = [_make_profile(1, "Alice"), _make_profile(2, "Bob")]
     synth.synthesize_from_names = AsyncMock(return_value=[_make_profile(3, "Carl")])
     topo.find_activation_candidates = AsyncMock(
@@ -765,6 +784,7 @@ async def test_run_threads_intent_to_round_runner_and_result():
     synth = AsyncMock(spec=ProfileSynthesizer)
     topo = AsyncMock(spec=CommunicationTopology)
     society_memory = AsyncMock(spec=SocietyMemory)
+    society_memory.read_snapshot.return_value = SocietySnapshot(round=0)
     society_memory.commit_round.return_value = _ok_receipt()
     synth.synthesize.return_value = [_make_profile(1, "Alice"), _make_profile(2, "Bob")]
     topo.compute_round_pairs.return_value = [
@@ -808,6 +828,7 @@ async def test_run_threads_query_and_context_and_returns_the_narrative():
     synth = AsyncMock(spec=ProfileSynthesizer)
     topo = AsyncMock(spec=CommunicationTopology)
     society_memory = AsyncMock(spec=SocietyMemory)
+    society_memory.read_snapshot.return_value = SocietySnapshot(round=0)
     society_memory.commit_round.return_value = _ok_receipt()
     synth.synthesize.return_value = [_make_profile(1, "Alice"), _make_profile(2, "Bob")]
     topo.compute_round_pairs.return_value = [
@@ -861,6 +882,7 @@ async def test_run_without_intent_exposes_none():
     synth = AsyncMock(spec=ProfileSynthesizer)
     topo = AsyncMock(spec=CommunicationTopology)
     society_memory = AsyncMock(spec=SocietyMemory)
+    society_memory.read_snapshot.return_value = SocietySnapshot(round=0)
     society_memory.commit_round.return_value = _ok_receipt()
     synth.synthesize.return_value = [_make_profile(1, "Alice"), _make_profile(2, "Bob")]
     topo.compute_round_pairs.return_value = [
@@ -897,6 +919,7 @@ def _stage_ready_orch(max_rounds: int = 3, profiles=None):
     synth = AsyncMock(spec=ProfileSynthesizer)
     topo = AsyncMock(spec=CommunicationTopology)
     society_memory = AsyncMock(spec=SocietyMemory)
+    society_memory.read_snapshot.return_value = SocietySnapshot(round=0)
     society_memory.commit_round.return_value = _ok_receipt()
     synth.synthesize.return_value = (
         profiles
@@ -919,6 +942,7 @@ async def test_stage_events_follow_the_documented_sequence():
     synth = AsyncMock(spec=ProfileSynthesizer)
     topo = AsyncMock(spec=CommunicationTopology)
     society_memory = AsyncMock(spec=SocietyMemory)
+    society_memory.read_snapshot.return_value = SocietySnapshot(round=0)
     society_memory.commit_round.return_value = _ok_receipt()
     synth.synthesize.return_value = [_make_profile(1, "Alice"), _make_profile(2, "Bob")]
     topo.compute_round_pairs.side_effect = lambda *a, **kw: [
@@ -1014,6 +1038,7 @@ async def test_agent_events_are_broadcast_in_order_without_a_selection_event():
     llm_runner = MagicMock(spec=BatchedLLMRunner)
     verdict_synth = MagicMock(spec=VerdictSynthesizer)
     society_memory = AsyncMock(spec=SocietyMemory)
+    society_memory.read_snapshot.return_value = SocietySnapshot(round=0)
 
     profiles = [_make_profile(1, "Alice"), _make_profile(2, "Bob")]
 
@@ -1065,6 +1090,7 @@ async def test_round_events_carry_consensus_weights():
     llm_runner = MagicMock(spec=BatchedLLMRunner)
     verdict_synth = MagicMock(spec=VerdictSynthesizer)
     society_memory = AsyncMock(spec=SocietyMemory)
+    society_memory.read_snapshot.return_value = SocietySnapshot(round=0)
 
     profiles = [_make_profile(1, "Alice"), _make_profile(2, "Bob")]
     synth.synthesize.return_value = profiles
@@ -1123,6 +1149,7 @@ async def test_failed_commit_is_still_broadcast():
     llm_runner = MagicMock(spec=BatchedLLMRunner)
     verdict_synth = MagicMock(spec=VerdictSynthesizer)
     society_memory = AsyncMock(spec=SocietyMemory)
+    society_memory.read_snapshot.return_value = SocietySnapshot(round=0)
 
     profiles = [_make_profile(1, "Alice"), _make_profile(2, "Bob")]
     synth.synthesize.return_value = profiles
@@ -1178,6 +1205,7 @@ async def test_convergence_stage_carries_share_and_threshold():
     llm_runner = MagicMock(spec=BatchedLLMRunner)
     verdict_synth = MagicMock(spec=VerdictSynthesizer)
     society_memory = AsyncMock(spec=SocietyMemory)
+    society_memory.read_snapshot.return_value = SocietySnapshot(round=0)
 
     profiles = [_make_profile(1, "Alice"), _make_profile(2, "Bob")]
     synth.synthesize.return_value = profiles
@@ -1244,6 +1272,7 @@ async def test_result_carries_the_verdict_payload_for_the_ui():
     llm_runner = MagicMock(spec=BatchedLLMRunner)
     verdict_synth = MagicMock(spec=VerdictSynthesizer)
     society_memory = AsyncMock(spec=SocietyMemory)
+    society_memory.read_snapshot.return_value = SocietySnapshot(round=0)
 
     synth.synthesize.return_value = [_make_profile(1, "Alice"), _make_profile(2, "Bob")]
     topo.compute_round_pairs.return_value = [
@@ -1315,6 +1344,7 @@ async def test_metering_error_is_not_absorbed_by_the_round_loop():
     llm_runner = MagicMock(spec=BatchedLLMRunner)
     verdict_synth = MagicMock(spec=VerdictSynthesizer)
     society_memory = AsyncMock(spec=SocietyMemory)
+    society_memory.read_snapshot.return_value = SocietySnapshot(round=0)
 
     synth.synthesize.return_value = [_make_profile(1, "Alice"), _make_profile(2, "Bob")]
     topo.compute_round_pairs.return_value = [

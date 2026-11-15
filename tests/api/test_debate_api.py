@@ -5,6 +5,7 @@ Tests for Debate API endpoints.
 import asyncio
 import json
 import os
+import random
 import sys
 import uuid
 from dataclasses import asdict
@@ -31,6 +32,7 @@ from src.api.debate_api import (
 from src.auth.deps import current_user
 from src.db.engine import get_session_factory
 from src.db.models import User
+from src.llm.config_llm import get_llm_config
 from src.persona.agent import Agent, Stance
 from src.persona.graph_context import ChunkHit, ChunkSearch
 from src.simulation.debate_config import DebateConfig
@@ -361,7 +363,13 @@ def _stub_profile(name: str) -> Agent:
     )
 
 
-async def _stub_generation(client, *, question, axis, name, aliases, type_label, pack):
+def _bio_vector(text: str) -> list[float]:
+    """A deterministic bio vector per text at the configured width, so distinct bios stay distinct."""
+    rng = random.Random(text)
+    return [rng.uniform(-1.0, 1.0) for _ in range(get_llm_config().embedding_dimensions)]
+
+
+async def _stub_generation(client, *, question, axis, name, aliases, type_label, pack, taken=()):
     """The generation seam: every candidate gets a draft; the job test is about wiring, not prose."""
     draft = ProfileDraft(
         role=f"{name} role",
@@ -469,6 +477,7 @@ async def _run_stubbed_job(
     ctx = MagicMock()
     ctx.__aenter__ = AsyncMock(return_value=ctx)
     ctx.__aexit__ = AsyncMock(return_value=False)
+    ctx._get_embedding = AsyncMock(side_effect=_bio_vector)
     ctx.find_relevant_entities = AsyncMock(return_value=_selection_entity_nodes())
     ctx.find_relevant_chunks = AsyncMock(
         return_value=chunks if chunks is not None else _CARBON_CHUNKS
@@ -692,6 +701,7 @@ class TestDebateJobIntent:
         ctx = MagicMock()
         ctx.__aenter__ = AsyncMock(return_value=ctx)
         ctx.__aexit__ = AsyncMock(return_value=False)
+        ctx._get_embedding = AsyncMock(side_effect=_bio_vector)
 
         profiler = MagicMock()
         profiler.synthesize = AsyncMock(
@@ -790,6 +800,7 @@ class TestDebateJobFailure:
         ctx = MagicMock()
         ctx.__aenter__ = AsyncMock(return_value=ctx)
         ctx.__aexit__ = AsyncMock(return_value=False)
+        ctx._get_embedding = AsyncMock(side_effect=_bio_vector)
 
         profiler = MagicMock()
 
@@ -858,6 +869,7 @@ class TestDebateJobFailure:
         ctx = MagicMock()
         ctx.__aenter__ = AsyncMock(return_value=ctx)
         ctx.__aexit__ = AsyncMock(return_value=False)
+        ctx._get_embedding = AsyncMock(side_effect=_bio_vector)
 
         profiler = MagicMock()
         profiler.synthesize = AsyncMock(side_effect=RuntimeError(secret))
@@ -940,6 +952,7 @@ async def _run_with_depth(job_id: str, depth: str):
     ctx = MagicMock()
     ctx.__aenter__ = AsyncMock(return_value=ctx)
     ctx.__aexit__ = AsyncMock(return_value=False)
+    ctx._get_embedding = AsyncMock(side_effect=_bio_vector)
 
     repo = MagicMock()
     result = OrchestratedDebateResult(
@@ -1085,6 +1098,7 @@ async def _run_with_result(job_id: str, result: OrchestratedDebateResult):
     ctx = MagicMock()
     ctx.__aenter__ = AsyncMock(return_value=ctx)
     ctx.__aexit__ = AsyncMock(return_value=False)
+    ctx._get_embedding = AsyncMock(side_effect=_bio_vector)
 
     orch = MagicMock()
     orch.run = AsyncMock(return_value=result)
@@ -1207,6 +1221,7 @@ class TestDebateJobNarrative:
         ctx = MagicMock()
         ctx.__aenter__ = AsyncMock(return_value=ctx)
         ctx.__aexit__ = AsyncMock(return_value=False)
+        ctx._get_embedding = AsyncMock(side_effect=_bio_vector)
         orch = MagicMock()
         orch.run = AsyncMock(return_value=result)
         ws_manager = MagicMock()
@@ -1343,6 +1358,7 @@ class TestMeteringStopAtTheDebateBoundary:
         ctx = MagicMock()
         ctx.__aenter__ = AsyncMock(return_value=ctx)
         ctx.__aexit__ = AsyncMock(return_value=False)
+        ctx._get_embedding = AsyncMock(side_effect=_bio_vector)
 
         profiler = MagicMock()
         profiler.synthesize = AsyncMock(side_effect=MeteringError(f"metering failed: {secret}"))

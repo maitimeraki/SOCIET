@@ -123,16 +123,43 @@ def test_a_rejected_profile_hands_the_seat_to_the_next_candidate():
     assert q.next().name == "B"
 
 
-def test_next_refuses_to_draw_while_a_draw_is_unresolved():
+def test_open_draws_never_exceed_the_free_seats():
     a = cand("A", ppr=0.9, vector=(1.0, 0.0))
     b = cand("B", ppr=0.85, vector=(1.0, 0.0))
     c = cand("C", ppr=0.7, vector=(0.0, 1.0))
     q = SeatQueue([a, b, c], n=2)
-    q.next()
-    with pytest.raises(ValueError, match="before drawing again"):
-        q.next()
-    q.accept(a)
-    assert q.next().name == "C"
+    drawn = q.draw(5)
+    assert [d.name for d in drawn] == ["A", "C"]
+    assert q.next() is None
+    q.accept(drawn[0])
+    q.reject(drawn[1], "bad")
+    assert q.next().name == "B"
+
+
+def test_a_batch_draw_spreads_its_picks_away_from_each_other():
+    a = cand("A", ppr=0.9, vector=(1.0, 0.0))
+    twin = cand("Twin", ppr=0.89, vector=(1.0, 0.0))
+    other = cand("Other", ppr=0.5, vector=(0.0, 1.0))
+    q = SeatQueue([a, twin, other], n=2)
+    assert [d.name for d in q.draw(2)] == ["A", "Other"]
+
+
+def test_unseat_frees_the_seat_and_renumbers_the_rest():
+    a, b = cand("A", ppr=0.9), cand("B", ppr=0.8)
+    q = SeatQueue([a, b], n=2)
+    q.accept(q.next())
+    q.accept(q.next())
+    q.unseat(a, "too alike to a seated profile")
+    decisions = {d.name: d for d in q.decisions()}
+    assert (decisions["A"].seated, decisions["A"].reason) == (False, "rejected: too alike to a seated profile")
+    assert decisions["B"].order == 1
+    assert q.next() is None
+
+
+def test_unseat_of_a_candidate_not_seated_raises():
+    q = SeatQueue([cand("A")], n=1)
+    with pytest.raises(ValueError, match="not seated"):
+        q.unseat(cand("A"), "x")
 
 
 def test_same_input_gives_the_same_order():

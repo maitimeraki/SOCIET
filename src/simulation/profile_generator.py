@@ -96,6 +96,7 @@ def build_prompt(
     type_label: str,
     pack: EvidencePack,
     rejections: Sequence[Rejection] = (),
+    taken: Sequence[str] = (),
 ) -> tuple[str, str]:
     lines = [
         "QUESTION",
@@ -125,6 +126,10 @@ def build_prompt(
         lines.append("")
         lines.append("REPAIR: the previous reply was rejected for these reasons. Fix them and reply with the full JSON object.")
         lines.extend(f"- {attr_text(r.field)}: {attr_text(r.reason)}" for r in rejections)
+    if taken:
+        lines.append("")
+        lines.append("ALREADY TAKEN: another agent in this debate states these claims. Do not restate them; find this agent's own angle.")
+        lines.extend(f"<taken>{body_text(claim)}</taken>" for claim in taken)
     return SYSTEM_PROMPT, "\n".join(lines)
 
 
@@ -151,7 +156,9 @@ def _parse_profile(raw: str, pack: EvidencePack) -> tuple[ProfileDraft | None, l
     return validate_profile(data, pack)
 
 
-async def generate_profile(client, *, question, axis, name, aliases, type_label, pack) -> GenerationResult:
+async def generate_profile(
+    client, *, question, axis, name, aliases, type_label, pack, taken: Sequence[str] = ()
+) -> GenerationResult:
     cfg = get_llm_config()
     started = time.monotonic()
     rejections: list[Rejection] = []
@@ -159,7 +166,7 @@ async def generate_profile(client, *, question, axis, name, aliases, type_label,
     attempts = 0
     while attempts < MAX_ATTEMPTS:
         attempts += 1
-        system, user = build_prompt(question, axis, name, aliases, type_label, pack, rejections)
+        system, user = build_prompt(question, axis, name, aliases, type_label, pack, rejections, taken)
         raw = await _call(client, system, user, model=cfg.profile_model,
                           max_tokens=cfg.profile_max_tokens, temperature=PROFILE_TEMPERATURE)
         if raw is None:

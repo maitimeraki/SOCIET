@@ -220,6 +220,7 @@ class DebateOrchestrator:
             records=profile_records,
             llm_client=llm_client,
             on_profile=_emit_profile,
+            llm_concurrency=config.llm_concurrency,
         )
         stage_index = await self._emit_stage(
             on_stage, stage_index, "synthesis", agents=len(profiles)
