@@ -393,8 +393,13 @@ class GraphContext:
     async def find_connected_nodes_by_seed(
         self, node_ids: List[str], dataset_id: str, limit: int = 10
     ) -> Dict[str, List[EntityNode]]:
-        """Per-seed 1-hop entity neighbours (entity↔entity only), keyed by seed id
-        AND seed name so a caller resolving either key finds its group. One query.
+        """Per-seed entity neighbours (entity↔entity only), keyed by seed id AND seed
+        name so a caller resolving either key finds its group. One query.
+
+        Seeds are not excluded as neighbours, so an edge between two seeds is read
+        from both ends: this is how PageRank sees candidate-to-candidate edges. Each
+        seed keeps at most `limit` neighbours, the strongest (most edges) first.
+        A neighbour is listed once per key, however many edges join it to the seed.
         """
         keys = [str(n) for n in node_ids if str(n or "").strip()]
         if not keys:
@@ -404,27 +409,32 @@ class GraphContext:
         MATCH (seed:__Entity__)-[r]-(n:__Entity__)
         WHERE (seed.id IN $node_ids OR seed.name IN $node_ids)
           AND {entity_in_dataset("seed")}
-          AND NOT n:Chunk AND NOT (n.id IN $node_ids OR n.name IN $node_ids)
+          AND NOT n:Chunk AND n <> seed
           AND {entity_in_dataset("n")}
-        RETURN seed.id AS seed_id, seed.name AS seed_name, n, type(r) AS rel_type
-        LIMIT $limit
+        WITH seed, n, count(r) AS weight
+        ORDER BY seed.id, weight DESC, n.id
+        WITH seed, collect(n)[..$per_seed] AS neighbours
+        UNWIND neighbours AS n
+        RETURN seed.id AS seed_id, seed.name AS seed_name, n
         """
         async with self._driver.session(database=self._db) as session:
             result = await session.run(
                 cast(LiteralString, cypher),
                 node_ids=keys,
                 dataset_id=dataset_id,
-                limit=limit * max(1, len(keys)),
+                per_seed=limit,
             )
             rows = await result.data()
 
         grouped: Dict[str, List[EntityNode]] = {}
+        seen: Dict[str, set[str]] = {}
         for row in rows:
             if row.get("n") is None:
                 continue
             entity = self._entity_from_node(row.get("n"), 0.0)
             for key in (row.get("seed_id"), row.get("seed_name")):
-                if key:
+                if key and entity.id not in seen.setdefault(str(key), set()):
+                    seen[str(key)].add(entity.id)
                     grouped.setdefault(str(key), []).append(entity)
         return grouped
 

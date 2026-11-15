@@ -17,7 +17,7 @@ import pytest
 import pytest_asyncio
 from dotenv import load_dotenv
 
-from src.persona.graph_context import EntityNode
+from src.persona.graph_context import ChunkHit, ChunkSearch, EntityNode
 from src.persona.repository import PersonaRepository
 from src.simulation.debate_config import DebateConfig
 from src.simulation.profile_synthesizer import ProfileSynthesizer
@@ -135,7 +135,7 @@ async def test_synthesis_written_entity_links_produce_round1_pairs(live):
 
 @pytest.mark.asyncio
 async def test_single_cell_graph_synthesizes_a_debatable_roster(live):
-    """The reported bug's shape, end to end: one chunk, one document, N entities.
+    """The reported bug's shape, end to end: one document, two chunks, N entities.
 
     Synthesis must derive one persona per required node (never one collapsed
     persona), write the links, and let the real round-1 Cypher pair them.
@@ -167,9 +167,26 @@ async def test_single_cell_graph_synthesizes_a_debatable_roster(live):
                 names=names,
             )
 
-        # The vector entry is stubbed (no embeddings in a unit run); everything
-        # else is real: node-level derivation, the real writers, the real
-        # round-1 pairing Cypher.
+        # A second chunk of the same document names every entity: one source is
+        # not enough evidence to seat an entity (two are required).
+        chunk2_id = f"itest-chunk2-{uuid4().hex[:10]}"
+        async with driver.session(database=db) as session:
+            await session.run(
+                """
+                CREATE (c2:__Node__:Chunk {id: $chunk2_id, chunk_id: $chunk2_id, doc_id: $doc_id,
+                        dataset_id: $ds, title: 'itest', breadcrumb: '', _test: true})
+                WITH c2
+                MATCH (e:__Entity__ {dataset_id: $ds})
+                CREATE (c2)-[:MENTIONS]->(e)
+                """,
+                chunk2_id=chunk2_id,
+                doc_id=doc_id,
+                ds=ds,
+            )
+
+        # The vector and chunk legs are stubbed (no embeddings in a unit run);
+        # everything else is real: node-level derivation, the real writers, the
+        # real round-1 pairing Cypher.
         class _SeededContext:
             async def find_relevant_entities(self, query, dataset_id, limit=10):
                 return [
@@ -182,6 +199,27 @@ async def test_single_cell_graph_synthesizes_a_debatable_roster(live):
                     )
                     for index, name in enumerate(names)
                 ]
+
+            async def find_relevant_chunks(self, query, dataset_id, limit=200):
+                hits = [
+                    ChunkHit(
+                        chunk_id=cid,
+                        doc_id=doc_id,
+                        doc_title="",
+                        section="",
+                        text="",
+                        rank=rank,
+                        entity_ids=tuple(names),
+                    )
+                    for rank, cid in enumerate([chunk_id, chunk2_id], start=1)
+                ]
+                return ChunkSearch(vector=hits, fulltext=hits)
+
+            async def find_entities_by_ids(self, entity_ids, dataset_id):
+                return []
+
+            async def find_connected_nodes_by_seed(self, node_ids, dataset_id, limit=10):
+                return {}
 
         async def _stub_build(**kwargs):
             return SimpleNamespace(identity=SimpleNamespace(name=kwargs["agent_name"]))

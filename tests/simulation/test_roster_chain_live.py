@@ -18,7 +18,7 @@ import pytest
 import pytest_asyncio
 from dotenv import load_dotenv
 
-from src.persona.graph_context import EntityNode
+from src.persona.graph_context import ChunkHit, ChunkSearch, EntityNode
 from src.persona.repository import PersonaRepository
 from src.simulation.debate_config import DebateConfig
 from src.simulation.profile_synthesizer import ProfileSynthesizer
@@ -30,21 +30,42 @@ CHUNK_TEXT = "The EU market entry carries a 4.2% regulatory surcharge."
 
 
 class _StubCtx:
-    """Only the two reads the roster path makes — no embeddings, no LLM.
+    """The reads the roster path makes, with no embeddings and no LLM.
 
     `find_relevant_entities` returns EntityNodes whose `properties` are the
     seeded graph nodes' own properties (the test reads them back), so the
-    synthesizer consumes exactly what a real GraphContext would surface.
+    synthesizer consumes exactly what a real GraphContext would surface. The
+    chunk legs name the entities the way the seeded chunks MENTION them: one
+    `(chunk_id, entity_ids)` pair per seeded chunk, in rank order.
     """
 
-    def __init__(self, nodes):
+    def __init__(self, nodes, chunk_mentions):
         self._nodes = list(nodes)
+        self._mentions = list(chunk_mentions)
 
     async def find_relevant_entities(self, query, dataset_id, limit):
         return list(self._nodes)
 
-    def find_connected_nodes(self, ids, dataset_id, limit):
+    async def find_relevant_chunks(self, query, dataset_id, limit=200):
+        hits = [
+            ChunkHit(
+                chunk_id=chunk_id,
+                doc_id=f"doc-{chunk_id}",
+                doc_title="",
+                section="",
+                text="",
+                rank=rank,
+                entity_ids=tuple(entity_ids),
+            )
+            for rank, (chunk_id, entity_ids) in enumerate(self._mentions, start=1)
+        ]
+        return ChunkSearch(vector=hits, fulltext=hits)
+
+    async def find_entities_by_ids(self, entity_ids, dataset_id):
         return []
+
+    async def find_connected_nodes_by_seed(self, node_ids, dataset_id, limit=10):
+        return {}
 
 
 @pytest_asyncio.fixture
@@ -82,6 +103,7 @@ async def _seed_writer_shaped_graph(repo, db, ds):
     """
     suffix = uuid4().hex[:8]
     chunk_id = f"itest-roster-chunk-{suffix}"
+    chunk2_id = f"itest-roster-chunk2-{suffix}"
     doc_anchor = f"DOC-{suffix}"
     names = (f"itest-adv-{suffix}", f"itest-skep-{suffix}", f"itest-legacy-{suffix}")
 
@@ -103,6 +125,12 @@ async def _seed_writer_shaped_graph(repo, db, ds):
                 stance: 'NEUTRAL', domain_tags: ['trade'], dataset_id: $ds})
             CREATE (c)-[:MENTIONS]->(adv)
             CREATE (c)-[:MENTIONS]->(skep)
+            CREATE (c2:__Node__:Chunk {
+                id: $chunk2_id, text: $text, document_anchor: $anchor,
+                title: 'EU Market 2027', breadcrumb: 'Section 4 > Entry',
+                chunk_id: $chunk2_uuid, dataset_id: $ds})
+            CREATE (c2)-[:MENTIONS]->(adv)
+            CREATE (c2)-[:MENTIONS]->(skep)
             CREATE (d:Document {dataset_id: $ds, _test: true})
             CREATE (adv)-[:DERIVED_FROM]->(d)
             CREATE (skep)-[:DERIVED_FROM]->(d)
@@ -112,12 +140,14 @@ async def _seed_writer_shaped_graph(repo, db, ds):
             text=CHUNK_TEXT,
             anchor=doc_anchor,
             chunk_uuid=str(uuid4()),
+            chunk2_id=chunk2_id,
+            chunk2_uuid=str(uuid4()),
             ds=ds,
             adv=names[0],
             skep=names[1],
             legacy=names[2],
         )
-    return chunk_id, doc_anchor, names
+    return chunk_id, chunk2_id, doc_anchor, names
 
 
 async def _entity_nodes(repo, db, names):
@@ -155,21 +185,28 @@ def _score_for(pairs, a, b):
 async def test_roster_chain_holds_on_writer_shaped_graph(live):
     repo, db = live
     ds = f"itest-roster-{uuid4().hex[:10]}"
-    chunk_id, doc_anchor, (adv_name, skep_name, legacy_name) = (
+    chunk_id, chunk2_id, doc_anchor, (adv_name, skep_name, legacy_name) = (
         await _seed_writer_shaped_graph(repo, db, ds)
     )
 
     try:
         nodes = await _entity_nodes(repo, db, (adv_name, skep_name, legacy_name))
-        synth = ProfileSynthesizer(repo, _StubCtx(nodes))
+        ids = {node.name: node.id for node in nodes}
+        mentions = [(chunk_id, [ids[adv_name], ids[skep_name]]), (chunk2_id, [ids[adv_name], ids[skep_name]])]
+        synth = ProfileSynthesizer(repo, _StubCtx(nodes, mentions))
+        decisions: list = []
         agents = await synth.synthesize(
             query="Should we expand into the EU?",
             dataset_id=ds,
             max_agents=5,
+            decisions=decisions,
         )
         by_name = {a.identity.name: a for a in agents}
-        assert {adv_name, skep_name, legacy_name} <= set(by_name), by_name.keys()
-        adv, skep, legacy = by_name[adv_name], by_name[skep_name], by_name[legacy_name]
+        assert {adv_name, skep_name} <= set(by_name), by_name.keys()
+        assert legacy_name not in by_name
+        reasons = {d.name: d.reason for d in decisions}
+        assert reasons[legacy_name] == "evidence 0 < 2"
+        adv, skep = by_name[adv_name], by_name[skep_name]
 
         # (1) entity.triplet_source_id == chunk.id, and the `(c:Chunk {id}).text`
         # read holds on writer-shaped data: the seeded text is the evidence, and
@@ -206,18 +243,15 @@ async def test_roster_chain_holds_on_writer_shaped_graph(live):
             1.0 + _STANCE_DIVERGENCE_BONUS
         )
 
-        # (4) Negative case (gating behavior, triaged ship): an entity with NO
-        # `triplet_source_id` yields no evidence and no entity links.
-        assert legacy.source_evidence == []
-        assert legacy.summary_provenance == []
+        # (4) Negative case: the entity with NO `triplet_source_id` and no chunk
+        # mention has no evidence, so it is refused, and no Persona is written.
         async with repo._driver.session(database=db) as session:
             res = await session.run(
-                "MATCH (p:Persona {name: $name, dataset_id: $ds})-[:MENTIONS]->(e:__Entity__) "
-                "RETURN count(e) AS links",
+                "MATCH (p:Persona {name: $name, dataset_id: $ds}) RETURN count(p) AS personas",
                 name=legacy_name,
                 ds=ds,
             )
-            assert (await res.data())[0]["links"] == 0
+            assert (await res.data())[0]["personas"] == 0
     finally:
         async with repo._driver.session(database=db) as session:
             await session.run(

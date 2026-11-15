@@ -30,8 +30,8 @@ logger = logging.getLogger(__name__)
 CHUNK_POOL = 200
 #: Entity vector hits read; their similarity is percentile-ranked.
 ENTITY_HITS = 100
-#: Graph neighbours read per pool entity (PPR edges and evidence).
-NEIGHBOURS_PER_SEED = 10
+#: Graph neighbours read per pool entity (PPR edges and evidence), strongest first.
+NEIGHBOURS_PER_SEED = 25
 NO_COVERAGE_MESSAGE = "the graph does not cover this question"
 _UNTYPED_LABELS = frozenset({"", "Entity", "__Entity__"})
 
@@ -39,6 +39,20 @@ _UNTYPED_LABELS = frozenset({"", "Entity", "__Entity__"})
 def _type_label(node: EntityNode) -> str:
     """The entity's real type label, or "" when the graph carries none."""
     return "" if node.label in _UNTYPED_LABELS else node.label
+
+
+def _distinct_by_id(entities: list[EntityNode], own_id: str) -> list[EntityNode]:
+    """Neighbours once each by entity id, the node itself left out.
+
+    An entity whose id equals its name arrives under both keys of a grouped read.
+    """
+    seen: set[str] = {own_id}
+    distinct: list[EntityNode] = []
+    for entity in entities:
+        if entity.id not in seen:
+            seen.add(entity.id)
+            distinct.append(entity)
+    return distinct
 
 
 def _embedding(node: EntityNode) -> tuple[float, ...]:
@@ -496,10 +510,20 @@ class ProfileSynthesizer:
         if not any(query_relevance.get(node.id, 0.0) > 0 for node in pool):
             raise NoAgentsDerivableError(NO_COVERAGE_MESSAGE)
 
-        neighbours = await self._subgraph_by_seed(
+        grouped = await self._subgraph_by_seed(
             pool, dataset_id=dataset_id, limit=NEIGHBOURS_PER_SEED
         )
-        edges = [(node.id, n.id) for node in pool for n in neighbours.get(node.id, [])]
+        neighbours = {
+            node.id: _distinct_by_id(grouped.get(node.id, []), node.id) for node in pool
+        }
+        # Undirected, one edge per pair: a pool-to-pool edge arrives from both ends.
+        edges = sorted(
+            {
+                tuple(sorted((node.id, n.id)))
+                for node in pool
+                for n in neighbours[node.id]
+            }
+        )
         seeds = {
             node.id: query_relevance[node.id]
             for node in pool
@@ -521,7 +545,7 @@ class ProfileSynthesizer:
                 ppr=ppr.get(node.id, 0.0),
                 doc_count=len(doc_ids.get(node.id, ())),
                 chunk_count=chunk_count.get(node.id, 0),
-                evidence_count=chunk_count.get(node.id, 0) + len(neighbours.get(node.id, [])),
+                evidence_count=chunk_count.get(node.id, 0) + len(neighbours[node.id]),
                 vector=_embedding(node),
             )
             for node in pool
@@ -533,7 +557,7 @@ class ProfileSynthesizer:
         while (drawn := queue.next()) is not None:
             queue.accept(drawn)
             node = nodes[drawn.entity_id]
-            seats.append((drawn, [node, *neighbours.get(node.id, [])]))
+            seats.append((drawn, [node, *neighbours[node.id]]))
         if decisions is not None:
             decisions.extend(queue.decisions())
         return seats

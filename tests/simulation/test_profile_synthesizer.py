@@ -1725,3 +1725,59 @@ async def test_joiner_gets_a_real_archetype():
     assert [p.identity.name for p in profiles] == ["Regulator Node"]
     assert profiles[0].identity.archetype == "Regulator"
     assert profiles[0].identity.archetype != "Strategic Analyst"
+
+
+@pytest.mark.asyncio
+async def test_a_connector_outranks_an_isolated_entity_with_equal_chunk_score():
+    """Pool-to-pool edges reach PageRank: the connector to a partner outranks the isolated entity."""
+    connector = _cluster_entity("Connector", 0.0, ["x"], "c")
+    partner = _cluster_entity("Partner", 0.0, ["x"], "p")
+    isolated = _cluster_entity("Isolated", 0.0, ["x"], "i")
+    ids = [connector.id, partner.id, isolated.id]
+    chunks = chunk_search(
+        vector=["c0", "c1"], fulltext=["c0", "c1"], mentions={"c0": ids, "c1": ids}
+    )
+    neighbours = {
+        connector.id: [
+            EntityNode(id="Partner", name="Partner", label="Persona"),
+            EntityNode(id="Hub", name="Hub", label="Persona"),
+        ],
+        partner.id: [EntityNode(id="Connector", name="Connector", label="Persona")],
+        isolated.id: [],
+    }
+    synth = _selection_synth(
+        [connector, partner, isolated], chunks=chunks, neighbours=neighbours
+    )
+    decisions: list[SeatDecision] = []
+
+    profiles = await synth.synthesize(
+        query="q", dataset_id="ds", max_agents=1, decisions=decisions
+    )
+
+    assert [p.identity.name for p in profiles] == ["Connector"]
+    scores = {d.name: d.features["ppr"] for d in decisions}
+    assert scores["Connector"] > scores["Isolated"]
+
+
+@pytest.mark.asyncio
+async def test_a_neighbour_listed_twice_does_not_satisfy_min_evidence_alone():
+    """id == name: one neighbour arrives under both keys. It counts once, so it is
+    one piece of evidence, below MIN_EVIDENCE=2 with no chunk to back it."""
+    named_only = _cluster_entity("Lone Neighbour", 0.0, ["x"], "n")
+    grounded = _cluster_entity("Grounded", 0.0, ["x"], "g")
+    chunks = chunk_search(
+        vector=["c0", "c1"],
+        fulltext=["c0", "c1"],
+        mentions={"c0": [grounded.id], "c1": [grounded.id]},
+    )
+    twin = EntityNode(id="Dup", name="Dup", label="Persona")
+    synth = _selection_synth(
+        [named_only, grounded],
+        chunks=chunks,
+        neighbours={named_only.id: [twin, twin], grounded.id: []},
+    )
+    decisions: list[SeatDecision] = []
+
+    await synth.synthesize(query="q", dataset_id="ds", max_agents=2, decisions=decisions)
+
+    assert {d.name: d.reason for d in decisions}["Lone Neighbour"] == "evidence 1 < 2"

@@ -785,3 +785,41 @@ async def test_find_entities_by_ids_empty_ids_run_no_query():
 
     assert await ctx.find_entities_by_ids([], "ds-A") == []
     assert driver.queries == []
+
+
+@pytest.mark.asyncio
+async def test_find_connected_nodes_by_seed_does_not_exclude_pool_members():
+    """Seeds are neighbours too: an edge between two seeds must reach PageRank."""
+    ctx, driver = _batch_ctx(lambda cypher, params: [])
+
+    await ctx.find_connected_nodes_by_seed(["s1", "s2"], "ds-A", limit=10)
+
+    cypher, _ = driver.queries[0]
+    assert "NOT (n.id IN" not in cypher
+    assert "n <> seed" in cypher
+
+
+@pytest.mark.asyncio
+async def test_find_connected_nodes_by_seed_caps_each_seed_not_the_whole_read():
+    ctx, driver = _batch_ctx(lambda cypher, params: [])
+
+    await ctx.find_connected_nodes_by_seed(["s1", "s2"], "ds-A", limit=10)
+
+    cypher, params = driver.queries[0]
+    assert "LIMIT $limit" not in cypher
+    assert "[..$per_seed]" in cypher
+    assert params["per_seed"] == 10
+
+
+@pytest.mark.asyncio
+async def test_find_connected_nodes_by_seed_lists_a_neighbour_once_when_id_equals_name():
+    """id == name (spec): the same neighbour arrives under both keys; one entry per key."""
+    rows = [
+        {"seed_id": "s1", "seed_name": "s1", "n": _FakeNode("GDPR", "Regulation")},
+        {"seed_id": "s1", "seed_name": "s1", "n": _FakeNode("GDPR", "Regulation")},
+    ]
+    ctx, _ = _batch_ctx(lambda cypher, params: rows)
+
+    out = await ctx.find_connected_nodes_by_seed(["s1"], "ds-A", limit=10)
+
+    assert [e.name for e in out["s1"]] == ["GDPR"]
