@@ -3,6 +3,7 @@ Debate API: Async debate simulation with streaming support.
 """
 
 import asyncio
+import json
 import logging
 import math
 import time
@@ -20,7 +21,7 @@ from fastapi import (
     WebSocket,
     WebSocketDisconnect,
 )
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.api import run_doc
@@ -86,6 +87,10 @@ class DebateConfigRequest(BaseModel):
     snapshot_top_k: int = Field(default=8, ge=5, le=20)
 
 
+#: The serialised size cap on the user's scenario context (audit L-G1).
+CONTEXT_MAX_BYTES = 4096
+
+
 class DebateRequest(BaseModel):
     """Request to start a debate simulation."""
 
@@ -109,6 +114,16 @@ class DebateRequest(BaseModel):
         description="User-supplied scenario constraints; weighed into the synthesized verdict.",
     )
     config: DebateConfigRequest = Field(default_factory=DebateConfigRequest)
+
+    @field_validator("context")
+    @classmethod
+    def _cap_context(cls, value: Optional[dict]) -> Optional[dict]:
+        if value is None:
+            return value
+        size = len(json.dumps(value, default=str).encode("utf-8"))
+        if size > CONTEXT_MAX_BYTES:
+            raise ValueError(f"context is {size} bytes; the limit is {CONTEXT_MAX_BYTES}")
+        return value
 
 
 class DebateJobResponse(BaseModel):
