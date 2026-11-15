@@ -113,7 +113,7 @@ def test_system_prompt_uses_profile_fields():
     _, bob = make_profile(
         "Bob", ["environmental science"], "Externalities are not priced in.", 0.7
     )
-    prompt = _build_system_prompt(alice, bob, ["carbon tax", "EPA"])
+    prompt = _build_system_prompt(alice, ["carbon tax", "EPA"])
     assert "Alice" in prompt
     assert "economics" in prompt
     assert "Markets self-correct efficiently" in prompt
@@ -123,7 +123,7 @@ def test_system_prompt_carries_the_full_profile():
     full = "x" * 5000
     _, alice = make_profile("Alice", ["x"], full, 0.8)
     _, bob = make_profile("Bob", ["y"], "y", 0.7)
-    prompt = _build_system_prompt(alice, bob, [])
+    prompt = _build_system_prompt(alice, [])
     assert full in prompt
 
 

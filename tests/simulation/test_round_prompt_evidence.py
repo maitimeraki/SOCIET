@@ -25,27 +25,21 @@ def _item(i: int, text: str = "chunk text", item_id: str | None = None) -> Evide
 
 
 def test_prompt_includes_evidence_block():
-    prompt = _build_system_prompt(
-        slim_agent(evidence=[_item(1, "chunk one text")]), slim_agent("B"), []
-    )
+    prompt = _build_system_prompt(slim_agent(evidence=[_item(1, "chunk one text")]), [])
 
     assert '<evidence id="e1"' in prompt
     assert "chunk one text" in prompt
 
 
 def test_prompt_renders_none_and_no_fence_when_no_evidence():
-    prompt = _build_system_prompt(slim_agent(), slim_agent("B"), [])
+    prompt = _build_system_prompt(slim_agent(), [])
 
     assert "<evidence" not in prompt
     assert "\n\n\n" not in prompt
 
 
 def test_prompt_keeps_role_bio_stance_and_shared_entities():
-    prompt = _build_system_prompt(
-        slim_agent(role="my role", bio="my bio", details_raw="my perspective"),
-        slim_agent("B"),
-        ["SharedEntity"],
-    )
+    prompt = _build_system_prompt(slim_agent(role="my role", bio="my bio", details_raw="my perspective"), ["SharedEntity"])
 
     assert "my role" in prompt
     assert "my bio" in prompt
@@ -57,30 +51,26 @@ def test_full_profile_reaches_prompt_untruncated():
     details = ("alpha beta gamma delta " * 50).strip()
     assert len(details) > 1000
 
-    prompt = _build_system_prompt(slim_agent(details_raw=details), slim_agent("B"), [])
+    prompt = _build_system_prompt(slim_agent(details_raw=details), [])
 
     assert details in prompt
 
 
 def test_prompt_renders_at_most_max_evidence_items():
     evidence = [_item(i) for i in range(PROMPT_EVIDENCE_MAX + 3)]
-    prompt = _build_system_prompt(slim_agent(evidence=evidence), slim_agent("B"), [])
+    prompt = _build_system_prompt(slim_agent(evidence=evidence), [])
 
     assert prompt.count("<evidence ") == PROMPT_EVIDENCE_MAX
 
 
 def test_evidence_id_cannot_break_the_fence():
-    prompt = _build_system_prompt(
-        slim_agent(evidence=[_item(1, item_id='e1"><x>')]), slim_agent("B"), []
-    )
+    prompt = _build_system_prompt(slim_agent(evidence=[_item(1, item_id='e1"><x>')]), [])
 
     assert "<x>" not in prompt
     assert '<evidence id="e1x"' in prompt
 
 
 def test_prompt_states_the_stance_and_strength():
-    prompt = _build_system_prompt(
-        slim_agent(strength=0.25), slim_agent("B"), []
-    )
+    prompt = _build_system_prompt(slim_agent(strength=0.25), [])
 
     assert "POSITIVE (strength 0.25)" in prompt

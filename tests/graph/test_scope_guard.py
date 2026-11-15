@@ -54,6 +54,10 @@ READS = {
             "(m:Chunk AND " + chunk_in_dataset("m") + ")",
         ],
     ),
+    "find_relations_for": (
+        lambda ctx, **kw: ctx.find_relations_for("a", ["b"], **kw),
+        [entity_in_dataset("seed"), entity_in_dataset("n"), chunk_in_dataset("ch")],
+    ),
     "get_provenance": (
         lambda ctx, **kw: ctx.get_provenance("a", **kw),
         [entity_in_dataset("n"), chunk_in_dataset("chunk")],

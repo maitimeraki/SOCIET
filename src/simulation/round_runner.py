@@ -107,9 +107,7 @@ def _truncate_snippet(text: str, budget: int) -> str:
     return cut.rsplit(" ", 1)[0] if " " in cut else cut
 
 
-def _build_system_prompt(
-    agent: Agent, opponent: Agent, shared_entities: list[str]
-) -> str:
+def _build_system_prompt(agent: Agent, shared_entities: list[str]) -> str:
     """The agent's own voice: role, bio, the full profile, stance and its evidence.
 
     Evidence renders as fenced `<evidence>` blocks (the same fence the profile
@@ -251,7 +249,7 @@ class RoundRunner:
 
             meta_a = {"pair": pair, "speaker": agent_a, "opponent": agent_b}
             prompt_a = PairPrompt(
-                system_prompt=_build_system_prompt(agent_a, agent_b, shared),
+                system_prompt=_build_system_prompt(agent_a, shared),
                 user_prompt=_build_user_prompt(
                     agent_a,
                     agent_b,
@@ -268,7 +266,7 @@ class RoundRunner:
 
             meta_b = {"pair": pair, "speaker": agent_b, "opponent": agent_a}
             prompt_b = PairPrompt(
-                system_prompt=_build_system_prompt(agent_b, agent_a, shared),
+                system_prompt=_build_system_prompt(agent_b, shared),
                 user_prompt=_build_user_prompt(
                     agent_b,
                     agent_a,

@@ -90,11 +90,16 @@ def test_stance_has_no_ambivalent_member():
     assert "AMBIVALENT" not in Stance.__members__
 
 
-def test_agent_has_no_fabricated_defaults():
-    from src.persona.agent import Agent, PersonaIdentity
+@pytest.mark.parametrize("missing", ["stance", "strength", "confidence"])
+def test_agent_has_no_fabricated_defaults(missing):
+    from src.persona.agent import Agent
+    from tests.agent_factory import slim_agent
+
+    kwargs = slim_agent().model_dump()
+    del kwargs[missing]
 
     with pytest.raises(ValidationError):
-        Agent(identity=PersonaIdentity(name="X"))
+        Agent(**kwargs)
 
 
 def test_stance_parse_trims_and_accepts_lowercase():

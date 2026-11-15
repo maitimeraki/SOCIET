@@ -88,7 +88,7 @@ class DebateRequest(BaseModel):
     )
     simulation_depth: Literal["shallow", "standard", "deep"] = Field(
         default="standard",
-        description="Depth gate (D3): shallow skips S5 persona distillation; standard/deep run it.",
+        description="Accepted for client compatibility; it currently has no effect on the run.",
     )
     context: Optional[dict] = Field(
         default=None,

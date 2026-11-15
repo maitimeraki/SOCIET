@@ -581,6 +581,8 @@ class DebateOrchestrator:
                         f"Round {round_num}: activated {len(new_profiles)} agents: "
                         + ", ".join(p.identity.name for p in new_profiles)
                     )
+        except MeteringError:
+            raise
         except Exception as exc:
             logger.warning("Round %s: activation failed", round_num, exc_info=exc)
             warnings.append(

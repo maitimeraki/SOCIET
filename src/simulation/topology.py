@@ -49,7 +49,8 @@ class CommunicationTopology:
         Compute communication pairs for a debate round using Cypher.
 
         Round 1: Direct entity overlap via single-hop paths.
-        Round 2+: Expand path length to `config.comm_radius` hops (at least 1).
+        Round 2+: Expand path length to `max(1, config.comm_radius)` hops. The 1..5
+        bound on comm_radius is enforced by DebateConfig and debate_api, not here.
         """
         agent_names = [p.identity.name for p in profiles]
         effective_radius = max(1, int(config.comm_radius))
@@ -134,9 +135,9 @@ class CommunicationTopology:
         The round emits one query for every pair, so there is one radius for the
         whole cohort: `effective_radius` is `config.comm_radius` (at least 1).
 
-        `effective_radius` is a Python int already clamped by the caller. We
-        interpolate it via Cypher's `*1..N` syntax, which only accepts integers
-        -- the caller-side clamp is what makes this safe.
+        `effective_radius` is a Python int that `compute_round_pairs` floors at 1
+        and DebateConfig bounds to 1..5. We interpolate it via Cypher's `*1..N`
+        syntax, which only accepts integers -- the int conversion keeps it safe.
 
         Score carries the same stance-divergence term as round 1, but reads
         `Persona.current_stance` (updated on every `commit_round`) instead.

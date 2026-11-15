@@ -137,6 +137,7 @@ class FakeGraph:
         self._neighbours = neighbours if neighbours is not None else _neighbours_for(list(entities))
         self._relations = relations or {}
         self.relation_calls: list[tuple[str, list[str]]] = []
+        self.relation_dataset_ids: list[str] = []
 
     async def find_relevant_chunks(self, query, dataset_id, limit=200):
         return self._chunks
@@ -152,6 +153,7 @@ class FakeGraph:
 
     async def find_relations_for(self, entity_id, counterpart_ids, dataset_id, limit=8):
         self.relation_calls.append((entity_id, list(counterpart_ids)))
+        self.relation_dataset_ids.append(dataset_id)
         return self._relations.get(entity_id, [])
 
 
@@ -364,6 +366,28 @@ async def test_relations_are_read_only_to_the_capped_neighbours():
 
     entity_id, counterparts = graph.relation_calls[0]
     assert (entity_id, len(counterparts)) == ("kestra", NEIGHBOUR_CAP)
+
+
+@pytest.mark.asyncio
+async def test_relations_are_read_in_the_run_dataset():
+    graph = FakeGraph([KESTRA], neighbours={"kestra": [_entity("n1", "Neighbour")]})
+
+    await _run(_synth([KESTRA], graph=graph), max_agents=1)
+
+    assert graph.relation_dataset_ids == ["ds-A"]
+
+
+@pytest.mark.asyncio
+async def test_a_neighbour_listed_twice_does_not_satisfy_min_evidence_alone():
+    other = _entity("other", "Other", score=0.9)
+    twice = _entity("n1", "Neighbour")
+    graph = FakeGraph(
+        [other, KESTRA],
+        chunks=_chunks_for([other]),
+        neighbours={"kestra": [twice, twice], "other": []},
+    )
+
+    assert await _run(_synth([other, KESTRA], graph=graph), max_agents=3) == []
 
 
 @pytest.mark.asyncio

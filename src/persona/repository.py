@@ -1,31 +1,15 @@
-from typing import Any, Dict, List, LiteralString, Optional, Sequence, cast
+from typing import Any, Optional, Sequence
 
 from llama_index.embeddings.ollama import OllamaEmbedding
 from neo4j import AsyncGraphDatabase
 
 from src.graph.scope import chunk_in_dataset, entity_in_dataset
 from src.llm.config_llm import LLMConfig
-from src.logging.setup_logging import setup_logging
-
-logger = setup_logging()
 
 # The ollama clients default to httpx `timeout=None` (unbounded) — a stuck
 # localhost embed call would wait forever. 60 s is a generous bound for it.
 _EMBED_TIMEOUT_SECONDS = 60
 
-
-# Store/base labels carried by every graph node — never the entity's real type.
-# Mirrors `graph_context._BASE_LABELS`; the type is a Neo4j label, not a property.
-_BASE_LABELS = frozenset({"__Entity__", "__Node__", "Chunk", "Document"})
-
-
-def _real_type_label(labels: Any) -> str:
-    """The first non-base Neo4j label a node carries, or "" when it has none."""
-    for label in labels or ():
-        text = str(label).strip()
-        if text and text not in _BASE_LABELS:
-            return text
-    return ""
 
 class PersonaRepository:
     def __init__(
@@ -51,67 +35,6 @@ class PersonaRepository:
 
     async def close(self) -> None:
         await self._driver.close()
-
-    @staticmethod
-    def _node_props(node: Any) -> Dict[str, Any]:
-        """Safely read node properties from various neo4j driver node representations."""
-        if node is None:
-            return {}
-        try:
-            # mapping-like object (recorded dict)
-            if isinstance(node, dict):
-                return dict(node)
-            # py2neo-style or neo4j node with ._properties
-            if hasattr(node, "_properties"):
-                return dict(node._properties)
-            # neo4j v5 node has .properties
-            if hasattr(node, "properties"):
-                return dict(node.properties)
-            # fallback: cast to dict
-            return dict(node)
-        except Exception:
-            logger.exception("Failed to read node properties")
-            return {}
-
-    async def fetch_nodes_by_names(
-        self, names: List[str], dataset_id: str
-    ) -> Dict[str, Dict[str, Any]]:
-        """Batch-fetch entity nodes by their `name` property and return a map name->props.
-
-        Only `:__Entity__` nodes of `dataset_id` match (audit C1). Persona nodes
-        carry no entity label, so a persona's own properties never shadow an
-        entity's (`triplet_source_id` etc.).
-        """
-        if not names:
-            return {}
-
-        query = f"""
-        MATCH (n:__Entity__)
-        WHERE n.name IN $names AND {entity_in_dataset("n")}
-        RETURN n.name AS name, n, labels(n) AS labels
-        """
-        async with self._driver.session(database=self._db) as session:
-            res = await session.run(
-                cast(LiteralString, query), names=names, dataset_id=dataset_id
-            )
-            rows = await res.data()
-
-        out: Dict[str, Dict[str, Any]] = {}
-        for r in rows:
-            name = r.get("name")
-            node = r.get("n")
-            if not node or not name:
-                continue
-            props = self._node_props(node)
-            # A node's real type is a Neo4j label, never a property, so a
-            # props-only read drops it. Carry it as `label` so the build's
-            # Task 5 identity precedence (`node["label"]`) can derive the
-            # archetype — joiners reach the build through this fetch alone.
-            label = _real_type_label(r.get("labels"))
-            if label and not props.get("label"):
-                props = {**props, "label": label}
-            out.setdefault(name, props)
-        return out
 
     #: Bound on the provenance write: at most this many chunk ids per persona, per call.
     _PROVENANCE_CHUNK_CAP = 20
