@@ -40,7 +40,9 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from src.db.engine import get_session_factory
 from src.db.models import AgentRecordRow, Job, Run, RunEvent
+from src.persona.agent import Stance
 from src.simulation.agent_record import AgentView
+from src.simulation.turn_protocol import dominant_stance
 
 logger = logging.getLogger(__name__)
 
@@ -364,12 +366,9 @@ def _summarize(
 ) -> dict[str, Any]:
     result = run.verdict or {}
     clusters = result.get("cluster_details") or {}
-    verdict_stance = None
-    if clusters:
-        dominant = max(
-            clusters.values(), key=lambda cluster: cluster.get("total_weight", 0.0)
-        )
-        verdict_stance = dominant.get("stance")
+    weights = {Stance.parse(key): float(cluster.get("total_weight") or 0.0) for key, cluster in clusters.items()}
+    dominant = dominant_stance(weights)
+    verdict_stance = dominant.value if dominant is not None else None
     status = run.status
     if status == "failed" and error == "interrupted":
         # The boot sweep's mark — the honest "server restarted mid-run" (§7.10).

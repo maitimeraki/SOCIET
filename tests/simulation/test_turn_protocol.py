@@ -22,6 +22,7 @@ from src.simulation.turn_protocol import (
     PositionState,
     TurnParse,
     accept_position,
+    dominant_stance,
     parse_turn,
     stance_weights,
     weighted_share,
@@ -172,6 +173,17 @@ async def test_a_second_failure_drops_the_turn_and_warns_without_model_text(capl
     assert CANARY not in result.warnings[0]
     assert CANARY not in caplog.text
     assert all(CANARY not in repr(t) for t in result.turns)
+
+
+@pytest.mark.asyncio
+async def test_an_llm_failure_is_dropped_and_never_retried():
+    # A retry would consume Alice's queued DECLARED reply and keep her turn.
+    replies = {"Alice": [RuntimeError("provider down"), DECLARED], "Bob": [DECLARED]}
+    result = await _round(_pair_runner(replies))
+
+    assert [t.agent_name for t in result.turns] == ["Bob"]
+    assert result.warnings == ["Alice: turn dropped, the LLM call failed"]
+    assert replies["Alice"] == [DECLARED]
 
 
 @pytest.mark.asyncio
@@ -388,3 +400,22 @@ def test_stance_weights_has_every_wire_stance_and_abstain_weighs_nothing():
     weights = stance_weights([turn("A", Stance.ABSTAIN, 0.9)], profiles(A=1.0))
     assert set(weights) == set(WIRE_STANCES)
     assert weights[Stance.ABSTAIN] == 0.0
+
+
+def test_dominant_stance_breaks_ties_in_position_order():
+    weights = {Stance.NEUTRAL: 0.5, Stance.NEGATIVE: 0.5, Stance.POSITIVE: 0.5}
+    assert dominant_stance(weights) is Stance.POSITIVE
+    assert dominant_stance({Stance.NEUTRAL: 0.5, Stance.NEGATIVE: 0.5}) is Stance.NEGATIVE
+
+
+def test_dominant_stance_is_none_when_no_position_carries_weight():
+    assert dominant_stance({Stance.POSITIVE: 0.0, Stance.ABSTAIN: 0.0}) is None
+    assert dominant_stance({}) is None
+
+
+def test_an_unknown_stance_word_raises_rather_than_being_skipped():
+    bad = AgentTurn(
+        agent_id="x", agent_name="A", content="x", stance="UNKNOWN", confidence=0.5, strength=0.5
+    )
+    with pytest.raises(ValueError):
+        stance_weights([bad], profiles(A=1.0))

@@ -137,8 +137,11 @@ class SocietySnapshot:
             return ""
         lines = [f"SOCIETY STATE (through round {self.round}):"]
         if self.consensus:
+            rounds = self.consensus["rounds"]
+            span = f"{rounds} round" + ("" if rounds == 1 else "s")
             lines.append(
-                f"Consensus: {self.consensus['stance']} holds {self.consensus['weight_share']:.0%} of the weight in the last two rounds."
+                f"Consensus over the last {span}: {self.consensus['stance']} holds "
+                f"{self.consensus['weight_share']:.0%} of the weight."
             )
         neighbors = set(self.neighbor_map.get(speaker, []))
         picked = 0

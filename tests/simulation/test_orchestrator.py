@@ -455,7 +455,7 @@ async def test_check_convergence_domimant_stance_threshold():
     )
 
     # Test _check_convergence directly
-    assert orchestrator._check_convergence([r1]) is False  # < 2 rounds
+    assert orchestrator._check_convergence([r1], profiles) is False  # < 2 rounds
     assert orchestrator._check_convergence([r1, r2], profiles) is True  # 100% dominant
 
 
@@ -1920,3 +1920,72 @@ async def test_positive_control_every_marker_and_sentence_is_in_the_unprojected_
     assert [marker for marker in _NATURAL_MARKERS if marker not in raw] == []
     assert [marker for marker in _LEAK_MARKERS if marker not in raw + canaried] == []
     assert [sentence for sentence in _EVIDENCE_SENTENCES if sentence not in _as_text(raw_records)] == []
+
+
+@pytest.mark.asyncio
+async def test_the_snapshot_consensus_carries_the_stance_value_and_its_round_span():
+    synth = AsyncMock(spec=ProfileSynthesizer)
+    topo = AsyncMock(spec=CommunicationTopology)
+    society_memory = AsyncMock(spec=SocietyMemory)
+    snapshot = SocietySnapshot(round=0)
+    society_memory.read_snapshot.return_value = snapshot
+    society_memory.commit_round.return_value = _ok_receipt()
+    synth.synthesize.return_value = [_make_profile(1, "Alice"), _make_profile(2, "Bob")]
+    pair = CommPair(agent_a="Alice", agent_b="Bob", shared_entities=[], score=0.5)
+    topo.compute_round_pairs.side_effect = lambda *a, **kw: [pair]
+    verdict_synth = MagicMock(spec=VerdictSynthesizer)
+    verdict_synth.asynthesize.return_value = _make_verdict()
+    orch = _orch(synth, topo, society_memory, verdict_synth)
+
+    with patch("src.simulation.orchestrator.RoundRunner") as rr_cls:
+        rr = MagicMock()
+        rr.execute_round = AsyncMock(
+            side_effect=lambda **kw: RoundResult(
+                round_num=kw["round_num"],
+                turns=[_make_turn("1", "Alice"), _make_turn("2", "Bob")],
+                pairs=[pair],
+            )
+        )
+        rr_cls.return_value = rr
+        await orch.run("q", "ds1", DebateConfig(max_agents=5, max_rounds=2), AsyncMock())
+
+    assert type(snapshot.consensus["stance"]) is str
+    assert snapshot.consensus["stance"] == "POSITIVE"
+    assert snapshot.consensus["rounds"] == 1
+
+
+@pytest.mark.asyncio
+async def test_final_stances_are_read_from_the_consensus_window():
+    synth = AsyncMock(spec=ProfileSynthesizer)
+    topo = AsyncMock(spec=CommunicationTopology)
+    society_memory = AsyncMock(spec=SocietyMemory)
+    society_memory.read_snapshot.return_value = SocietySnapshot(round=0)
+    society_memory.commit_round.return_value = _ok_receipt()
+    synth.synthesize.return_value = [
+        _make_profile(1, "Alice"),
+        _make_profile(2, "Bob"),
+        _make_profile(3, "Carol"),
+    ]
+    pair = CommPair(agent_a="Alice", agent_b="Bob", shared_entities=[], score=0.5)
+    topo.compute_round_pairs.side_effect = lambda *a, **kw: [pair]
+    verdict_synth = MagicMock(spec=VerdictSynthesizer)
+    verdict_synth.asynthesize.return_value = _make_verdict()
+    orch = _orch(synth, topo, society_memory, verdict_synth)
+    # Carol speaks only in round 1, outside the last-two-round window; an even split keeps the loop running.
+    turns_by_round = {
+        1: [_make_turn("1", "Alice", "POSITIVE"), _make_turn("2", "Bob", "NEGATIVE"), _make_turn("3", "Carol", "POSITIVE")],
+        2: [_make_turn("1", "Alice", "POSITIVE"), _make_turn("2", "Bob", "NEGATIVE")],
+        3: [_make_turn("1", "Alice", "POSITIVE"), _make_turn("2", "Bob", "NEGATIVE")],
+    }
+
+    with patch("src.simulation.orchestrator.RoundRunner") as rr_cls:
+        rr = MagicMock()
+        rr.execute_round = AsyncMock(
+            side_effect=lambda **kw: RoundResult(
+                round_num=kw["round_num"], turns=turns_by_round[kw["round_num"]], pairs=[pair]
+            )
+        )
+        rr_cls.return_value = rr
+        result = await orch.run("q", "ds1", DebateConfig(max_agents=5, max_rounds=3), AsyncMock())
+
+    assert result.final_stances == {"Alice": "POSITIVE", "Bob": "NEGATIVE", "Carol": "ABSTAIN"}

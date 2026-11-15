@@ -55,6 +55,7 @@ from src.simulation.round_runner import RoundRunner
 from src.simulation.society_memory import SocietyMemory, SocietySnapshot
 from src.simulation.topology import CommunicationTopology
 from src.simulation.turn_protocol import (
+    consensus_round_count,
     consensus_window,
     stance_weights,
     weighted_share,
@@ -318,8 +319,9 @@ class DebateOrchestrator:
                     )
                     if share:
                         snapshot.consensus = {
-                            "stance": share[0],
+                            "stance": share[0].value,
                             "weight_share": share[1],
+                            "rounds": consensus_round_count(rounds),
                         }
 
                 if round_num > 1:
@@ -372,7 +374,7 @@ class DebateOrchestrator:
                 total = sum(weights.values())
                 consensus = (
                     {
-                        "stance": share[0],
+                        "stance": share[0].value,
                         "weight_share": round(share[1], 4),
                         "threshold": config.convergence_threshold,
                         "weights": {
@@ -517,15 +519,16 @@ class DebateOrchestrator:
             rounds_executed=len(rounds),
         )
 
-        # Step 4: Collect final stances
+        # Step 4: final stances, read from the same consensus window as the verdict. An agent
+        # with no turn in that window has no position: ABSTAIN, never NEUTRAL.
+        window = consensus_window(rounds)
         final_stances: dict[str, str] = {}
         for profile in profiles:
-            for turn in reversed(all_turns):
+            for turn in reversed(window):
                 if turn.agent_name == profile.identity.name:
                     final_stances[profile.identity.name] = turn.stance
                     break
             else:
-                # Never spoke: no position, so no stance. Not NEUTRAL.
                 final_stances[profile.identity.name] = Stance.ABSTAIN.value
 
         return OrchestratedDebateResult(
@@ -718,14 +721,14 @@ class DebateOrchestrator:
     def _check_convergence(
         self,
         rounds: list[RoundResult],
-        profiles: Optional[List[Agent]] = None,
+        profiles: List[Agent],
         config: Optional[DebateConfig] = None,
     ) -> bool:
         """Quality-weighted convergence on the LAST TWO rounds, with configured threshold."""
         if len(rounds) < 2:
             return False
         share = weighted_share(
-            consensus_window(rounds), {p.identity.name: p for p in profiles or []}
+            consensus_window(rounds), {p.identity.name: p for p in profiles}
         )
         if share is None:
             return False

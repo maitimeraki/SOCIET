@@ -138,10 +138,33 @@ def accept_position(
 #: The stances that can carry weight: a position a turn takes. ABSTAIN is not one.
 POSITION_STANCES: tuple[Stance, ...] = tuple(s for s in WIRE_STANCES if s is not Stance.ABSTAIN)
 
+#: How many rounds the consensus reads: the stop test's window, and the verdict's.
+CONSENSUS_ROUNDS = 2
+
 
 def consensus_window(rounds: Sequence[RoundResult]) -> list[AgentTurn]:
-    """The turns the consensus reads: the last two rounds, the same window the stop test uses."""
-    return [turn for round_result in rounds[-2:] for turn in round_result.turns]
+    """The turns the consensus reads: the last CONSENSUS_ROUNDS rounds."""
+    return [turn for round_result in rounds[-CONSENSUS_ROUNDS:] for turn in round_result.turns]
+
+
+def consensus_round_count(rounds: Sequence[RoundResult]) -> int:
+    """How many rounds the consensus window covers: min(CONSENSUS_ROUNDS, rounds run so far)."""
+    return min(CONSENSUS_ROUNDS, len(rounds))
+
+
+def dominant_stance(weights: Mapping[Stance, float]) -> Stance | None:
+    """The position stance with the largest weight, or None when no position carries weight.
+
+    The one tie-break: a tie goes to the first stance in POSITION_STANCES order
+    (POSITIVE, then NEGATIVE, then NEUTRAL). Every consumer of a dominant stance goes through here.
+    """
+    best: Stance | None = None
+    best_weight = 0.0
+    for stance in POSITION_STANCES:
+        weight = weights.get(stance, 0.0)
+        if weight > best_weight:
+            best, best_weight = stance, weight
+    return best
 
 
 def _unit(value: float, field_name: str, speaker: str) -> float:
@@ -167,10 +190,7 @@ def stance_weights(turns: Iterable[AgentTurn], profiles: Mapping[str, Agent]) ->
             raise ValueError(f"no profile for turn speaker {turn.agent_name!r}")
         strength = _unit(turn.strength, "strength", turn.agent_name)
         confidence = _unit(profile.confidence, "confidence", turn.agent_name)
-        try:
-            stance = Stance.parse(turn.stance)
-        except ValueError:
-            continue
+        stance = Stance.parse(turn.stance)
         if stance is not Stance.ABSTAIN:
             parts[stance].append(strength * confidence)
     return {stance: math.fsum(values) for stance, values in parts.items()}
@@ -183,11 +203,11 @@ def weighted_share(
 
     Weight is strength x profile confidence; ABSTAIN contributes nothing. Returns None when no
     turn takes a position or the counted weight is zero: that is no verdict, never NEUTRAL.
-    A tie goes to the first stance in WIRE_STANCES order (POSITIVE, then NEGATIVE, then NEUTRAL).
+    The dominant stance is chosen by dominant_stance (ties: POSITIVE, then NEGATIVE, then NEUTRAL).
     """
     weights = stance_weights(turns, profiles)
-    total = math.fsum(weights[stance] for stance in POSITION_STANCES)
-    if total <= 0.0:
+    dominant = dominant_stance(weights)
+    if dominant is None:
         return None
-    dominant = max(POSITION_STANCES, key=lambda stance: weights[stance])
+    total = math.fsum(weights[stance] for stance in POSITION_STANCES)
     return dominant, weights[dominant] / total

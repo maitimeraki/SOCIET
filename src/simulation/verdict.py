@@ -54,8 +54,10 @@ def cluster_by_stance(turns: Iterable[AgentTurn]) -> dict[Stance, list[AgentTurn
     return clusters
 
 
-#: The summary of a debate with no consensus: no turn took a position (none spoke, or all abstained).
-NO_VERDICT_SUMMARY = "No verdict: no agent took a position."
+#: The summary of a debate with no consensus: no position in the window carries weight.
+NO_VERDICT_SUMMARY = "No verdict: no position carries weight."
+#: The narrative status of a no-verdict run: no answer was written, so there is no fallback.
+NO_VERDICT_STATUS = "no_verdict"
 
 # Step 9: bound the transcript the answer-writer prompt may carry. Bound the
 # input, never the answer — there is no character cap on the narrative itself.
@@ -162,10 +164,15 @@ class VerdictSynthesizer:
         logged with the run/query, never silent).
         """
         verdict = self.synthesize(rounds=rounds, profiles=profiles, llm_client=None)
+        if verdict.overall_stance is Stance.ABSTAIN:
+            # No position carries weight: there is no answer to write, so the answer-writer is not called.
+            verdict.narrative = verdict.summary
+            verdict.narrative_status = NO_VERDICT_STATUS
+            return verdict
         parsed = None
         if llm_client is not None:
             parsed = await self._allm_verdict(
-                llm_client, verdict, rounds, query, scenario
+                llm_client, verdict, consensus_window(rounds), query, scenario
             )
         if parsed is not None:
             verdict.dissenting_views = parsed.dissenting_views
@@ -190,7 +197,7 @@ class VerdictSynthesizer:
         self,
         llm_client: "LLMClient",
         verdict: DebateVerdict,
-        rounds: list[RoundResult],
+        turns: list[AgentTurn],
         query: str,
         scenario: str,
     ) -> Verdict | None:
@@ -203,7 +210,7 @@ class VerdictSynthesizer:
         `_parse_verdict`. Returns None only once every attempt has failed, so the
         caller can flag the fallback.
         """
-        transcript, turns_used = self._render_transcript(rounds)
+        transcript, turns_used = self._render_transcript(turns)
         contested_note = " -- contested" if verdict.contested else ""
         user_prompt = (
             f"QUESTION: {query or '(none)'}\n"
@@ -254,11 +261,10 @@ class VerdictSynthesizer:
         return None
 
     @staticmethod
-    def _render_transcript(rounds: list[RoundResult]) -> tuple[str, int]:
+    def _render_transcript(turns: list[AgentTurn]) -> tuple[str, int]:
         """Bounded transcript for the summary prompt: the last-N turns within a
         total char cap, newest-first so the most recent argument is never the
         one dropped. Returns (text, turns_included)."""
-        turns = [turn for round_result in rounds for turn in round_result.turns]
         lines: list[str] = []
         budget = SUMMARY_TRANSCRIPT_MAX_CHARS
         for turn in reversed(turns[-SUMMARY_TRANSCRIPT_MAX_TURNS:]):

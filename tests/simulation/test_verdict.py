@@ -1,6 +1,8 @@
 """Tests for VerdictSynthesizer."""
 
+import json
 import math
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -8,6 +10,7 @@ from src.persona.agent import WIRE_STANCES, Stance
 from src.simulation.pair_turn import AgentTurn, DebateVerdict, RoundResult
 from src.simulation.turn_protocol import stance_weights
 from src.simulation.verdict import (
+    NO_VERDICT_STATUS,
     NO_VERDICT_SUMMARY,
     VerdictSynthesizer,
     cluster_by_stance,
@@ -68,7 +71,7 @@ class TestRenderTranscript:
             confidence=0.8,
             strength=0.5,
         )
-        text, _ = synth._render_transcript([make_round(1, [turn])])
+        text, _ = synth._render_transcript([turn])
         assert text == "[POSITIVE] Alice: I support it."
 
 
@@ -277,3 +280,43 @@ class TestMissingProfileFailsClosed:
         rounds = [make_round(1, [make_turn("a1", "Alice", "POSITIVE", 0.5, strength=0.8)])]
         verdict = VerdictSynthesizer().synthesize(rounds, [make_profile("Alice", confidence=0.5)])
         assert math.isclose(verdict.cluster_details[Stance.POSITIVE].total_weight, 0.4)
+
+
+def _answer_writer() -> MagicMock:
+    llm = MagicMock()
+    llm.generate = AsyncMock(
+        return_value=json.dumps({"answer": "Expand.", "reasoning": "Because.", "constraints_and_risks": ""})
+    )
+    return llm
+
+
+@pytest.mark.asyncio
+async def test_no_verdict_skips_the_answer_writer_and_says_so():
+    llm = _answer_writer()
+    rounds = [make_round(1, [make_turn("a1", "Alice", "ABSTAIN", 1.0)])]
+    verdict = await VerdictSynthesizer().asynthesize(
+        rounds, [make_profile("Alice")], llm_client=llm
+    )
+    llm.generate.assert_not_awaited()
+    assert verdict.narrative == NO_VERDICT_SUMMARY
+    assert verdict.narrative_status == NO_VERDICT_STATUS
+
+
+@pytest.mark.asyncio
+async def test_the_answer_writer_reads_only_the_consensus_window():
+    llm = _answer_writer()
+    rounds = [
+        make_round(1, [make_turn("a1", "Alice", "POSITIVE", 0.9)]),
+        make_round(2, [make_turn("a2", "Bob", "NEGATIVE", 0.8)]),
+        make_round(3, [make_turn("a3", "Carol", "NEGATIVE", 0.7)]),
+    ]
+    profiles = [
+        make_profile("Alice", confidence=0.9),
+        make_profile("Bob", confidence=0.8),
+        make_profile("Carol", confidence=0.7),
+    ]
+    await VerdictSynthesizer().asynthesize(rounds, profiles, llm_client=llm)
+    prompt = llm.generate.call_args.kwargs["user_prompt"]
+    assert "Content from Alice" not in prompt
+    assert "Content from Bob" in prompt
+    assert "Content from Carol" in prompt

@@ -484,3 +484,31 @@ async def test_snapshot_neighbours_scope_the_shared_entity_to_the_dataset():
     assert "coalesce(q.dataset_id, '') = $dataset_id" in query  # neighbour end
     assert entity_in_dataset("e") in query  # the shared entity
     assert kwargs["dataset_id"] == "ds-A"
+
+
+def _snapshot_with_consensus(consensus: dict) -> SocietySnapshot:
+    entry = {
+        "agent": "Bob",
+        "round": 1,
+        "stance": "NEGATIVE",
+        "confidence": 0.5,
+        "weight": 0.2,
+        "summary": "s",
+        "entities": [],
+    }
+    return SocietySnapshot(round=2, entries=[entry], consensus=consensus)
+
+
+def test_the_consensus_line_names_the_stance_value_and_the_round_span():
+    text = _snapshot_with_consensus({"stance": "POSITIVE", "weight_share": 0.8, "rounds": 2}).to_prompt(
+        "Alice", "Bob"
+    )
+    assert "Consensus over the last 2 rounds: POSITIVE holds 80% of the weight." in text
+    assert "Stance." not in text
+
+
+def test_a_one_round_consensus_is_not_described_as_two_rounds():
+    text = _snapshot_with_consensus({"stance": "NEGATIVE", "weight_share": 1.0, "rounds": 1}).to_prompt(
+        "Alice", "Bob"
+    )
+    assert "Consensus over the last 1 round: NEGATIVE holds 100% of the weight." in text
