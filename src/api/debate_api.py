@@ -202,7 +202,7 @@ UNITS_PER_CALL_TYPICAL = billing_units.units_for_tokens(
 
 def debate_worst_call_units() -> int:
     """Units one debate call settles at most: prompt_char_bound() characters (one token each) plus the
-    largest completion cap. Used only for the documented absolute worst case, never for the hold."""
+    largest completion cap. Used only for the ceiling in debate_worst_case_units, never for the hold."""
     cfg = get_llm_config()
     max_completion = max(
         cfg.profile_max_tokens,
@@ -215,14 +215,18 @@ def debate_worst_call_units() -> int:
 
 
 def debate_worst_case_units(*, agents: int, rounds: int, max_new_per_round: int, max_pairs_per_round: int) -> int:
-    """The absolute worst case a debate run can settle, documented and pinned by a test.
+    """A ceiling on what a debate run can settle, pinned by a test. It is conditional: the profile and
+    judge prompts are bounded in code (prompt_char_bound), but round, verdict, intent and actor
+    classification prompts are NOT byte-bounded in code. Charging them the same per-call bound is an
+    assumption, so this is a ceiling only if those prompts stay within prompt_char_bound(). It is
+    documented for the record and is not the admission reserve.
 
     Worst-case calls, counted at their caps: intent (1); the pool's actor classification (one call per
     ACTOR_BATCH labels, the pool keeps at most POOL_CAP candidates); verdict attempts (VERDICT_MAX_ATTEMPTS);
     the roster's draws, at most (agents + DRAW_SLACK) x CALLS_PER_DRAW; per round, activation's
     classification and its joiner draws; and per round two turns per pair, pairs capped by the request
     and by agents choose 2. Each call charged debate_worst_call_units(). Overruns of the hold are
-    charged by settlement, so this is a ceiling for the record, not the admission reserve.
+    charged by settlement (units.py), not by this figure.
     """
     per_round_activation = (
         math.ceil(max_new_per_round / ACTOR_BATCH) + (max_new_per_round + DRAW_SLACK) * CALLS_PER_DRAW

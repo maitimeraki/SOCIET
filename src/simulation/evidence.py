@@ -91,10 +91,11 @@ def build_pack(name: str, aliases: list[str], chunks: list[ChunkRow], relations:
     ranked = sorted(chunks, key=lambda c: (-c.retrieval_score, c.chunk_id))
     items: list[EvidenceItem] = []
     for chunk in ranked:
-        for start, end in sentence_spans(chunk.text):
-            end = min(_clip(chunk.text, start, end), start + MAX_ITEM_CHARS)
-            if not pattern.search(chunk.text[start:end]):
+        for start, sentence_end in sentence_spans(chunk.text):
+            clipped = _clip(chunk.text, start, sentence_end)
+            if not pattern.search(chunk.text[start:clipped]):
                 continue
+            end = min(clipped, start + MAX_ITEM_CHARS)
             items.append(EvidenceItem(f"e{len(items) + 1}", chunk.chunk_id, chunk.doc_id, chunk.doc_title,
                                       chunk.section, (start, end), chunk.text[start:end], "own", chunk.retrieval_score))
             if len(items) == MAX_OWN:

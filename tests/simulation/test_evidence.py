@@ -1,4 +1,4 @@
-from src.simulation.evidence import ChunkRow, build_pack, sentence_spans
+from src.simulation.evidence import MAX_ITEM_CHARS, ChunkRow, build_pack, sentence_spans
 
 CHUNK = ChunkRow("c1", "d1", "Deal memo", "Acquisitions",
                  "Amazon acquired Whole Foods in 2017. The deal was valued at $13.7 billion. Weather was mild.", 0.9)
@@ -7,6 +7,12 @@ CHUNK = ChunkRow("c1", "d1", "Deal memo", "Acquisitions",
 def test_own_items_name_the_entity():
     pack = build_pack("Whole Foods", [], [CHUNK], [])
     assert [i.text for i in pack.items] == ["Amazon acquired Whole Foods in 2017."]
+
+
+def test_a_name_past_the_character_cap_still_owns_the_sentence():
+    sentence = " ".join(["x" * 13] * 30) + " Kestra ships the pilot."
+    pack = build_pack("Kestra", [], [ChunkRow("c1", "d1", "Memo", "Pricing", sentence, 0.9)], [])
+    assert [len(i.text) for i in pack.items] == [MAX_ITEM_CHARS]
 
 
 def test_every_item_resolves_to_exact_text():

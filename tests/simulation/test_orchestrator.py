@@ -1,3 +1,5 @@
+import re
+
 """Tests for DebateOrchestrator."""
 
 import uuid
@@ -1398,3 +1400,90 @@ async def test_metering_error_is_not_absorbed_by_the_round_loop():
         await orchestrator.run(
             "test query", "ds1", DebateConfig(max_agents=5, max_rounds=3), AsyncMock()
         )
+
+
+# ---- client-visible warnings name no exception class (every path that formats one) -----------
+
+
+def _names_no_exception_class(warnings: list[str]) -> bool:
+    return not any(re.search(r"\b\w+(Error|Exception)\b", w) for w in warnings)
+
+
+async def _two_rounds(society_memory, topo, *, pairs_side_effect=None):
+    """Two rounds with one pair each, so round 2 reads a snapshot and the self history."""
+    synth = AsyncMock(spec=ProfileSynthesizer)
+    synth.synthesize.return_value = [_make_profile(1, "Alice"), _make_profile(2, "Bob")]
+    synth.synthesize_from_names = AsyncMock(return_value=[])
+    if pairs_side_effect is not None:
+        topo.compute_round_pairs.side_effect = pairs_side_effect
+    else:
+        topo.compute_round_pairs.side_effect = lambda *a, **kw: [
+            CommPair(agent_a="Alice", agent_b="Bob", shared_entities=[], score=0.5)
+        ]
+    topo.find_activation_candidates = AsyncMock(return_value=[])
+    llm_runner = MagicMock(spec=BatchedLLMRunner)
+    llm_runner.gather = MagicMock(side_effect=lambda *a, **kw: _AsyncEmptyIter())
+    orch = _orch(synth, topo, society_memory, None, llm_runner)
+    return await orch.run("q", "ds1", DebateConfig(max_agents=5, max_rounds=2), AsyncMock())
+
+
+def _society(**overrides) -> AsyncMock:
+    society_memory = AsyncMock(spec=SocietyMemory)
+    society_memory.read_snapshot.return_value = SocietySnapshot(round=0)
+    society_memory.commit_round.return_value = _ok_receipt()
+    society_memory.read_self_history.return_value = []
+    for name, value in overrides.items():
+        getattr(society_memory, name).side_effect = value
+    return society_memory
+
+
+@pytest.mark.asyncio
+async def test_a_snapshot_read_failure_warns_without_an_exception_class():
+    result = await _two_rounds(
+        _society(read_snapshot=RuntimeError("db down")), AsyncMock(spec=CommunicationTopology)
+    )
+
+    assert ("Round 2: society snapshot read failed" in result.warnings, _names_no_exception_class(result.warnings)) == (
+        True,
+        True,
+    )
+
+
+@pytest.mark.asyncio
+async def test_a_commit_failure_warns_without_an_exception_class():
+    result = await _two_rounds(
+        _society(commit_round=RuntimeError("db down")), AsyncMock(spec=CommunicationTopology)
+    )
+
+    assert ("Round 1: commit failed" in result.warnings, _names_no_exception_class(result.warnings)) == (True, True)
+
+
+@pytest.mark.asyncio
+async def test_a_failed_round_warns_without_an_exception_class():
+    calls = []
+
+    def pairs_failing_once(*args, **kwargs):
+        calls.append(1)
+        if len(calls) == 1:
+            raise RuntimeError("topology down")
+        return [CommPair(agent_a="Alice", agent_b="Bob", shared_entities=[], score=0.5)]
+
+    result = await _two_rounds(
+        _society(),
+        AsyncMock(spec=CommunicationTopology),
+        pairs_side_effect=pairs_failing_once,
+    )
+
+    assert ("Round 1 failed" in result.warnings, _names_no_exception_class(result.warnings)) == (True, True)
+
+
+@pytest.mark.asyncio
+async def test_a_self_history_failure_warns_without_an_exception_class():
+    result = await _two_rounds(
+        _society(read_self_history=RuntimeError("db down")), AsyncMock(spec=CommunicationTopology)
+    )
+
+    assert ("Round 2: self history read failed" in result.warnings, _names_no_exception_class(result.warnings)) == (
+        True,
+        True,
+    )

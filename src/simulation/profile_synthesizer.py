@@ -43,7 +43,6 @@ from src.simulation.evidence import (
     build_pack,
 )
 from src.simulation.profile_generator import (
-    MAX_ALIASES,
     PROFILE_PROMPT_VERSION,
     PROFILE_TEMPERATURE,
     GenerationResult,
@@ -97,7 +96,7 @@ def _aliases(node: EntityNode) -> list[str]:
     raw = node.properties.get("aliases")
     if not isinstance(raw, (list, tuple)):
         return []
-    return [str(alias).strip() for alias in raw if str(alias).strip()][:MAX_ALIASES]
+    return [str(alias).strip() for alias in raw if str(alias).strip()]
 
 
 def _distinct_by_id(entities: list[EntityNode], own_id: str) -> list[EntityNode]:
@@ -228,6 +227,8 @@ async def _gather_in_order(awaitables: Sequence[Awaitable[_Attempt]]) -> list[_A
     the rest of the batch is cancelled. Otherwise the batch settles and the first failure in draw
     order is raised. Either way no call outlives the batch.
     """
+    # A generic failure does not cancel its siblings: the batch settles, so a run that is already
+    # doomed can still spend calls. That spend is bounded by the draw cap (DRAW_SLACK).
     tasks = [asyncio.ensure_future(awaitable) for awaitable in awaitables]
     pending = set(tasks)
     try:
@@ -544,7 +545,10 @@ class ProfileSynthesizer:
             )
             for node in pool
         ]
-        candidates = sorted(candidates, key=lambda c: (-score(c), c.name, c.entity_id))[:POOL_CAP]
+        ranked = sorted(candidates, key=lambda c: (-score(c), c.name, c.entity_id))
+        if len(ranked) > POOL_CAP:
+            logger.info("candidate pool capped: kept %d of %d candidates", POOL_CAP, len(ranked))
+        candidates = ranked[:POOL_CAP]
         candidates = await self._classify_actors(candidates, llm_client, warnings)
         return _Pool(candidates=candidates, nodes=nodes, neighbours=neighbours, chunk_rows=evidence.chunk_rows)
 

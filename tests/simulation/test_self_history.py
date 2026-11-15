@@ -359,4 +359,4 @@ async def test_one_speaker_read_failure_keeps_the_other_speakers_block():
 
     assert snap is not None
     assert [e["agent"] for e in snap.self_entries] == ["Bob"]
-    assert any("self history read failed for Alice" in w for w in warnings)
+    assert any("self history read failed" in w for w in warnings)

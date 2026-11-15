@@ -113,8 +113,9 @@ def prompt_char_bound() -> int:
     """Upper bound on the characters of any profile or judge prompt, from the caps in code.
 
     Every attribute is capped at ATTR_MAX_CHARS, every item text at MAX_ITEM_CHARS, and the
-    pack holds at most MAX_OWN items and MAX_RELATIONS relations. A cited sentence carries a
-    marker of at least five characters, so the judge sees at most DETAILS_MAX // 5 sentences.
+    pack holds at most MAX_OWN items and MAX_RELATIONS relations. A cited sentence's marker is
+    at least four characters ("[e1]"); each sentence is followed by a whitespace separator, so a
+    marked sentence takes at least five characters and the judge sees at most DETAILS_MAX // 5.
     The repair block lists at most one line per check, and the taken block is one earlier
     details text (at most DETAILS_MAX characters plus a newline per sentence).
     """
@@ -164,7 +165,7 @@ def build_prompt(
         attr_text(axis) or "none",
         "NODE",
         f"name: {attr_text(name)}",
-        f"aliases: {', '.join(attr_text(a) for a in aliases) or 'none'}",
+        f"aliases: {', '.join(attr_text(a) for a in aliases[:MAX_ALIASES]) or 'none'}",
         f"type: {attr_text(type_label) or 'unknown'}",
         "",
         "EVIDENCE",

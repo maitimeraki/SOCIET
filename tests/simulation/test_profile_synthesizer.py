@@ -793,10 +793,14 @@ async def test_a_typical_run_with_rejections_settles_within_the_reserve(monkeypa
 
 
 @pytest.mark.asyncio
-async def test_the_documented_worst_case_is_pinned():
-    """Pins the absolute ceiling so a change to a cap or a constant is noticed.
+async def test_the_ceiling_is_pinned_conditional_on_the_unbounded_prompts():
+    """Pins the ceiling so a change to a cap or constant is noticed.
 
-    Worst case, 8 seats and 3 rounds: 234 calls x 36 units = 8424. Per call: prompt_char_bound() 32,947
+    CONDITIONAL: the profile and judge prompts are bounded in code; round, verdict, intent and actor
+    classification prompts are not, and are assumed to fit prompt_char_bound(). This is not the
+    admission reserve (see debate_reserve_units).
+
+    Ceiling, 8 seats and 3 rounds: 234 calls x 36 units = 8424. Per call: prompt_char_bound() 32,947
     characters + 3,000 completion = 35,947 tokens -> 36 units.
     """
     assert debate_worst_call_units() == 36
@@ -813,6 +817,24 @@ def _embedder_down_for_kestra(text: str) -> list[float]:
     if "Kestra" in text:
         raise RuntimeError("embedder down")
     return _default_vector(text)
+
+
+@pytest.mark.asyncio
+async def test_every_alias_counts_as_ownership_not_only_the_first_five():
+    kestra = EntityNode(
+        id="kestra",
+        name="Kestra",
+        label="Company",
+        relevance_score=0.9,
+        properties={"aliases": ["A1", "A2", "A3", "A4", "A5", "A6", "Zeta"]},
+    )
+    text = "Zeta prices the pilot. Zeta tracks compliance. Zeta weighs the rollout."
+    hit = ChunkHit("c-k", "doc-k", "Memo", "Pricing", text, 1, (kestra.id,))
+    llm = FakeLLM()
+
+    agents = await _run(_synth([kestra], graph=FakeGraph([kestra], chunks=ChunkSearch(vector=[hit], fulltext=[hit]))), llm, max_agents=1)
+
+    assert (len(agents[0].evidence), "aliases: A1, A2, A3, A4, A5\n" in llm.profile_prompts[0]) == (3, True)
 
 
 @pytest.mark.asyncio
@@ -847,6 +869,7 @@ async def test_a_roster_member_is_never_regenerated_for_a_joiner():
     await _join(synth, ["Lumen"], llm, roster=roster)
 
     regenerations = [p for p in llm.profile_prompts if "ALREADY TAKEN" in p]
+    assert regenerations
     assert all("name: Lumen" in p for p in regenerations)
 
 

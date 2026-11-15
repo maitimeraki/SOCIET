@@ -325,7 +325,5 @@ def test_worst_case_profile_and_judge_prompts_fit_the_char_bound():
     judge_system, judge_user = _judge_prompt(marked, pack, big)
 
     bound = prompt_char_bound()
-    assert (len(profile_system) + len(profile_user) <= bound, len(judge_system) + len(judge_user) <= bound) == (
-        True,
-        True,
-    )
+    assert len(profile_system) + len(profile_user) <= bound, "the profile prompt exceeds prompt_char_bound()"
+    assert len(judge_system) + len(judge_user) <= bound, "the judge prompt exceeds prompt_char_bound()"

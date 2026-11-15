@@ -297,10 +297,7 @@ class DebateOrchestrator:
                         logger.warning(
                             "Round %s: society snapshot read failed", round_num, exc_info=exc
                         )
-                        warnings.append(
-                            f"Round {round_num}: society snapshot read failed "
-                            f"({type(exc).__name__})"
-                        )
+                        warnings.append(f"Round {round_num}: society snapshot read failed")
                         snapshot = None
 
                 if snapshot is not None:
@@ -411,9 +408,7 @@ class DebateOrchestrator:
                     await ws_broadcast({"type": "commit", **receipt})
                 except Exception as exc:
                     logger.warning("Round %s: commit failed", round_num, exc_info=exc)
-                    warnings.append(
-                        f"Round {round_num}: commit failed ({type(exc).__name__})"
-                    )
+                    warnings.append(f"Round {round_num}: commit failed")
 
                 await self._maybe_activate(
                     profiles=profiles,
@@ -438,7 +433,7 @@ class DebateOrchestrator:
             except Exception as exc:
                 rounds_failed += 1
                 logger.warning("Round %s failed", round_num, exc_info=exc)
-                warnings.append(f"Round {round_num} failed ({type(exc).__name__})")
+                warnings.append(f"Round {round_num} failed")
                 continue
 
         # The loop is over (converged or exhausted): the convergence check is a
@@ -638,10 +633,7 @@ class DebateOrchestrator:
                 logger.warning(
                     "Round %s: self history read failed for %s", round_num, name, exc_info=exc
                 )
-                warnings.append(
-                    f"Round {round_num}: self history read failed for {name} "
-                    f"({type(exc).__name__})"
-                )
+                warnings.append(f"Round {round_num}: self history read failed")
                 continue
             self_entries.extend({"agent": name, **row} for row in rows)
         if snapshot is None and not self_entries:
