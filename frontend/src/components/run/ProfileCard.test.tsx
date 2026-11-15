@@ -24,6 +24,16 @@ describe('ProfileCard', () => {
     expect(text).not.toMatch(/unknown/i)
   })
 
+  it('shows "not available" for a type placeholder from the server and keeps the rest of the view', () => {
+    const html = draw(sampleView({ type: 'type unknown' }))
+    const text = renderedText(html)
+    expect(text).toContain('not available')
+    expect(text).not.toMatch(/unknown/i)
+    expect(text).toContain('D. Weber reads the record as a trade analyst.')
+    expect(text).toContain('0.70')
+    expect(text).toContain('The entry cost is the open question.')
+  })
+
   it('shows no rank, score, provenance or document title', () => {
     expect(renderedText(draw(sampleView()))).not.toMatch(/score|rank|provenance|chunk|source_count|participant/i)
   })

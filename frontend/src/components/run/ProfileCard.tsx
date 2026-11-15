@@ -1,5 +1,5 @@
 import type { AgentView } from '../../run/events'
-import { shownText } from '../../run/agentDisplay'
+import { shownText, shownType } from '../../run/agentDisplay'
 import PositionMark from '../ui/PositionMark'
 import Chip from '../ui/Chip'
 import Meter from '../ui/Meter'
@@ -21,7 +21,7 @@ export default function ProfileCard({ profile }: { profile: AgentView }) {
         <Estimate value={profile.confidence} />
       </div>
       <div className="mt-2 flex flex-wrap items-center gap-1">
-        <Chip>{shownText(profile.type)}</Chip>
+        <Chip>{shownType(profile.type)}</Chip>
       </div>
       <Details text={profile.details} className="mt-3 space-y-2 text-body text-ink-2" />
     </article>

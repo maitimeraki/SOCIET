@@ -27,7 +27,7 @@ export interface QueryIntent {
 /** The one agent shape the backend sends. Nothing else about an agent reaches the client. */
 export interface AgentView {
   name: string
-  /** Free-text entity type; may be the literal "type unknown". Render as is. */
+  /** Free-text entity type. The server sends the literal "type unknown" when it has none; display maps it to "not available" (shownType). */
   type: string
   role: string
   stance: Stance

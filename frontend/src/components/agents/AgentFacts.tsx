@@ -3,7 +3,7 @@ import { NOT_AVAILABLE, detailParagraphs } from '../../run/agentDisplay'
 /** Details as plain paragraphs; an empty text reads "not available". */
 export function Details({ text, className = '' }: { text: string; className?: string }) {
   const paragraphs = detailParagraphs(text)
-  if (paragraphs.length === 0) return <p className={`${className} text-ink-3`}>{NOT_AVAILABLE}</p>
+  if (paragraphs.length === 0) return <p className={className}>{NOT_AVAILABLE}</p>
   return (
     <div className={className}>
       {paragraphs.map((paragraph, index) => (

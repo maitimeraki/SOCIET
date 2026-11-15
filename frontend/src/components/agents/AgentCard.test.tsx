@@ -15,6 +15,14 @@ describe('AgentCard', () => {
     expect(renderedText(html)).toContain('0.70')
   })
 
+  it('shows "not available" for a type placeholder from the server and keeps the rest of the card', () => {
+    const text = renderedText(draw(sampleView({ type: 'type unknown' })))
+    expect(text).toContain('not available')
+    expect(text).not.toMatch(/unknown/i)
+    expect(text).toContain('estimate')
+    expect(text).toContain('D. Weber reads the record as a trade analyst.')
+  })
+
   it('shows "not available" for a blank bio', () => {
     expect(renderedText(draw(sampleView({ bio: '   ' })))).toContain('not available')
   })
