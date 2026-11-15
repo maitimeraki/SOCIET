@@ -117,3 +117,37 @@ def test_dossier_hash_changes_when_prompt_version_changes(monkeypatch):
     before = dossier_hash(pack, "p1")
     monkeypatch.setattr(agent_record, "PROFILE_PROMPT_VERSION", "p2")
     assert dossier_hash(pack, "p1") != before
+
+
+
+def _slim(**over):
+    from tests.agent_factory import slim_agent
+
+    return slim_agent(**over)
+
+
+def test_view_strips_cite_markers_and_says_type_unknown_without_a_label():
+    from src.persona.agent import PersonaIdentity
+
+    agent = _slim(
+        details_raw="Claim one [e1]. Claim two [e2].",
+        identity=PersonaIdentity(name="A", archetype="x", communication_style="y", type_label=""),
+    )
+    view = agent.view()
+    assert "[e" not in view.details
+    assert view.type == "type unknown"
+
+
+def test_view_json_never_carries_evidence_cites_or_ids():
+    import json
+
+    from src.simulation.evidence import EvidenceItem
+
+    item = EvidenceItem(
+        id="e1", chunk_id="c-1", doc_id="d-1", doc_title="T", section="S",
+        span=(0, 4), text="text", origin="chunk", retrieval_score=1.0,
+    )
+    agent = _slim(evidence=[item], cites={"details": ["e1"]}, node_id="node-x")
+    encoded = json.dumps(agent.view().model_dump(mode="json"))
+    for leaked in ("c-1", "d-1", "node-x", str(agent.agent_id), "cites", "evidence"):
+        assert leaked not in encoded
