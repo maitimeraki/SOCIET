@@ -8,16 +8,16 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ### What It Does
 1. User provides a scenario/question (e.g., "Should I expand into Europe?")
-2. System creates a society of domain-specific AI agents
-3. Agents engage in structured debate with Cypher-computed pairings
-4. CIOR-weighted consensus generates final verdict with confidence metrics
+2. The graph is queried for the question; the `n` most relevant entities are seated as agents (`n` = `max_agents`, 1..12, default 8)
+3. Each seated agent gets one evidence-cited profile; agents debate in pairs under the declared POSITION protocol
+4. A weighted consensus over the last two rounds gives the position; one LLM-written report states it, with code checks
 
 ### Core Architecture (5-Layer Design)
 
 ```
-LAYER 5: Opinion Output Engine (Final results delivery)
-LAYER 4: Consensus & Synthesis (CIOR-weighted verdict generation)
-LAYER 3: Simulation World (Debate orchestration - Orchestrator, RoundRunner, Topology, Verdict)
+LAYER 5: Opinion Output Engine (Final results delivery, public_events allowlist)
+LAYER 4: Consensus & Synthesis (weighted_share / consensus_window, report writer)
+LAYER 3: Simulation World (Orchestrator, RoundRunner, Ranking, Profiles, Verdict)
 LAYER 2: Orchestration Engine (FastAPI, job management)
 LAYER 1: User Interface (React dashboard, API, CLI)
 ```
@@ -25,20 +25,20 @@ LAYER 1: User Interface (React dashboard, API, CLI)
 ### Data Flow
 
 ```
-User Input → POST /simulate/debate → DebateOrchestrator → ProfileSynthesizer.synthesize()
+POST /simulate/debate → DebateOrchestrator
     ↓
-Debate Loop (per round):
-    SocietyMemory.read_snapshot() → SocietySnapshot → prompt society state (round ≥ 2)
-    CommunicationTopology.compute_round_pairs() → Cypher queries
-    RoundRunner.execute_round() → LLM API → parse stance/confidence
-    SocietyMemory.commit_round() → Neo4j Opinion/STATED/MENTIONS + round-keyed REACTED_TO
-    CommunicationTopology.find_activation_candidates() → new agents join next round
+Seat (ProfileSynthesizer):
+    query → graph retrieval (scoped) → RRF fusion → personalised PageRank → SeatQueue (MMR)
+    per seat: EvidencePack → generate_profile (one call + repair + support judge) → validate_profile
+    accepted → AgentRecord (backend) + AgentView (client); rejected → not seated
     ↓
-check_convergence() → config.convergence_threshold weighted consensus (last two rounds)
+Debate loop (per round):
+    CommunicationTopology → pairs → RoundRunner → parse_turn (POSITION line) → accept_position
+    SocietyMemory.commit_round() → Neo4j Opinion/STATED/MENTIONS, scoped to the dataset
     ↓
-VerdictSynthesizer.synthesize() → CIOR-weighted verdict
+consensus_window (last CONSENSUS_ROUNDS = 2 rounds) → weighted_share → dominant_stance
     ↓
-SimulationResponse (society_opinion, confidence_metrics, dissenting_views)
+write_report (one LLM call, code checks) → result: title, markdown, position, sources, status
 ```
 
 ## Key Components
@@ -46,13 +46,20 @@ SimulationResponse (society_opinion, confidence_metrics, dissenting_views)
 ### Simulation Engine (`src/simulation/`)
 | File | Class | Purpose |
 |------|-------|---------|
-| `orchestrator.py` | DebateOrchestrator | 5-stage pipeline coordinator |
-| `round_runner.py` | RoundRunner | Single round execution, prompt building |
-| `topology.py` | CommunicationTopology | Cypher-based agent pair scoring |
-| `verdict.py` | VerdictSynthesizer | CIOR-weighted consensus synthesis |
-| `society_memory.py` | SocietyMemory | Per-round commit (Opinion/STATED/REACTED_TO) + snapshot read-back |
-| `profile_synthesizer.py` | ProfileSynthesizer | Graph → Agent creation |
-| `relevance_matrix.py` | SelectionRow, rank_candidates | Intent-aware candidate ranking (semantic + density blend, decomposed scores) for the selection step |
+| `orchestrator.py` | DebateOrchestrator | Pipeline coordinator |
+| `round_runner.py` | RoundRunner | One round: pair prompts, turn parse, retry once |
+| `turn_protocol.py` | parse_turn, accept_position, consensus_window, weighted_share, dominant_stance | POSITION protocol and consensus (`CONSENSUS_ROUNDS = 2`) |
+| `ranking.py` | rrf_fuse, personalized_pagerank, SeatQueue | Query-ranked seats: RRF, PageRank, MMR |
+| `profile_synthesizer.py` | ProfileSynthesizer | Seats the top candidates, runs generation and validation |
+| `profile_generator.py` | generate_profile | One cited profile per agent (LLM call, repair, support judge) |
+| `profile_validation.py` | ProfileDraft, validate_profile | Code-side citation and uniqueness checks; no LLM |
+| `evidence.py` | EvidencePack, build_pack | Per-agent evidence sentences and relations |
+| `agent_record.py` | AgentView, AgentRecord | Client view vs backend-only record |
+| `verdict.py` | VerdictSynthesizer, write_report, check_report | Board facts and the single report call |
+| `report_retry.py` | build_retry_inputs, check_rebuild | Exact rebuild for a report retry |
+| `society_memory.py` | SocietyMemory | Per-round commit + snapshot read-back |
+| `topology.py` | CommunicationTopology | Pair scoring (Cypher, dataset-scoped) |
+| `actor_filter.py` | classify actor labels | One metered LLM call |
 | `pair_turn.py` | CommPair, AgentTurn, RoundResult | Data classes |
 | `llm_batch.py` | BatchedLLMRunner | Parallel LLM calls per round |
 | `debate_config.py` | DebateConfig | Validated debate settings |
@@ -71,18 +78,33 @@ SimulationResponse (society_opinion, confidence_metrics, dissenting_views)
 ### Persona Layer (`src/persona/`)
 | File | Class | Purpose |
 |------|-------|---------|
-| `agent.py` | Agent | Canonical agent model (identity, stance, conviction, cior) |
-| `repository.py` | PersonaRepository | Neo4j operations, agent metrics |
-| `graph_context.py` | GraphContext | Vector + keyword retrieval over the graph |
-| `models_persona.py` | — | Persona-side data models |
+| `agent.py` | Agent, Stance | Seated agent (internal) and the `Stance` enum with `Stance.parse` |
+| `repository.py` | PersonaRepository | Neo4j reads and writes |
+| `graph_context.py` | GraphContext | Scoped retrieval: fulltext, vector, seed walks |
+| `models_persona.py` | ProvenanceLink | Persona-side models |
 
 ### API Layer (`src/api/`)
 | File | Purpose |
 |------|---------|
-| `api_server.py` | FastAPI app (real entry point), job management, `/simulate` endpoints |
-| `config_api.py` | Request/response Pydantic schemas |
-| `debate_api.py` | Debate router (`/simulate/debate` + job status + WS stream) |
-| `middleware.py` | Request/response logging with correlation IDs |
+| `api_server.py` | FastAPI app (real entry point), graph routes, `/simulate/async` |
+| `debate_api.py` | Debate router under `/simulate` (see routes below) |
+| `operator_api.py` | `/operator` router, role-guarded (support, admin) |
+| `public_events.py` | Default-deny outbound allowlist for events and results |
+| `run_doc.py` | Postgres-backed run and job store |
+| `graph_stream_api.py` | WS graph stream, dataset-scoped snapshot |
+| `middleware.py` | Request logging with correlation IDs |
+
+Debate routes (all owner-scoped; unknown and foreign runs both return 404):
+- `POST /simulate/debate`: start a run (202), plan cap applied to `max_agents`
+- `GET /simulate/debates/{run_id}` and `/simulate/debates`: run status and list
+- `GET /simulate/debates/{run_id}/roster`: `AgentView` list in seat order
+- `GET /simulate/debates/{run_id}/sources/{n}`: one report citation `[n]` resolved to its passage
+- `POST /simulate/debates/{run_id}/verdict/retry`: re-run only the report of a run whose report was not produced (202, returns `run_id`)
+- `GET /simulate/debates/{run_id}/graph`: dataset-scoped graph for the run
+- `WS /simulate/{job_id}/stream`: run events, through `public_events` (the same routes are also mounted under `/api/v1`)
+- `GET /operator/runs/{run_id}/agents/{node_id}`: one `AgentRecord`, audited before return
+
+> **Removed:** `persona_api.py` (`/api/personas/hatch`, unmetered; audit C2, d4b76a2) and the legacy `/api/agents` stack (2026-09-30, decision D1). Agents are created only from graph retrieval.
 
 > **Removed 2026-09-30 (decision D1):** the legacy `/api/agents` stack — `src/api/agent_api.py`, `src/persona/agent_repository.py`, `src/persona/response_tracker.py` and the `agent_node.py` model — was deleted. Superseded by the debate path: agents are created only from graph retrieval (`ProfileSynthesizer`), never from a second hardcoded agent store.
 
@@ -99,28 +121,39 @@ src/
 ├── main.py                      # Graph pipeline demo entry
 │
 ├── api/                         # FastAPI layer
-│   ├── api_server.py            # FastAPI app (real entry point), job management
+│   ├── api_server.py            # FastAPI app (real entry point), graph routes
+│   ├── debate_api.py            # Debate router under /simulate
+│   ├── operator_api.py          # /operator (support, admin): AgentRecord reads
+│   ├── public_events.py         # Default-deny outbound allowlist
+│   ├── run_doc.py               # Postgres run and job store
+│   ├── graph_stream_api.py      # WebSocket graph stream
 │   ├── config_api.py            # Request/response Pydantic schemas
-│   ├── debate_api.py            # Debate router + WebSocket stream
 │   └── middleware.py            # Logging middleware (correlation IDs)
 │
 ├── simulation/                  # Debate engine
 │   ├── orchestrator.py          # DebateOrchestrator (coordinator)
 │   ├── round_runner.py          # Single round execution
+│   ├── turn_protocol.py         # POSITION turn parse, consensus, weighted_share
+│   ├── ranking.py               # RRF, personalised PageRank, SeatQueue (MMR)
+│   ├── evidence.py              # Per-agent evidence packs
+│   ├── profile_synthesizer.py   # Seats candidates, runs generation and validation
+│   ├── profile_generator.py     # One cited profile per agent
+│   ├── profile_validation.py    # Code-side checks, uniqueness
+│   ├── agent_record.py          # AgentView (client) and AgentRecord (backend-only)
+│   ├── verdict.py               # Board facts and the report call
+│   ├── report_retry.py          # Report retry inputs and exact rebuild checks
 │   ├── topology.py              # CommunicationTopology (Cypher pair scoring)
-│   ├── profile_synthesizer.py   # ProfileSynthesizer (graph → Agent)
-│   ├── relevance_matrix.py      # Intent-aware candidate ranking (semantic + density blend)
-│   ├── verdict.py               # VerdictSynthesizer (CIOR-weighted consensus)
 │   ├── society_memory.py        # SocietyMemory (round commit + snapshot read-back)
+│   ├── actor_filter.py          # Actor label classifier (one metered call)
 │   ├── pair_turn.py             # CommPair, AgentTurn, RoundResult
 │   ├── llm_batch.py             # BatchedLLMRunner (parallel LLM calls)
 │   └── debate_config.py         # DebateConfig dataclass
 │
 ├── persona/                     # Persona layer
-│   ├── agent.py                 # Canonical Agent model (Pydantic)
+│   ├── agent.py                 # Agent model and Stance enum
 │   ├── repository.py            # PersonaRepository (Neo4j operations)
-│   ├── graph_context.py         # GraphContext (entity retrieval)
-│   └── models_persona.py        # Persona data models
+│   ├── graph_context.py         # GraphContext (scoped retrieval)
+│   └── models_persona.py        # ProvenanceLink
 │
 ├── graph/                       # Knowledge graph construction
 │   ├── graph_pipeline.py        # UniversalGraphPipeline (end-to-end)
@@ -144,6 +177,8 @@ src/
 └── utils/
     ├── chunkProcessor.py        # Document chunk processing
     ├── queryIntend.py           # Query intent extraction
+    ├── labels.py                # Report source label cap
+    ├── json_extract.py          # First JSON object from a model reply
     └── hydrate_ontology.py      # Ontology hydration helpers
 
 tests/                           # Single test tree, mirrors src/ subsystems
@@ -196,80 +231,41 @@ asyncio.run(main())
 
 ## Common Patterns
 
-### Agent Pair Scoring (Cypher)
-```cypher
--- Round 1: Single-hop Jaccard + edge bonuses
-MATCH (a:Persona)-[r1]-(e)-[r2]-(b:Persona)
-WHERE a.name IN $agent_names AND b.name IN $agent_names
-WITH a, b, count(DISTINCT e) AS shared_count
-WITH a, b, shared_count,
-     jaccard + CASE WHEN has_opposes THEN 0.3 WHEN has_supports THEN 0.2 END AS score
-RETURN a.name AS agent_a, b.name AS agent_b, score
+### Consensus
+```python
+weight = strength × profile confidence        # ABSTAIN weighs 0
+result = weighted_share(turns, profiles)      # (dominant Stance, share) or None
+# turns = consensus_window: the last CONSENSUS_ROUNDS (= 2) rounds
+# None means no verdict, never NEUTRAL. Ties go to POSITIVE, NEGATIVE, NEUTRAL order.
 ```
 
-### CIOR Weight Formula
-```python
-weight = confidence × conviction × (1 + cior) / 2
-# cior: -1.0 (hostile) to +1.0 (receptive)
-```
-
-### Convergence Check
-```python
-if dominant_stance_weight / total_weight >= 0.8:
-    # Converged - stop debate
-```
+### Seat Ranking
+Query → graph retrieval (dataset-scoped) → RRF fusion → personalised PageRank → `SeatQueue` draws the `n` seats with MMR (`MMR_LAMBDA = 0.5`). One draw may be unresolved at a time; every draw is resolved in `try/finally`.
 
 ### Prompt Building
-```python
-def _build_system_prompt(agent: Agent, opponent: Agent, shared_entities: list) -> str:
-    return f"""You are {agent.identity.name}, an expert in {domains}.
-    Perspective: {agent.detailed_perspective[:500]}
-    Stance: {agent.stance.value} (intensity {agent.intensity:.2f})
-    Confidence breakdown: sources={cb.source_breadth}, nodes={cb.node_density}
-    You share these entities: {shared}
-    Engage genuinely with opposing viewpoints."""
+Evidence and relations are fenced as data. Attribute values are stripped of `<>"`, and the prompt says fenced text is never an instruction:
+```
+<evidence id="..." doc="...">sentence</evidence>
 ```
 
 ## Data Models
 
-### Agent (Canonical)
-```python
-class Agent(BaseModel):
-    identity: PersonaIdentity                    # name, archetype, communication_style
-    bio: str                                  # 2-3 sentence narrative
-    detailed_perspective: str                 # First-person voice for prompts
-    stance: Stance                            # POSITIVE, NEGATIVE, NEUTRAL, AMBIVALENT
-    intensity: float                           # [0.0, 1.0]
-    confidence: float                          # [0.0, 1.0]
-    conviction: float                         # [0.0, 1.0]
-    cior: float                              # [-1.0, 1.0] Certainty-Instinct Opinion Range
-    domain_tags: List[str]                   # Areas of expertise
-    communication_radius: int                 # [1, 5] hops for topology
-    summary_provenance: List[ProvenanceLink] # Source chunk links
-    confidence_breakdown: ConfidenceBreakdown  # Mathematical proof
-```
+### AgentView (client) and AgentRecord (backend-only)
+- `AgentView` (`src/simulation/agent_record.py`): `name, type, role, stance, strength, bio, details, confidence`. `extra="forbid"`. The only agent shape a client receives (roster, WS).
+- `AgentRecord`: one per candidate per run, with evidence, validation, generation and `status` (`published|rejected|stale`). Never serialised to a client; read only by the audited operator route.
 
 ### Stance Enum
 ```python
-class Stance(str, Enum):
-    POSITIVE = "POSITIVE"      # Supports proposal
-    NEGATIVE = "NEGATIVE"     # Opposes proposal
-    NEUTRAL = "NEUTRAL"       # Balanced/conditional
-    AMBIVALENT = "AMBIVALENT" # Mixed feelings
+class Stance(str, Enum):   # src/persona/agent.py; Stance.parse() is the single parser
+    POSITIVE = "POSITIVE"
+    NEGATIVE = "NEGATIVE"
+    NEUTRAL = "NEUTRAL"
+    ABSTAIN = "ABSTAIN"    # no weight; shown as "No view"
 ```
+Wire casing stays uppercase, matching persisted events and the frontend.
 
-### DebateVerdict
-```python
-@dataclass
-class DebateVerdict:
-    overall_stance: Stance
-    confidence_score: float
-    supporting_entities: List[str]
-    opposing_entities: List[str]
-    summary: str
-    cluster_details: Dict[Stance, ClusterSummary]
-    rounds_executed: int
-```
+### Report Result
+`verdict.report` carries `title, markdown, position, sources, status`. `status` is `not_produced` when the report call fails after its attempts; the UI then shows "Report not produced". No generated fallback text.
 
 ## API Schemas
 
@@ -292,6 +288,12 @@ class SimulationResponse(BaseModel):
     agent_profiles: List[Dict[str, Any]]
     raw_debate_log: Optional[List[Dict[str, Any]]]
 ```
+
+## Outbound Allowlist and LLM Calls
+
+- `src/api/public_events.py` is default-deny. Client, WebSocket, `run_events` and `runs.verdict` carry only the keys it lists (`_PROFILE_KEYS` = AgentView keys, `_VERDICT_KEYS`, `_EVENT_KEYS`). A new outbound key is added there, never sent raw.
+- Backend-only, never served: `source_refs`, `attempts`, `checks`, `retry_inputs`, evidence and chunk ids, node ids, cite markers, validation results, prompt and model versions, dossier and version hashes.
+- Every LLM call goes through `LLMClient.generate` (it runs `metering.check_metering()`), inside `metering.source_scope(...)`, with explicit `model`, `temperature` and `max_tokens`. Sources are the billing ledger's `SOURCES` (`ingest, ontology, debate, verdict`); add no new source name without updating the ledger.
 
 ## Development Guidelines
 
@@ -321,7 +323,7 @@ class SimulationResponse(BaseModel):
 - **Connection management**: Always close connections (DB, HTTP, streams) in finally blocks or context managers.
 
 ### State & Architecture
-- **Single source of truth**: Agent model lives in `src/persona/agent.py`. Don't duplicate fields.
+- **Single source of truth**: the client agent shape is `AgentView` and the stored shape is `AgentRecord` (`src/simulation/agent_record.py`). Don't duplicate fields.
 - **Layered dependencies**: UI → API → Simulation → LLM. Don't skip layers.
 - **No circular imports**: Structure modules to avoid circular dependencies.
 
@@ -355,6 +357,11 @@ class SimulationResponse(BaseModel):
 #   DEBATE:   the most powerful — agent debate in the simulation world
 ANALYSIS_LLM_MODEL=claude-sonnet-5
 DEBATE_LLM_MODEL=claude-opus-5-5
+# Per-call overrides (default: ANALYSIS tier). Output budgets are per attempt.
+PROFILE_LLM_MODEL=
+PROFILE_MAX_TOKENS=1200
+VERDICT_LLM_MODEL=
+VERDICT_MAX_TOKENS=3000
 
 # Default provider for the LiteLLM client (openai | anthropic | huggingface | ollama | nvidia_nim)
 DEFAULT_LLM_PROVIDER=ollama
@@ -412,6 +419,8 @@ PLAN_STARTER_PRICE_USD=10
 PLAN_STUDIO_PRICE_USD=20
 PLAN_ENTERPRISE_PRICE_LABEL=Custom
 GRAPH_JOB_RESERVE_UNITS=2000
+# Unit hold for a verdict retry; unset derives it from the report budget and question length.
+VERDICT_RETRY_RESERVE_UNITS=
 
 # =============================================================================
 # EXTRACTION / EDGE
@@ -424,6 +433,7 @@ EXTRACTION_TRIAL_ACK=false
 LLM_PROMPT_CACHE=true
 FORWARDED_ALLOW_IPS=
 RATE_LIMIT_STORAGE_URI=
+RATE_LIMIT_VERDICT_RETRY=10/hour
 GIT_SHA=dev
 ```
 
@@ -438,7 +448,7 @@ owns the age-based deletes). Run retention as `societas_retention`.
 ```python
 @dataclass
 class DebateConfig:
-    max_agents: int = 50
+    max_agents: int = 8          # seat count n; 1..12, also the billing plan cap
     max_rounds: int = 5
     comm_radius: int = 1
     min_entity_overlap: int = 1

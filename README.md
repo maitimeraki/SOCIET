@@ -10,7 +10,7 @@ Simulation World transforms a business question or scenario into a synthesized s
 
 1. **Creating a Society** of domain-specific AI agents with distinct expertise, personalities, and stances
 2. **Running Structured Debate** where agents argue, counter-argue, and respond to each other
-3. **Generating Consensus** using CIOR-weighted opinion clustering (not simple voting)
+3. **Generating Consensus** from a strength- and confidence-weighted share of the last two rounds' positions (ABSTAIN weighs nothing; no position means no verdict)
 4. **Delivering Insights** with confidence metrics, dissenting views, and supporting evidence
 
 ### Example
@@ -44,7 +44,7 @@ Simulation World transforms a business question or scenario into a synthesized s
 ┌─────────────────────────────────────────────────────────────────┐
 │  LAYER 5: Opinion Output Engine (Final results delivery)         │
 ├─────────────────────────────────────────────────────────────────┤
-│  LAYER 4: Consensus & Synthesis (CIOR-weighted verdict)         │
+│  LAYER 4: Consensus & Synthesis (weighted verdict)              │
 ├─────────────────────────────────────────────────────────────────┤
 │  LAYER 3: Simulation World (Debate orchestration)               │
 ├─────────────────────────────────────────────────────────────────┤
@@ -78,7 +78,7 @@ Verdict Synthesis → Society Opinion + Confidence + Dissenting Views
 | `orchestrator.py` | **DebateOrchestrator** - 5-stage pipeline coordinator |
 | `round_runner.py` | Executes single debate rounds, builds prompts |
 | `topology.py` | **CommunicationTopology** - Cypher-based agent pair scoring |
-| `verdict.py` | **VerdictSynthesizer** - CIOR-weighted consensus |
+| `verdict.py` | **VerdictSynthesizer** - consensus numbers and the single report call |
 | `society_memory.py` | **SocietyMemory** - Commits rounds to Neo4j (Opinion/STATED/REACTED_TO) + snapshot read-back |
 | `profile_synthesizer.py` | Creates agents from graph entities |
 | `pair_turn.py` | Data classes for turns, pairs, verdicts |
@@ -97,7 +97,7 @@ Verdict Synthesis → Society Opinion + Confidence + Dissenting Views
 
 | File | Purpose |
 |------|---------|
-| `agent.py` | **Canonical Agent model** - identity, stance, conviction, cior |
+| `agent.py` | **Stance** enum (POSITIVE, NEGATIVE, NEUTRAL, ABSTAIN) and the internal seated **Agent** model; clients receive `AgentView` |
 | `repository.py` | **PersonaRepository** - Neo4j operations for agents |
 | `graph_context.py` | Entity discovery from graph |
 
@@ -304,7 +304,7 @@ src/
 │   ├── orchestrator.py       # 5-stage pipeline coordinator
 │   ├── round_runner.py       # Round execution
 │   ├── topology.py           # Cypher pair scoring
-│   ├── verdict.py            # CIOR-weighted synthesis
+│   ├── verdict.py            # Consensus numbers + report call
 │   ├── society_memory.py     # Opinion/REACTED_TO commit + snapshot read
 │   └── profile_synthesizer.py # Agent creation
 ├── persona/                  # Agent models + repository
@@ -327,14 +327,12 @@ docs/
 
 ## Key Concepts
 
-### CIOR (Certainty-Instinct Opinion Range)
-Weighting formula for consensus:
+### Consensus
+Weighting formula for the verdict (`turn_protocol.weighted_share`):
 ```
-weight = confidence × conviction × (1 + cior) / 2
+weight = strength × profile confidence     # ABSTAIN weighs 0
 ```
-- `cior = +1.0` → Maximum receptivity
-- `cior =  0.0` → Neutral
-- `cior = -1.0` → Maximum hostility
+The window is the last two rounds (`CONSENSUS_ROUNDS = 2`). A tie goes to the first stance in POSITIVE, NEGATIVE, NEUTRAL order.
 
 ### Communication Topology
 - **Round 1**: Single-hop entity overlap via Cypher
