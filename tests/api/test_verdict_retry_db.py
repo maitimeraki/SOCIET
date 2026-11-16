@@ -4,6 +4,7 @@ DB-gated: skipped unless DATABASE_URL is set. The pure gate is covered without a
 test_verdict_retry_gate.py.
 """
 
+import datetime
 import os
 import uuid
 from types import SimpleNamespace
@@ -43,10 +44,11 @@ async def run():
 
 
 def _insert(run, job_id: str) -> dict:
+    now = datetime.datetime.now(datetime.UTC).isoformat()
     return {
         "job_id": job_id, "run_id": run.run_id, "user_id": run.user_id,
-        "created_at": "2026-11-16T00:00:00+00:00", "reserved_units": 3,
-        "reserved_period_start": "2026-11-01T00:00:00+00:00", "reserved_at": "2026-11-16T00:00:00+00:00",
+        "created_at": now, "reserved_units": 3,
+        "reserved_period_start": "2026-11-01T00:00:00+00:00", "reserved_at": now,
     }
 
 

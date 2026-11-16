@@ -9,6 +9,7 @@ import pytest
 import pytest_asyncio
 
 from src.api import run_doc
+from src.api.public_events import RUN_FAILED_MESSAGE
 from src.config.settings import get_settings
 from src.db.engine import get_session_factory
 from src.db.models import User
@@ -136,7 +137,7 @@ async def test_a_dispatch_failure_marks_the_row_failed_not_queued(owner, monkeyp
         )
 
     doc = await run_doc.read_job_doc(seen["job_id"])
-    assert (doc["status"], doc["error"]) == ("failed", "redis down")
+    assert (doc["status"], doc["error"]) == ("failed", RUN_FAILED_MESSAGE)
     assert await run_doc.count_active_jobs(owner) == 0
 
 

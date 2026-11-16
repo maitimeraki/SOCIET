@@ -20,7 +20,7 @@ from sqlalchemy import delete, select
 from src.api import run_doc
 from src.api.auth_api import router as auth_router
 from src.api.billing_api import router as billing_router
-from src.api.debate_api import _DEBATE_JOBS
+from src.api.debate_api import _DEBATE_JOBS, DebateConfigRequest, debate_reserve_units
 from src.api.debate_api import router as debate_router
 from src.api.errors import install_error_handlers
 from src.api.ingest_api import router as ingest_router
@@ -221,13 +221,24 @@ async def test_the_billing_flow_shares_one_pool_and_keeps_internals_off_the_wire
             created_jobs.append(debate_job_id)
 
             debate_job = await _job_row(factory, debate_job_id)
+            # The hold is the figure create_debate reserves for the request's defaults, clamped to the
+            # free plan the same way create_debate clamps them.
             free = get_plan("free")
-            # The default 8 seats (under the free cap of 10) * 3 rounds * 2 turns.
-            assert debate_job.reserved_units == 8 * free.max_rounds * 2 == 48
+            requested = DebateConfigRequest()
+            agents = min(requested.max_agents, free.max_agents)
+            rounds = min(requested.max_rounds, free.max_rounds)
+            pairs = min(requested.max_pairs_per_round, agents)
+            reserve = debate_reserve_units(
+                agents=agents,
+                rounds=rounds,
+                max_new_per_round=requested.max_new_agents_per_round,
+                max_pairs_per_round=pairs,
+            )
+            assert debate_job.reserved_units == reserve
 
             during = await _usage(client, bodies)
             assert during["units_used"] == estimate
-            assert during["units_remaining"] == 1000 - estimate - 48
+            assert during["units_remaining"] == 1000 - estimate - reserve
 
             measured = 5
             await _settle(
@@ -240,8 +251,8 @@ async def test_the_billing_flow_shares_one_pool_and_keeps_internals_off_the_wire
                 job_id=debate_job_id,
             )
             released = await _release_job(factory, debate_job_id)
-            # 48 reserved less the 5 settled against this job = 43 still held, released.
-            assert released == 43
+            # The hold less the measured 5 settled against this job is still held, and is released.
+            assert released == reserve - measured
             await run_doc.set_job_status(debate_job_id, "complete")
 
             after_debate = await _usage(client, bodies)

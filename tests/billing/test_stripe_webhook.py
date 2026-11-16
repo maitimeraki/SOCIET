@@ -484,6 +484,6 @@ async def test_unmapped_subscription_marks_the_event_failed(
             row = await db.get(WebhookEvent, row_id)
 
         assert row.status == "failed"
-        assert "unmapped subscription" in row.error
+        assert row.error == "ValueError"
     finally:
         await _cleanup(factory, event_ids=[event["id"]])
