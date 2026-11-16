@@ -32,10 +32,13 @@ _KEYWORD = re.compile(
     r"CREATE (?:CONSTRAINT|INDEX|VECTOR INDEX|FULLTEXT INDEX)|DROP INDEX)\b",
     _FLAGS,
 )
-_LABELLED_NODE = re.compile(rf"\(\s*\w*\s*:\s*(?:{_LABELS})\b", _FLAGS)
-_TENANT = re.compile(rf"[(:]\s*(?:{_LABELS})\b", _FLAGS)
+# Labels and property names are case-sensitive in Neo4j: only keywords and clause words fold case.
+_LABELLED_NODE = re.compile(rf"\(\s*\w*\s*:\s*(?:{_LABELS})\b")
+# A tenant label as a node pattern `(x:Label)` or as a label predicate `x:Label` with no space
+# before the colon. `match: Document` (prose) is not a label reference.
+_TENANT = re.compile(rf"(?:\(\s*\w*\s*:\s*|\b\w+:)(?:{_LABELS})\b")
 _ELEMENT_ID = re.compile(r"\belementId\s*\(", _FLAGS)
-_SCOPE = re.compile(r"\bdataset_id\b|\b(?:chunk|entity|path)_in_dataset\(", _FLAGS)
+_SCOPE = re.compile(r"\bdataset_id\b|\b(?:chunk|entity|path)_in_dataset\(")
 _CLAUSE = re.compile(
     r"\b(OPTIONAL MATCH|MATCH|MERGE|CREATE|UNWIND|WITH|CALL|RETURN|SET|DETACH DELETE|DELETE|"
     r"ORDER BY|LIMIT|FOREACH|REMOVE)\b",
@@ -190,12 +193,21 @@ def _rel(path: Path) -> str:
     return path.relative_to(REPO).as_posix()
 
 
-def _live_keys() -> set[tuple[str, str, str]]:
-    return {
-        (_rel(path), owner, fingerprint(text))
-        for path in _src_files()
-        for owner, _, text in cypher_strings(path.read_text(encoding="utf-8"), str(path))
-    }
+def _needed_keys() -> set[tuple[str, str, str]]:
+    """Keys of every query the rule flags without the allowlist: an entry must be one of these."""
+    needed = set()
+    for path in _src_files():
+        rel = _rel(path)
+        for owner, _, text in unscoped_tenant_queries(path.read_text(encoding="utf-8"), str(path)):
+            if (rel, owner) in DDL_ONLY and _DDL.match(text):
+                continue
+            needed.add((rel, owner, fingerprint(text)))
+    return needed
+
+
+def _stale_entries() -> list[tuple[str, str, str]]:
+    needed = _needed_keys()
+    return sorted(key for key in ALLOWLIST if key not in needed)
 
 
 def test_every_tenant_cypher_string_binds_the_scope_or_is_allowlisted():
@@ -262,9 +274,38 @@ def test_a_new_query_inside_an_allowlisted_function_still_fails(monkeypatch):
     assert violations(grown, rel) != []
 
 
-def test_every_allowlist_entry_names_a_live_cypher_string():
-    stale = sorted(key for key in ALLOWLIST if key not in _live_keys())
-    assert stale == []
+def test_every_allowlist_entry_is_needed_because_its_text_is_flagged():
+    assert _stale_entries() == []
+
+
+def test_an_entry_for_a_query_the_rule_accepts_is_stale(monkeypatch):
+    text = next(
+        text for owner, _, text in cypher_strings(
+            (SRC / "graph" / "normalization.py").read_text(encoding="utf-8")
+        )
+        if owner == "destructive_merge" and "mergeNodes" in text
+    )
+    key = ("src/graph/normalization.py", "destructive_merge", fingerprint(text))
+    monkeypatch.setitem(ALLOWLIST, key, "probe: a query the rule already accepts")
+    assert key in _stale_entries()
+
+
+def test_prose_with_a_keyword_and_a_capitalised_word_is_not_tenant_cypher():
+    source = (
+        'def log(logger):\n    logger.warning("No match: Document missing for upload")\n'
+        '    logger.error("Error: Agent failed to match a persona")\n'
+    )
+    assert unscoped_tenant_queries(source) == []
+
+
+def test_a_lowercase_keyword_with_an_unscoped_capitalised_label_is_flagged():
+    source = 'def read(s):\n    return s.run("match (c:Chunk {id: $id}) return c")\n'
+    assert [owner for owner, _, _ in unscoped_tenant_queries(source)] == ["read"]
+
+
+def test_a_label_predicate_outside_parentheses_is_a_tenant_reference():
+    source = 'def read(s):\n    return s.run("MATCH (n) WHERE n.id = $id AND NOT n:Chunk RETURN n")\n'
+    assert [owner for owner, _, _ in unscoped_tenant_queries(source)] == ["read"]
 
 
 def test_every_ddl_only_owner_holds_cypher():

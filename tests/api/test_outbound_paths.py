@@ -22,7 +22,7 @@ MOUNT_PREFIX = "/api/v1"
 #: spec 4b: never shown to a client. No allowlist may carry one of these as a key.
 FORBIDDEN_4B_KEYS = frozenset({
     "evidence", "evidence_id", "evidence_items", "evidence_quote", "quote", "quotes",
-    "span", "spans", "chunk_id", "chunk_ids",
+    "section", "sections", "document_title", "span", "spans", "chunk_id", "chunk_ids",
     "cite_id", "cite_ids", "cite_marker", "cite_markers", "validation", "validation_results",
     "rejected_claims", "similarity", "rank_features", "features", "prompt_version",
     "model_version", "dossier_hash", "version_hash", "source_count", "unknown",
@@ -165,3 +165,10 @@ def test_served_sources_and_provenance_keep_their_shipped_shape():
     })
     assert set(out["sources"]["1"]) == {"document", "section"}
     assert set(out["provenance_by_claim"]["claim"][0]) == {"title", "breadcrumb"}
+
+
+@pytest.mark.parametrize("name", ["section", "sections", "document_title"])
+def test_a_nested_name_added_to_a_served_allowlist_fails_the_spec_4b_check(monkeypatch, name):
+    monkeypatch.setattr(public_events, "_PROFILE_KEYS", public_events._PROFILE_KEYS | {name})
+    with pytest.raises(AssertionError):
+        test_served_allowlist_holds_no_spec_4b_key("_PROFILE_KEYS")
