@@ -322,7 +322,7 @@ _NUMERIC_MARKER_LIST = re.compile(r"\s*\d+(?:\s*,\s*\d+)*\s*")
 _ID_SHAPED = re.compile(r"\b[er]\d+\b|\b\w+_\d+\b|\bchunk[-\w]*\d", re.IGNORECASE)
 _UUID_SHAPED = re.compile(
     r"\b[0-9a-fA-F]{8}-?[0-9a-fA-F]{4}-?[0-9a-fA-F]{4}-?[0-9a-fA-F]{4}-?[0-9a-fA-F]{12}\b"
-    r"|\b[0-9a-fA-F]{32}\b"
+    r"|\b[0-9a-fA-F]{32,64}\b"
 )
 #: A verbatim run of source text at least this long is copied, not paraphrased.
 VERBATIM_RUN_CHARS = 80

@@ -318,3 +318,15 @@ def test_ordinary_bracketed_tokens_are_not_ids(token):
 @pytest.mark.parametrize("token", ["e1", "r3", "chunk_12", "chunk-7", "0c0ffee0-0000-4000-8000-0000000000c1", "abcdef0123456789abcdef0123456789"])
 def test_minted_or_uuid_ids_in_brackets_are_still_rejected(token):
     assert ID_IN_BRACKETS in check_report(GOOD.replace("[1]", f"[{token}]"), FACTS, {"1"})
+
+
+@pytest.mark.parametrize("length", [32, 40, 64])
+def test_a_hex_id_of_32_to_64_characters_in_the_text_is_rejected(length):
+    hex_id = ("0123456789abcdef" * 4)[:length]
+    assert UUID_IN_TEXT in check_report(GOOD + f"\nRef {hex_id} here.", FACTS, {"1"})
+
+
+@pytest.mark.parametrize("length", [32, 40, 64])
+def test_a_hex_id_of_32_to_64_characters_in_brackets_is_rejected(length):
+    hex_id = ("0123456789abcdef" * 4)[:length]
+    assert ID_IN_BRACKETS in check_report(GOOD.replace("[1]", f"[{hex_id}]"), FACTS, {"1"})
