@@ -13,7 +13,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.api import run_doc
-from src.api.public_events import project_result
+from src.api.public_events import served_result
 from src.audit import client_ip
 from src.audit import record as audit_record
 from src.auth.cookies import verify_csrf
@@ -27,23 +27,6 @@ logger = logging.getLogger(__name__)
 router = APIRouter(
     prefix="/jobs", tags=["jobs"], dependencies=[Depends(verify_csrf)]
 )
-
-
-#: Modes whose stored result is served as it is. Any other mode serves no result (default deny).
-PASSTHROUGH_RESULT_MODES = frozenset(
-    {"ontology", "build_graph", "normalize_graph", "extract_upload", "account_export"}
-)
-
-
-def served_result(mode: object, result: object) -> object:
-    """A job's result as a client may see it. A debate's result goes through the allowlist (it carries
-    backend-only keys); the listed modes pass through; every other mode, including verdict retries and
-    any mode added later, serves None until it is listed here on purpose."""
-    if mode == "debate":
-        return project_result(result)
-    if mode in PASSTHROUGH_RESULT_MODES:
-        return result
-    return None
 
 
 # The one status read: `/api/v1/jobs/{id}` and the legacy `/simulate/jobs/{id}`

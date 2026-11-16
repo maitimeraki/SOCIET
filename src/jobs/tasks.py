@@ -28,7 +28,7 @@ from src.api.public_events import (
     METERING_STOPPED_MESSAGE,
     REPORT_NOT_PRODUCED_MESSAGE,
     RUN_FAILED_MESSAGE,
-    project_result,
+    served_result,
 )
 from src.billing.metering import MeteringError
 from src.jobs.queue import (
@@ -481,9 +481,9 @@ async def _account_delete_core(job_id: str, payload: dict[str, Any]) -> None:
 
 
 def _run_json(run, kind: str) -> dict[str, Any]:
-    # Only a debate's verdict is a result doc; other kinds keep their job state
-    # (stage, progress, result) as stored.
-    verdict = project_result(run.verdict) if kind == "debate" else run.verdict
+    # The same default-deny as the job API: a debate's verdict is projected, the graph modes pass
+    # their stored state, every other kind (verdict retries included) exports no verdict.
+    verdict = served_result(kind, run.verdict)
     return {
         "run_id": str(run.id),
         "query": run.query,

@@ -132,6 +132,23 @@ def project_result(result: Mapping[str, Any] | None) -> dict[str, Any] | None:
     return _narrow_verdict(result, _RESULT_KEYS)
 
 
+#: Modes whose stored result is served as it is. Any other mode serves no result (default deny).
+PASSTHROUGH_RESULT_MODES = frozenset(
+    {"ontology", "build_graph", "normalize_graph", "extract_upload", "account_export"}
+)
+
+
+def served_result(mode: object, result: object) -> object:
+    """A job's result as a client may see it. A debate's result goes through the allowlist (it carries
+    backend-only keys); the listed modes pass through; every other mode, including verdict retries and
+    any mode added later, serves None until it is listed here on purpose."""
+    if mode == "debate":
+        return project_result(result)
+    if mode in PASSTHROUGH_RESULT_MODES:
+        return result
+    return None
+
+
 def stored_result(result: Mapping[str, Any] | None) -> dict[str, Any] | None:
     """The result as `runs.verdict` keeps it: the served keys, plus the backend-only report keys.
 

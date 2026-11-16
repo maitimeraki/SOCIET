@@ -333,6 +333,18 @@ def test_build_graph_job_export_keeps_its_verdict_state():
     assert _run_json(_export_run(state), "build_graph")["verdict"] == state
 
 
+def test_a_verdict_retry_export_serves_no_verdict_whatever_it_stores():
+    from src.jobs.tasks import _run_json
+
+    retry_state = {"source_refs": {"1": {"node_id": "NODE-SECRET"}}, "retry_inputs": {"q": "SECRET-Q"},
+                   "attempts": 2, "checks": ["SECRET-CHECK"], "markdown": "# T"}
+
+    out = _run_json(_export_run(retry_state), "verdict")
+
+    assert out["verdict"] is None
+    assert not any(t in json.dumps(out) for t in ("NODE-SECRET", "SECRET-Q", "SECRET-CHECK"))
+
+
 @pytest.mark.parametrize("kind", [["complete"], {"type": "complete"}, None, 3])
 def test_non_string_event_type_is_dropped_without_logging_its_payload(kind, caplog):
     with caplog.at_level(logging.WARNING):
