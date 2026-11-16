@@ -99,6 +99,9 @@ export function VerdictsPageView({ latest, earlier, loading, failed, failDetail,
   )
 }
 
+/** The most answered runs whose documents the headline probe reads. */
+const HEADLINE_PROBE_LIMIT = 5
+
 // eslint-disable-next-line react-refresh/only-export-components -- loadVerdicts is the tested loader
 export async function loadVerdicts() {
   const answered: RunSummary[] = []
@@ -109,16 +112,15 @@ export async function loadVerdicts() {
     cursor = page.next_cursor
   } while (cursor && answered.length < 50)
 
-  // Read documents only until the first readable one: that run is the answer the page opens.
-  // Every earlier row takes its stance/share/date from the list, so one unreadable run
-  // (deleted, 404, transient 5xx) never blanks the archive — and the archive never fans out
-  // into one document read per run.
+  // The headline probe reads the documents of at most the first HEADLINE_PROBE_LIMIT answered runs,
+  // one at a time. It stops at the first produced report; otherwise it headlines the first readable
+  // run, which may be one whose report was not produced. Every row of the archive, probed or not,
+  // takes its stance, share and date from the list, so the page never waits on more than the probe
+  // and one unreadable run (deleted, 404, transient 5xx) never blanks the archive.
   // §11.3 — the sheet is the same `reportFromState` construction the run page renders and every
   // export serializes; the page never re-derives the reasoning or the sources.
-  // A produced report headlines the page. A run whose report was not produced (a legacy run included)
-  // headlines only when no produced one exists, and reads the rest of the archive before it does.
   let latest: VerdictsPageViewProps['latest'] = null
-  for (const entry of answered) {
+  for (const entry of answered.slice(0, HEADLINE_PROBE_LIMIT)) {
     try {
       const doc = await getRun(entry.run_id)
       const report = reportFromState(applyStoredResult(fold(doc.events), doc.result))

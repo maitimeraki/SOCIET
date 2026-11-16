@@ -201,6 +201,63 @@ describe('loadVerdicts', () => {
     expect(loaded.latest?.report.reportStatus).toBe('not_produced')
   })
 
+  it('reads at most five documents to find the headline, however long the archive', async () => {
+    const legacy = (id: string): RunDoc => ({
+      ...good,
+      run_id: id,
+      events: [{ type: 'complete', converged: false, final_stances: {}, warnings: [], rounds_executed: 0 }],
+    })
+    const ids = Array.from({ length: 8 }, (_, index) => `r-legacy-${index}`)
+    const documentReads: string[] = []
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string) => {
+        const match = url.match(/\/debates\/(r-legacy-\d+)$/)
+        if (match) {
+          documentReads.push(match[1])
+          return reply(legacy(match[1]))
+        }
+        return reply({ items: ids.map((id) => run({ run_id: id })), next_cursor: null })
+      }),
+    )
+
+    const loaded = await loadVerdicts()
+
+    expect(documentReads).toHaveLength(5)
+    expect(loaded.latest?.runId).toBe('r-legacy-0')
+    expect(loaded.earlier.map((row) => row.runId)).toEqual(ids.slice(1))
+  })
+
+  it('stops reading at the first produced report it finds', async () => {
+    const legacy = (id: string): RunDoc => ({
+      ...good,
+      run_id: id,
+      events: [{ type: 'complete', converged: false, final_stances: {}, warnings: [], rounds_executed: 0 }],
+    })
+    const documents: Record<string, RunDoc> = {
+      'r-a': legacy('r-a'),
+      'r-b': { ...good, run_id: 'r-b' },
+      'r-c': legacy('r-c'),
+    }
+    const documentReads: string[] = []
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string) => {
+        const match = url.match(/\/debates\/(r-[a-z])$/)
+        if (match) {
+          documentReads.push(match[1])
+          return reply(documents[match[1]])
+        }
+        return reply({ items: [run({ run_id: 'r-a' }), run({ run_id: 'r-b' }), run({ run_id: 'r-c' })], next_cursor: null })
+      }),
+    )
+
+    const loaded = await loadVerdicts()
+
+    expect(documentReads).toEqual(['r-a', 'r-b'])
+    expect(loaded.latest?.runId).toBe('r-b')
+  })
+
   it('leaves every answered row in the archive when no document can be read', async () => {
     vi.stubGlobal(
       'fetch',
