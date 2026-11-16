@@ -11,26 +11,28 @@ Simulation World transforms a business question or scenario into a synthesized s
 1. **Creating a Society** of domain-specific AI agents with distinct expertise, personalities, and stances
 2. **Running Structured Debate** where agents argue, counter-argue, and respond to each other
 3. **Generating Consensus** from a strength- and confidence-weighted share of the last two rounds' positions (ABSTAIN weighs nothing; no position means no verdict)
-4. **Delivering Insights** with confidence metrics, dissenting views, and supporting evidence
+4. **Delivering Insights** as a report with a title, markdown, the consensus position and its cited sources; "Report not produced" when the report cannot be written
 
 ### Example
 
 ```json
-// Input: "Should I expand into Europe?"
+// Request: POST /simulate/debate (202), then GET /simulate/debates/{run_id}
 {
-  "scenario": "Should I expand my SaaS business into Europe in 2026?",
-  "context": { "budget_usd": 200000, "team_size": 12 }
+  "graph_id": "<owned dataset uuid>",
+  "query": "Should I expand my SaaS business into Europe in 2026?",
+  "context": { "budget_usd": 200000, "team_size": 12 },
+  "config": { "max_agents": 8 }
 }
 
-// Output: Synthesized society opinion
+// Result (verdict keys, abridged)
 {
-  "society_opinion": "Cautionary expansion with phased approach recommended...",
-  "confidence_metrics": { "overall_confidence": 0.78, "debate_rounds": 3 },
-  "agent_profiles": [
-    { "name": "Conservative Analyst", "expertise": ["finance", "risk_management"] },
-    { "name": "Growth Strategist", "expertise": ["business_development"] }
-  ],
-  "dissenting_views": [...]
+  "title": "...",
+  "markdown": "...",
+  "position": "POSITIVE",
+  "sources": { ... },
+  "status": "produced",
+  "weight_share": 0.62,
+  "contested": false
 }
 ```
 
@@ -64,7 +66,7 @@ Debate Loop (per round):
     ↓
 Convergence Check (80% threshold)
     ↓
-Verdict Synthesis → Society Opinion + Confidence + Dissenting Views
+Verdict Synthesis → Consensus Position + Report (title, markdown, sources, status)
 ```
 
 ---
@@ -75,10 +77,10 @@ Verdict Synthesis → Society Opinion + Confidence + Dissenting Views
 
 | File | Purpose |
 |------|---------|
-| `orchestrator.py` | **DebateOrchestrator** - 5-stage pipeline coordinator |
+| `orchestrator.py` | **DebateOrchestrator** - six-stage pipeline coordinator (intake, selection, synthesis, round, convergence, verdict) |
 | `round_runner.py` | Executes single debate rounds, builds prompts |
 | `topology.py` | **CommunicationTopology** - Cypher-based agent pair scoring |
-| `verdict.py` | **VerdictSynthesizer** - consensus numbers and the single report call |
+| `verdict.py` | **VerdictSynthesizer** - consensus numbers and the report call (up to 3 attempts) |
 | `society_memory.py` | **SocietyMemory** - Commits rounds to Neo4j (Opinion/STATED/REACTED_TO) + snapshot read-back |
 | `profile_synthesizer.py` | Creates agents from graph entities |
 | `pair_turn.py` | Data classes for turns, pairs, verdicts |
@@ -217,8 +219,7 @@ Startup (backend, frontend) and the golden path: see [Quickstart](#quickstart). 
 
 | Endpoint | Method | Purpose |
 |----------|--------|---------|
-| `/simulate` | POST | Synchronous simulation |
-| `/simulate/async` | POST | Async simulation (returns job_id) |
+| `/simulate` | POST | Retired (501); use `/simulate/debate` |
 | `/simulate/jobs/{job_id}` | GET | Poll job status |
 
 ### Graph Operations
@@ -301,10 +302,10 @@ src/
 ├── main.py                    # Entry point
 ├── api/                      # FastAPI server + endpoints
 ├── simulation/               # Core debate engine
-│   ├── orchestrator.py       # 5-stage pipeline coordinator
+│   ├── orchestrator.py       # six-stage pipeline coordinator
 │   ├── round_runner.py       # Round execution
 │   ├── topology.py           # Cypher pair scoring
-│   ├── verdict.py            # Consensus numbers + report call
+│   ├── verdict.py            # Consensus numbers + report call (up to 3 attempts)
 │   ├── society_memory.py     # Opinion/REACTED_TO commit + snapshot read
 │   └── profile_synthesizer.py # Agent creation
 ├── persona/                  # Agent models + repository

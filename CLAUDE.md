@@ -38,7 +38,7 @@ Debate loop (per round):
     ↓
 consensus_window (last CONSENSUS_ROUNDS = 2 rounds) → weighted_share → dominant_stance
     ↓
-write_report (one LLM call, code checks) → result: title, markdown, position, sources, status
+write_report (up to REPORT_MAX_ATTEMPTS = 3 LLM calls, each checked in code) → result: title, markdown, position, sources, status
 ```
 
 ## Key Components
@@ -55,11 +55,11 @@ write_report (one LLM call, code checks) → result: title, markdown, position, 
 | `profile_validation.py` | ProfileDraft, validate_profile | Code-side citation and uniqueness checks; no LLM |
 | `evidence.py` | EvidencePack, build_pack | Per-agent evidence sentences and relations |
 | `agent_record.py` | AgentView, AgentRecord | Client view vs backend-only record |
-| `verdict.py` | VerdictSynthesizer, write_report, check_report | Board facts and the single report call |
+| `verdict.py` | VerdictSynthesizer, write_report, check_report | Board facts and the report call (up to 3 attempts) |
 | `report_retry.py` | build_retry_inputs, check_rebuild | Exact rebuild for a report retry |
 | `society_memory.py` | SocietyMemory | Per-round commit + snapshot read-back |
 | `topology.py` | CommunicationTopology | Pair scoring (Cypher, dataset-scoped) |
-| `actor_filter.py` | classify actor labels | One metered LLM call |
+| `actor_filter.py` | classify actor labels | One metered LLM call per batch of 100 labels |
 | `pair_turn.py` | CommPair, AgentTurn, RoundResult | Data classes |
 | `llm_batch.py` | BatchedLLMRunner | Parallel LLM calls per round |
 | `debate_config.py` | DebateConfig | Validated debate settings |
@@ -86,7 +86,7 @@ write_report (one LLM call, code checks) → result: title, markdown, position, 
 ### API Layer (`src/api/`)
 | File | Purpose |
 |------|---------|
-| `api_server.py` | FastAPI app (real entry point), graph routes, `/simulate/async` |
+| `api_server.py` | FastAPI app (real entry point), graph routes; legacy `/simulate` and `/simulate/async` return 501 |
 | `debate_api.py` | Debate router under `/simulate` (see routes below) |
 | `operator_api.py` | `/operator` router, role-guarded (support, admin) |
 | `public_events.py` | Default-deny outbound allowlist for events and results |
@@ -269,31 +269,27 @@ Wire casing stays uppercase, matching persisted events and the frontend.
 
 ## API Schemas
 
-### UserQuery
+### DebateRequest (`POST /simulate/debate`)
 ```python
-class UserQuery(BaseModel):
-    scenario: str                              # The question/proposal
-    context: Optional[Dict[str, Any]]          # User-provided context
-    simulation_depth: str = "standard"         # shallow, standard, deep
-    selected_domains: Optional[List[str]]      # Domain filter
-    mode: str = "sync"
+class DebateRequest(BaseModel):
+    graph_id: uuid.UUID          # owned dataset
+    query: str
+    corpus_label: Optional[str]  # max 120 chars
+    selected_domains: List[str]
+    context: Optional[dict]      # serialised size capped at CONTEXT_MAX_BYTES (4096)
+    config: DebateConfigRequest  # max_agents: 1..12, default 8
 ```
 
-### SimulationResponse
-```python
-class SimulationResponse(BaseModel):
-    society_opinion: str
-    dissenting_views: List[Dict[str, Any]]
-    confidence_metrics: Dict[str, Any]        # overall_confidence, debate_rounds, etc.
-    agent_profiles: List[Dict[str, Any]]
-    raw_debate_log: Optional[List[Dict[str, Any]]]
-```
+### Run result (verdict keys)
+`title, markdown, position, sources, status` (`status` is `produced` or `not_produced`), plus `weight_share, contested, final_stances, provenance_by_claim, cluster_details, warnings` and the other keys in `_VERDICT_KEYS`. The legacy `UserQuery` and `SimulationResponse` (`src/api/config_api.py`) are retired and not served.
 
 ## Outbound Allowlist and LLM Calls
 
 - `src/api/public_events.py` is default-deny. Client, WebSocket, `run_events` and `runs.verdict` carry only the keys it lists (`_PROFILE_KEYS` = AgentView keys, `_VERDICT_KEYS`, `_EVENT_KEYS`). A new outbound key is added there, never sent raw.
 - Backend-only, never served: `source_refs`, `attempts`, `checks`, `retry_inputs`, evidence and chunk ids, node ids, cite markers, validation results, prompt and model versions, dossier and version hashes.
-- Every LLM call goes through `LLMClient.generate` (it runs `metering.check_metering()`), inside `metering.source_scope(...)`, with explicit `model`, `temperature` and `max_tokens`. Sources are the billing ledger's `SOURCES` (`ingest, ontology, debate, verdict`); add no new source name without updating the ledger.
+- LLM calls on the debate, verdict and intent paths go through `LLMClient.generate`, inside `metering.source_scope(...)`, with explicit `model`, `temperature` and `max_tokens`. Sources are the billing ledger's `SOURCES` (`ingest, ontology, debate, verdict`).
+- Graph extraction and ontology discovery call llama-index `OpenAILike` directly and are metered by `src/graph/llm_metering.wrap_with_metering`. They are outside this rule.
+- Exception: the boot and health probe (`_probe_llm` in `api_server.py`) is unmetered and has no explicit `max_tokens`.
 
 ## Development Guidelines
 
@@ -448,7 +444,7 @@ owns the age-based deletes). Run retention as `societas_retention`.
 ```python
 @dataclass
 class DebateConfig:
-    max_agents: int = 8          # seat count n; 1..12, also the billing plan cap
+    max_agents: int = 8          # seat count n; request bound 1..12 (DebateConfigRequest)
     max_rounds: int = 5
     comm_radius: int = 1
     min_entity_overlap: int = 1
