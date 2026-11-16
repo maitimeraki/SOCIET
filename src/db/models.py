@@ -173,7 +173,16 @@ class Job(Base):
         DateTime(timezone=True)
     )
 
-    __table_args__ = (Index("jobs_user_id_idx", "user_id"),)
+    __table_args__ = (
+        Index("jobs_user_id_idx", "user_id"),
+        # One in-flight verdict retry per run: a double submit cannot enqueue a second job.
+        Index(
+            "jobs_one_verdict_retry_in_flight",
+            "run_id",
+            unique=True,
+            postgresql_where=text("kind = 'verdict' AND status IN ('queued', 'running')"),
+        ),
+    )
 
 
 class Upload(Base):

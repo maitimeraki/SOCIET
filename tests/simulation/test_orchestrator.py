@@ -1656,7 +1656,7 @@ _EVIDENCE_SENTENCES = sorted(
 _LEAK_MARKERS = (
     "chunk_id", "doc_id", "version_hash", "dossier_hash", "graph_snapshot", "summary_provenance",
     "source_evidence", "evidence", "REASONING", "[e1]", "llm_model", "anchors", "source_count",
-    "source_refs", "attempts", "checks",
+    "source_refs", "attempts", "checks", "retry_inputs",
 )
 # Markers a real run produces. The other six in _LEAK_MARKERS never occur in a run: they are
 # guarded by their per-marker removal cases, not by the positive control.
@@ -2081,3 +2081,25 @@ async def test_a_real_report_leaks_no_marker_on_any_client_surface(marker):
     payloads = await _client_payloads(await _run_leak_debate(real_report=True))
 
     assert [name for name, text in payloads.surfaces.items() if marker in text] == []
+
+
+@pytest.mark.asyncio
+async def test_the_retry_inputs_round_trip_the_turn_log_of_a_real_run():
+    run = await _run_leak_debate(real_report=True)
+    retry_inputs = run.result.retry_inputs
+
+    assert retry_inputs is not None
+    logged = [
+        (entry["round"], entry["agent_name"], entry["stance"], entry["cites"], entry["strength"])
+        for entry in retry_inputs["turns"]
+    ]
+    shown = [
+        (event["round"], turn["agent_name"], turn["stance"])
+        for event in run.events
+        if event["type"] == "round"
+        for turn in event["turns"]
+    ]
+    assert [(round_num, name, stance) for round_num, name, stance, _, _ in logged] == shown
+    assert any("e1" in cites for _, _, _, cites, _ in logged)
+    assert all(0.0 <= strength <= 1.0 for *_, strength in logged)
+    assert retry_inputs["context"] == ""

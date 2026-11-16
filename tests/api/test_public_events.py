@@ -73,7 +73,7 @@ def test_result_drops_every_unlisted_key_and_the_backend_only_report_keys():
     out = project_result({"surprise": 1, "source_refs": {"1": {"node_id": "N"}}, "attempts": 2,
                           "checks": ["c"], "converged": True})
     assert out == {"converged": True}
-    assert _BACKEND_RESULT_KEYS == frozenset({"source_refs", "attempts", "checks"})
+    assert _BACKEND_RESULT_KEYS == frozenset({"source_refs", "attempts", "checks", "retry_inputs"})
 
 
 # --- the crossings: every one applies the same projector -----------------------
@@ -456,3 +456,60 @@ def test_a_10k_provenance_title_is_capped_at_200_characters():
 def test_control_characters_are_removed_from_a_source_label():
     out = project_result({"sources": {"1": {"document": "Me\x00mo\x1b", "section": "Pri\ncing\t"}}})
     assert out == {"sources": {"1": {"document": "Memo", "section": "Pricing"}}}
+
+
+# --- the retry inputs: stored for a verdict retry, never served ----------------
+
+_RETRY_INPUTS = {
+    "context": "CTX-SECRET",
+    "turns": [{"agent_name": "Kestra", "round": 1, "stance": "POSITIVE",
+               "cites": ["EV-CITE-SECRET"], "strength": 0.6}],
+}
+_RETRY_LEAKS = ("CTX-SECRET", "EV-CITE-SECRET")
+
+
+def test_retry_inputs_are_stored_and_dropped_from_every_projection():
+    stored_doc = {"converged": True, "status": "not_produced", "retry_inputs": _RETRY_INPUTS,
+                  "attempts": 3, "checks": []}
+    assert stored_result(stored_doc)["retry_inputs"] == _RETRY_INPUTS
+    served = project_result(stored_doc)
+    assert "retry_inputs" not in served
+    complete = project_event({"type": "complete", "converged": True, "retry_inputs": _RETRY_INPUTS})
+    assert "retry_inputs" not in complete
+    for token in _RETRY_LEAKS:
+        assert token not in json.dumps([served, complete])
+
+
+@pytest.mark.asyncio
+async def test_retry_inputs_leave_no_served_surface_of_a_run():
+    from src.api.debate_api import get_debate_doc, get_debate_status
+
+    run_id, user_id = str(uuid.uuid4()), uuid.uuid4()
+    result = {"converged": True, "status": "not_produced", "retry_inputs": _RETRY_INPUTS,
+              "attempts": 3, "checks": [], "final_stances": {}}
+    stored = {"user_id": str(user_id),
+              "events": [{"type": "complete", "converged": True, "retry_inputs": _RETRY_INPUTS}],
+              "result": result}
+    head = {"user_id": str(user_id), "kind": "debate", "status": "complete", "result": result, "error": None}
+    with (
+        patch("src.api.debate_api.run_doc.read_run_doc", new=AsyncMock(return_value=stored)),
+        patch("src.api.debate_api.run_doc.read_run_head", new=AsyncMock(return_value=head)),
+        patch("src.api.debate_api.require_owner", new=AsyncMock()),
+    ):
+        doc = await get_debate_doc(run_id, user=_user(user_id))
+        status = await get_debate_status(run_id, user=_user(user_id))
+
+    surfaces = {"run doc": json.dumps(doc, default=str), "status": status.model_dump_json()}
+    for name, text in surfaces.items():
+        for token in _RETRY_LEAKS:
+            assert token not in text, (name, token)
+
+
+def test_debate_export_leaves_out_the_retry_inputs():
+    from src.jobs.tasks import _run_json
+
+    run = _export_run({"converged": True, "status": "not_produced", "retry_inputs": _RETRY_INPUTS,
+                       "attempts": 3, "checks": []})
+    text = json.dumps(_run_json(run, "debate"), default=str)
+    for token in _RETRY_LEAKS:
+        assert token not in text

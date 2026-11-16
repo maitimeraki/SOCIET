@@ -48,9 +48,10 @@ from src.persona.agent import Agent
 from src.simulation.agent_record import AgentRecord
 from src.simulation.debate_config import DebateConfig
 from src.simulation.llm_batch import BatchedLLMRunner
-from src.simulation.pair_turn import CommPair, RoundResult
+from src.simulation.pair_turn import CommPair, DebateVerdict, RoundResult
 from src.simulation.profile_synthesizer import ProfileSynthesizer
 from src.simulation.ranking import SeatDecision
+from src.simulation.report_retry import build_retry_inputs
 from src.simulation.round_runner import RoundRunner
 from src.simulation.society_memory import SocietyMemory, SocietySnapshot
 from src.simulation.topology import CommunicationTopology
@@ -121,6 +122,54 @@ class OrchestratedDebateResult:
     #: The final report's stored fields (verdict.write_board_report): title, markdown, position,
     #: sources, source_refs, attempts, checks, status. Empty when the verdict was not written.
     report: dict = field(default_factory=dict)
+    #: Backend-only inputs of a verdict retry (report_retry.build_retry_inputs). Absent when the
+    #: turn log is over its bound; never served (public_events keeps it out of every served key).
+    retry_inputs: Optional[dict] = None
+
+
+def result_from_verdict(
+    verdict: DebateVerdict,
+    *,
+    converged: bool,
+    final_stances: dict[str, str],
+    warnings: list[str],
+    rounds_executed: int,
+    intent: Optional[QueryIntent],
+    retry_inputs: Optional[dict],
+) -> OrchestratedDebateResult:
+    """The debate result for one verdict: the one place its served fields are derived.
+
+    The debate's run and a verdict retry both build their result here, so the two stored shapes
+    cannot drift apart.
+    """
+    cluster_details = None
+    if verdict.cluster_details:
+        cluster_details = {
+            stance.value: {**asdict(summary), "stance": stance.value}
+            for stance, summary in verdict.cluster_details.items()
+        }
+    provenance_by_claim = None
+    if verdict.provenance_by_claim:
+        provenance_by_claim = {
+            claim: [link.model_dump(mode="json") for link in links]
+            for claim, links in verdict.provenance_by_claim.items()
+        }
+    return OrchestratedDebateResult(
+        converged=converged,
+        final_stances=final_stances,
+        warnings=warnings,
+        rounds_executed=rounds_executed,
+        intent=intent,
+        confidence_score=verdict.confidence_score,
+        cluster_details=cluster_details,
+        supporting_entities=list(verdict.supporting_entities),
+        opposing_entities=list(verdict.opposing_entities),
+        weight_share=verdict.weight_share,
+        contested=verdict.contested,
+        provenance_by_claim=provenance_by_claim,
+        report=verdict.report,
+        retry_inputs=retry_inputs,
+    )
 
 
 class DebateOrchestrator:
@@ -485,27 +534,16 @@ class DebateOrchestrator:
         )
 
         # Step 3: the consensus verdict and the final report (async path -- no asyncio.run collision)
+        scenario = json.dumps(context) if context else ""
         verdict = await self._verdict_synthesizer.asynthesize(
             rounds=rounds,
             profiles=profiles,
             llm_client=llm_client,
             query=query,
-            scenario=json.dumps(context) if context else "",
+            scenario=scenario,
             run_id=dataset_id,
             converged=converged,
         )
-        cluster_details = None
-        if verdict is not None and verdict.cluster_details:
-            cluster_details = {
-                stance.value: {**asdict(summary), "stance": stance.value}
-                for stance, summary in verdict.cluster_details.items()
-            }
-        provenance_by_claim = None
-        if verdict is not None and verdict.provenance_by_claim:
-            provenance_by_claim = {
-                claim: [link.model_dump(mode="json") for link in links]
-                for claim, links in verdict.provenance_by_claim.items()
-            }
         await self._emit_stage(
             on_stage,
             stage_index,
@@ -517,21 +555,18 @@ class DebateOrchestrator:
         # Step 4: final stances, read from the same consensus window as the verdict. An agent
         # with no turn in that window has no position: ABSTAIN, never NEUTRAL.
         final_stances = board_final_stances(rounds, profiles)
+        retry_inputs = build_retry_inputs(rounds, scenario)
+        if retry_inputs is None:
+            logger.warning("run %s: turn log over its bound; the report cannot be retried", dataset_id)
 
-        return OrchestratedDebateResult(
+        return result_from_verdict(
+            verdict,
             converged=converged,
             final_stances=final_stances,
             warnings=warnings,
             rounds_executed=len(rounds),
             intent=intent,
-            confidence_score=verdict.confidence_score if verdict else None,
-            cluster_details=cluster_details,
-            supporting_entities=list(verdict.supporting_entities) if verdict else [],
-            opposing_entities=list(verdict.opposing_entities) if verdict else [],
-            weight_share=verdict.weight_share if verdict else None,
-            contested=verdict.contested if verdict else None,
-            provenance_by_claim=provenance_by_claim,
-            report=verdict.report if verdict else {},
+            retry_inputs=retry_inputs,
         )
 
     async def _maybe_activate(

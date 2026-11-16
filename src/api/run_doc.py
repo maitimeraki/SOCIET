@@ -37,6 +37,7 @@ from pydantic import BaseModel
 from sqlalchemy import func, select, tuple_, update
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.exc import IntegrityError
 
 from src.db.engine import get_session_factory
 from src.db.models import AgentRecordRow, Job, Run, RunEvent
@@ -236,6 +237,95 @@ async def read_job_doc(job_id: str) -> Optional[dict[str, Any]]:
         "error": job.error,
         "result": state.get("result"),
     }
+
+
+VERDICT_RETRY_CONSTRAINT = "jobs_one_verdict_retry_in_flight"
+
+
+class VerdictJobInFlight(RuntimeError):
+    """A verdict retry is already queued or running for this run."""
+
+
+async def write_verdict_job(
+    *,
+    job_id: str,
+    run_id: str,
+    user_id: str,
+    created_at: str,
+    reserved_units: int,
+    reserved_period_start: Optional[str],
+    reserved_at: Optional[str],
+) -> None:
+    """Insert a queued verdict-retry job row, owned by the run it retries.
+
+    The job's own id is new; its run_id names the run whose report it rewrites, so the in-flight
+    index (migration 0008) sees one active retry per run. A second insert for the same run is
+    refused by the database and raised as VerdictJobInFlight; no other integrity failure is mapped.
+    """
+    async with get_session_factory()() as session:
+        try:
+            await session.execute(
+                pg_insert(Job).values(
+                    id=_as_uuid(job_id),
+                    user_id=_as_uuid(user_id),
+                    run_id=_as_uuid(run_id),
+                    kind="verdict",
+                    status="queued",
+                    queued_at=_parse_dt(created_at) or _now(),
+                    reserved_units=reserved_units or 0,
+                    reserved_period_start=_parse_dt(reserved_period_start),
+                    reserved_at=_parse_dt(reserved_at),
+                )
+            )
+            await session.commit()
+        except IntegrityError as exc:
+            await session.rollback()
+            if VERDICT_RETRY_CONSTRAINT in str(exc.orig):
+                raise VerdictJobInFlight(run_id) from exc
+            raise
+
+
+async def verdict_job_in_flight(run_id: str) -> bool:
+    """True when a verdict retry for this run is queued or running."""
+    key = _as_uuid(run_id)
+    if key is None:
+        return False
+    async with get_session_factory()() as session:
+        count = (
+            await session.execute(
+                select(func.count())
+                .select_from(Job)
+                .where(
+                    Job.run_id == key,
+                    Job.kind == "verdict",
+                    Job.status.notin_(TERMINAL_STATUSES),
+                )
+            )
+        ).scalar_one()
+    return count > 0
+
+
+async def read_published_records(run_id: str) -> list[dict[str, Any]]:
+    """The stored records of a run's published seats, in seat order (backend-only)."""
+    key = _as_uuid(run_id)
+    if key is None:
+        return []
+    async with get_session_factory()() as session:
+        rows = (
+            (
+                await session.execute(
+                    select(AgentRecordRow.record)
+                    .where(
+                        AgentRecordRow.run_id == key,
+                        AgentRecordRow.status == "published",
+                    )
+                    .order_by(AgentRecordRow.seat, AgentRecordRow.node_id)
+                )
+            )
+            .scalars()
+            .all()
+        )
+    return list(rows)
 
 
 # --- debate runs -------------------------------------------------------------

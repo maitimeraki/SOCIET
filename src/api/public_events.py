@@ -32,8 +32,9 @@ _VERDICT_KEYS = frozenset({"converged", "final_stances", "warnings", "rounds_exe
                            "weight_share", "contested", "provenance_by_claim", "cluster_details",
                            "supporting_entities", "opposing_entities",
                            "title", "markdown", "position", "sources", "status"})
-# Stored with the result but never served: the report's source refs, its attempts and its checks.
-_BACKEND_RESULT_KEYS = frozenset({"source_refs", "attempts", "checks"})
+# Stored with the result but never served: the report's source refs, its attempts and its checks,
+# and the inputs a verdict retry rebuilds the report from (context, per-turn cites and strength).
+_BACKEND_RESULT_KEYS = frozenset({"source_refs", "attempts", "checks", "retry_inputs"})
 _COMPLETE_KEYS = _VERDICT_KEYS | {"type"}
 _RESULT_KEYS = _VERDICT_KEYS | {"intent"}
 _EVENT_KEYS: dict[str, frozenset[str]] = {

@@ -32,6 +32,7 @@ ACTIONS = frozenset(
         "units_reserve",
         "units_denied",
         "units_release",
+        "verdict_retry",
         "upload",
         "upload_delete",
         "account_delete",

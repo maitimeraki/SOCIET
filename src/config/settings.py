@@ -61,6 +61,7 @@ class Settings(BaseSettings):
     rate_limit_login: str = "5/minute"
     rate_limit_signup: str = "10/hour"
     rate_limit_debate_enqueue: str = "20/hour"
+    rate_limit_verdict_retry: str = "10/hour"
 
     # --- Job queue (plan §5). ``rq`` dispatches to the Redis-backed worker
     # (Task 8's compose); ``inline`` runs the same task in-process — the dev
@@ -147,6 +148,10 @@ class Settings(BaseSettings):
     # any LLM call and settlement releases only what the job actually holds.
     graph_job_reserve_units: int = 2_000
 
+    # The unit hold a verdict retry takes at enqueue. None derives it: the report's
+    # maximum attempts times the typical units one debate call settles (debate_api).
+    verdict_retry_reserve_units: int | None = None
+
     plan_free_max_agents: int = 10
     plan_starter_max_agents: int = 12
     plan_studio_max_agents: int = 12
@@ -196,6 +201,8 @@ class Settings(BaseSettings):
             raise ValueError("billing_reservation_lease_seconds must be > 0")
         if self.graph_job_reserve_units < 1:
             raise ValueError("graph_job_reserve_units must be >= 1")
+        if self.verdict_retry_reserve_units is not None and self.verdict_retry_reserve_units < 1:
+            raise ValueError("verdict_retry_reserve_units must be >= 1 when set")
         return self
 
     @field_validator(

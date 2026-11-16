@@ -24,7 +24,11 @@ import time
 import uuid
 from typing import Any
 
-from src.api.public_events import METERING_STOPPED_MESSAGE, RUN_FAILED_MESSAGE, project_result
+from src.api.public_events import (
+    METERING_STOPPED_MESSAGE,
+    RUN_FAILED_MESSAGE,
+    project_result,
+)
 from src.billing.metering import MeteringError
 from src.jobs.queue import (
     cancel_check,
@@ -51,6 +55,7 @@ _SUCCESS_STATUS = {
     "extract_upload": "completed",
     "account_delete": "completed",
     "account_export": "completed",
+    "verdict": "completed",
 }
 
 
@@ -105,6 +110,19 @@ async def _debate_core(job_id: str, payload: dict[str, Any]) -> None:
         )
     except DebateCancelled as exc:
         raise JobCancelled(str(exc)) from exc
+
+
+async def _verdict_core(job_id: str, payload: dict[str, Any]) -> None:
+    """Re-run only the report of a run whose report was not produced; no debate runs.
+
+    MeteringError is not caught: `execute` settles the job as stopped by metering.
+    """
+    from src.api import debate_api
+
+    await _assert_reservation(job_id)
+    await debate_api.retry_verdict_report(
+        run_id=str(payload["run_id"]), owner_id=str(payload["user_id"])
+    )
 
 
 def _documents(payload: dict[str, Any]):
@@ -812,6 +830,7 @@ CORES = {
     "extract_upload": _extract_upload_core,
     "account_delete": _account_delete_core,
     "account_export": _account_export_core,
+    "verdict": _verdict_core,
 }
 
 #: Job kinds that call the LLM, and the source their usage is charged to.
@@ -821,6 +840,7 @@ _METERED_SOURCES = {
     "ontology": "ontology",
     "build_graph": "ontology",
     "normalize_graph": "ontology",
+    "verdict": "verdict",
 }
 
 
@@ -937,7 +957,8 @@ async def execute(kind: str, job_id: str, payload: dict[str, Any]) -> None:
         # hold because RQ may retry it and the lease sweep is the backstop
         # (Task 2). An ingest extraction spends no LLM tokens and charges
         # nothing on failure (plan §8 item 8), so it releases on every exit.
-        release = kind == "extract_upload" or (
+        # A verdict retry never reruns: it releases on every exit as well.
+        release = kind in ("extract_upload", "verdict") or (
             kind in ("debate", "ontology", "build_graph", "normalize_graph")
             and status != "failed"
         )
@@ -996,6 +1017,10 @@ def account_export(job_id: str, payload: dict[str, Any]) -> None:
     asyncio.run(execute("account_export", job_id, payload))
 
 
+def verdict(job_id: str, payload: dict[str, Any]) -> None:
+    asyncio.run(execute("verdict", job_id, payload))
+
+
 #: The RQ targets, by kind.
 TASKS = {
     "debate": run_debate,
@@ -1005,4 +1030,5 @@ TASKS = {
     "extract_upload": extract_upload,
     "account_delete": account_delete,
     "account_export": account_export,
+    "verdict": verdict,
 }

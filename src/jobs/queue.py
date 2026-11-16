@@ -208,6 +208,18 @@ async def _write_queued_rows(kind: str, job_id: str, payload: dict[str, Any]) ->
             }
         )
         return
+    if kind == "verdict":
+        # A retry owns no run of its own: its row points at the run whose report it rewrites.
+        await run_doc.write_verdict_job(
+            job_id=job_id,
+            run_id=payload["run_id"],
+            user_id=user_id,
+            created_at=created_at,
+            reserved_units=payload.get("reserved_units") or 0,
+            reserved_period_start=payload.get("reserved_period_start"),
+            reserved_at=payload.get("reserved_at"),
+        )
+        return
     await run_doc.write_job_doc(
         {
             "job_id": job_id,

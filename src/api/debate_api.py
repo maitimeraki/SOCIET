@@ -66,6 +66,11 @@ from src.simulation.profile_generator import (
     typical_prompt_chars,
 )
 from src.simulation.profile_synthesizer import DRAW_SLACK, POOL_CAP
+from src.simulation.report_retry import (
+    REFUSAL_IN_FLIGHT,
+    REFUSAL_MESSAGES,
+    retry_refusal,
+)
 from src.simulation.verdict import REPORT_MAX_ATTEMPTS
 from src.utils.labels import public_source
 
@@ -280,6 +285,16 @@ def debate_reserve_units(*, agents: int, rounds: int, max_new_per_round: int, ma
     return calls * UNITS_PER_CALL_TYPICAL
 
 
+def _job_result(result, *, intent: Optional[dict], retry_inputs: Optional[dict]) -> dict:
+    """The stored result of a finished debate or verdict retry.
+
+    The served verdict payload, the intent, and the backend-only retry inputs (kept by stored_result,
+    never served). The `complete` event carries the verdict payload alone.
+    """
+    kept = {"retry_inputs": retry_inputs} if retry_inputs is not None else {}
+    return {**_verdict_payload(result), "intent": intent, **kept}
+
+
 def _verdict_payload(result) -> dict:
     """The verdict fields of a finished run: the job result and the `complete` event share them."""
     return {
@@ -422,10 +437,11 @@ async def _run_debate_async(
         # Store result
         async with _DEBATE_JOBS_LOCK:
             _DEBATE_JOBS[job_id]["status"] = "complete"
-            _DEBATE_JOBS[job_id]["result"] = {
-                **_verdict_payload(result),
-                "intent": result.intent.model_dump() if result.intent else None,
-            }
+            _DEBATE_JOBS[job_id]["result"] = _job_result(
+                result,
+                intent=result.intent.model_dump() if result.intent else None,
+                retry_inputs=result.retry_inputs,
+            )
 
         # Send completion event (the verdict fields ride along — §12.3 item 5)
         await ws_manager.broadcast({"type": "complete", **_verdict_payload(result)})
@@ -826,6 +842,209 @@ async def get_debate_roster(run_id: str, user: User = Depends(current_user)):
         raise HTTPException(status_code=404, detail=_FLAT_NOT_FOUND)
     await require_owner(head.get("user_id"), user)
     return await run_doc.read_roster(run_id, user.id)
+
+
+def verdict_retry_reserve_units() -> int:
+    """The retry's reserve: the report's maximum attempts at the typical units one call settles."""
+    configured = get_settings().verdict_retry_reserve_units
+    return configured if configured is not None else REPORT_MAX_ATTEMPTS * UNITS_PER_CALL_TYPICAL
+
+
+def verdict_retry_estimate(units_remaining: int) -> int:
+    """The retry's hold: the reserve capped at the user's remaining units, never below 1 (as graph jobs)."""
+    return max(1, min(verdict_retry_reserve_units(), units_remaining))
+
+
+def _refused(code: str) -> HTTPException:
+    return HTTPException(status_code=409, detail={"code": code, "message": REFUSAL_MESSAGES[code]})
+
+
+async def _release_hold(db: AsyncSession, *, user_id, reservation, ip, estimate: int, reason: str) -> None:
+    """Return a hold that will not be spent. A release failure is logged, never raised over the caller's error."""
+    try:
+        await billing_units.release_reservation(
+            db,
+            user_id=user_id,
+            period_start=reservation.period_start,
+            amount=reservation.amount,
+        )
+    except Exception as release_exc:
+        logger.warning("could not release reservation for user %s: %s", user_id, release_exc)
+        return
+    await audit_record(
+        db,
+        "units_release",
+        user_id=user_id,
+        target=None,
+        ip=ip,
+        meta={"estimate": estimate, "reason": reason},
+    )
+
+
+async def retry_verdict_report(run_id: str, owner_id: str) -> None:
+    """Rebuild a not-produced report from the run's own rows, and write it if it now passes.
+
+    No debate runs. The board comes from the stored round events, the published records and the
+    turn log; the report comes from the one writer (VerdictSynthesizer.asynthesize). A report that
+    still fails its checks leaves the run not_produced, with nothing written. A rebuild that does
+    not reproduce the stored board raises RetryDataError before any LLM call. MeteringError is not
+    caught here.
+    """
+    from src.llm.client import LLMClient
+    from src.simulation.orchestrator import result_from_verdict
+    from src.simulation.report_retry import (
+        RetryDataError,
+        check_rebuild,
+        rebuild_profiles,
+        rebuild_rounds,
+    )
+    from src.simulation.verdict import PRODUCED, VerdictSynthesizer, board_final_stances
+
+    run = await run_doc.read_run_doc(run_id)
+    if run is None or run.get("kind") != "debate" or str(run.get("user_id")) != str(owner_id):
+        raise RetryDataError("the run is not the owner's debate")
+    stored = run.get("result")
+    refusal = retry_refusal(stored)
+    if refusal is not None:
+        raise RetryDataError(f"the run is not retryable: {refusal}")
+    retry_inputs = stored["retry_inputs"]
+    dataset_id = str(run.get("dataset_id") or "")
+    rounds = rebuild_rounds(run["events"], retry_inputs)
+    profiles = rebuild_profiles(await run_doc.read_published_records(run_id), dataset_id)
+    check_rebuild(rounds, profiles, stored)
+
+    converged = bool(stored["converged"])
+    verdict = await VerdictSynthesizer().asynthesize(
+        rounds=rounds,
+        profiles=profiles,
+        llm_client=LLMClient(),
+        query=run.get("query") or "",
+        scenario=retry_inputs.get("context") or "",
+        run_id=run_id,
+        converged=converged,
+    )
+    if verdict.report.get("status") != PRODUCED:
+        return
+    result = result_from_verdict(
+        verdict,
+        converged=converged,
+        final_stances=board_final_stances(rounds, profiles),
+        warnings=list(stored.get("warnings") or []),
+        rounds_executed=len(rounds),
+        intent=None,
+        retry_inputs=retry_inputs,
+    )
+    # The one run-doc writer, as the debate path: the run's head keeps its status and corpus.
+    await run_doc.write_run_doc(
+        {
+            "run_id": run_id,
+            "user_id": run["user_id"],
+            "created_at": run["created_at"],
+            "status": run["status"],
+            "query": run.get("query"),
+            "dataset_id": run.get("dataset_id"),
+            "corpus_label": run.get("corpus_label"),
+            "config": run.get("config"),
+            "error": run.get("error"),
+            "result": stored_result(
+                _job_result(result, intent=stored.get("intent"), retry_inputs=retry_inputs)
+            ),
+        }
+    )
+
+
+@router.post("/debates/{run_id}/verdict/retry", response_model=DebateJobResponse, status_code=202)
+@limiter.limit(lambda: get_settings().rate_limit_verdict_retry)
+async def retry_verdict(
+    run_id: str,
+    request: Request,
+    user: User = Depends(current_user),
+    db: AsyncSession = Depends(get_db),
+    _available: None = Depends(service_available),
+):
+    """Re-run only the report of a run whose report was not produced. No debate runs again.
+
+    The retry is metered like a debate: it holds the reserve (capped at the remaining units), and
+    the job releases what it does not spend. Every refusal is decided before any reserve is taken,
+    and a double submit enqueues nothing: the pre-check refuses it, and the database's in-flight
+    index refuses a racing second insert.
+    """
+    head = await run_doc.read_run_head(run_id)
+    if head is None or head.get("kind") != "debate":
+        raise HTTPException(status_code=404, detail=_FLAT_NOT_FOUND)
+    await require_owner(head.get("user_id"), user)
+
+    refusal = retry_refusal(head.get("result"))
+    if refusal is not None:
+        raise _refused(refusal)
+    if await run_doc.verdict_job_in_flight(run_id):
+        raise _refused(REFUSAL_IN_FLIGHT)
+
+    # `reserve_units` rolls back on refusal and commits on success, so the identity is captured first.
+    user_id = user.id
+    plan_key = user.plan_key
+    ip = client_ip(request)
+    ent = await resolve_entitlements(db, user=user)
+    estimate = verdict_retry_estimate(ent.units_remaining)
+    try:
+        reservation = await billing_units.reserve_units(
+            db, user_id=user_id, plan_key=plan_key, estimate=estimate
+        )
+    except billing_units.InsufficientUnits as exc:
+        await audit_record(
+            db,
+            "units_denied",
+            user_id=user_id,
+            target=None,
+            ip=ip,
+            meta={"estimate": estimate, "period_end": exc.period_end.isoformat()},
+        )
+        raise payment_required(
+            f"Units used up. They reset on {exc.period_end.date().isoformat()}."
+        ) from exc
+
+    created_at = datetime.now(timezone.utc).isoformat()
+    try:
+        job_id = await enqueue_or_http(
+            "verdict",
+            {
+                "user_id": str(user_id),
+                "run_id": run_id,
+                "created_at": created_at,
+                "correlation_id": getattr(request.state, "correlation_id", None),
+                "reserved_units": reservation.amount,
+                "reserved_period_start": reservation.period_start.isoformat(),
+                "reserved_at": created_at,
+            },
+        )
+    except run_doc.VerdictJobInFlight as exc:
+        await _release_hold(
+            db, user_id=user_id, reservation=reservation, ip=ip, estimate=estimate, reason="enqueue_failed"
+        )
+        raise _refused(REFUSAL_IN_FLIGHT) from exc
+    except Exception:
+        await _release_hold(
+            db, user_id=user_id, reservation=reservation, ip=ip, estimate=estimate, reason="enqueue_failed"
+        )
+        raise
+
+    await audit_record(
+        db,
+        "units_reserve",
+        user_id=user_id,
+        target=job_id,
+        ip=ip,
+        meta={
+            "estimate": estimate,
+            "units_used": reservation.units_used,
+            "units_reserved": reservation.units_reserved,
+            "kind": "verdict",
+        },
+    )
+    await audit_record(
+        db, "verdict_retry", user_id=user_id, target=run_id, ip=ip, meta={"job_id": job_id}
+    )
+    return DebateJobResponse(job_id=job_id, status="queued")
 
 
 # --- a report citation's source text (spec §0B.3 rule 1) ---------------------
