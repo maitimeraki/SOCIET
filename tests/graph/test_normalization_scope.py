@@ -151,3 +151,50 @@ async def test_a_refused_group_is_enqueued_for_review_not_dropped(caplog):
     assert params["dataset_id"] == "ds-A"
     assert "4:a:1" in caplog.text and "4:a:2" in caplog.text
     assert "ds-A" in caplog.text and "ds-B" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_a_refused_review_row_stores_ids_and_labels_only_tagged_with_the_survivor():
+    log = []
+    survivor, other = _node("4:a:1", "ds-A"), _node("4:a:2", "ds-B")
+
+    await _stage(log).enqueue_for_review(
+        [survivor, other], {}, reason="refused: mixed dataset", refused_survivor=survivor
+    )
+
+    ((_, params),) = [(q, p) for q, p in log if "MergeReview" in q]
+    assert params["group"] == [
+        {"id": "4:a:1", "labels": ["Organization"]},
+        {"id": "4:a:2", "labels": ["Organization"]},
+    ]
+    assert params["dataset_id"] == "ds-A"
+
+
+@pytest.mark.asyncio
+async def test_a_refused_review_row_whose_survivor_has_no_dataset_stores_none():
+    log = []
+    survivor, other = _node("4:a:1", None), _node("4:a:2", "ds-B")
+
+    await _stage(log).enqueue_for_review(
+        [survivor, other], {}, reason="refused: mixed dataset", refused_survivor=survivor
+    )
+
+    ((_, params),) = [(q, p) for q, p in log if "MergeReview" in q]
+    assert params["dataset_id"] is None
+    assert all("props" not in member for member in params["group"])
+
+
+@pytest.mark.asyncio
+async def test_an_ordinary_review_row_keeps_its_full_payload():
+    log = []
+    group = [_node("4:a:1", "ds-A"), _node("4:a:2", "ds-A")]
+
+    await _stage(log).enqueue_for_review(group, {"aggregate_confidence": 0.1}, reason="low-confidence")
+
+    ((_, params),) = [(q, p) for q, p in log if "MergeReview" in q]
+    assert params["group"][0] == {
+        "id": "4:a:1",
+        "labels": ["Organization"],
+        "props": {"name": "acme", "dataset_id": "ds-A"},
+    }
+    assert params["dataset_id"] == "ds-A"

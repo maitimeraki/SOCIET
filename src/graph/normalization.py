@@ -398,7 +398,13 @@ class GraphNormalizationStage:
         group: List[MergeCandidate],
         signals: Dict[str, Any],
         reason: Optional[str] = None,
+        refused_survivor: Optional[MergeCandidate] = None,
     ) -> str:
+        """Queue a group for human review.
+
+        A refused group (`refused_survivor` given) is stored as ids and labels only, tagged with the
+        survivor's dataset_id. Any other group keeps its full payload, tagged with its first member's.
+        """
         q = Query("""
         CREATE (q:MergeReview {
             review_id: $review_id,
@@ -411,9 +417,15 @@ class GraphNormalizationStage:
         RETURN q.review_id AS id
         """)
         review_id = str(uuid.uuid4())
-        group_payload = [
-            {"id": n.node_id, "labels": n.labels, "props": n.properties} for n in group
-        ]
+        if refused_survivor is not None:
+            # Other datasets' members must not carry their properties into this row.
+            group_payload = [{"id": n.node_id, "labels": n.labels} for n in group]
+            dataset_id = refused_survivor.properties.get("dataset_id")
+        else:
+            group_payload = [
+                {"id": n.node_id, "labels": n.labels, "props": n.properties} for n in group
+            ]
+            dataset_id = group[0].properties.get("dataset_id") if group else None
         await self._run(
             q,
             {
@@ -421,7 +433,7 @@ class GraphNormalizationStage:
                 "group": group_payload,
                 "signals": signals,
                 "reason": reason,
-                "dataset_id": group[0].properties.get("dataset_id") if group else None,
+                "dataset_id": dataset_id,
             },
         )
         return review_id
@@ -458,7 +470,10 @@ class GraphNormalizationStage:
                     else:
                         if outcome["status"] == "refused":
                             await self.enqueue_for_review(
-                                group, signals, reason="refused: mixed dataset"
+                                group,
+                                signals,
+                                reason="refused: mixed dataset",
+                                refused_survivor=survivor,
                             )
                 elif agg >= 0.75:
                     await self.create_alias_relationships(
