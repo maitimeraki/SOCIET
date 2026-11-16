@@ -36,7 +36,9 @@ _KEYWORD = re.compile(
 _LABELLED_NODE = re.compile(rf"\(\s*\w*\s*:\s*(?:{_LABELS})\b")
 # A tenant label as a node pattern `(x:Label)` or as a label predicate `x:Label` with no space
 # before the colon. `match: Document` (prose) is not a label reference.
-_TENANT = re.compile(rf"(?:\(\s*\w*\s*:\s*|\b\w+:)(?:{_LABELS})\b")
+_TENANT = re.compile(
+    rf"(?:\(\s*\w*\s*:\s*|(?i:\b(?:WHERE|AND|OR|NOT)\s+)\w+\s*:\s*)(?:{_LABELS})\b"
+)
 _ELEMENT_ID = re.compile(r"\belementId\s*\(", _FLAGS)
 _SCOPE = re.compile(r"\bdataset_id\b|\b(?:chunk|entity|path)_in_dataset\(")
 _CLAUSE = re.compile(
@@ -341,3 +343,37 @@ def test_nothing_outside_normalization_imports_the_dead_writers():
                 names = [node.id]
             offenders.extend(f"{_rel(path)}:{node.lineno} {name}" for name in names if name in dead)
     assert offenders == []
+
+
+def _query_source(cypher: str) -> str:
+    return f"def read(s):\n    return s.run({cypher!r})\n"
+
+
+@pytest.mark.parametrize(
+    "cypher",
+    [
+        "MATCH (n) WHERE n.id = $id AND NOT n: Chunk RETURN n",
+        "MATCH (n) WHERE n.id = $id AND NOT n :Chunk RETURN n",
+        "MATCH (x) WHERE x: Chunk RETURN x",
+    ],
+)
+def test_a_label_predicate_with_whitespace_after_a_keyword_is_a_tenant_reference(cypher):
+    assert [owner for owner, _, _ in unscoped_tenant_queries(_query_source(cypher))] == ["read"]
+
+
+@pytest.mark.parametrize(
+    "prose",
+    [
+        "No match: Document missing for upload",
+        "Error: Agent failed to match a persona",
+        "Note: Chunk ids are stored per split",
+    ],
+)
+def test_prose_with_a_capitalised_word_after_a_colon_is_not_tenant_cypher(prose):
+    source = f"def log(logger):\n    logger.warning({prose!r})\n"
+    assert unscoped_tenant_queries(source) == []
+
+
+def test_a_scoped_label_predicate_with_whitespace_passes():
+    cypher = "MATCH (e:__Entity__) WHERE e.dataset_id = $dataset_id AND NOT e: Chunk RETURN e"
+    assert unscoped_tenant_queries(_query_source(cypher)) == []
