@@ -307,7 +307,12 @@ class GraphNormalizationStage:
         # members do not all carry the survivor's dataset_id, before anything is written.
         dataset_id = survivors.properties.get("dataset_id")
         if dataset_id is None or any(n.properties.get("dataset_id") != dataset_id for n in group):
-            logger.warning("destructive merge refused: group members do not share one dataset_id")
+            logger.warning(
+                "destructive merge refused: nodes %s carry datasets %s (survivor dataset %s)",
+                [n.node_id for n in group],
+                sorted({str(n.properties.get("dataset_id")) for n in group}),
+                dataset_id,
+            )
             return {"audit_id": None, "aggregate_confidence": agg, "status": "refused"}
 
         # Create audit record pre-merge (node ids and properties)
@@ -439,7 +444,7 @@ class GraphNormalizationStage:
                     survivor = max(group, key=lambda g: len(g.properties or {}))
                     to_merge = [g for g in group if g.node_id != survivor.node_id]
                     try:
-                        await self.destructive_merge(
+                        outcome = await self.destructive_merge(
                             survivor, to_merge, merge_author="auto"
                         )
                     except Exception:
@@ -450,6 +455,11 @@ class GraphNormalizationStage:
                             group,
                             audit_note="fallback-to-canonical",
                         )
+                    else:
+                        if outcome["status"] == "refused":
+                            await self.enqueue_for_review(
+                                group, signals, reason="refused: mixed dataset"
+                            )
                 elif agg >= 0.75:
                     await self.create_alias_relationships(
                         "CanonicalEntity",

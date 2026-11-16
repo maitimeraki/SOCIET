@@ -131,3 +131,23 @@ async def test_a_review_row_carries_the_groups_dataset_id():
     ((query, params),) = [(q, p) for q, p in log if "MergeReview" in q]
     assert "dataset_id: $dataset_id" in query
     assert params["dataset_id"] == "ds-A"
+
+
+@pytest.mark.asyncio
+async def test_a_refused_group_is_enqueued_for_review_not_dropped(caplog):
+    log = []
+    stage = _stage(log)
+    group = [_node("4:a:1", "ds-A"), _node("4:a:2", "ds-B")]
+    stage.find_surface_duplicates = AsyncMock(return_value=[group])
+    stage.close = AsyncMock()
+
+    with caplog.at_level("WARNING"):
+        await stage.run("ds-A")
+
+    assert _merge_queries(log) == []
+    assert not any("CanonicalEntity" in query for query, _ in log)
+    ((query, params),) = [(q, p) for q, p in log if "MergeReview" in q]
+    assert params["reason"] == "refused: mixed dataset"
+    assert params["dataset_id"] == "ds-A"
+    assert "4:a:1" in caplog.text and "4:a:2" in caplog.text
+    assert "ds-A" in caplog.text and "ds-B" in caplog.text
