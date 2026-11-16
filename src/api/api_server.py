@@ -75,8 +75,8 @@ logger = (
 )  # Ensure logging is configured with handler clearing to prevent duplication
 
 _PROBE_CACHE_SECONDS = 60.0
-#: The probe answers "OK": a small cap keeps each paid probe cheap.
-_PROBE_MAX_TOKENS = 16
+#: Reasoning models spend hidden tokens before any visible "OK"; a 16-token cap can return empty and mark a healthy provider degraded.
+_PROBE_MAX_TOKENS = 256
 # ponytail: one process-wide lock; per-provider locks if the probe ever targets several providers.
 _LLM_PROBE_LOCK = asyncio.Lock()
 

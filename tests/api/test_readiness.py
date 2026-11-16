@@ -112,6 +112,28 @@ async def test_concurrent_stale_readiness_checks_share_one_provider_call(app_sta
     assert all(verdicts)
 
 
+@pytest.mark.asyncio
+async def test_probe_with_visible_content_is_healthy(app_state, monkeypatch):
+    async def _generate(*_args, **_kwargs):
+        return "OK"
+
+    monkeypatch.setattr(api_server.global_llm_client, "generate", _generate)
+    app.state.last_llm_probe_at = None
+
+    assert await api_server._llm_healthy(app) is True
+
+
+@pytest.mark.asyncio
+async def test_probe_with_empty_content_is_unhealthy(app_state, monkeypatch):
+    async def _generate(*_args, **_kwargs):
+        return ""
+
+    monkeypatch.setattr(api_server.global_llm_client, "generate", _generate)
+    app.state.last_llm_probe_at = None
+
+    assert await api_server._llm_healthy(app) is False
+
+
 def test_ready_names_the_unreachable_dependency(app_state, monkeypatch):
     async def _probe(_app):
         _app.state.degraded = False
