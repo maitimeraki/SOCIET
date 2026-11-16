@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { RunEvent } from './events'
 import { RUN_SAMPLE } from './__fixtures__/run-sample'
-import { applyEvent, fold, initialState } from './reducer'
+import { applyEvent, applyStoredResult, fold, initialState } from './reducer'
 
 const NOW = () => 1_000
 
@@ -40,29 +40,63 @@ describe('reducer', () => {
     expect(state.verdict?.converged).toBe(true)
     expect(state.verdict?.clusters?.POSITIVE?.count).toBe(3)
   })
-  it('defaults the narrative and structured dissent when the complete event omits them', () => {
+  it('carries the report title, markdown and sources off the complete event', () => {
     const state = applyEvent(
       initialState,
-      { type: 'complete', converged: false, verdict: 'Fallback.', final_stances: {}, warnings: [], rounds_executed: 0 },
+      {
+        type: 'complete',
+        converged: true,
+        title: 'Expand?',
+        markdown: '# Expand?\n## Recommendation\nExpand.',
+        status: 'produced',
+        sources: { '1': { document: 'Study', section: 'Costs' } },
+        final_stances: {},
+        warnings: [],
+        rounds_executed: 1,
+      },
       1,
     )
-    expect(state.verdict?.narrative).toBe('')
-    expect(state.verdict?.dissentingViews).toEqual([])
-    expect(state.verdict?.evidence).toEqual([])
+    expect(state.verdict?.reportStatus).toBe('produced')
+    expect(state.verdict?.title).toBe('Expand?')
+    expect(state.verdict?.markdown).toContain('## Recommendation')
+    expect(state.verdict?.sources).toEqual({ '1': { document: 'Study', section: 'Costs' } })
   })
-  it('carries narrative_status off the complete event — fallback is the notice-bearing value (§17.3)', () => {
-    const fallback = applyEvent(
+  it('keeps no title, markdown or sources for a report that was not produced', () => {
+    const state = applyEvent(
       initialState,
-      { type: 'complete', converged: false, verdict: 'Aggregates only.', narrative_status: 'fallback', final_stances: {}, warnings: [], rounds_executed: 0 },
+      { type: 'complete', converged: false, title: null, markdown: null, status: 'not_produced', sources: {}, final_stances: {}, warnings: [], rounds_executed: 0 },
       1,
     )
-    expect(fallback.verdict?.narrativeStatus).toBe('fallback')
-    const ok = applyEvent(
+    expect(state.verdict?.reportStatus).toBe('not_produced')
+    expect(state.verdict?.title).toBeNull()
+    expect(state.verdict?.markdown).toBeNull()
+    expect(state.verdict?.sources).toEqual({})
+  })
+  it('reads a stored result over the complete event it was filed with, once a retry has written it', () => {
+    const filed = applyEvent(
       initialState,
-      { type: 'complete', converged: true, verdict: 'Written.', final_stances: {}, warnings: [], rounds_executed: 1 },
+      { type: 'complete', converged: false, title: null, markdown: null, status: 'not_produced', final_stances: {}, warnings: [], rounds_executed: 0 },
       1,
     )
-    expect(ok.verdict?.narrativeStatus).toBe('ok')
+    const retried = applyStoredResult(filed, {
+      status: 'produced',
+      converged: false,
+      title: 'Expand?',
+      markdown: '# Expand?',
+      sources: {},
+      final_stances: {},
+    })
+    expect(retried.verdict?.reportStatus).toBe('produced')
+    expect(retried.verdict?.markdown).toBe('# Expand?')
+  })
+  it('leaves the verdict alone when the stored result carries no report status', () => {
+    const filed = applyEvent(
+      initialState,
+      { type: 'complete', converged: true, title: null, markdown: null, status: 'not_produced', final_stances: {}, warnings: [], rounds_executed: 0 },
+      1,
+    )
+    expect(applyStoredResult(filed, { intent: null })).toBe(filed)
+    expect(applyStoredResult(filed, null)).toBe(filed)
   })
   it('tolerates unknown event types as warnings', () => {
     const state = applyEvent(initialState, { type: 'future_thing' } as unknown as RunEvent, 1)

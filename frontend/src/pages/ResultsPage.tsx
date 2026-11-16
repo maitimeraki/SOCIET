@@ -5,15 +5,13 @@ import type { RunSummary } from '../api/types'
 import type { Stance } from '../run/events'
 import { reportFromState } from '../components/run/reportFromState'
 import type { ReportModel } from '../components/run/exportReport'
-import NarrativeFallbackNotice from '../components/verdict/NarrativeFallbackNotice'
+import ReportDocument from '../components/run/ReportDocument'
 import { buttonClasses } from '../components/ui/Button'
 import EmptyState from '../components/ui/EmptyState'
 import ErrorState from '../components/ui/ErrorState'
 import Skeleton from '../components/ui/Skeleton'
 import PositionMark from '../components/ui/PositionMark'
-import VerdictSheet from '../components/ui/VerdictSheet'
-import { fold } from '../run/reducer'
-import { verdictView } from '../run/selectors'
+import { applyStoredResult, fold } from '../run/reducer'
 import { PAGE_SIZE } from './pageSize'
 import { fmtDay } from '../utils/format'
 
@@ -26,15 +24,17 @@ export interface VerdictRow {
 }
 
 export interface VerdictsPageViewProps {
-  latest: { runId: string; report: ReportModel; narrativeStatus: string } | null
+  latest: { runId: string; report: ReportModel } | null
   earlier: VerdictRow[]
   loading: boolean
   failed: boolean
   failDetail?: string
   onRetry: () => void
+  /** A retried report was written: the page reads its verdicts again. */
+  onRestored: () => void
 }
 
-export function VerdictsPageView({ latest, earlier, loading, failed, failDetail, onRetry }: VerdictsPageViewProps) {
+export function VerdictsPageView({ latest, earlier, loading, failed, failDetail, onRetry, onRestored }: VerdictsPageViewProps) {
   return (
     <div>
       {/* §7.6/§12.7 — the outcome is the first thing; the page's name is for the document outline only. */}
@@ -52,17 +52,7 @@ export function VerdictsPageView({ latest, earlier, loading, failed, failDetail,
       ) : latest ? (
         <div className="grid gap-6 lg:grid-cols-12 print:block">
           <div className="lg:col-span-8 print:block">
-            <NarrativeFallbackNotice status={latest.narrativeStatus} />
-            <VerdictSheet
-              question={latest.report.question}
-              filed={latest.report.filed}
-              position={latest.report.position}
-              share={latest.report.share}
-              caseAgainst={latest.report.caseAgainst}
-              reasoning={latest.report.reasoning}
-              whoHeldWhichView={latest.report.whoHeldWhichView}
-              onExport={() => window.print()}
-            />
+            <ReportDocument report={latest.report} runId={latest.runId} onRestored={onRestored} />
           </div>
           <aside className="lg:col-span-4 print:hidden">
             <h2 className="mb-2 font-ui text-label uppercase tracking-[0.09em] text-ink-3">
@@ -124,11 +114,9 @@ export async function loadVerdicts() {
   for (const entry of answered) {
     try {
       const doc = await getRun(entry.run_id)
-      const state = fold(doc.events)
-      const view = verdictView(state)
-      const report = reportFromState(state, entry.created_at)
-      if (view && report) {
-        latest = { runId: entry.run_id, report, narrativeStatus: view.narrativeStatus }
+      const report = reportFromState(applyStoredResult(fold(doc.events), doc.result))
+      if (report) {
+        latest = { runId: entry.run_id, report }
         break
       }
     } catch (error) {
@@ -193,6 +181,7 @@ export default function ResultsPage() {
         setFailed(false)
         setAttempt((value) => value + 1)
       }}
+      onRestored={() => setAttempt((value) => value + 1)}
     />
   )
 }

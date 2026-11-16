@@ -1,6 +1,6 @@
 import type { DebateConfig } from '../api/types'
 import { InvalidAgentError, UnknownStanceError, asStance, parseAgentView, parsePairId } from './events'
-import type { AgentView, ClusterSummary, ConsensusInfo, DissentingView, EvidenceItem, PairInfo, QueryIntent, RunEvent, Stance, TurnInfo, WrittenLink, WrittenNode } from './events'
+import type { AgentView, ClusterSummary, ConsensusInfo, PairInfo, QueryIntent, ReportSources, ReportStatus, RunEvent, Stance, TurnInfo, WrittenLink, WrittenNode } from './events'
 
 export interface StageEntry {
   stage: string
@@ -35,12 +35,12 @@ export interface RunActivation {
 
 export interface RunVerdict {
   converged: boolean
-  summary: string
-  narrative: string
-  /** "ok" | "fallback" | "no_verdict" — "fallback" means the narrative degraded to `summary` (§17.3); "no_verdict" means no position carried weight. */
-  narrativeStatus: string
-  dissentingViews: DissentingView[]
-  evidence: EvidenceItem[]
+  /** The report's title and markdown, as the backend wrote them. Both null when the report was not produced. */
+  title: string | null
+  markdown: string | null
+  reportStatus: ReportStatus
+  /** Citation number to its public source. Empty when no report was produced. */
+  sources: ReportSources
   confidence: number | null
   clusters: Record<Stance, ClusterSummary> | null
   finalStances: Record<string, string>
@@ -221,19 +221,7 @@ function reduceEvent(state: RunState, event: RunEvent, now: number): RunState {
       return {
         ...base,
         status: 'complete',
-        verdict: {
-          converged: event.converged,
-          summary: event.verdict,
-          narrative: event.narrative ?? '',
-          narrativeStatus: event.narrative_status ?? 'ok',
-          dissentingViews: event.dissenting_views ?? [],
-          evidence: event.evidence ?? [],
-          confidence: event.confidence_score ?? null,
-          clusters: event.cluster_details ?? null,
-          finalStances: Object.fromEntries(Object.entries(event.final_stances ?? {}).map(([agent, stance]) => [agent, asStance(stance)])),
-          supporting: event.supporting_entities ?? [],
-          opposing: event.opposing_entities ?? [],
-        },
+        verdict: verdictFromFields(event),
         // The complete event's warnings are the server's full list — they replace the streamed deltas.
         warnings: mergeWarnings(base.warnings, event.warnings ?? []),
       }
@@ -260,4 +248,36 @@ export function applyEvent(state: RunState, event: RunEvent, now: number): RunSt
 /** The only way state is ever built — live WS fold and reopened run docs go through the same path (§11.2). */
 export function fold(events: RunEvent[], now: () => number = Date.now): RunState {
   return events.reduce((state, event) => applyEvent(state, event, now()), initialState)
+}
+
+/** The verdict fields a `complete` event and a stored run result both carry (the backend's served set). */
+export type VerdictFields = Partial<Omit<Extract<RunEvent, { type: 'complete' }>, 'type'>>
+
+/**
+ * The run's verdict from its verdict fields: the one mapping the live `complete` event and a stored
+ * result share. A report that was not produced keeps no title, markdown or sources (backend §13).
+ */
+function verdictFromFields(fields: VerdictFields): RunVerdict {
+  const produced = fields.status === 'produced'
+  return {
+    converged: fields.converged ?? false,
+    title: produced ? (fields.title ?? null) : null,
+    markdown: produced ? (fields.markdown ?? null) : null,
+    reportStatus: produced ? 'produced' : 'not_produced',
+    sources: produced ? (fields.sources ?? {}) : {},
+    confidence: fields.confidence_score ?? null,
+    clusters: fields.cluster_details ?? null,
+    finalStances: Object.fromEntries(Object.entries(fields.final_stances ?? {}).map(([agent, stance]) => [agent, asStance(stance)])),
+    supporting: fields.supporting_entities ?? [],
+    opposing: fields.opposing_entities ?? [],
+  }
+}
+
+/**
+ * The run's verdict as a stored result serves it, once the result carries a report status. A reopened
+ * run and a retried report read the result: the event log keeps the complete event it was filed with.
+ */
+export function applyStoredResult(state: RunState, result: Record<string, unknown> | null | undefined): RunState {
+  if (!result || (result.status !== 'produced' && result.status !== 'not_produced')) return state
+  return { ...state, verdict: verdictFromFields(result as VerdictFields) }
 }

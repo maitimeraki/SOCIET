@@ -17,8 +17,6 @@ import { BANNED_TERMS, renderedText } from '../test/copyLaw'
 vi.mock('@react-sigma/core', () => ({ SigmaContainer: () => null, useSigma: () => null }))
 
 const RUN_ID = 'run-1'
-/** The stored run doc's `created_at` — the date the report states, independent of the fold clock. */
-const RUN_CREATED_AT = '2026-10-22T09:30:00Z'
 const TABS = ['roster', 'floor', 'verdict', 'agents', 'artifacts'] as const
 type Tab = (typeof TABS)[number]
 
@@ -49,11 +47,12 @@ const FILED: RunState = {
   stages: [{ stage: 'verdict', index: 6, at: Date.UTC(2026, 9, 22, 9, 30), fields: {} }],
   verdict: {
     converged: true,
-    summary: 'The panel concluded the expansion is worth staging.',
-    narrative: '',
-    narrativeStatus: 'ok',
-    dissentingViews: [{ stance: 'NEGATIVE', view: 'Entry cost outweighs the single market.' }],
-    evidence: [],
+    title: 'Should we expand?',
+    markdown:
+      '# Should we expand?\n## Recommendation\nPosition: POSITIVE, 83%, settled\nExpand, cautiously.\n' +
+      '## Entry cost\nPoint: Entry cost outweighs the single market (judgement)',
+    reportStatus: 'produced',
+    sources: {},
     confidence: 0.83,
     // A filed verdict carries its weighted clusters; the stance is the dominant weight, not a head count.
     clusters: {
@@ -78,7 +77,6 @@ const render = (tab: Tab, run: RunState = RUN) =>
         runId={RUN_ID}
         scrubbed={null}
         latestRound={1}
-        runCreatedAt={RUN_CREATED_AT}
         onScrub={() => {}}
         onNavigate={() => {}}
         onReplay={() => {}}
@@ -174,16 +172,25 @@ describe('one nav strip, and every section is a real tabpanel (§14.4)', () => {
 })
 
 describe('the report tab files the report (§12.8, R57)', () => {
-  it('mounts the filed report, derived from the folded run state', () => {
+  it('mounts the filed report as the backend wrote it', () => {
     const html = render('verdict', FILED)
     expect(html).toContain('Should we expand?')
-    expect(html).toContain('22 Oct 2026')
-    expect(html).toContain('The case against')
-    expect(html).toContain('Entry cost outweighs the single market.')
-    expect(html).toContain('0.83')
-    expect(html).toContain('The passes')
-    expect(html).toContain('The panel')
-    expect(html).toContain('Nordic Lead')
+    expect(html).toContain('Position: POSITIVE, 83%, settled')
+    expect(html).toContain('Expand, cautiously.')
+    expect(html).toContain('Entry cost outweighs the single market (judgement)')
+    expect(html).not.toContain('The passes')
+    expect(html).not.toContain('The case against')
+  })
+
+  it('offers the retry, and no export, for a report that was not produced', () => {
+    const unproduced: RunState = {
+      ...FILED,
+      verdict: { ...FILED.verdict!, reportStatus: 'not_produced', title: null, markdown: null, sources: {} },
+    }
+    const html = render('verdict', unproduced)
+    expect(html).toContain('Report not produced')
+    expect(html).toContain('Retry report')
+    expect(html).not.toContain('Copy for Google Docs')
   })
 
   it('offers the one export bar over the one construction (§11.4/§12.8)', () => {

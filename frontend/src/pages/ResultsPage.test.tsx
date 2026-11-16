@@ -2,18 +2,13 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { MemoryRouter } from 'react-router-dom'
 import { DEBATE_CONFIG_DEFAULTS, type RunDoc, type RunSummary } from '../api/types'
-import { NARRATIVE_FALLBACK_COPY } from '../components/verdict/NarrativeFallbackNotice'
 import { reportFromState } from '../components/run/reportFromState'
-import { fold } from '../run/reducer'
-import { verdictView } from '../run/selectors'
+import { applyStoredResult, fold } from '../run/reducer'
 import { RUN_SAMPLE } from '../run/__fixtures__/run-sample'
 import { BANNED_TERMS, renderedText } from '../test/copyLaw'
 import { VerdictsPageView, loadVerdicts, type VerdictsPageViewProps } from './ResultsPage'
 
-const FILED_AT = '2026-10-09T10:00:00Z'
-const STATE = fold(RUN_SAMPLE)
-const view = verdictView(STATE)
-const report = reportFromState(STATE, FILED_AT)!
+const report = reportFromState(fold(RUN_SAMPLE, () => 0))!
 
 const render = (props: Partial<VerdictsPageViewProps> = {}) =>
   renderToStaticMarkup(
@@ -24,60 +19,33 @@ const render = (props: Partial<VerdictsPageViewProps> = {}) =>
         loading={false}
         failed={false}
         onRetry={() => {}}
+        onRestored={() => {}}
         {...props}
       />
     </MemoryRouter>,
   )
 
 const filled = {
-  latest: { runId: 'r1', report, narrativeStatus: view!.narrativeStatus },
+  latest: { runId: 'r1', report },
   earlier: [{ runId: 'r0', question: 'Should we hire?', stance: 'POSITIVE' as const, share: 0.74, date: '2026-09-01T10:00:00Z' }],
 }
 
 describe('VerdictsPageView', () => {
-  it('renders the latest answer as the verdict sheet and every earlier verdict as a ruled row', () => {
+  it('renders the latest answer as the report as given, and every earlier verdict as a ruled row', () => {
     const html = render(filled)
-    expect(html).toContain('Should we expand into the European market in 2027?')
+    expect(html).toContain('Expand, cautiously, into one market first.')
     expect(html).toContain('Should we hire?')
     expect(html).toContain('0.74')
     expect(html).toContain('/runs/r0')
-    // Position, share and date lead, before any prose (§7.6).
-    expect(html).toContain('Export document')
-    expect(html).toContain('9 Oct 2026')
-    expect(html).toContain('weighted share')
-    expect(html).toContain('0.83')
-    expect(html).toContain('The case against')
-    expect(html).toContain('Entry cost outweighs the single market.')
-    // The earlier row carries its own date, position and share.
     expect(html).toContain('1 Sept 2026')
     expect(html).toContain('Positive')
   })
 
-  it('shows the narrative fallback notice, and does not print the fallback summary twice', () => {
-    const verdict = STATE.verdict!
-    const summary = verdict.summary
-    const fallback = reportFromState(
-      { ...STATE, verdict: { ...verdict, narrative: summary, narrativeStatus: 'fallback' } },
-      FILED_AT,
-    )!
-    const html = render({ latest: { runId: 'r1', report: fallback, narrativeStatus: 'fallback' }, earlier: [] })
-    expect(html).toContain(NARRATIVE_FALLBACK_COPY)
-    expect(html.split(summary)).toHaveLength(2)
-  })
-
-  it('isolates the sheet for printing — chrome and the archive stay off the page', () => {
-    const html = render(filled)
-    expect(html).toContain('print:hidden')
-    expect(html).toContain('print:block')
-  })
-
-  it('derives who held which view in STANCE_ORDER and drops the empty groups', () => {
-    const html = render(filled)
-    expect(html).toContain('D. Weber, P. Silva')
-    expect(html).toContain('M. Chen')
-    expect(html.indexOf('D. Weber')).toBeLessThan(html.indexOf('M. Chen'))
-    // L. Novak is on the roster but holds no final stance — the sheet invents no row.
-    expect(html).not.toContain('L. Novak')
+  it('offers the retry for a latest report that was not produced', () => {
+    const unproduced = reportFromState(applyStoredResult(fold([], () => 0), { status: 'not_produced' }))!
+    const html = render({ latest: { runId: 'r1', report: unproduced }, earlier: [] })
+    expect(html).toContain('Report not produced')
+    expect(html).toContain('Retry report')
   })
 
   it('renders the empty state and the failure state', () => {
@@ -149,7 +117,7 @@ describe('loadVerdicts', () => {
     const loaded = await loadVerdicts()
 
     expect(loaded.latest?.runId).toBe('r-good')
-    expect(loaded.latest?.report.filed).toBe('9 Oct 2026')
+    expect(loaded.latest?.report.title).toBe('Should we expand into the European market in 2027?')
     expect(loaded.earlier).toEqual([
       {
         runId: 'r-bad',
@@ -160,6 +128,27 @@ describe('loadVerdicts', () => {
       },
     ])
     expect(errorSpy).toHaveBeenCalled()
+  })
+
+  it('opens a retried report from the stored result, over the event log it was filed with', async () => {
+    const retried: RunDoc = {
+      ...good,
+      run_id: 'r-retried',
+      events: [{ type: 'complete', converged: false, title: null, markdown: null, status: 'not_produced', final_stances: {}, warnings: [], rounds_executed: 0 }],
+      result: { status: 'produced', title: 'Expand?', markdown: '# Expand?\n## Recommendation\nExpand.', sources: {}, final_stances: {} },
+    }
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string) => {
+        if (url.includes('/r-retried')) return reply(retried)
+        return reply({ items: [run({ run_id: 'r-retried' })], next_cursor: null })
+      }),
+    )
+
+    const loaded = await loadVerdicts()
+
+    expect(loaded.latest?.runId).toBe('r-retried')
+    expect(loaded.latest?.report.markdown).toContain('## Recommendation')
   })
 
   it('leaves every answered row in the archive when no document can be read', async () => {

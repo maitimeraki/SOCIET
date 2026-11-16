@@ -2,64 +2,75 @@ import { describe, expect, it } from 'vitest'
 import { reportHtml, reportJson, reportMarkdown } from './exportReport'
 import type { ReportModel } from './exportReport'
 
+const MARKDOWN = [
+  '# Should Ridgeline Coffee open a second location?',
+  '## Recommendation',
+  'Position: NEGATIVE, 82%, settled',
+  'Point: The Mill Street economics hold [2] (from the documents)',
+  'Point: Timing matters more than place (judgement)',
+].join('\n')
+
 const REPORT: ReportModel = {
-  question: 'Should Ridgeline Coffee open a second location on Mill Street?',
-  filed: '22 Oct 2026',
-  position: 'NEGATIVE',
-  share: 0.82,
-  caseAgainst: 'If the grease-trap upgrade lands on time, the Mill Street economics hold.',
-  reasoning: ['The panel divided on timing, not on the location.'],
-  whoHeldWhichView: [
-    { position: 'NEGATIVE', names: ['Market analyst'] },
-    { position: 'POSITIVE', names: ['Site analyst'] },
-  ],
-  passes: [{ pass: 'P1', negative: 0.61, positive: 0.28, abstain: 0.11 }],
-  panel: [
-    {
-      name: 'Tom Okafor',
-      role: 'local regulator',
-      position: 'NEGATIVE',
-      confidence: 0.94,
-      strength: 0.95,
-      turns: 4,
-    },
-  ],
+  title: 'Should Ridgeline Coffee open a second location?',
+  reportStatus: 'produced',
+  markdown: MARKDOWN,
+  sources: {
+    '2': { document: 'Mill Street study', section: 'Footfall' },
+    '1': { document: 'Grease-trap permit', section: '' },
+  },
   warnings: ['The demand study is a proxy.'],
 }
 
-describe('the exports speak the customer words', () => {
-  it('writes the outcome and the panel positions in title case, never the enum', () => {
-    expect(reportMarkdown(REPORT)).toContain('**Negative · 0.82 weighted share**')
-    expect(reportMarkdown(REPORT)).toContain('| Tom Okafor (local regulator) | Negative |')
-    expect(reportMarkdown(REPORT)).not.toContain('NEGATIVE')
-    expect(reportHtml(REPORT)).toContain('Negative · 0.82 weighted share')
-    expect(reportHtml(REPORT)).toContain('Tom Okafor (local regulator)')
-    expect(reportHtml(REPORT)).not.toContain('>NEGATIVE<')
+describe('the export is the markdown as given, then the sources it cites', () => {
+  it('writes the markdown unchanged and a plain Sources list in citation order', () => {
+    expect(reportMarkdown(REPORT)).toBe(
+      `${MARKDOWN}\n\n## Sources\n\n- [1] Grease-trap permit\n- [2] Mill Street study — Footfall\n`,
+    )
   })
 
-  it('keeps the enum in json for machine consumers', () => {
-    expect(JSON.parse(reportJson(REPORT)).outcome.stance).toBe('NEGATIVE')
-    expect(JSON.parse(reportJson(REPORT)).outcome.share).toBe(0.82)
+  it('adds no section the backend did not write when there are no sources', () => {
+    expect(reportMarkdown({ ...REPORT, sources: {} })).toBe(`${MARKDOWN}\n`)
   })
 
-  it('states a missing share, never invents one', () => {
-    expect(reportMarkdown({ ...REPORT, share: null })).toContain('**Negative · — weighted share**')
-    expect(JSON.parse(reportJson({ ...REPORT, share: null })).outcome.share).toBeNull()
+  it('exports nothing for a report that was not produced', () => {
+    expect(reportMarkdown({ ...REPORT, reportStatus: 'not_produced', markdown: null, sources: {} })).toBe('')
   })
 
-  it('escapes customer text in the HTML export — a question is not markup', () => {
+  it('never carries an id: the sources are the public document and section', () => {
+    const out = reportMarkdown(REPORT)
+    expect(out).not.toMatch(/chunk|node|evidence|[0-9a-f]{8}-[0-9a-f]{4}/i)
+  })
+})
+
+describe('the HTML export reads the same blocks and escapes customer text', () => {
+  it('renders the title, sections, points and the Sources list', () => {
+    const html = reportHtml(REPORT)
+    expect(html).toContain('<h1>Should Ridgeline Coffee open a second location?</h1>')
+    expect(html).toContain('<h2>Recommendation</h2>')
+    expect(html).toContain('<h2>Sources</h2>')
+    expect(html).toContain('[2] Mill Street study — Footfall')
+  })
+
+  it('escapes markup in the report and its sources', () => {
     const html = reportHtml({
       ...REPORT,
-      question: '<script>alert(1)</script>',
-      caseAgainst: 'Rent < 4,200 & rising > 3%',
-      reasoning: ['<img src=x onerror=alert(1)>'],
-      warnings: ['<em>proxy</em>'],
+      title: '<script>alert(1)</script>',
+      markdown: '# <script>alert(1)</script>\nRent < 4,200 & rising > 3% (from the documents)',
+      sources: { '1': { document: '<img src=x onerror=alert(1)>', section: '' } },
     })
     expect(html).not.toContain('<script>')
     expect(html).not.toContain('<img')
-    expect(html).not.toContain('<em>')
     expect(html).toContain('&lt;script&gt;alert(1)&lt;/script&gt;')
-    expect(html).toContain('&amp;')
-    expect(html).toContain('&lt;em&gt;proxy&lt;/em&gt;')
+    expect(html).toContain('Rent &lt; 4,200 &amp; rising &gt; 3%')
+  })
+})
+
+describe('the JSON export is the model, with the same document as a string', () => {
+  it('carries the status, title, markdown, sources and the document', () => {
+    const json = JSON.parse(reportJson(REPORT))
+    expect(json.reportStatus).toBe('produced')
+    expect(json.title).toBe(REPORT.title)
+    expect(json.sources).toEqual(REPORT.sources)
+    expect(json.document).toBe(reportMarkdown(REPORT))
   })
 })

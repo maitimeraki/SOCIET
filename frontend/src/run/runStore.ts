@@ -5,7 +5,7 @@ import type { RunSocket } from '../api/ws'
 import { useGraphStore } from '../graph/graphStore'
 import type { GraphSnapshot } from '../graph/graphStore'
 import type { RunEvent } from './events'
-import { applyEvent, initialState } from './reducer'
+import { applyEvent, applyStoredResult, initialState } from './reducer'
 import type { RunState } from './reducer'
 import { composeRunGraph, opinionStances } from './runGraphStore'
 
@@ -19,17 +19,16 @@ interface RunStoreState {
   corpus: GraphSnapshot | null
   /** True when that read came back with nothing: the map pane says so rather than showing an empty map. */
   corpusMissing: boolean
-  /**
-   * The stored run doc's `created_at` — the one stable date a reopened report can state. Null while a
-   * live run has no doc, or when the doc read failed, so the report says the date is not recorded
-   * rather than passing a fold clock off as the filing day.
-   */
-  runCreatedAt: string | null
   /** The run `version` the map was last built from — the key `seedMap` rebuilds against (§11.2). */
   mapVersion: number
   /** The pass the map was last replayed to, alongside `mapVersion`; null = every pass. */
   mapRound: number | null
   loadAndConnect: (runId: string, options?: { keepMap?: boolean }) => Promise<void>
+  /**
+   * Read the run's stored result again and take its report: a retried report is written to the result,
+   * not to the event log, so the reader takes it from here. Logged, never raised, as the load is.
+   */
+  reloadVerdict: (runId: string) => Promise<void>
   /** Rebuild the one map from the run's own folded state, up to a pass — the reopened run's producer (§11.2, F36). */
   seedMap: (maxRound?: number | null) => void
   dispatch: (event: RunEvent) => void
@@ -121,7 +120,6 @@ export const useRunStore = create<RunStoreState>((set, get) => {
     socket: null,
     corpus: null,
     corpusMissing: false,
-    runCreatedAt: null,
     mapVersion: -1,
     mapRound: null,
 
@@ -166,20 +164,30 @@ export const useRunStore = create<RunStoreState>((set, get) => {
       set({ socket: null, connection: 'idle', corpus: null, corpusMissing: false, mapVersion: -1, mapRound: null })
     },
 
+    reloadVerdict: async (runId: string) => {
+      try {
+        const doc = await getRun(runId)
+        set((state) => (state.run.runId === runId ? { run: applyStoredResult(state.run, doc.result) } : {}))
+      } catch (error) {
+        console.warn(`Stored run ${runId} could not be read again after a report retry.`, error)
+      }
+    },
+
     loadAndConnect: async (runId: string, options?: { keepMap?: boolean }) => {
       get().disconnect()
       const generation = ++loadGeneration
-      set({ run: { ...initialState, runId }, events: [], connection: 'connecting', runCreatedAt: null })
+      set({ run: { ...initialState, runId }, events: [], connection: 'connecting' })
 
       // Instant paint for reopened / mid-run views. The WS replay below refolds the
       // full buffer, so this fold is display-only and the seam is invisible (§11.5).
       try {
         const doc = await getRun(runId)
         if (generation !== loadGeneration) return
-        const reopened = doc.events.reduce<RunState>(
+        const replayed = doc.events.reduce<RunState>(
           (state, event) => applyEvent(state, event, Date.now()),
           { ...initialState, runId, config: doc.config ?? null, datasetId: doc.dataset_id ?? null },
         )
+        const reopened = applyStoredResult(replayed, doc.result)
         // The replayed event buffer carries no corpus, so the material is read on its own.
         const corpus = await readCorpus(runId)
         if (generation !== loadGeneration) return
@@ -188,7 +196,6 @@ export const useRunStore = create<RunStoreState>((set, get) => {
           events: doc.events,
           corpus: corpus.snapshot,
           corpusMissing: corpus.missing,
-          runCreatedAt: doc.created_at,
         })
         // Seed the map from the run's own state. A reopened run builds its map here; a live run seeds
         // the same layers and the WS replay below re-adds them idempotently, so the seam is invisible.

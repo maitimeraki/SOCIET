@@ -1,33 +1,56 @@
 import { describe, expect, it } from 'vitest'
 import { renderToStaticMarkup } from 'react-dom/server'
 import ReportDocument from './ReportDocument'
-import { reportMarkdown, reportJson, reportHtml } from './exportReport'
+import type { ReportModel } from './exportReport'
+import { BANNED_TERMS, renderedText } from '../../test/copyLaw'
 
-const REPORT = {
-  question: 'Should Ridgeline Coffee open a second location on Mill Street?',
-  filed: '22 Oct 2026',
-  position: 'NEGATIVE' as const,
-  share: 0.82,
-  caseAgainst: 'If the grease-trap upgrade lands on time, the Mill Street economics hold.',
-  reasoning: ['The panel divided on timing, not on the location.'],
-  whoHeldWhichView: [{ position: 'NEGATIVE' as const, names: ['Market analyst'] }],
-  passes: [{ pass: 'P1', negative: 0.61, positive: 0.28, abstain: 0.11 }],
-  panel: [{ name: 'Tom Okafor', role: 'local regulator', position: 'NEGATIVE' as const, confidence: 0.94, strength: 0.95, turns: 4 }],
+const PRODUCED: ReportModel = {
+  title: 'Expand into Europe?',
+  reportStatus: 'produced',
+  markdown: '# Expand into Europe?\n## Recommendation\nPosition: POSITIVE, 83%, settled\nExpand, cautiously.',
+  sources: { '1': { document: 'EU market study 2026', section: 'Tariffs' } },
   warnings: ['The demand study is a proxy.'],
 }
 
-describe('the filed report', () => {
-  it('carries the case against and the share', () => {
-    const html = renderToStaticMarkup(<ReportDocument report={REPORT} />)
-    expect(html).toContain('The case against')
-    expect(html).toContain('0.82')
+const NOT_PRODUCED: ReportModel = {
+  title: null,
+  reportStatus: 'not_produced',
+  markdown: null,
+  sources: {},
+  warnings: [],
+}
+
+const render = (report: ReportModel) =>
+  renderToStaticMarkup(<ReportDocument report={report} runId="r1" onRestored={() => {}} />)
+
+describe('a produced report', () => {
+  it('renders the markdown as given, with no retry offered', () => {
+    const html = render(PRODUCED)
+    expect(html).toContain('Expand, cautiously.')
+    expect(html).not.toContain('Report not produced')
+    expect(html).not.toContain('Retry report')
   })
 
-  it('exports the same document as markdown, html and json', () => {
-    expect(reportMarkdown(REPORT)).toContain('The case against')
-    expect(reportMarkdown(REPORT)).toContain('0.82')
-    expect(reportHtml(REPORT)).toContain('The case against')
-    expect(reportJson(REPORT)).toContain('The case against')
-    expect(JSON.parse(reportJson(REPORT)).outcome.share).toBe(0.82)
+  it('lists the run’s warnings under their own heading', () => {
+    const html = render(PRODUCED)
+    expect(html).toContain('The demand study is a proxy.')
+    expect(html).toContain('Warnings')
+  })
+})
+
+describe('a report that was not produced', () => {
+  it('says so, offers the one retry, and shows no markdown', () => {
+    const html = render(NOT_PRODUCED)
+    expect(html).toContain('Report not produced')
+    expect(html).toContain('Retry report')
+    expect(html).not.toContain('Recommendation')
+  })
+
+  it('shows no warnings section when there are none', () => {
+    expect(render(NOT_PRODUCED)).not.toContain('Warnings')
+  })
+
+  it('carries no banned word', () => {
+    expect(renderedText(render(NOT_PRODUCED))).not.toMatch(BANNED_TERMS)
   })
 })

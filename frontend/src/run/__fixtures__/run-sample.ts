@@ -93,10 +93,25 @@ export const RUN_SAMPLE: RunEvent[] = [
   {
     type: 'complete',
     converged: true,
-    verdict: 'The debate concluded with 67% of turns expressing POSITIVE stance. Confidence score: 0.83.',
-    narrative: '## Recommendation\nExpand, cautiously.\n\n## Reasoning\nSteel tariffs bite the entry cost.',
-    dissenting_views: [{ stance: 'NEGATIVE', view: 'Entry cost outweighs the single market.' }],
-    evidence: [{ entity: 'EU single market', claim: 'Lowers per-unit distribution cost.' }],
+    title: 'Should we expand into the European market in 2027?',
+    markdown:
+      '# Should we expand into the European market in 2027?\n' +
+      '## Recommendation\n' +
+      'Position: POSITIVE, 83%, settled\n' +
+      'Expand, cautiously, into one market first.\n' +
+      '## Entry cost\n' +
+      'Point: Steel tariffs raise the entry cost [1] (from the documents)\n' +
+      'Against:\n' +
+      'The tariffs may fall before the entry is priced.\n' +
+      'Opinion: A staged entry keeps the option open.\n' +
+      'Result: Stage the entry and hold back the full budget.\n' +
+      'Point: The single market is the safer first move (judgement)\n' +
+      'Against:\n' +
+      'A second market may be cheaper later.\n' +
+      'Opinion: One market first keeps the exposure small.\n' +
+      'Result: Choose one market before committing the budget.',
+    status: 'produced',
+    sources: { '1': { document: 'EU market study 2026', section: 'Tariffs' } },
     final_stances: { 'D. Weber': 'POSITIVE', 'M. Chen': 'NEGATIVE', 'P. Silva': 'POSITIVE' },
     warnings: [],
     rounds_executed: 2,

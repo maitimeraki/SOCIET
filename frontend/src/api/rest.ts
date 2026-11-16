@@ -213,6 +213,23 @@ export interface RunGraphSnapshot extends GraphSnapshot {
 export const getRunGraph = (runId: string) =>
   request<RunGraphSnapshot>(`/api/v1/simulate/debates/${runId}/graph`)
 
+/** One citation's passage, read on click only. Every failure is the same 404 (`ApiError`). */
+export interface DebateSource {
+  document: string
+  section: string
+  text: string
+}
+
+export const getDebateSource = (runId: string, n: string) =>
+  request<DebateSource>(`/api/v1/simulate/debates/${runId}/sources/${n}`)
+
+/** Re-run only the report of a run whose report was not produced; poll the job it returns. */
+export const retryVerdictReport = (runId: string) =>
+  request<{ job_id: string; run_id: string; status: string }>(
+    `/api/v1/simulate/debates/${runId}/verdict/retry`,
+    { method: 'POST' },
+  )
+
 export const authMe = () => request<User>('/api/v1/auth/me')
 
 export const authLogin = (email: string, password: string) =>

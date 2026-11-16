@@ -1,104 +1,126 @@
-import VerdictSheet from '../ui/VerdictSheet'
-import Table from '../ui/Table'
+import { useEffect, useRef, useState } from 'react'
+import { getJob, retryVerdictReport } from '../../api/rest'
+import WarningList from '../common/WarningList'
+import Button from '../ui/Button'
 import Label from '../ui/Label'
-import PositionMark, { stanceWord } from '../ui/PositionMark'
-import { fmtPct, fmtScore } from '../../utils/format'
+import AnswerDocument from './AnswerDocument'
 import type { ReportModel } from './exportReport'
+import {
+  RETRY_MAX_POLLS,
+  RETRY_POLL_MS,
+  RETRY_SLOW_COPY,
+  failedRetryMessage,
+  retryMessage,
+  retryOutcome,
+} from './reportRetry'
 
 /**
- * §12.8 — the filed report is the document itself: the verdict sheet, then the two matrices the
- * record supports. It reads from the same `ReportModel` every export is serialized from, so the
- * page and the files cannot disagree.
+ * The Report tab's document. A produced report is the backend's markdown as given; a report that was
+ * not produced says so and offers the one retry. `onRestored` runs once a retry has written the report,
+ * so the parent can read the run again.
  */
-export default function ReportDocument({ report }: { report: ReportModel }) {
+export default function ReportDocument({
+  report,
+  runId,
+  onRestored,
+}: {
+  report: ReportModel
+  runId: string
+  onRestored: () => void
+}) {
   return (
     <div className="max-w-[760px] space-y-6">
-      <VerdictSheet
-        question={report.question}
-        filed={report.filed}
-        position={report.position}
-        share={report.share}
-        caseAgainst={report.caseAgainst}
-        reasoning={report.reasoning}
-        whoHeldWhichView={report.whoHeldWhichView}
-      />
-
-      <section className="rounded-xl bg-paper p-12 shadow-sheet">
-        <Label as="h3">The passes</Label>
-        <Table
-          className="mt-4"
-          head={
-            <tr>
-              <th scope="col">Pass</th>
-              <th scope="col" className="num">
-                Negative
-              </th>
-              <th scope="col" className="num">
-                Positive
-              </th>
-              <th scope="col" className="num">
-                {stanceWord('ABSTAIN')}
-              </th>
-            </tr>
-          }
-        >
-          {report.passes.map((row) => (
-            <tr key={row.pass}>
-              <td>{row.pass}</td>
-              <td className="num">{fmtPct(row.negative)}</td>
-              <td className="num">{fmtPct(row.positive)}</td>
-              <td className="num">{fmtPct(row.abstain)}</td>
-            </tr>
-          ))}
-        </Table>
-
-        <Label as="h3" className="mt-10 block">
-          The panel
-        </Label>
-        <Table
-          className="mt-4"
-          head={
-            <tr>
-              <th scope="col">Expert</th>
-              <th scope="col">Position</th>
-              <th scope="col" className="num">
-                Turns
-              </th>
-              <th scope="col" className="num">
-                Conf.
-              </th>
-              <th scope="col" className="num">
-                Str.
-              </th>
-            </tr>
-          }
-        >
-          {report.panel.map((row) => (
-            <tr key={row.name}>
-              <td>
-                {row.name} <span className="text-ink-3">({row.role})</span>
-              </td>
-              <td>
-                <PositionMark position={row.position} size="sm" ground="light" />
-              </td>
-              <td className="num">{row.turns}</td>
-              <td className="num">{fmtScore(row.confidence)}</td>
-              <td className="num">{fmtScore(row.strength)}</td>
-            </tr>
-          ))}
-        </Table>
-
-        {report.warnings.length > 0 ? (
-          <section className="mt-10 border-t border-rule pt-6">
-            <Label as="h3">Warnings</Label>
-            <ul className="mt-3 space-y-1 font-ui text-body-sm text-ink-2">
-              {report.warnings.map((warning) => (
-                <li key={warning}>{warning}</li>
-              ))}
-            </ul>
-          </section>
-        ) : null}
-      </section>
+      {report.markdown !== null ? (
+        <AnswerDocument runId={runId} markdown={report.markdown} sources={report.sources} />
+      ) : (
+        <NotProduced runId={runId} onRestored={onRestored} />
+      )}
+      {report.warnings.length > 0 ? (
+        <section className="border-t border-rule pt-6">
+          <Label as="h3">Warnings</Label>
+          <div className="mt-3">
+            <WarningList warnings={report.warnings} />
+          </div>
+        </section>
+      ) : null}
     </div>
+  )
+}
+
+/** The not-produced state: the retry is queued as a job, polled a bounded number of times, then the run is read again. */
+function NotProduced({ runId, onRestored }: { runId: string; onRestored: () => void }) {
+  const [busy, setBusy] = useState(false)
+  const [jobId, setJobId] = useState<string | null>(null)
+  const [message, setMessage] = useState<string | null>(null)
+  const restored = useRef(onRestored)
+  useEffect(() => {
+    restored.current = onRestored
+  })
+
+  useEffect(() => {
+    if (jobId === null) return
+    let cancelled = false
+    let polls = 0
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const settle = (text: string | null) => {
+      setJobId(null)
+      setBusy(false)
+      setMessage(text)
+    }
+    const check = async () => {
+      polls += 1
+      const job = await getJob(jobId).catch((error: unknown) => {
+        if (!cancelled) settle(retryMessage(error))
+        return null
+      })
+      if (job === null || cancelled) return
+      const outcome = retryOutcome(job.status)
+      if (outcome === 'complete') {
+        settle(null)
+        restored.current()
+      } else if (outcome === 'failed') {
+        settle(failedRetryMessage(job.error))
+      } else if (polls >= RETRY_MAX_POLLS) {
+        settle(RETRY_SLOW_COPY)
+      } else {
+        timer = setTimeout(check, RETRY_POLL_MS)
+      }
+    }
+    timer = setTimeout(check, RETRY_POLL_MS)
+    return () => {
+      cancelled = true
+      clearTimeout(timer)
+    }
+  }, [jobId])
+
+  const retry = async () => {
+    setBusy(true)
+    setMessage(null)
+    try {
+      const accepted = await retryVerdictReport(runId)
+      setJobId(accepted.job_id)
+    } catch (error) {
+      setBusy(false)
+      setMessage(retryMessage(error))
+    }
+  }
+
+  return (
+    <section className="rounded-xl bg-paper p-12 shadow-sheet">
+      <Label as="h3">Report not produced</Label>
+      <p className="mt-3 max-w-[60ch] font-ui text-body text-ink-2">
+        The report for this decision could not be written. The run is unchanged.
+      </p>
+      <div className="mt-6">
+        <Button type="button" onClick={() => void retry()} disabled={busy}>
+          {busy ? 'Retrying…' : 'Retry report'}
+        </Button>
+      </div>
+      {message !== null ? (
+        <p role="status" className="mt-3 font-ui text-body-sm text-ink-2">
+          {message}
+        </p>
+      ) : null}
+    </section>
   )
 }

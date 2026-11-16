@@ -103,10 +103,17 @@ export interface ClusterSummary {
   agents: string[]
 }
 
-export interface DissentingView {
-  stance: string
-  view: string
+/** The report's status as the backend stores it: written and checked, or not produced (no text). */
+export type ReportStatus = 'produced' | 'not_produced'
+
+/** One source a report may cite as [n]: the public document and section only, never a chunk id. */
+export interface ReportSource {
+  document: string
+  section: string
 }
+
+/** Citation number (as a string key) to its source. */
+export type ReportSources = Record<string, ReportSource>
 
 /**
  * An entry a `commit` event reports the transaction wrote — taken verbatim (D7). `key` is the
@@ -126,11 +133,6 @@ export interface WrittenLink {
   from: string
   to: string
   kind: string
-}
-
-export interface EvidenceItem {
-  entity: string
-  claim: string
 }
 
 export type RunEvent =
@@ -168,13 +170,11 @@ export type RunEvent =
   | {
       type: 'complete'
       converged: boolean
-      verdict: string
-      /** Query-grounded markdown answer; empty when synthesis fell back to `verdict`. */
-      narrative?: string
-      /** "ok" when `narrative` is the query-grounded answer; "fallback" when it degraded to `verdict`; "no_verdict" when no position carried weight and no answer was written. */
-      narrative_status?: string
-      dissenting_views?: DissentingView[]
-      evidence?: EvidenceItem[]
+      /** The report's title and markdown; both null when the report was not produced. */
+      title?: string | null
+      markdown?: string | null
+      status?: ReportStatus
+      sources?: ReportSources
       final_stances: Record<string, string>
       warnings: string[]
       rounds_executed: number

@@ -25,7 +25,7 @@ describe('selectors', () => {
         { type: 'stage', stage: 'intake', index: 0, query: 'q' },
         { type: 'stage', stage: 'synthesis', index: 1, agents: 0 },
         { type: 'stage', stage: 'verdict', index: 2, converged: false, rounds_executed: 0 },
-        { type: 'complete', converged: false, verdict: 'No agents', final_stances: {}, warnings: [], rounds_executed: 0 },
+        { type: 'complete', converged: false, title: null, markdown: null, status: 'not_produced', final_stances: {}, warnings: [], rounds_executed: 0 },
       ],
       NOW,
     )
@@ -58,16 +58,11 @@ describe('selectors', () => {
     expect(view?.stance).toBe('POSITIVE')
     expect(view?.confidence).toBe(0.83)
   })
-  it('carries the narrative and structured dissent into the verdict view', () => {
+  it('carries the report markdown, its sources and its status into the verdict view', () => {
     const view = verdictView(full)
-    expect(view?.narrative).toContain('## Recommendation')
-    expect(view?.dissentingViews).toEqual([
-      { stance: 'NEGATIVE', view: 'Entry cost outweighs the single market.' },
-    ])
-    expect(view?.evidence?.[0]).toEqual({
-      entity: 'EU single market',
-      claim: 'Lowers per-unit distribution cost.',
-    })
+    expect(view?.markdown).toContain('## Recommendation')
+    expect(view?.reportStatus).toBe('produced')
+    expect(view?.sources).toEqual({ '1': { document: 'EU market study 2026', section: 'Tariffs' } })
   })
 })
 
@@ -95,9 +90,9 @@ describe('the verdict stance and the tape without a weighted position', () => {
         {
           type: 'complete' as const,
           converged: false,
-          verdict: 'No verdict: no position carries weight.',
-          narrative: 'No verdict: no position carries weight.',
-          narrative_status: 'no_verdict',
+          title: null,
+          markdown: null,
+          status: 'not_produced' as const,
           final_stances,
           warnings: [],
           rounds_executed: 1,
@@ -113,7 +108,8 @@ describe('the verdict stance and the tape without a weighted position', () => {
     const view = verdictView(state)
     expect(view?.stance).toBeNull()
     expect(view?.confidence).toBeNull()
-    expect(view?.narrativeStatus).toBe('no_verdict')
+    expect(view?.reportStatus).toBe('not_produced')
+    expect(view?.markdown).toBeNull()
     expect(convergenceSeries(state)[0].weights).toBeNull()
   })
 

@@ -1,4 +1,4 @@
-import type { AgentView, ClusterSummary, DissentingView, EvidenceItem, Stance, TurnInfo } from './events'
+import type { AgentView, ClusterSummary, ReportSources, ReportStatus, Stance, TurnInfo } from './events'
 import { asStance } from './events'
 import type { RunState } from './reducer'
 
@@ -147,11 +147,10 @@ export interface VerdictView {
   stance: Stance | null
   confidence: number | null
   converged: boolean
-  summary: string
-  narrative: string
-  narrativeStatus: string
-  dissentingViews: DissentingView[]
-  evidence: EvidenceItem[]
+  title: string | null
+  markdown: string | null
+  reportStatus: ReportStatus
+  sources: ReportSources
   clusters: ClusterSummary[]
   finalStances: { agent: string; stance: Stance }[]
   supporting: string[]
@@ -181,11 +180,10 @@ export function verdictView(state: RunState): VerdictView | null {
     // No stance means no share: the filed confidence belongs to a verdict that exists.
     confidence: stance === null ? null : verdict.confidence,
     converged: verdict.converged,
-    summary: verdict.summary,
-    narrative: verdict.narrative,
-    narrativeStatus: verdict.narrativeStatus,
-    dissentingViews: verdict.dissentingViews,
-    evidence: verdict.evidence,
+    title: verdict.title,
+    markdown: verdict.markdown,
+    reportStatus: verdict.reportStatus,
+    sources: verdict.sources,
     clusters,
     finalStances: Object.entries(verdict.finalStances).map(([agent, value]) => ({ agent, stance: asStance(value) })),
     supporting: verdict.supporting,
