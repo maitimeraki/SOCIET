@@ -259,7 +259,7 @@ async def test_a_retry_reserves_the_reserve_and_enqueues_one_verdict_job(world, 
     assert response.status_code == 202
     assert response.json()["status"] == "queued"
     assert response.json()["run_id"] == run_id
-    assert world.reserves == [debate_api.verdict_retry_reserve_units()]
+    assert world.reserves == [debate_api.verdict_retry_reserve_units(17)]
     [(kind, payload)] = world.enqueued
     assert kind == "verdict"
     assert payload["run_id"] == run_id and payload["user_id"] == str(world.user_id)
@@ -282,7 +282,7 @@ def reserve_setting(monkeypatch):
 def test_the_reserve_is_three_report_calls_by_default(reserve_setting):
     reserve_setting(None)
 
-    assert debate_api.verdict_retry_reserve_units() == REPORT_MAX_ATTEMPTS * debate_api.report_call_units()
+    assert debate_api.verdict_retry_reserve_units(17) == REPORT_MAX_ATTEMPTS * debate_api.report_call_units(17)
 
 
 def test_the_report_call_is_sized_from_the_report_prompt_and_its_completion_cap(reserve_setting):
@@ -293,22 +293,22 @@ def test_the_report_call_is_sized_from_the_report_prompt_and_its_completion_cap(
 
     reserve_setting(None)
 
-    expected = units_for_tokens(ceil(debate_api.report_prompt_chars() / 4), get_llm_config().verdict_max_tokens)
-    assert debate_api.report_call_units() == expected
+    expected = units_for_tokens(ceil(debate_api.report_prompt_chars(17) / 4), get_llm_config().verdict_max_tokens)
+    assert debate_api.report_call_units(17) == expected
 
 
 def test_the_hold_follows_the_report_completion_cap_not_the_profile_cap(reserve_setting, monkeypatch):
     reserve_setting(None)
-    base = debate_api.verdict_retry_reserve_units()
+    base = debate_api.verdict_retry_reserve_units(17)
 
     try:
         monkeypatch.setenv("PROFILE_MAX_TOKENS", "9000")
         get_llm_config.cache_clear()
-        assert debate_api.verdict_retry_reserve_units() == base
+        assert debate_api.verdict_retry_reserve_units(17) == base
 
         monkeypatch.setenv("VERDICT_MAX_TOKENS", "6000")
         get_llm_config.cache_clear()
-        assert debate_api.verdict_retry_reserve_units() > base
+        assert debate_api.verdict_retry_reserve_units(17) > base
     finally:
         monkeypatch.undo()
         get_llm_config.cache_clear()
@@ -317,15 +317,15 @@ def test_the_hold_follows_the_report_completion_cap_not_the_profile_cap(reserve_
 def test_a_configured_reserve_overrides_the_derived_one(reserve_setting):
     reserve_setting(7)
 
-    assert debate_api.verdict_retry_reserve_units() == 7
+    assert debate_api.verdict_retry_reserve_units(17) == 7
 
 
 def test_the_estimate_is_capped_at_the_remaining_units_and_floored_at_one():
-    reserve = debate_api.verdict_retry_reserve_units()
+    reserve = debate_api.verdict_retry_reserve_units(17)
 
-    assert debate_api.verdict_retry_estimate(10**9) == reserve
-    assert debate_api.verdict_retry_estimate(5) == min(reserve, 5)
-    assert debate_api.verdict_retry_estimate(0) == 1
+    assert debate_api.verdict_retry_estimate(10**9, 17) == reserve
+    assert debate_api.verdict_retry_estimate(5, 17) == min(reserve, 5)
+    assert debate_api.verdict_retry_estimate(0, 17) == 1
 
 
 @pytest.mark.asyncio
@@ -428,7 +428,7 @@ async def test_nothing_from_the_request_body_is_used(world, user):
     assert response.status_code == 202
     [(_, payload)] = world.enqueued
     assert payload["run_id"] == run_id
-    assert world.reserves == [debate_api.verdict_retry_reserve_units()]
+    assert world.reserves == [debate_api.verdict_retry_reserve_units(17)]
 
 
 def test_the_debate_result_stores_the_retry_inputs_and_serves_none_of_them():
@@ -458,3 +458,30 @@ def test_a_result_over_the_turn_log_bound_stores_no_retry_inputs():
     result = OrchestratedDebateResult(converged=False, final_stances={}, warnings=[], rounds_executed=0)
 
     assert "retry_inputs" not in debate_api._job_result(result, intent=None, retry_inputs=result.retry_inputs)
+
+
+@pytest.mark.asyncio
+async def test_the_hold_grows_with_the_stored_question_and_is_capped_at_the_remaining_units(world, user):
+    short = "Should we expand?"
+    long_question = "why " * 7500  # 30,000 characters: far past any question the old constant assumed
+    run_id = str(uuid.uuid4())
+    world.runs[run_id] = {**_head(world, run_id, result=NOT_PRODUCED), "query": long_question}
+
+    response = await _retry(world, user, run_id)
+
+    assert response.status_code == 202
+    assert world.reserves == [debate_api.verdict_retry_reserve_units(len(long_question))]
+    assert world.reserves[0] > debate_api.verdict_retry_reserve_units(len(short))
+
+    capped_run = str(uuid.uuid4())
+    world.runs[capped_run] = {**_head(world, capped_run, result=NOT_PRODUCED), "query": long_question}
+    world.remaining = 40
+    response = await _retry(world, user, capped_run)
+
+    assert response.status_code == 202
+    assert world.reserves[-1] == 40
+
+
+def test_the_estimate_grows_with_the_question_length():
+    assert debate_api.verdict_retry_estimate(10**9, 30_000) > debate_api.verdict_retry_estimate(10**9, 17)
+    assert debate_api.verdict_retry_estimate(10**9, 0) >= 1

@@ -262,7 +262,40 @@ def test_the_verdict_kind_is_registered_as_a_metered_job():
 
 
 def test_the_verdict_estimate_is_three_report_calls():
-    assert debate_api.verdict_retry_reserve_units() == 3 * debate_api.report_call_units()
+    assert debate_api.verdict_retry_reserve_units(17) == 3 * debate_api.report_call_units(17)
+
+
+class _Duration:
+    """Stands in for the job-duration histogram: records the labels each job is observed under."""
+
+    def __init__(self):
+        self.seen: list[dict] = []
+
+    def labels(self, **labels):
+        self.seen.append(labels)
+        return SimpleNamespace(observe=lambda value: None)
+
+
+@pytest.mark.asyncio
+async def test_the_metric_records_a_not_produced_retry_as_failed(store, monkeypatch):
+    _spy_write_report(monkeypatch, None)
+    duration = _Duration()
+    monkeypatch.setattr(tasks, "JOB_DURATION", duration)
+
+    await tasks.execute("verdict", store.job_id, store.payload)
+
+    assert duration.seen == [{"kind": "verdict", "status": "failed"}]
+
+
+@pytest.mark.asyncio
+async def test_the_metric_records_a_produced_retry_as_completed(store, monkeypatch):
+    _spy_write_report(monkeypatch, PRODUCED)
+    duration = _Duration()
+    monkeypatch.setattr(tasks, "JOB_DURATION", duration)
+
+    await tasks.execute("verdict", store.job_id, store.payload)
+
+    assert duration.seen == [{"kind": "verdict", "status": "completed"}]
 
 
 @pytest.mark.asyncio

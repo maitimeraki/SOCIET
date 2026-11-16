@@ -852,10 +852,11 @@ async def get_debate_roster(run_id: str, user: User = Depends(current_user)):
     return await run_doc.read_roster(run_id, user.id)
 
 
-#: The report prompt's size for the retry's hold, from the caps the report reads. These are estimates,
-#: not code caps (the question is not capped in code). The hold is an admission estimate: a report
-#: call that settles above it is charged to units_used as usual (units.py), never refused for it.
-REPORT_QUESTION_CHARS = 1_000
+#: The report prompt's size for the retry's hold. The question is the run's stored query, measured
+#: (the route passes its length). The other parts are estimates from the caps the report reads: the
+#: context at its byte cap, the answers, the sources and the switches. These are not code caps for
+#: every part (a question is not capped in code), so the hold is an admission estimate: a report call
+#: that settles above it is charged to units_used as usual (units.py), never refused for it.
 REPORT_MAX_SEATS = 12  # DebateConfigRequest.max_agents, the plan cap
 REPORT_MAX_ROUNDS = 20  # DebateConfigRequest.max_rounds
 REPORT_SWITCH_CHARS = 200  # one switch line
@@ -863,34 +864,34 @@ REPORT_SOURCE_OVERHEAD_CHARS = 120  # the evidence tag around one source text
 CHARS_PER_TOKEN = 4  # the convention UNITS_PER_CALL_TYPICAL uses
 
 
-def report_prompt_chars() -> int:
-    """Characters of one report prompt, estimated from the caps: the system prompt, the context at its
-    byte cap, the question, every final answer at the completion cap (max_output_tokens), every seat's
-    evidence at MAX_OWN items of MAX_ITEM_CHARS, and one switch line per seat per round."""
+def report_prompt_chars(question_chars: int) -> int:
+    """Characters of one report prompt for a question of `question_chars`: the system prompt, the context
+    at its byte cap, the question, every final answer at the completion cap (max_output_tokens), every
+    seat's evidence at MAX_OWN items of MAX_ITEM_CHARS, and one switch line per seat per round."""
     from src.simulation.evidence import MAX_ITEM_CHARS, MAX_OWN
     from src.simulation.verdict import REPORT_SYSTEM
 
     answers = REPORT_MAX_SEATS * get_llm_config().max_output_tokens * CHARS_PER_TOKEN
     sources = REPORT_MAX_SEATS * MAX_OWN * (MAX_ITEM_CHARS + REPORT_SOURCE_OVERHEAD_CHARS)
     switches = REPORT_MAX_ROUNDS * REPORT_MAX_SEATS * REPORT_SWITCH_CHARS
-    return len(REPORT_SYSTEM) + CONTEXT_MAX_BYTES + REPORT_QUESTION_CHARS + answers + sources + switches
+    return len(REPORT_SYSTEM) + CONTEXT_MAX_BYTES + max(0, question_chars) + answers + sources + switches
 
 
-def report_call_units() -> int:
+def report_call_units(question_chars: int) -> int:
     """Units one report call holds: its estimated prompt, and verdict_max_tokens of completion."""
-    prompt_tokens = math.ceil(report_prompt_chars() / CHARS_PER_TOKEN)
+    prompt_tokens = math.ceil(report_prompt_chars(question_chars) / CHARS_PER_TOKEN)
     return billing_units.units_for_tokens(prompt_tokens, get_llm_config().verdict_max_tokens)
 
 
-def verdict_retry_reserve_units() -> int:
-    """The retry's hold: REPORT_MAX_ATTEMPTS report calls at report_call_units(), unless configured."""
+def verdict_retry_reserve_units(question_chars: int) -> int:
+    """The retry's hold: REPORT_MAX_ATTEMPTS report calls at report_call_units(question_chars), unless configured."""
     configured = get_settings().verdict_retry_reserve_units
-    return configured if configured is not None else REPORT_MAX_ATTEMPTS * report_call_units()
+    return configured if configured is not None else REPORT_MAX_ATTEMPTS * report_call_units(question_chars)
 
 
-def verdict_retry_estimate(units_remaining: int) -> int:
+def verdict_retry_estimate(units_remaining: int, question_chars: int) -> int:
     """The retry's hold: the reserve capped at the user's remaining units, never below 1 (as graph jobs)."""
-    return max(1, min(verdict_retry_reserve_units(), units_remaining))
+    return max(1, min(verdict_retry_reserve_units(question_chars), units_remaining))
 
 
 def _refused(code: str) -> HTTPException:
@@ -1024,7 +1025,7 @@ async def retry_verdict(
     plan_key = user.plan_key
     ip = client_ip(request)
     ent = await resolve_entitlements(db, user=user)
-    estimate = verdict_retry_estimate(ent.units_remaining)
+    estimate = verdict_retry_estimate(ent.units_remaining, len(head.get("query") or ""))
     try:
         reservation = await billing_units.reserve_units(
             db, user_id=user_id, plan_key=plan_key, estimate=estimate

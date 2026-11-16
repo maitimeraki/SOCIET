@@ -46,10 +46,14 @@ def board_fingerprint(rounds: Sequence[RoundResult], profiles: Sequence[Agent], 
     bundle, _refs = build_report_bundle(list(rounds), list(profiles), query, scenario)
     return {
         "sources": sorted(bundle.sources, key=int),
-        "citizens": [
-            [citizen.name, citizen.position.value if citizen.position is not None else None, list(citizen.source_ids)]
-            for citizen in bundle.citizens
-        ],
+        # Sorted by name: the fingerprint says what the bundle holds, not the order its citizens were listed in.
+        "citizens": sorted(
+            (
+                [citizen.name, citizen.position.value if citizen.position is not None else None, list(citizen.source_ids)]
+                for citizen in bundle.citizens
+            ),
+            key=lambda row: row[0],
+        ),
         "switches": list(bundle.switches),
     }
 
@@ -202,8 +206,14 @@ def check_rebuild(
     stored_board = retry_inputs.get("board")
     if not isinstance(stored_board, Mapping):
         raise RetryDataError("the stored retry inputs carry no board fingerprint")
-    if board_fingerprint(rounds, profiles, query, str(retry_inputs.get("context") or "")) != json_normal(stored_board):
+    rebuilt = board_fingerprint(rounds, profiles, query, str(retry_inputs.get("context") or ""))
+    if canonical_board(rebuilt) != canonical_board(json_normal(stored_board)):
         raise RetryDataError("the rebuilt bundle differs from the stored one")
+
+
+def canonical_board(board: Mapping[str, Any]) -> dict[str, Any]:
+    """A board fingerprint with its citizens in name order: the comparison ignores how they were listed."""
+    return {**board, "citizens": sorted(board["citizens"], key=lambda row: row[0])}
 
 
 def json_normal(value: Any) -> Any:

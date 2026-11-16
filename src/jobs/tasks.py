@@ -46,6 +46,10 @@ class JobCancelled(RuntimeError):
     """The owner cancelled the job; a terminal ``cancelled``, not a failure."""
 
 
+class ReportNotProduced(RuntimeError):
+    """A verdict retry's report still failed its checks: a terminal ``failed`` outcome, not a crash."""
+
+
 #: Terminal status on success, per kind (the row convention each body already
 #: writes: runs are ``complete``, graph jobs ``completed``).
 _SUCCESS_STATUS = {
@@ -125,8 +129,7 @@ async def _verdict_core(job_id: str, payload: dict[str, Any]) -> None:
         run_id=str(payload["run_id"]), owner_id=str(payload["user_id"])
     )
     if not written:
-        # The job's own outcome: a stable message, never the checks or the model's text.
-        await _set_status(job_id, "failed", error=REPORT_NOT_PRODUCED_MESSAGE)
+        raise ReportNotProduced(job_id)
 
 
 def _documents(payload: dict[str, Any]):
@@ -938,6 +941,12 @@ async def execute(kind: str, job_id: str, payload: dict[str, Any]) -> None:
             logger.info("job %s (%s) cancelled: %s", job_id, kind, exc)
             await _set_status(job_id, "cancelled")
             status = "cancelled"
+            return
+        except ReportNotProduced:
+            # The outcome is a failed job with a stable message: the metric and the log say so too.
+            logger.info("job %s (%s): the report was not produced", job_id, kind)
+            await _set_status(job_id, "failed", error=REPORT_NOT_PRODUCED_MESSAGE)
+            status = "failed"
             return
         except MeteringError as exc:
             logger.warning("job %s (%s) stopped by metering", job_id, kind, exc_info=exc)

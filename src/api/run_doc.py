@@ -774,21 +774,20 @@ async def sweep_interrupted() -> int:
             .where(Run.status == "running")
             .values(status="failed", finished_at=now)
         )
+        # One statement: the status is re-checked in the UPDATE itself, so a row the worker moved to
+        # running after any read is not failed, and only the rows this statement flipped come back.
         stuck = (
             await session.execute(
-                select(Job.id, Job.user_id).where(
+                update(Job)
+                .where(
                     Job.kind == "verdict",
                     Job.status == "queued",
                     Job.queued_at < stale_before,
                 )
+                .values(status="failed", error="interrupted", finished_at=now)
+                .returning(Job.id, Job.user_id)
             )
         ).all()
-        if stuck:
-            await session.execute(
-                update(Job)
-                .where(Job.id.in_([row.id for row in stuck]))
-                .values(status="failed", error="interrupted", finished_at=now)
-            )
         await session.commit()
     if stuck:
         from src.audit import record as audit_record

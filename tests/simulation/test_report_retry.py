@@ -275,3 +275,19 @@ def test_a_not_produced_run_with_its_inputs_may_retry():
 
 def test_every_refusal_code_has_a_client_message():
     assert set(rr.REFUSAL_MESSAGES) == {rr.REFUSAL_NOT_PENDING, rr.REFUSAL_NOT_RETRYABLE, rr.REFUSAL_IN_FLIGHT}
+
+
+def test_a_reordered_citizen_list_is_not_a_false_refusal(board):
+    rounds, profiles = board
+    stored_inputs = _inputs(rounds, profiles)
+    stored_inputs["board"]["citizens"] = list(reversed(stored_inputs["board"]["citizens"]))
+
+    rr.check_rebuild(rounds, profiles, _stored(rounds, profiles), stored_inputs, "Q?")
+
+
+def test_the_fingerprint_lists_citizens_by_name(board):
+    rounds, profiles = board
+
+    listed = rr.board_fingerprint(rounds, list(reversed(profiles)), "Q?", "")["citizens"]
+
+    assert [citizen[0] for citizen in listed] == ["Kestra", "Orbit"]
