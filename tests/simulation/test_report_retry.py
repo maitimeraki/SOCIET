@@ -120,15 +120,15 @@ def _stored(rounds, profiles, converged=True) -> dict:
 
 
 def test_the_turn_log_and_round_events_rebuild_the_rounds_exactly(board):
-    rounds, _ = board
-    inputs = json.loads(json.dumps(rr.build_retry_inputs(rounds, "scenario text")))
+    rounds, profiles = board
+    inputs = json.loads(json.dumps(rr.build_retry_inputs(rounds, profiles, "Q?", "scenario text")))
 
     assert rr.rebuild_rounds(_events(rounds), inputs) == rounds
 
 
 def test_the_turn_log_keeps_the_context_and_one_entry_per_turn(board):
-    rounds, _ = board
-    inputs = rr.build_retry_inputs(rounds, "scenario text")
+    rounds, profiles = board
+    inputs = rr.build_retry_inputs(rounds, profiles, "Q?", "scenario text")
 
     assert inputs["context"] == "scenario text"
     assert len(inputs["turns"]) == 4
@@ -137,10 +137,10 @@ def test_the_turn_log_keeps_the_context_and_one_entry_per_turn(board):
 
 
 def test_a_turn_log_over_its_bound_is_not_kept(board):
-    rounds, _ = board
+    rounds, profiles = board
     crowded = [RoundResult(round_num=1, turns=rounds[0].turns * (rr.RETRY_TURN_LOG_MAX // 2 + 1), pairs=[])]
 
-    assert rr.build_retry_inputs(crowded, "") is None
+    assert rr.build_retry_inputs(crowded, profiles, "Q?", "") is None
 
 
 def test_the_rebuilt_profiles_equal_the_seated_agents(board):
@@ -154,7 +154,7 @@ def test_the_rebuilt_profiles_equal_the_seated_agents(board):
 
 def test_the_rebuilt_bundle_and_board_equal_the_debate_bundle(board):
     rounds, profiles = board
-    inputs = json.loads(json.dumps(rr.build_retry_inputs(rounds, "scenario text")))
+    inputs = json.loads(json.dumps(rr.build_retry_inputs(rounds, profiles, "Q?", "scenario text")))
     rebuilt_rounds = rr.rebuild_rounds(_events(rounds), inputs)
     rebuilt_profiles = rr.rebuild_profiles(_records(profiles), "ds-1")
 
@@ -166,10 +166,15 @@ def test_the_rebuilt_bundle_and_board_equal_the_debate_bundle(board):
     assert board_facts(rebuilt_rounds, rebuilt_profiles, True) == board_facts(rounds, profiles, True)
 
 
+def _inputs(rounds, profiles, context: str = "") -> dict:
+    """The retry inputs as the store returns them (JSON), for the check."""
+    return json.loads(json.dumps(rr.build_retry_inputs(rounds, profiles, "Q?", context)))
+
+
 def test_the_stored_board_passes_the_check(board):
     rounds, profiles = board
 
-    rr.check_rebuild(rounds, profiles, _stored(rounds, profiles))
+    rr.check_rebuild(rounds, profiles, _stored(rounds, profiles), _inputs(rounds, profiles), "Q?")
 
 
 @pytest.mark.parametrize(
@@ -186,22 +191,53 @@ def test_a_rebuild_that_differs_from_the_stored_board_is_refused(board, key, val
     stored = {**_stored(rounds, profiles), key: value}
 
     with pytest.raises(rr.RetryDataError):
-        rr.check_rebuild(rounds, profiles, stored)
+        rr.check_rebuild(rounds, profiles, stored, _inputs(rounds, profiles), "Q?")
+
+
+@pytest.mark.parametrize(
+    "key, value",
+    [
+        ("sources", ["1", "2", "3", "4"]),
+        ("sources", ["1"]),
+        ("citizens", [["Kestra", "POSITIVE", ["1"]], ["Orbit", "NEGATIVE", ["2"]]]),
+        ("citizens", [["Kestra", "POSITIVE", []], ["Orbit", "NEGATIVE", ["2", "3"]]]),
+        ("citizens", [["Kestra", "NEGATIVE", ["1"]], ["Orbit", "NEGATIVE", ["2", "3"]]]),
+        ("switches", ["Round 9: Nobody moved"]),
+    ],
+)
+def test_a_bundle_that_differs_from_the_stored_fingerprint_is_refused(board, key, value):
+    rounds, profiles = board
+    stored_inputs = _inputs(rounds, profiles)
+    assert stored_inputs["board"][key] != value, "the mutation must change the fingerprint"
+    stored_inputs["board"][key] = value
+
+    with pytest.raises(rr.RetryDataError):
+        rr.check_rebuild(rounds, profiles, _stored(rounds, profiles), stored_inputs, "Q?")
+
+
+def test_the_fingerprint_names_the_sources_and_citizens_of_the_debate(board):
+    rounds, profiles = board
+
+    board_fp = _inputs(rounds, profiles)["board"]
+
+    assert board_fp["sources"] == ["1", "2", "3"]
+    assert [citizen[0] for citizen in board_fp["citizens"]] == ["Kestra", "Orbit"]
 
 
 def test_a_turn_speaker_that_is_not_seated_is_refused(board):
     rounds, profiles = board
     stored = _stored(rounds, profiles)
+    inputs = _inputs(rounds, profiles)
     rounds[0].turns[0] = dataclasses.replace(rounds[0].turns[0], agent_name="Nobody")
 
     with pytest.raises(rr.RetryDataError):
-        rr.check_rebuild(rounds, profiles, stored)
+        rr.check_rebuild(rounds, profiles, stored, inputs, "Q?")
 
 
 def test_a_turn_log_that_disagrees_with_the_events_is_refused(board):
-    rounds, _ = board
+    rounds, profiles = board
     events = _events(rounds)
-    inputs = rr.build_retry_inputs(rounds, "")
+    inputs = rr.build_retry_inputs(rounds, profiles, "Q?", "")
 
     wrong_speaker = json.loads(json.dumps(inputs))
     wrong_speaker["turns"][0]["agent_name"] = "Orbit"

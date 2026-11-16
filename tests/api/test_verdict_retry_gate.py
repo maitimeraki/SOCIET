@@ -24,6 +24,7 @@ from src.auth.deps import current_user
 from src.billing import units as billing_units
 from src.config.settings import get_settings
 from src.db.engine import get_db
+from src.llm.config_llm import get_llm_config
 from src.simulation.report_retry import (
     REFUSAL_IN_FLIGHT,
     REFUSAL_NOT_PENDING,
@@ -48,6 +49,7 @@ class World:
         self.releases: list[int] = []
         self.enqueued: list[tuple[str, dict]] = []
         self.audits: list[str] = []
+        self.audit_meta: list[dict] = []
         self.enqueue_error: Exception | None = None
 
 
@@ -97,6 +99,7 @@ def world(monkeypatch):
 
     async def audit_record(db, action, **kwargs):
         state.audits.append(action)
+        state.audit_meta.append(kwargs.get("meta") or {})
 
     monkeypatch.setattr(run_doc, "read_run_head", read_run_head)
     monkeypatch.setattr(run_doc, "verdict_job_in_flight", verdict_job_in_flight)
@@ -255,6 +258,7 @@ async def test_a_retry_reserves_the_reserve_and_enqueues_one_verdict_job(world, 
 
     assert response.status_code == 202
     assert response.json()["status"] == "queued"
+    assert response.json()["run_id"] == run_id
     assert world.reserves == [debate_api.verdict_retry_reserve_units()]
     [(kind, payload)] = world.enqueued
     assert kind == "verdict"
@@ -275,10 +279,39 @@ def reserve_setting(monkeypatch):
     get_settings.cache_clear()
 
 
-def test_the_reserve_is_three_typical_report_calls_by_default(reserve_setting):
+def test_the_reserve_is_three_report_calls_by_default(reserve_setting):
     reserve_setting(None)
 
-    assert debate_api.verdict_retry_reserve_units() == REPORT_MAX_ATTEMPTS * debate_api.UNITS_PER_CALL_TYPICAL
+    assert debate_api.verdict_retry_reserve_units() == REPORT_MAX_ATTEMPTS * debate_api.report_call_units()
+
+
+def test_the_report_call_is_sized_from_the_report_prompt_and_its_completion_cap(reserve_setting):
+    from math import ceil
+
+    from src.billing.units import units_for_tokens
+    from src.llm.config_llm import get_llm_config
+
+    reserve_setting(None)
+
+    expected = units_for_tokens(ceil(debate_api.report_prompt_chars() / 4), get_llm_config().verdict_max_tokens)
+    assert debate_api.report_call_units() == expected
+
+
+def test_the_hold_follows_the_report_completion_cap_not_the_profile_cap(reserve_setting, monkeypatch):
+    reserve_setting(None)
+    base = debate_api.verdict_retry_reserve_units()
+
+    try:
+        monkeypatch.setenv("PROFILE_MAX_TOKENS", "9000")
+        get_llm_config.cache_clear()
+        assert debate_api.verdict_retry_reserve_units() == base
+
+        monkeypatch.setenv("VERDICT_MAX_TOKENS", "6000")
+        get_llm_config.cache_clear()
+        assert debate_api.verdict_retry_reserve_units() > base
+    finally:
+        monkeypatch.undo()
+        get_llm_config.cache_clear()
 
 
 def test_a_configured_reserve_overrides_the_derived_one(reserve_setting):
@@ -349,6 +382,7 @@ async def test_a_racing_second_insert_is_refused_and_its_hold_released(world, us
     assert _refusal_code(response) == REFUSAL_IN_FLIGHT
     assert world.reserves == world.releases != []
     assert world.enqueued == []
+    assert world.audit_meta[-1]["reason"] == "verdict_job_in_flight"
 
 
 @pytest.mark.asyncio

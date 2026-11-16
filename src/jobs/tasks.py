@@ -26,6 +26,7 @@ from typing import Any
 
 from src.api.public_events import (
     METERING_STOPPED_MESSAGE,
+    REPORT_NOT_PRODUCED_MESSAGE,
     RUN_FAILED_MESSAGE,
     project_result,
 )
@@ -120,9 +121,12 @@ async def _verdict_core(job_id: str, payload: dict[str, Any]) -> None:
     from src.api import debate_api
 
     await _assert_reservation(job_id)
-    await debate_api.retry_verdict_report(
+    written = await debate_api.retry_verdict_report(
         run_id=str(payload["run_id"]), owner_id=str(payload["user_id"])
     )
+    if not written:
+        # The job's own outcome: a stable message, never the checks or the model's text.
+        await _set_status(job_id, "failed", error=REPORT_NOT_PRODUCED_MESSAGE)
 
 
 def _documents(payload: dict[str, Any]):

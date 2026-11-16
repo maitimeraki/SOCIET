@@ -748,13 +748,21 @@ async def count_active_jobs(user_id: uuid.UUID | str) -> int:
 
 
 async def sweep_interrupted() -> int:
-    """Mark rows still ``running`` as failed/'interrupted'.
+    """Mark rows still ``running`` as failed/'interrupted', and reap verdict retries that never ran.
 
     Single-process reality: at boot nothing is running, so a ``running`` row is
     a run this process can never resume (§7.10). The heartbeat variant waits
     for multi-replica (Task 8+). Returns the number of jobs swept.
+
+    A verdict retry still ``queued`` past the job timeout was never picked up: the process died between
+    its row write and its dispatch, or the RQ job was lost. It is failed and its hold released, so the
+    in-flight index and the owner's job cap are not blocked forever. The age is the verdict's own job
+    timeout, the same bound a running job gets.
     """
+    from src.jobs.queue import timeout_for  # lazy: queue imports this module
+
     now = _now()
+    stale_before = now - datetime.timedelta(seconds=timeout_for("verdict"))
     async with get_session_factory()() as session:
         jobs = await session.execute(
             update(Job)
@@ -766,5 +774,37 @@ async def sweep_interrupted() -> int:
             .where(Run.status == "running")
             .values(status="failed", finished_at=now)
         )
+        stuck = (
+            await session.execute(
+                select(Job.id, Job.user_id).where(
+                    Job.kind == "verdict",
+                    Job.status == "queued",
+                    Job.queued_at < stale_before,
+                )
+            )
+        ).all()
+        if stuck:
+            await session.execute(
+                update(Job)
+                .where(Job.id.in_([row.id for row in stuck]))
+                .values(status="failed", error="interrupted", finished_at=now)
+            )
         await session.commit()
-    return jobs.rowcount or 0
+    if stuck:
+        from src.audit import record as audit_record
+        from src.billing import units
+
+        for row in stuck:
+            async with get_session_factory()() as session:
+                released = await units.release_job_reservation(session, row.id)
+                if released:
+                    await audit_record(
+                        session,
+                        "units_release",
+                        user_id=row.user_id,
+                        target=str(row.id),
+                        meta={"released": released, "reason": "stuck_verdict_queued"},
+                    )
+                    await session.commit()
+            logger.warning("reaped a verdict retry that was never picked up (job %s)", row.id)
+    return (jobs.rowcount or 0) + len(stuck)

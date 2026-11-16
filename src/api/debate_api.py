@@ -143,6 +143,14 @@ class DebateJobResponse(BaseModel):
     status: str = "queued"
 
 
+class VerdictRetryResponse(BaseModel):
+    """The accepted verdict retry: its job (poll /api/v1/jobs/{job_id}) and the run whose report it rewrites."""
+
+    job_id: str
+    run_id: str
+    status: str = "queued"
+
+
 class DebateStatusResponse(BaseModel):
     """Response for debate status check."""
 
@@ -844,10 +852,40 @@ async def get_debate_roster(run_id: str, user: User = Depends(current_user)):
     return await run_doc.read_roster(run_id, user.id)
 
 
+#: The report prompt's size for the retry's hold, from the caps the report reads. These are estimates,
+#: not code caps (the question is not capped in code). The hold is an admission estimate: a report
+#: call that settles above it is charged to units_used as usual (units.py), never refused for it.
+REPORT_QUESTION_CHARS = 1_000
+REPORT_MAX_SEATS = 12  # DebateConfigRequest.max_agents, the plan cap
+REPORT_MAX_ROUNDS = 20  # DebateConfigRequest.max_rounds
+REPORT_SWITCH_CHARS = 200  # one switch line
+REPORT_SOURCE_OVERHEAD_CHARS = 120  # the evidence tag around one source text
+CHARS_PER_TOKEN = 4  # the convention UNITS_PER_CALL_TYPICAL uses
+
+
+def report_prompt_chars() -> int:
+    """Characters of one report prompt, estimated from the caps: the system prompt, the context at its
+    byte cap, the question, every final answer at the completion cap (max_output_tokens), every seat's
+    evidence at MAX_OWN items of MAX_ITEM_CHARS, and one switch line per seat per round."""
+    from src.simulation.evidence import MAX_ITEM_CHARS, MAX_OWN
+    from src.simulation.verdict import REPORT_SYSTEM
+
+    answers = REPORT_MAX_SEATS * get_llm_config().max_output_tokens * CHARS_PER_TOKEN
+    sources = REPORT_MAX_SEATS * MAX_OWN * (MAX_ITEM_CHARS + REPORT_SOURCE_OVERHEAD_CHARS)
+    switches = REPORT_MAX_ROUNDS * REPORT_MAX_SEATS * REPORT_SWITCH_CHARS
+    return len(REPORT_SYSTEM) + CONTEXT_MAX_BYTES + REPORT_QUESTION_CHARS + answers + sources + switches
+
+
+def report_call_units() -> int:
+    """Units one report call holds: its estimated prompt, and verdict_max_tokens of completion."""
+    prompt_tokens = math.ceil(report_prompt_chars() / CHARS_PER_TOKEN)
+    return billing_units.units_for_tokens(prompt_tokens, get_llm_config().verdict_max_tokens)
+
+
 def verdict_retry_reserve_units() -> int:
-    """The retry's reserve: the report's maximum attempts at the typical units one call settles."""
+    """The retry's hold: REPORT_MAX_ATTEMPTS report calls at report_call_units(), unless configured."""
     configured = get_settings().verdict_retry_reserve_units
-    return configured if configured is not None else REPORT_MAX_ATTEMPTS * UNITS_PER_CALL_TYPICAL
+    return configured if configured is not None else REPORT_MAX_ATTEMPTS * report_call_units()
 
 
 def verdict_retry_estimate(units_remaining: int) -> int:
@@ -881,14 +919,14 @@ async def _release_hold(db: AsyncSession, *, user_id, reservation, ip, estimate:
     )
 
 
-async def retry_verdict_report(run_id: str, owner_id: str) -> None:
+async def retry_verdict_report(run_id: str, owner_id: str) -> bool:
     """Rebuild a not-produced report from the run's own rows, and write it if it now passes.
 
     No debate runs. The board comes from the stored round events, the published records and the
     turn log; the report comes from the one writer (VerdictSynthesizer.asynthesize). A report that
     still fails its checks leaves the run not_produced, with nothing written. A rebuild that does
     not reproduce the stored board raises RetryDataError before any LLM call. MeteringError is not
-    caught here.
+    caught here. Returns True when the report was written, False when it was not produced.
     """
     from src.llm.client import LLMClient
     from src.simulation.orchestrator import result_from_verdict
@@ -911,7 +949,7 @@ async def retry_verdict_report(run_id: str, owner_id: str) -> None:
     dataset_id = str(run.get("dataset_id") or "")
     rounds = rebuild_rounds(run["events"], retry_inputs)
     profiles = rebuild_profiles(await run_doc.read_published_records(run_id), dataset_id)
-    check_rebuild(rounds, profiles, stored)
+    check_rebuild(rounds, profiles, stored, retry_inputs, run.get("query") or "")
 
     converged = bool(stored["converged"])
     verdict = await VerdictSynthesizer().asynthesize(
@@ -924,7 +962,7 @@ async def retry_verdict_report(run_id: str, owner_id: str) -> None:
         converged=converged,
     )
     if verdict.report.get("status") != PRODUCED:
-        return
+        return False
     result = result_from_verdict(
         verdict,
         converged=converged,
@@ -951,9 +989,10 @@ async def retry_verdict_report(run_id: str, owner_id: str) -> None:
             ),
         }
     )
+    return True
 
 
-@router.post("/debates/{run_id}/verdict/retry", response_model=DebateJobResponse, status_code=202)
+@router.post("/debates/{run_id}/verdict/retry", response_model=VerdictRetryResponse, status_code=202)
 @limiter.limit(lambda: get_settings().rate_limit_verdict_retry)
 async def retry_verdict(
     run_id: str,
@@ -1019,7 +1058,8 @@ async def retry_verdict(
         )
     except run_doc.VerdictJobInFlight as exc:
         await _release_hold(
-            db, user_id=user_id, reservation=reservation, ip=ip, estimate=estimate, reason="enqueue_failed"
+            db, user_id=user_id, reservation=reservation, ip=ip, estimate=estimate,
+            reason="verdict_job_in_flight",
         )
         raise _refused(REFUSAL_IN_FLIGHT) from exc
     except Exception:
@@ -1044,7 +1084,7 @@ async def retry_verdict(
     await audit_record(
         db, "verdict_retry", user_id=user_id, target=run_id, ip=ip, meta={"job_id": job_id}
     )
-    return DebateJobResponse(job_id=job_id, status="queued")
+    return VerdictRetryResponse(job_id=job_id, run_id=run_id, status="queued")
 
 
 # --- a report citation's source text (spec §0B.3 rule 1) ---------------------

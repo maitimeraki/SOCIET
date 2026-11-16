@@ -66,3 +66,34 @@ async def test_a_finished_retry_frees_the_run_for_a_new_one(run):
     assert not await run_doc.verdict_job_in_flight(run.run_id)
     await run_doc.write_verdict_job(**_insert(run, str(uuid.uuid4())))
     assert await run_doc.verdict_job_in_flight(run.run_id)
+
+
+async def test_the_reaper_fails_a_stuck_queued_retry_and_releases_its_hold(run):
+    from src.db.models import Job
+
+    stuck = str(uuid.uuid4())
+    await run_doc.write_verdict_job(**{**_insert(run, stuck), "created_at": "2020-01-01T00:00:00+00:00"})
+
+    await run_doc.sweep_interrupted()
+
+    async with get_session_factory()() as session:
+        row = await session.get(Job, uuid.UUID(stuck))
+    assert row.status == "failed" and row.error == "interrupted"
+    assert row.reserved_units == 0
+    assert not await run_doc.verdict_job_in_flight(run.run_id)
+    await run_doc.write_verdict_job(**_insert(run, str(uuid.uuid4())))
+    assert await run_doc.verdict_job_in_flight(run.run_id)
+
+
+async def test_the_reaper_leaves_a_recent_queued_retry_alone(run):
+    from src.db.models import Job
+
+    recent = str(uuid.uuid4())
+    await run_doc.write_verdict_job(**_insert(run, recent))
+
+    await run_doc.sweep_interrupted()
+
+    async with get_session_factory()() as session:
+        row = await session.get(Job, uuid.UUID(recent))
+    assert row.status == "queued" and row.reserved_units == 3
+    assert await run_doc.verdict_job_in_flight(run.run_id)

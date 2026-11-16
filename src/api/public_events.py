@@ -14,6 +14,11 @@ logger = logging.getLogger(__name__)
 # What a client sees when a run or job fails for a reason we did not author.
 # The exception text stays in the server log.
 RUN_FAILED_MESSAGE = "The run failed. Try again, or contact support with the run id."
+# What a verdict retry's job says when the report still fails its checks. The run stays not_produced;
+# the checks and the model's text stay in the server log.
+REPORT_NOT_PRODUCED_MESSAGE = (
+    "The report could not be produced. The run is unchanged; you can retry again."
+)
 # What the owner sees when metering stops a run: the accounting state, authored here, never the raw reason.
 METERING_STOPPED_MESSAGE = (
     "This run stopped: the usage limit for this period was reached, or usage could not be recorded. "

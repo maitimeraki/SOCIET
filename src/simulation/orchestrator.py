@@ -555,7 +555,7 @@ class DebateOrchestrator:
         # Step 4: final stances, read from the same consensus window as the verdict. An agent
         # with no turn in that window has no position: ABSTAIN, never NEUTRAL.
         final_stances = board_final_stances(rounds, profiles)
-        retry_inputs = build_retry_inputs(rounds, scenario)
+        retry_inputs = build_retry_inputs(rounds, profiles, query, scenario)
         if retry_inputs is None:
             logger.warning("run %s: turn log over its bound; the report cannot be retried", dataset_id)
 

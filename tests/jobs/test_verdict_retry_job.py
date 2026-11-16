@@ -15,7 +15,11 @@ from unittest.mock import AsyncMock
 import pytest
 
 from src.api import debate_api, run_doc
-from src.api.public_events import METERING_STOPPED_MESSAGE, RUN_FAILED_MESSAGE
+from src.api.public_events import (
+    METERING_STOPPED_MESSAGE,
+    REPORT_NOT_PRODUCED_MESSAGE,
+    RUN_FAILED_MESSAGE,
+)
 from src.billing import units
 from src.billing.metering import MeteringError
 from src.jobs import tasks
@@ -111,7 +115,7 @@ def board():
 @pytest.fixture
 def store(board, monkeypatch):
     rounds, profiles = board
-    retry_inputs = json.loads(json.dumps(rr.build_retry_inputs(rounds, "")))
+    retry_inputs = json.loads(json.dumps(rr.build_retry_inputs(rounds, profiles, "Should we expand?", "")))
     fake = _Store(rounds, profiles, _stored(rounds, profiles, retry_inputs))
     head = {k: v for k, v in fake.run.items() if k != "events"}
 
@@ -207,6 +211,8 @@ async def test_a_report_that_still_fails_leaves_the_run_not_produced_and_release
     assert len(calls) == 1
     store.write.assert_not_awaited()
     store.released.assert_awaited_once()
+    outcomes = [call for call in store.status.await_args_list if call.args[1] == "failed"]
+    assert [call.kwargs["error"] for call in outcomes] == [REPORT_NOT_PRODUCED_MESSAGE]
 
 
 @pytest.mark.asyncio
@@ -255,5 +261,18 @@ def test_the_verdict_kind_is_registered_as_a_metered_job():
     assert tasks._SUCCESS_STATUS["verdict"] == "completed"
 
 
-def test_the_verdict_estimate_is_the_reserve_derived_from_the_typical_call():
-    assert debate_api.verdict_retry_reserve_units() == 3 * debate_api.UNITS_PER_CALL_TYPICAL
+def test_the_verdict_estimate_is_three_report_calls():
+    assert debate_api.verdict_retry_reserve_units() == 3 * debate_api.report_call_units()
+
+
+@pytest.mark.asyncio
+async def test_a_board_fingerprint_that_differs_from_the_debate_is_refused_before_any_call(store, monkeypatch):
+    calls = _spy_write_report(monkeypatch, PRODUCED)
+    store.run["result"]["retry_inputs"]["board"]["sources"] = ["1"]
+
+    with pytest.raises(rr.RetryDataError):
+        await tasks.execute("verdict", store.job_id, store.payload)
+
+    assert calls == []
+    store.write.assert_not_awaited()
+    store.released.assert_awaited_once()

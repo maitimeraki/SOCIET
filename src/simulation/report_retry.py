@@ -13,7 +13,12 @@ from src.persona.agent import Agent, PersonaIdentity, Stance
 from src.simulation.evidence import EvidenceItem, RelationItem
 from src.simulation.pair_turn import AgentTurn, RoundResult
 from src.simulation.turn_protocol import consensus_window, weighted_share
-from src.simulation.verdict import NOT_PRODUCED, board_facts, board_final_stances
+from src.simulation.verdict import (
+    NOT_PRODUCED,
+    board_facts,
+    board_final_stances,
+    build_report_bundle,
+)
 
 #: The most turn-log entries a debate keeps. The plan caps bound a run far under this (agents
 #: <= 12, pairs <= agents, rounds <= 20: at most 480 turns). A run over it keeps no retry inputs
@@ -35,8 +40,27 @@ class RetryDataError(ValueError):
     """The stored run cannot rebuild its report exactly. The reason is logged, never served."""
 
 
-def build_retry_inputs(rounds: Sequence[RoundResult], scenario: str) -> Optional[dict[str, Any]]:
-    """The backend-only inputs of a retry, or None when the turn log is over RETRY_TURN_LOG_MAX."""
+def board_fingerprint(rounds: Sequence[RoundResult], profiles: Sequence[Agent], query: str, scenario: str) -> dict[str, Any]:
+    """What the report's bundle is made of, as the debate sees it: the source numbers, each citizen's
+    name, position and cited source ids, and the switch lines. The rebuild must reproduce it exactly."""
+    bundle, _refs = build_report_bundle(list(rounds), list(profiles), query, scenario)
+    return {
+        "sources": sorted(bundle.sources, key=int),
+        "citizens": [
+            [citizen.name, citizen.position.value if citizen.position is not None else None, list(citizen.source_ids)]
+            for citizen in bundle.citizens
+        ],
+        "switches": list(bundle.switches),
+    }
+
+
+def build_retry_inputs(
+    rounds: Sequence[RoundResult], profiles: Sequence[Agent], query: str, scenario: str
+) -> Optional[dict[str, Any]]:
+    """The backend-only inputs of a retry, or None when the turn log is over RETRY_TURN_LOG_MAX.
+
+    `board` is the bundle fingerprint at debate time: check_rebuild compares the rebuilt bundle with it.
+    """
     turns = [
         {
             "agent_name": turn.agent_name,
@@ -50,7 +74,11 @@ def build_retry_inputs(rounds: Sequence[RoundResult], scenario: str) -> Optional
     ]
     if len(turns) > RETRY_TURN_LOG_MAX:
         return None
-    return {"context": scenario, "turns": turns}
+    return {
+        "context": scenario,
+        "turns": turns,
+        "board": board_fingerprint(rounds, profiles, query, scenario),
+    }
 
 
 def retry_refusal(result: Any) -> Optional[str]:
@@ -137,10 +165,20 @@ def rebuild_rounds(events: Sequence[Mapping[str, Any]], retry_inputs: Mapping[st
     return rounds
 
 
-def check_rebuild(rounds: Sequence[RoundResult], profiles: Sequence[Agent], stored: Mapping[str, Any]) -> None:
-    """Refuse a rebuild that does not reproduce the stored board: the rounds, the final stances,
-    the consensus share and the position must equal what the debate stored, and every speaker must
-    be a seated agent. A mismatch means the rows are not the debate's, so no report is written."""
+def check_rebuild(
+    rounds: Sequence[RoundResult],
+    profiles: Sequence[Agent],
+    stored: Mapping[str, Any],
+    retry_inputs: Mapping[str, Any],
+    query: str,
+) -> None:
+    """Refuse a rebuild that does not reproduce the stored board. Checked before any LLM call:
+
+    the round count, the final stances (the seated set, by name), the consensus share and the
+    position must equal what the debate stored; every turn speaker must be seated; and the rebuilt
+    bundle's source numbers, citizens (name, position, cited sources) and switch lines must equal
+    the fingerprint the debate stored in retry_inputs. A mismatch means the rows are not the debate's.
+    """
     names = [profile.identity.name for profile in profiles]
     if len(set(names)) != len(names):
         raise RetryDataError("two seated agents share a name")
@@ -161,3 +199,15 @@ def check_rebuild(rounds: Sequence[RoundResult], profiles: Sequence[Agent], stor
     expected_position = facts.position.value if facts.position is not None else None
     if stored.get("position") != expected_position:
         raise RetryDataError("the rebuilt position differs from the stored one")
+    stored_board = retry_inputs.get("board")
+    if not isinstance(stored_board, Mapping):
+        raise RetryDataError("the stored retry inputs carry no board fingerprint")
+    if board_fingerprint(rounds, profiles, query, str(retry_inputs.get("context") or "")) != json_normal(stored_board):
+        raise RetryDataError("the rebuilt bundle differs from the stored one")
+
+
+def json_normal(value: Any) -> Any:
+    """The JSON shape of a value, so tuples and lists compare as the store returns them."""
+    import json
+
+    return json.loads(json.dumps(value))
