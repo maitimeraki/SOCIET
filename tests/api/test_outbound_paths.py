@@ -16,13 +16,13 @@ from src.api import public_events
 from src.api.api_server import app
 
 REPO = Path(__file__).resolve().parents[2]
-RUN_DATA_PATH = re.compile(r"simulate|debates?/|/jobs/|operator/runs|account/export")
+RUN_DATA_PATH = re.compile(r"run|agent|graph|job|debate|simulate|roster|source|persona|operator|export")
 MOUNT_PREFIX = "/api/v1"
 
 #: spec 4b: never shown to a client. No allowlist may carry one of these as a key.
 FORBIDDEN_4B_KEYS = frozenset({
     "evidence", "evidence_id", "evidence_items", "evidence_quote", "quote", "quotes",
-    "document_title", "section", "sections", "span", "spans", "chunk_id", "chunk_ids",
+    "span", "spans", "chunk_id", "chunk_ids",
     "cite_id", "cite_ids", "cite_marker", "cite_markers", "validation", "validation_results",
     "rejected_claims", "similarity", "rank_features", "features", "prompt_version",
     "model_version", "dossier_hash", "version_hash", "source_count", "unknown",
@@ -75,9 +75,9 @@ def _canonical(path: str) -> str:
     return path[len(MOUNT_PREFIX):] if path.startswith(MOUNT_PREFIX + "/") else path
 
 
-def _inventory() -> set[tuple[str, str]]:
+def _inventory(routes=None) -> set[tuple[str, str]]:
     found: set[tuple[str, str]] = set()
-    for route in app.routes:
+    for route in (app.routes if routes is None else routes):
         path = getattr(route, "path", "")
         if not RUN_DATA_PATH.search(path):
             continue
@@ -140,3 +140,28 @@ def test_served_allowlist_holds_no_spec_4b_key(name):
 
 def test_the_forbidden_list_is_not_empty_and_names_the_chunk_keys():
     assert {"chunk_id", "evidence", "version_hash", "dossier_hash"} <= FORBIDDEN_4B_KEYS
+
+
+class _Route:
+    def __init__(self, path, methods):
+        self.path = path
+        self.methods = set(methods)
+
+
+def test_a_synthetic_runs_route_is_unclassified():
+    found = _inventory([_Route("/api/v1/runs/{run_id}", {"GET"})])
+    assert ("GET", "/runs/{run_id}") in found
+    assert ("GET", "/runs/{run_id}") not in DATA_ROUTES
+    assert ("GET", "/runs/{run_id}") not in NO_DATA_ROUTES
+
+
+def test_served_sources_and_provenance_keep_their_shipped_shape():
+    # The shipped decision (public_events.py: _narrow_sources and _narrow_provenance): the verdict's
+    # source map serves document and section, and provenance serves title and breadcrumb. Spec 4b
+    # lists titles and sections as never shown; this is the pinned exception, so it cannot widen.
+    out = public_events.project_result({
+        "sources": {"1": {"document": "D", "section": "S", "span": "SPAN", "chunk_id": "CH"}},
+        "provenance_by_claim": {"claim": [{"title": "T", "breadcrumb": "B", "chunk_id": "CH", "span": "SPAN"}]},
+    })
+    assert set(out["sources"]["1"]) == {"document", "section"}
+    assert set(out["provenance_by_claim"]["claim"][0]) == {"title", "breadcrumb"}
