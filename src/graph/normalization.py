@@ -303,6 +303,13 @@ class GraphNormalizationStage:
         if not labels:
             raise ValueError("No common label/type across nodes - abort merge")
 
+        # The merge is irreversible and APOC matches by element id alone: refuse any group whose
+        # members do not all carry the survivor's dataset_id, before anything is written.
+        dataset_id = survivors.properties.get("dataset_id")
+        if dataset_id is None or any(n.properties.get("dataset_id") != dataset_id for n in group):
+            logger.warning("destructive merge refused: group members do not share one dataset_id")
+            return {"audit_id": None, "aggregate_confidence": agg, "status": "refused"}
+
         # Create audit record pre-merge (node ids and properties)
         audit_id = str(uuid.uuid4())
         pre_snapshot = [
@@ -327,7 +334,7 @@ class GraphNormalizationStage:
                         """,
                         {
                             "audit_id": audit_id,
-                            "dataset_id": survivors.properties.get("dataset_id"),
+                            "dataset_id": dataset_id,
                             "author": merge_author,
                             "agg": agg,
                             "pre_snapshot": pre_snapshot,
@@ -339,7 +346,7 @@ class GraphNormalizationStage:
                     try:
                         await tx.run(
                             """
-                            MATCH (n) WHERE elementId(n) IN $node_ids
+                            MATCH (n) WHERE elementId(n) IN $node_ids AND n.dataset_id = $dataset_id
                             WITH collect(n) AS nodes
                             CALL apoc.refactor.mergeNodes(nodes, {properties: "combine", mergeRels: true}) YIELD node AS merged
                             SET merged.merged_from = $merged_from, merged.merge_audit = $audit_id
@@ -347,6 +354,7 @@ class GraphNormalizationStage:
                             """,
                             {
                                 "node_ids": node_ids,
+                                "dataset_id": dataset_id,
                                 "merged_from": [n.node_id for n in group],
                                 "audit_id": audit_id,
                             },
@@ -392,7 +400,8 @@ class GraphNormalizationStage:
             created_at: timestamp(),
             group: $group,
             signals: $signals,
-            reason: $reason
+            reason: $reason,
+            dataset_id: $dataset_id
         })
         RETURN q.review_id AS id
         """)
@@ -407,6 +416,7 @@ class GraphNormalizationStage:
                 "group": group_payload,
                 "signals": signals,
                 "reason": reason,
+                "dataset_id": group[0].properties.get("dataset_id") if group else None,
             },
         )
         return review_id
