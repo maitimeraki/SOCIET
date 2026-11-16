@@ -1,10 +1,11 @@
 import { Fragment, useEffect, useState } from 'react'
 import { getDebateSource } from '../../api/rest'
-import type { DebateSource } from '../../api/rest'
 import type { ReportSources } from '../../run/events'
 import Drawer from '../ui/Drawer'
 import { inlineParts, reportBlocks } from './reportBlocks'
 import type { ReportBlock } from './reportBlocks'
+import { loadSourceView } from './sourceView'
+import type { SourceView } from './sourceView'
 
 export interface AnswerDocumentProps {
   runId: string
@@ -77,41 +78,41 @@ function Inline({ text, sources, onOpen }: { text: string; sources: ReportSource
   return (
     <>
       {inlineParts(text).map((part, index) => {
-        if (part.kind === 'bold') return <strong key={index} className="font-semibold">{part.text}</strong>
-        if (part.kind === 'source' && Object.prototype.hasOwnProperty.call(sources, part.n)) {
-          return (
+        const content =
+          part.kind === 'source' && Object.prototype.hasOwnProperty.call(sources, part.n) ? (
             <button
-              key={index}
               type="button"
-              aria-label={`Open source ${part.n}`}
+              aria-label={`[${part.n}] open source`}
               onClick={() => onOpen(part.n)}
-              className="font-mono text-micro text-ink-2 underline decoration-rule underline-offset-4 hover:text-ink hover:decoration-accent"
+              className="inline-flex min-h-6 min-w-6 items-center justify-center font-mono text-micro text-ink-2 underline decoration-rule underline-offset-4 hover:text-ink hover:decoration-accent"
             >
               [{part.n}]
             </button>
+          ) : part.kind === 'source' ? (
+            part.raw
+          ) : (
+            part.text
           )
-        }
-        return <Fragment key={index}>{part.kind === 'source' ? part.raw : part.text}</Fragment>
+        return part.strong ? (
+          <strong key={index} className="font-semibold">
+            {content}
+          </strong>
+        ) : (
+          <Fragment key={index}>{content}</Fragment>
+        )
       })}
     </>
   )
 }
 
-type Loaded = { phase: 'loading' } | { phase: 'ready'; source: DebateSource } | { phase: 'unavailable' }
-
-/** One cited passage, read on demand. Every failure reads the same way: the source is unavailable. */
+/** One cited passage, read on demand. The read is `loadSourceView`; this only shows its state. */
 function SourceText({ runId, n }: { runId: string; n: string }) {
-  const [loaded, setLoaded] = useState<Loaded>({ phase: 'loading' })
+  const [loaded, setLoaded] = useState<SourceView>({ phase: 'loading' })
   useEffect(() => {
     let cancelled = false
-    getDebateSource(runId, n).then(
-      (source) => {
-        if (!cancelled) setLoaded({ phase: 'ready', source })
-      },
-      () => {
-        if (!cancelled) setLoaded({ phase: 'unavailable' })
-      },
-    )
+    void loadSourceView(getDebateSource, runId, n).then((view) => {
+      if (!cancelled) setLoaded(view)
+    })
     return () => {
       cancelled = true
     }

@@ -36,9 +36,18 @@ describe('the export is the markdown as given, then the sources it cites', () =>
     expect(reportMarkdown({ ...REPORT, reportStatus: 'not_produced', markdown: null, sources: {} })).toBe('')
   })
 
-  it('never carries an id: the sources are the public document and section', () => {
-    const out = reportMarkdown(REPORT)
-    expect(out).not.toMatch(/chunk|node|evidence|[0-9a-f]{8}-[0-9a-f]{4}/i)
+  it('never carries an id, even when a source arrives with one, in any export', () => {
+    const leaky = {
+      ...REPORT,
+      sources: {
+        '1': { document: 'Grease-trap permit', section: 'Permits', chunk_id: 'chunk-abc', node_id: 'node-def', evidence_id: 'evidence-ghi' },
+      },
+    } as unknown as ReportModel
+    const exported = [reportMarkdown(leaky), reportHtml(leaky), reportJson(leaky)].join('\n')
+    for (const id of ['chunk-abc', 'node-def', 'evidence-ghi', 'chunk_id', 'node_id', 'evidence_id']) {
+      expect(exported, id).not.toContain(id)
+    }
+    expect(reportMarkdown(leaky)).toContain('[1] Grease-trap permit — Permits')
   })
 })
 

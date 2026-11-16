@@ -1,4 +1,5 @@
 import type { ReportSource, ReportSources, ReportStatus } from '../../run/events'
+import { narrowSources } from '../../run/reducer'
 import { inlineParts, reportBlocks } from './reportBlocks'
 
 /**
@@ -15,8 +16,8 @@ export interface ReportModel {
 }
 
 /** Citation entries in citation order. */
-export function orderedSources(sources: ReportSources): [string, ReportSource][] {
-  return Object.entries(sources).sort(([a], [b]) => Number(a) - Number(b))
+function orderedSources(sources: ReportSources): [string, ReportSource][] {
+  return Object.entries(narrowSources(sources)).sort(([a], [b]) => Number(a) - Number(b))
 }
 
 const sourceLabel = (source: ReportSource): string =>
@@ -35,7 +36,10 @@ export function reportHtml(report: ReportModel): string {
     value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
   const inline = (text: string) =>
     inlineParts(text)
-      .map((part) => (part.kind === 'bold' ? `<strong>${escape(part.text)}</strong>` : escape(part.kind === 'source' ? part.raw : part.text)))
+      .map((part) => {
+        const html = escape(part.kind === 'source' ? part.raw : part.text)
+        return part.strong ? `<strong>${html}</strong>` : html
+      })
       .join('')
   const body = (report.markdown === null ? [] : reportBlocks(report.markdown))
     .map((block) => {
@@ -61,5 +65,5 @@ export function reportHtml(report: ReportModel): string {
 
 /** The model, as data, with the same document as a readable string. */
 export function reportJson(report: ReportModel): string {
-  return JSON.stringify({ ...report, document: reportMarkdown(report) }, null, 2)
+  return JSON.stringify({ ...report, sources: narrowSources(report.sources), document: reportMarkdown(report) }, null, 2)
 }

@@ -1,15 +1,9 @@
-import type { AgentView, ClusterSummary, ReportSources, ReportStatus, Stance, TurnInfo } from './events'
-import { asStance } from './events'
+import type { AgentView, ReportSources, ReportStatus, Stance, TurnInfo } from './events'
 import type { RunState } from './reducer'
 
 /** The display order of the stances (legend, tape segments, grouped lists). */
 export const STANCE_ORDER: Stance[] = ['POSITIVE', 'NEUTRAL', 'ABSTAIN', 'NEGATIVE']
 
-/**
- * The one tie-break for a dominant position, shared with the server (turn_protocol.dominant_stance):
- * a tie goes to the first of these. Display order (STANCE_ORDER) does not decide a verdict.
- */
-export const POSITION_TIE_ORDER: Stance[] = ['POSITIVE', 'NEGATIVE', 'NEUTRAL']
 
 // ---------------------------------------------------------------------------
 // Roster (profile creation) — the ①→④ sequence state
@@ -143,51 +137,21 @@ export function streamItems(state: RunState): StreamItem[] {
 // ---------------------------------------------------------------------------
 
 export interface VerdictView {
-  /** Null when no position carries weight: there is no verdict stance. */
-  stance: Stance | null
-  confidence: number | null
-  converged: boolean
   title: string | null
   markdown: string | null
   reportStatus: ReportStatus
   sources: ReportSources
-  clusters: ClusterSummary[]
-  finalStances: { agent: string; stance: Stance }[]
-  supporting: string[]
-  opposing: string[]
   warnings: string[]
-}
-
-/** The dominant stance by weight, the server's rule: ties in POSITION_TIE_ORDER, and null with no weight. */
-export function dominantStance(clusters: ClusterSummary[]): Stance | null {
-  let best: ClusterSummary | null = null
-  for (const stance of POSITION_TIE_ORDER) {
-    const cluster = clusters.find((entry) => entry.stance === stance)
-    if (cluster && cluster.total_weight > 0 && (best === null || cluster.total_weight > best.total_weight)) best = cluster
-  }
-  return best?.stance ?? null
 }
 
 export function verdictView(state: RunState): VerdictView | null {
   const verdict = state.verdict
   if (!verdict) return null
-  const clusters = verdict.clusters
-    ? STANCE_ORDER.map((stance) => verdict.clusters![stance]).filter((cluster): cluster is ClusterSummary => Boolean(cluster))
-    : []
-  const stance = dominantStance(clusters)
   return {
-    stance,
-    // No stance means no share: the filed confidence belongs to a verdict that exists.
-    confidence: stance === null ? null : verdict.confidence,
-    converged: verdict.converged,
     title: verdict.title,
     markdown: verdict.markdown,
     reportStatus: verdict.reportStatus,
     sources: verdict.sources,
-    clusters,
-    finalStances: Object.entries(verdict.finalStances).map(([agent, value]) => ({ agent, stance: asStance(value) })),
-    supporting: verdict.supporting,
-    opposing: verdict.opposing,
     warnings: state.warnings,
   }
 }

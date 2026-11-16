@@ -45,16 +45,22 @@ describe('the report reads as given — the client adds no section of its own', 
 })
 
 describe('the citation markers', () => {
-  it('turns a marker that names a source into a button for that source', () => {
+  it('turns a marker that names a source into a button whose name carries its visible number', () => {
     const html = render()
-    expect(html).toContain('aria-label="Open source 1"')
-    expect(html).toMatch(/<button[^>]*>\[1\]<\/button>/)
+    expect(html).toMatch(/<button[^>]*aria-label="\[1\] open source"[^>]*>\[1\]<\/button>/)
   })
 
   it('leaves a marker with no source as plain text', () => {
     const html = render()
     expect(html).toContain('[9]')
-    expect(html).not.toContain('aria-label="Open source 9"')
+    expect(html).not.toContain('aria-label="[9] open source"')
+  })
+
+  it('keeps the button for a citation inside bold', () => {
+    const html = renderToStaticMarkup(
+      <AnswerDocument runId="r1" markdown="Point: A **firm [1] claim** holds (from the documents)" sources={SOURCES} />,
+    )
+    expect(html).toMatch(/<strong[^>]*><button[^>]*>\[1\]<\/button><\/strong>/)
   })
 
   it('shows no drawer until a source is opened', () => {

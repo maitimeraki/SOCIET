@@ -6,7 +6,7 @@ import type { Stance } from '../run/events'
 import { reportFromState } from '../components/run/reportFromState'
 import type { ReportModel } from '../components/run/exportReport'
 import ReportDocument from '../components/run/ReportDocument'
-import { buttonClasses } from '../components/ui/Button'
+import Button, { buttonClasses } from '../components/ui/Button'
 import EmptyState from '../components/ui/EmptyState'
 import ErrorState from '../components/ui/ErrorState'
 import Skeleton from '../components/ui/Skeleton'
@@ -30,8 +30,8 @@ export interface VerdictsPageViewProps {
   failed: boolean
   failDetail?: string
   onRetry: () => void
-  /** A retried report was written: the page reads its verdicts again. */
-  onRestored: () => void
+  /** A retried report was written: the page reads its verdicts again. Resolves once the reload has landed. */
+  onRestored: () => Promise<void>
 }
 
 export function VerdictsPageView({ latest, earlier, loading, failed, failDetail, onRetry, onRestored }: VerdictsPageViewProps) {
@@ -53,6 +53,11 @@ export function VerdictsPageView({ latest, earlier, loading, failed, failDetail,
         <div className="grid gap-6 lg:grid-cols-12 print:block">
           <div className="lg:col-span-8 print:block">
             <ReportDocument report={latest.report} runId={latest.runId} onRestored={onRestored} />
+            {latest.report.reportStatus === 'produced' ? (
+              <Button variant="ghost" className="mt-6 print:hidden" onClick={() => window.print()}>
+                Export document
+              </Button>
+            ) : null}
           </div>
           <aside className="lg:col-span-4 print:hidden">
             <h2 className="mb-2 font-ui text-label uppercase tracking-[0.09em] text-ink-3">
@@ -110,15 +115,19 @@ export async function loadVerdicts() {
   // into one document read per run.
   // §11.3 — the sheet is the same `reportFromState` construction the run page renders and every
   // export serializes; the page never re-derives the reasoning or the sources.
+  // A produced report headlines the page. A run whose report was not produced (a legacy run included)
+  // headlines only when no produced one exists, and reads the rest of the archive before it does.
   let latest: VerdictsPageViewProps['latest'] = null
   for (const entry of answered) {
     try {
       const doc = await getRun(entry.run_id)
       const report = reportFromState(applyStoredResult(fold(doc.events), doc.result))
-      if (report) {
+      if (!report) continue
+      if (report.reportStatus === 'produced') {
         latest = { runId: entry.run_id, report }
         break
       }
+      latest ??= { runId: entry.run_id, report }
     } catch (error) {
       // Diagnosable without leaking the server's text into the page.
       console.error('ResultsPage: could not read one verdict.', error)
@@ -170,6 +179,15 @@ export default function ResultsPage() {
     }
   }, [attempt])
 
+  // A retry wrote a report: read the archive again, and keep the page as it was if the read fails.
+  const refreshVerdicts = async () => {
+    try {
+      setData(await loadVerdicts())
+    } catch (error) {
+      console.error('ResultsPage: could not reload verdicts.', error)
+    }
+  }
+
   return (
     <VerdictsPageView
       latest={data.latest}
@@ -181,7 +199,7 @@ export default function ResultsPage() {
         setFailed(false)
         setAttempt((value) => value + 1)
       }}
-      onRestored={() => setAttempt((value) => value + 1)}
+      onRestored={refreshVerdicts}
     />
   )
 }

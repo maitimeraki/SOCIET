@@ -6,18 +6,20 @@ import Label from '../ui/Label'
 import AnswerDocument from './AnswerDocument'
 import type { ReportModel } from './exportReport'
 import {
+  RETRY_COPY,
   RETRY_MAX_POLLS,
   RETRY_POLL_MS,
-  RETRY_SLOW_COPY,
-  failedRetryMessage,
+  forgetRetry,
+  knownRetry,
+  rememberRetry,
   retryMessage,
   retryOutcome,
 } from './reportRetry'
 
 /**
- * The Report tab's document. A produced report is the backend's markdown as given; a report that was
- * not produced says so and offers the one retry. `onRestored` runs once a retry has written the report,
- * so the parent can read the run again.
+ * The Report document. A produced report is the backend's markdown as given; a report whose status is
+ * `not_produced` says so and offers the one retry. `onRestored` resolves once the parent has read the
+ * run again after a retry wrote the report.
  */
 export default function ReportDocument({
   report,
@@ -26,15 +28,15 @@ export default function ReportDocument({
 }: {
   report: ReportModel
   runId: string
-  onRestored: () => void
+  onRestored: () => Promise<void>
 }) {
   return (
     <div className="max-w-[760px] space-y-6">
-      {report.markdown !== null ? (
+      {report.reportStatus === 'not_produced' ? (
+        <NotProduced key={runId} runId={runId} onRestored={onRestored} />
+      ) : report.markdown !== null ? (
         <AnswerDocument runId={runId} markdown={report.markdown} sources={report.sources} />
-      ) : (
-        <NotProduced runId={runId} onRestored={onRestored} />
-      )}
+      ) : null}
       {report.warnings.length > 0 ? (
         <section className="border-t border-rule pt-6">
           <Label as="h3">Warnings</Label>
@@ -47,10 +49,14 @@ export default function ReportDocument({
   )
 }
 
-/** The not-produced state: the retry is queued as a job, polled a bounded number of times, then the run is read again. */
-function NotProduced({ runId, onRestored }: { runId: string; onRestored: () => void }) {
-  const [busy, setBusy] = useState(false)
-  const [jobId, setJobId] = useState<string | null>(null)
+/**
+ * The not-produced state. A retry is queued as a job and polled a bounded number of times. A job that
+ * completes reloads the run: if the report is now produced this state leaves the page; if it is not,
+ * the state says so. A retry queued earlier in this session resumes its polling on return.
+ */
+function NotProduced({ runId, onRestored }: { runId: string; onRestored: () => Promise<void> }) {
+  const [jobId, setJobId] = useState<string | null>(() => knownRetry(runId))
+  const [busy, setBusy] = useState(() => knownRetry(runId) !== null)
   const [message, setMessage] = useState<string | null>(null)
   const restored = useRef(onRestored)
   useEffect(() => {
@@ -62,7 +68,8 @@ function NotProduced({ runId, onRestored }: { runId: string; onRestored: () => v
     let cancelled = false
     let polls = 0
     let timer: ReturnType<typeof setTimeout> | undefined
-    const settle = (text: string | null) => {
+    const settle = (text: string) => {
+      forgetRetry(runId)
       setJobId(null)
       setBusy(false)
       setMessage(text)
@@ -76,12 +83,16 @@ function NotProduced({ runId, onRestored }: { runId: string; onRestored: () => v
       if (job === null || cancelled) return
       const outcome = retryOutcome(job.status)
       if (outcome === 'complete') {
-        settle(null)
-        restored.current()
+        try {
+          await restored.current()
+        } catch {
+          // The parent logs its own failed reload; the state below still says what the job did.
+        }
+        if (!cancelled) settle(RETRY_COPY.stillNotProduced)
       } else if (outcome === 'failed') {
-        settle(failedRetryMessage(job.error))
+        settle(RETRY_COPY.notProduced)
       } else if (polls >= RETRY_MAX_POLLS) {
-        settle(RETRY_SLOW_COPY)
+        settle(RETRY_COPY.slow)
       } else {
         timer = setTimeout(check, RETRY_POLL_MS)
       }
@@ -91,13 +102,14 @@ function NotProduced({ runId, onRestored }: { runId: string; onRestored: () => v
       cancelled = true
       clearTimeout(timer)
     }
-  }, [jobId])
+  }, [jobId, runId])
 
   const retry = async () => {
     setBusy(true)
     setMessage(null)
     try {
       const accepted = await retryVerdictReport(runId)
+      rememberRetry(runId, accepted.job_id)
       setJobId(accepted.job_id)
     } catch (error) {
       setBusy(false)

@@ -19,7 +19,7 @@ const render = (props: Partial<VerdictsPageViewProps> = {}) =>
         loading={false}
         failed={false}
         onRetry={() => {}}
-        onRestored={() => {}}
+        onRestored={() => Promise.resolve()}
         {...props}
       />
     </MemoryRouter>,
@@ -46,6 +46,12 @@ describe('VerdictsPageView', () => {
     const html = render({ latest: { runId: 'r1', report: unproduced }, earlier: [] })
     expect(html).toContain('Report not produced')
     expect(html).toContain('Retry report')
+  })
+
+  it('offers one print action for a produced report, and none for a report not produced', () => {
+    expect(render(filled)).toContain('Export document')
+    const unproduced = reportFromState(applyStoredResult(fold([], () => 0), { status: 'not_produced' }))!
+    expect(render({ latest: { runId: 'r1', report: unproduced }, earlier: [] })).not.toContain('Export document')
   })
 
   it('renders the empty state and the failure state', () => {
@@ -149,6 +155,50 @@ describe('loadVerdicts', () => {
 
     expect(loaded.latest?.runId).toBe('r-retried')
     expect(loaded.latest?.report.markdown).toContain('## Recommendation')
+  })
+
+  it('does not headline a run whose report was not produced while a produced one exists', async () => {
+    const legacy: RunDoc = {
+      ...good,
+      run_id: 'r-legacy',
+      events: [{ type: 'complete', converged: false, final_stances: {}, warnings: [], rounds_executed: 0 }],
+    }
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string) => {
+        if (url.includes('/r-legacy')) return reply(legacy)
+        if (url.includes('/r-good')) return reply(good)
+        return reply({
+          items: [run({ run_id: 'r-legacy', verdict_confidence: 0.4 }), run({ run_id: 'r-good', verdict_confidence: 0.82 })],
+          next_cursor: null,
+        })
+      }),
+    )
+
+    const loaded = await loadVerdicts()
+
+    expect(loaded.latest?.runId).toBe('r-good')
+    expect(loaded.earlier.map((row) => row.runId)).toEqual(['r-legacy'])
+  })
+
+  it('headlines a run whose report was not produced only when no produced one exists', async () => {
+    const legacy: RunDoc = {
+      ...good,
+      run_id: 'r-legacy',
+      events: [{ type: 'complete', converged: false, final_stances: {}, warnings: [], rounds_executed: 0 }],
+    }
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string) => {
+        if (url.includes('/r-legacy')) return reply(legacy)
+        return reply({ items: [run({ run_id: 'r-legacy', verdict_confidence: 0.4 })], next_cursor: null })
+      }),
+    )
+
+    const loaded = await loadVerdicts()
+
+    expect(loaded.latest?.runId).toBe('r-legacy')
+    expect(loaded.latest?.report.reportStatus).toBe('not_produced')
   })
 
   it('leaves every answered row in the archive when no document can be read', async () => {

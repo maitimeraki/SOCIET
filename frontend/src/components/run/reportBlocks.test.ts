@@ -23,9 +23,12 @@ describe('reportBlocks — the report read as its own structure, never re-author
     ])
   })
 
-  it('tags a judgement point only when the line ends with the tag', () => {
-    expect(reportBlocks('(judgement) is not a tag here, the line goes on')[0]).toMatchObject({ judgement: false })
-    expect(reportBlocks('A point (judgement)')[0]).toMatchObject({ judgement: true })
+  it('styles the judgement tag anywhere in a Point line, not only at its end', () => {
+    expect(reportBlocks('Point: A claim (judgement) and more text')[0]).toMatchObject({ judgement: true })
+  })
+
+  it('reads the tag only on a Point line, so a Result line is never styled as a judgement', () => {
+    expect(reportBlocks('Result: Stage it (judgement)')[0]).toMatchObject({ judgement: false })
   })
 
   it('adds nothing the markdown does not say', () => {
@@ -35,13 +38,21 @@ describe('reportBlocks — the report read as its own structure, never re-author
 })
 
 describe('inlineParts — bold spans and citation markers, in order', () => {
-  it('splits text, bold and citation parts', () => {
-    expect(inlineParts('A **strong** claim [2] here')).toEqual([
-      { kind: 'text', text: 'A ' },
-      { kind: 'bold', text: 'strong' },
-      { kind: 'text', text: ' claim ' },
-      { kind: 'source', n: '2', raw: '[2]' },
-      { kind: 'text', text: ' here' },
+  it('splits text and citations, none of them bold', () => {
+    expect(inlineParts('A claim [2] here')).toEqual([
+      { kind: 'text', text: 'A claim ', strong: false },
+      { kind: 'source', n: '2', raw: '[2]', strong: false },
+      { kind: 'text', text: ' here', strong: false },
+    ])
+  })
+
+  it('keeps a citation inside bold as a citation, marked bold', () => {
+    expect(inlineParts('A **strong [1] claim** here')).toEqual([
+      { kind: 'text', text: 'A ', strong: false },
+      { kind: 'text', text: 'strong ', strong: true },
+      { kind: 'source', n: '1', raw: '[1]', strong: true },
+      { kind: 'text', text: ' claim', strong: true },
+      { kind: 'text', text: ' here', strong: false },
     ])
   })
 

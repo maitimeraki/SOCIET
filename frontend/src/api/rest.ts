@@ -35,12 +35,15 @@ export class ApiError extends Error {
   detail: string
   /** The `Retry-After` seconds on a 429 (the quota/job-cap rejection), else null. */
   retryAfter: number | null
-  constructor(status: number, detail: string, retryAfter: number | null = null) {
+  /** The server's stable error code (`{error: {code}}` or `{detail: {code}}`), else null. Branch on this, never on `detail`. */
+  code: string | null
+  constructor(status: number, detail: string, retryAfter: number | null = null, code: string | null = null) {
     super(detail)
     this.name = 'ApiError'
     this.status = status
     this.detail = detail
     this.retryAfter = retryAfter
+    this.code = code
   }
 }
 
@@ -115,19 +118,25 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   if (!response.ok) {
     if (response.status === 401) unauthorizedHandler?.() // session gone — clear, never retry
     let detail = response.statusText
+    let code: string | null = null
     try {
       const body = (await response.json()) as {
-        error?: { message?: unknown }
+        error?: { code?: unknown; message?: unknown }
         detail?: unknown
       }
       // The server's uniform envelope is `{error: {code, message, correlation_id}}`;
       // `detail` is the older FastAPI shape and stays as a fallback.
       if (typeof body.error?.message === 'string') detail = body.error.message
       else if (body.detail !== undefined) detail = readDetail(body.detail)
+      if (typeof body.error?.code === 'string') code = body.error.code
+      else if (body.detail !== null && typeof body.detail === 'object' && 'code' in body.detail) {
+        const bodyCode = (body.detail as { code?: unknown }).code
+        if (typeof bodyCode === 'string') code = bodyCode
+      }
     } catch {
       // Non-JSON error body: keep statusText.
     }
-    throw new ApiError(response.status, detail, readRetryAfter(response))
+    throw new ApiError(response.status, detail, readRetryAfter(response), code)
   }
   if (response.status === 204) return undefined as T // logout etc. carry no body
   return (await response.json()) as T

@@ -138,7 +138,7 @@ function RunWork({ run, events, tab, runId, scrubbed, latestRound, onScrub, onNa
             <ReportDocument
               report={report}
               runId={runId}
-              onRestored={() => void useRunStore.getState().reloadVerdict(runId)}
+              onRestored={() => useRunStore.getState().reloadVerdict(runId)}
             />
             <div className="flex flex-wrap items-center gap-3 print:hidden">
               <Button onClick={onReplay}>Replay this decision</Button>

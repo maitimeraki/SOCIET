@@ -21,7 +21,7 @@ const NOT_PRODUCED: ReportModel = {
 }
 
 const render = (report: ReportModel) =>
-  renderToStaticMarkup(<ReportDocument report={report} runId="r1" onRestored={() => {}} />)
+  renderToStaticMarkup(<ReportDocument report={report} runId="r1" onRestored={() => Promise.resolve()} />)
 
 describe('a produced report', () => {
   it('renders the markdown as given, with no retry offered', () => {
@@ -44,6 +44,12 @@ describe('a report that was not produced', () => {
     expect(html).toContain('Report not produced')
     expect(html).toContain('Retry report')
     expect(html).not.toContain('Recommendation')
+  })
+
+  it('branches on the status: no text is shown for it, and a retry is offered, whatever text a stray field holds', () => {
+    const html = render({ ...NOT_PRODUCED, markdown: 'Stray text.' })
+    expect(html).not.toContain('Stray text.')
+    expect(html).toContain('Retry report')
   })
 
   it('shows no warnings section when there are none', () => {

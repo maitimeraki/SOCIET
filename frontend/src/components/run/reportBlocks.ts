@@ -11,14 +11,14 @@ export type ReportBlock =
   | { kind: 'paragraph'; text: string; judgement: boolean }
   | { kind: 'list'; items: string[] }
 
-/** A run of text, a `**bold**` span, or a citation marker `[n]` (digits only). */
+/** A run of text or a citation marker `[n]` (digits only), in bold or not. */
 export type InlinePart =
-  | { kind: 'text'; text: string }
-  | { kind: 'bold'; text: string }
-  | { kind: 'source'; n: string; raw: string }
+  | { kind: 'text'; text: string; strong: boolean }
+  | { kind: 'source'; n: string; raw: string; strong: boolean }
 
-const JUDGEMENT_TAG = /\(judgement\)\s*$/
-const INLINE = /\*\*([^*]+)\*\*|\[(\d+)\]/g
+const JUDGEMENT_TAG = /\(judgement\)/
+const BOLD = /\*\*([^*]+)\*\*/g
+const CITATION = /\[(\d+)\]/g
 
 export function reportBlocks(markdown: string): ReportBlock[] {
   const blocks: ReportBlock[] = []
@@ -41,24 +41,33 @@ export function reportBlocks(markdown: string): ReportBlock[] {
       items = [...(items ?? []), line.slice(2).trim()]
     } else {
       endList()
-      blocks.push({ kind: 'paragraph', text: line, judgement: JUDGEMENT_TAG.test(line) })
+      blocks.push({ kind: 'paragraph', text: line, judgement: line.startsWith('Point:') && JUDGEMENT_TAG.test(line) })
     }
   }
   endList()
   return blocks
 }
 
-/** Splits a line into text, bold and citation parts, in order. Unknown numbers are the caller's to read. */
+/** Splits a line into text and citation parts, each marked bold or not, in order. A citation inside bold stays a citation. */
 export function inlineParts(text: string): InlinePart[] {
   const parts: InlinePart[] = []
-  let last = 0
-  for (const match of text.matchAll(INLINE)) {
-    const at = match.index ?? 0
-    if (at > last) parts.push({ kind: 'text', text: text.slice(last, at) })
-    if (match[1] !== undefined) parts.push({ kind: 'bold', text: match[1] })
-    else parts.push({ kind: 'source', n: match[2], raw: match[0] })
-    last = at + match[0].length
+  const plain = (segment: string, strong: boolean) => {
+    let at = 0
+    for (const match of segment.matchAll(CITATION)) {
+      const start = match.index ?? 0
+      if (start > at) parts.push({ kind: 'text', text: segment.slice(at, start), strong })
+      parts.push({ kind: 'source', n: match[1], raw: match[0], strong })
+      at = start + match[0].length
+    }
+    if (at < segment.length) parts.push({ kind: 'text', text: segment.slice(at), strong })
   }
-  if (last < text.length) parts.push({ kind: 'text', text: text.slice(last) })
+  let last = 0
+  for (const match of text.matchAll(BOLD)) {
+    const start = match.index ?? 0
+    plain(text.slice(last, start), false)
+    plain(match[1], true)
+    last = start + match[0].length
+  }
+  plain(text.slice(last), false)
   return parts
 }

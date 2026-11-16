@@ -1,6 +1,6 @@
 import type { DebateConfig } from '../api/types'
 import { InvalidAgentError, UnknownStanceError, asStance, parseAgentView, parsePairId } from './events'
-import type { AgentView, ClusterSummary, ConsensusInfo, PairInfo, QueryIntent, ReportSources, ReportStatus, RunEvent, Stance, TurnInfo, WrittenLink, WrittenNode } from './events'
+import type { AgentView, ConsensusInfo, PairInfo, QueryIntent, ReportSources, ReportStatus, RunEvent, Stance, TurnInfo, WrittenLink, WrittenNode } from './events'
 
 export interface StageEntry {
   stage: string
@@ -41,11 +41,6 @@ export interface RunVerdict {
   reportStatus: ReportStatus
   /** Citation number to its public source. Empty when no report was produced. */
   sources: ReportSources
-  confidence: number | null
-  clusters: Record<Stance, ClusterSummary> | null
-  finalStances: Record<string, string>
-  supporting: string[]
-  opposing: string[]
 }
 
 export interface RunState {
@@ -264,13 +259,15 @@ function verdictFromFields(fields: VerdictFields): RunVerdict {
     title: produced ? (fields.title ?? null) : null,
     markdown: produced ? (fields.markdown ?? null) : null,
     reportStatus: produced ? 'produced' : 'not_produced',
-    sources: produced ? (fields.sources ?? {}) : {},
-    confidence: fields.confidence_score ?? null,
-    clusters: fields.cluster_details ?? null,
-    finalStances: Object.fromEntries(Object.entries(fields.final_stances ?? {}).map(([agent, stance]) => [agent, asStance(stance)])),
-    supporting: fields.supporting_entities ?? [],
-    opposing: fields.opposing_entities ?? [],
+    sources: produced ? narrowSources(fields.sources) : {},
   }
+}
+
+/** Only the public document and section of each source survive the client boundary, whatever else arrives. */
+export function narrowSources(sources: ReportSources | undefined): ReportSources {
+  return Object.fromEntries(
+    Object.entries(sources ?? {}).map(([n, source]) => [n, { document: source.document, section: source.section }]),
+  )
 }
 
 /**

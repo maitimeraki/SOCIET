@@ -38,7 +38,16 @@ describe('reducer', () => {
   it('builds the verdict from the complete event', () => {
     const state = fold(RUN_SAMPLE, NOW)
     expect(state.verdict?.converged).toBe(true)
-    expect(state.verdict?.clusters?.POSITIVE?.count).toBe(3)
+    expect(state.verdict?.reportStatus).toBe('produced')
+  })
+  it('keeps only the public document and section of each source, whatever else the event carries', () => {
+    const leaky = { '1': { document: 'D', section: 'S', chunk_id: 'chunk-1' } }
+    const state = applyEvent(
+      initialState,
+      { type: 'complete', converged: true, title: 'T', markdown: '# T', status: 'produced', sources: leaky, final_stances: {}, warnings: [], rounds_executed: 1 },
+      1,
+    )
+    expect(state.verdict?.sources).toEqual({ '1': { document: 'D', section: 'S' } })
   })
   it('carries the report title, markdown and sources off the complete event', () => {
     const state = applyEvent(
