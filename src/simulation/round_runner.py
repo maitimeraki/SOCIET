@@ -8,7 +8,7 @@ from src.llm.config_llm import LLMConfig
 from src.persona.agent import Agent
 from src.simulation.llm_batch import BatchedLLMRunner, PairPrompt, PairResult
 from src.simulation.pair_turn import AgentTurn, CommPair, RoundResult
-from src.simulation.profile_generator import attr_text, evidence_block
+from src.simulation.profile_generator import evidence_block
 from src.simulation.society_memory import SocietySnapshot
 from src.simulation.turn_protocol import (
     PositionState,
@@ -16,6 +16,7 @@ from src.simulation.turn_protocol import (
     accept_position,
     parse_turn,
 )
+from src.utils.prompt_fence import attr_text
 from src.utils.queryIntend import QueryIntent
 
 OPPONENT_STATEMENT_CHARS = 600

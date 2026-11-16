@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import json
 import logging
-import re
 import time
 from collections.abc import Sequence
 from dataclasses import dataclass
@@ -29,6 +28,7 @@ from src.simulation.profile_validation import (
     validate_profile,
 )
 from src.utils.json_extract import extract_json_object
+from src.utils.prompt_fence import ATTR_MAX_CHARS, attr_text, body_text
 
 logger = logging.getLogger(__name__)
 
@@ -48,12 +48,8 @@ CALLS_PER_DRAW = 2 * CALLS_PER_GENERATION
 EXPECTED_CALLS_PER_SEAT = 2
 #: Expected model calls for a rejected draw: its profile attempts (no judge runs on a rejected draw).
 REJECTED_DRAW_CALLS = MAX_ATTEMPTS
-#: Characters of any one attribute value (names, aliases, titles, types, ids) in a prompt.
-ATTR_MAX_CHARS = 120
 #: Aliases a node contributes to its prompt; the rest are dropped.
 MAX_ALIASES = 5
-
-_MARKUP = re.compile(r'[<>"]')
 
 
 @dataclass(frozen=True)
@@ -63,16 +59,6 @@ class GenerationResult:
     attempts: int
     latency_ms: int
     model: str
-
-
-def attr_text(value: object, limit: int = ATTR_MAX_CHARS) -> str:
-    """Attribute or free-text value as data: no markup characters, one line, at most `limit` characters."""
-    return " ".join(_MARKUP.sub("", str(value)).split())[:limit]
-
-
-def body_text(value: str) -> str:
-    """Fenced body as data: angle brackets removed so it cannot close the fence."""
-    return value.replace("<", "").replace(">", "")
 
 
 def evidence_block(item: EvidenceItem) -> list[str]:

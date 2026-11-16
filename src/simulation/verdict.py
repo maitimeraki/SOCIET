@@ -19,13 +19,13 @@ from src.simulation.pair_turn import (
     DebateVerdict,
     RoundResult,
 )
-from src.simulation.profile_generator import attr_text, body_text
 from src.simulation.turn_protocol import (
     consensus_window,
     stance_weights,
     weighted_share,
 )
 from src.utils.labels import public_source
+from src.utils.prompt_fence import attr_text, body_text
 
 if TYPE_CHECKING:
     from src.llm.client import LLMClient

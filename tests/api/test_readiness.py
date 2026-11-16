@@ -93,6 +93,25 @@ def test_ready_reprobes_once_the_cached_verdict_is_stale(app_state, monkeypatch)
     assert response.json() == {"status": "ready"}
 
 
+@pytest.mark.asyncio
+async def test_concurrent_stale_readiness_checks_share_one_provider_call(app_state, monkeypatch):
+    calls: list[int | None] = []
+
+    async def _generate(*_args, **kwargs):
+        calls.append(kwargs.get("max_tokens"))
+        await asyncio.sleep(0.01)
+        return "OK"
+
+    monkeypatch.setattr(api_server.global_llm_client, "generate", _generate)
+    app.state.degraded = True
+    app.state.last_llm_probe_at = time.monotonic() - api_server._PROBE_CACHE_SECONDS - 1
+
+    verdicts = await asyncio.gather(*(api_server._llm_healthy(app) for _ in range(10)))
+
+    assert calls == [api_server._PROBE_MAX_TOKENS]
+    assert all(verdicts)
+
+
 def test_ready_names_the_unreachable_dependency(app_state, monkeypatch):
     async def _probe(_app):
         _app.state.degraded = False

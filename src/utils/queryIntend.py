@@ -19,6 +19,7 @@ from src.billing import metering
 from src.llm.client import LLMClient, global_llm_client
 from src.llm.config_llm import LLMConfig, get_llm_config
 from src.logging.setup_logging import setup_logging
+from src.utils.prompt_fence import body_text
 
 logger = setup_logging()
 
@@ -110,13 +111,11 @@ class QueryIntend:
         if not query:
             logger.warning("Received empty user query for intent expansion.")
             return None
-        # Markup stripped so the query cannot close its own data block.
-        fenced = query.replace("<", "").replace(">", "")
         try:
             with metering.source_scope("debate"):
                 raw = await self.llm.generate(
                     _SYSTEM_PROMPT,
-                    f"<query>\n{fenced}\n</query>",
+                    f"<query>\n{body_text(query)}\n</query>",
                     provider=self.provider,
                     model=self.model,
                     temperature=0,

@@ -362,7 +362,9 @@ async def _run_debate_async(
         intent = await QueryIntend(client=llm).expand_user_query(
             query, selected_domains=selected_domains
         )
-        await ws_manager.broadcast({"type": "intent", "intent": intent.model_dump()})
+        await ws_manager.broadcast(
+            {"type": "intent", "intent": intent.model_dump() if intent else None}
+        )
 
         # Create GraphContext with proper signature
         from src.graph.config_graph import GraphConfig

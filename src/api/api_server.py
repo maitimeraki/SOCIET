@@ -75,6 +75,10 @@ logger = (
 )  # Ensure logging is configured with handler clearing to prevent duplication
 
 _PROBE_CACHE_SECONDS = 60.0
+#: The probe answers "OK": a small cap keeps each paid probe cheap.
+_PROBE_MAX_TOKENS = 16
+# ponytail: one process-wide lock; per-provider locks if the probe ever targets several providers.
+_LLM_PROBE_LOCK = asyncio.Lock()
 
 
 async def _probe_llm(app: FastAPI) -> bool:
@@ -92,6 +96,7 @@ async def _probe_llm(app: FastAPI) -> bool:
                 provider=config.default_llm_provider,
                 model=config.debate_model,
                 temperature=0.7,
+                max_tokens=_PROBE_MAX_TOKENS,
             ),
             timeout=get_settings().llm_probe_timeout_seconds,
         )
@@ -109,12 +114,23 @@ async def _probe_llm(app: FastAPI) -> bool:
     return ok
 
 
-async def _llm_healthy(app: FastAPI) -> bool:
-    """Last probe's verdict, re-probing only when the cached one is stale."""
+def _probe_is_fresh(app: FastAPI) -> bool:
     last = getattr(app.state, "last_llm_probe_at", None)
-    if last is not None and time.monotonic() - last < _PROBE_CACHE_SECONDS:
+    return last is not None and time.monotonic() - last < _PROBE_CACHE_SECONDS
+
+
+async def _llm_healthy(app: FastAPI) -> bool:
+    """Last probe's verdict, re-probing only when the cached one is stale.
+
+    Single-flight: concurrent callers at expiry queue on the lock, and the one
+    that gets it probes; the rest re-check the cache and reuse its verdict.
+    """
+    if _probe_is_fresh(app):
         return not getattr(app.state, "degraded", False)
-    return await _probe_llm(app)
+    async with _LLM_PROBE_LOCK:
+        if _probe_is_fresh(app):
+            return not getattr(app.state, "degraded", False)
+        return await _probe_llm(app)
 
 
 async def _postgres_ok() -> bool:
