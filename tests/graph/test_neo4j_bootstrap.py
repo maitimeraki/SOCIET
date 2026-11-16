@@ -25,8 +25,8 @@ def _vectors():
     ]
 
 
-def test_statement_count_is_thirteen():
-    assert len(_statements()) == 13
+def test_statement_count_is_twelve():
+    assert len(_statements()) == 12
 
 
 def test_chunk_indexes_present():

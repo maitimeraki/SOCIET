@@ -401,9 +401,6 @@ async def _run_debate_async(
                 society_memory=SocietyMemory(ctx._driver, ctx._db),
             )
 
-            # Seat decisions: the caller-owned sink the seated set is read from.
-            seat_decisions: list = []
-
             # Agent records are stored at each synthesis boundary (initial seats, then each
             # joiner batch), so a debate that stops later still keeps them.
             records_stored = True
@@ -425,7 +422,6 @@ async def _run_debate_async(
                 intent=intent,
                 context=context,
                 cancel_check=cancel_check,
-                decisions=seat_decisions,
                 on_records=_store_agent_records,
             )
             if not records_stored:

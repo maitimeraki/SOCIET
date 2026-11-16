@@ -50,7 +50,6 @@ from src.simulation.debate_config import DebateConfig
 from src.simulation.llm_batch import BatchedLLMRunner
 from src.simulation.pair_turn import CommPair, DebateVerdict, RoundResult
 from src.simulation.profile_synthesizer import ProfileSynthesizer
-from src.simulation.ranking import SeatDecision
 from src.simulation.report_retry import build_retry_inputs
 from src.simulation.round_runner import RoundRunner
 from src.simulation.society_memory import SocietyMemory, SocietySnapshot
@@ -207,7 +206,6 @@ class DebateOrchestrator:
         on_stage: Optional[StageEmitter] = None,
         context: Optional[dict] = None,
         cancel_check: Optional[Callable[[], bool]] = None,
-        decisions: Optional[list[SeatDecision]] = None,
         on_records: Optional[Callable[[list[AgentRecord]], Awaitable[None]]] = None,
     ) -> OrchestratedDebateResult:
         """
@@ -235,10 +233,6 @@ class DebateOrchestrator:
         reading raises `DebateCancelled`, which the job boundary records as the
         run's terminal `cancelled` state.
 
-        `decisions` is the caller-owned sink for every candidate's seat decision
-        (best first). The caller reads it after the run. No `selection` event is
-        streamed.
-
         `on_records` receives the backend-only AgentRecords as they are produced: once
         after the initial synthesis (also when it raises: rejected records exist then),
         and once per activation batch of joiners. Each batch is handed over exactly once,
@@ -247,7 +241,6 @@ class DebateOrchestrator:
         warnings: list[str] = []
         all_turns: list = []
         profiles: List[Agent] = []
-        seat_sink: list[SeatDecision] = decisions if decisions is not None else []
         profile_records: list[AgentRecord] = []
         tried_names: set[str] = set()
         stage_index = await self._emit_stage(on_stage, 0, "intake", query=query)
@@ -271,7 +264,6 @@ class DebateOrchestrator:
                 max_agents=config.max_agents,
                 intent=intent,
                 warnings=warnings,
-                decisions=seat_sink,
                 records=profile_records,
                 llm_client=llm_client,
                 on_profile=_emit_profile,

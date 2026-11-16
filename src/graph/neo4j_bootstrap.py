@@ -106,11 +106,6 @@ def _statements() -> list[tuple[str, dict]]:
             {},
         ),
         (
-            "CREATE INDEX agent_archetype IF NOT EXISTS "
-            "FOR (a:Agent) ON (a.archetype)",
-            {},
-        ),
-        (
             "CREATE INDEX agent_updated IF NOT EXISTS "
             "FOR (a:Agent) ON (a.updated_at)",
             {},
@@ -218,7 +213,6 @@ def _statement_label(cypher: str) -> str:
         "CONSTRAINT document_id",
         "INDEX chunk_doc_dataset",
         "INDEX persona_dataset",
-        "INDEX agent_archetype",
         "INDEX agent_updated",
         "INDEX opinion_round",
         "VECTOR INDEX persona_embeddings",

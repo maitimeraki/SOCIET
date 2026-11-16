@@ -138,14 +138,13 @@ async def test_five_step_flow():
     result = await orchestrator.run("test query", "ds1", config, ws_broadcast)
 
     # Step 1: profile_synthesizer called — with the run's config, its warnings
-    # sink, the caller-owned seat decisions sink and the run's LLM client
+    # sink and the run's LLM client
     synth.synthesize.assert_awaited_once_with(
         query="test query",
         dataset_id="ds1",
         max_agents=5,
         intent=None,
         warnings=result.warnings,
-        decisions=ANY,
         records=ANY,
         llm_client=None,
         on_profile=ANY,
