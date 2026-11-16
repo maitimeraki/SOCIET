@@ -316,8 +316,10 @@ _PART_LABEL = re.compile(r"^(Point|Against|Opinion|Result):(.*)$")
 _SOURCE_MARKER = re.compile(r"\[\s*\d+(?:\s*,\s*\d+)*\s*\]")
 _BRACKETED = re.compile(r"\[([^\[\]\n]*)\]")
 _NUMERIC_MARKER_LIST = re.compile(r"\s*\d+(?:\s*,\s*\d+)*\s*")
-# An id-shaped word: letters then digits, as in e1, chunk_12 or r3.
-_ID_SHAPED = re.compile(r"[A-Za-z][A-Za-z_\-]*\d")
+# A bracket holding a minted id: the evidence and relation ids the prompt hands out (e1, r3),
+# an underscore id (chunk_12), or a chunk-named id. Ordinary tokens such as Q3, COVID-19, v2
+# or H1 2027 are not ids, so they do not match.
+_ID_SHAPED = re.compile(r"\b[er]\d+\b|\b\w+_\d+\b|\bchunk[-\w]*\d", re.IGNORECASE)
 _UUID_SHAPED = re.compile(
     r"\b[0-9a-fA-F]{8}-?[0-9a-fA-F]{4}-?[0-9a-fA-F]{4}-?[0-9a-fA-F]{4}-?[0-9a-fA-F]{12}\b"
     r"|\b[0-9a-fA-F]{32}\b"
@@ -437,7 +439,8 @@ def check_report(markdown: str, facts: BoardFacts, source_ids: set[str]) -> list
         if marker not in source_ids:
             errors.append(f"source marker [{marker}] is not in the source map")
     if any(
-        not _NUMERIC_MARKER_LIST.fullmatch(bracket.group(1)) and _ID_SHAPED.search(bracket.group(1))
+        not _NUMERIC_MARKER_LIST.fullmatch(bracket.group(1))
+        and (_ID_SHAPED.search(bracket.group(1)) or _UUID_SHAPED.search(bracket.group(1)))
         for bracket in _BRACKETED.finditer(markdown)
     ):
         errors.append("an id in brackets is not a source marker: cite sources only as [n], never ids")

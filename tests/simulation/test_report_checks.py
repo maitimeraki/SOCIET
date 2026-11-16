@@ -308,3 +308,13 @@ def test_a_bare_32_hex_id_in_the_text_is_rejected():
 
 def test_a_numeric_marker_list_is_still_a_marker_not_an_id():
     assert check_report(GOOD.replace("[1]", "[1, 1]"), FACTS, {"1"}) == []
+
+
+@pytest.mark.parametrize("token", ["Q3", "COVID-19", "H1 2027", "v2"])
+def test_ordinary_bracketed_tokens_are_not_ids(token):
+    assert ID_IN_BRACKETS not in check_report(GOOD.replace("[1]", f"[{token}]"), FACTS, {"1"})
+
+
+@pytest.mark.parametrize("token", ["e1", "r3", "chunk_12", "chunk-7", "0c0ffee0-0000-4000-8000-0000000000c1", "abcdef0123456789abcdef0123456789"])
+def test_minted_or_uuid_ids_in_brackets_are_still_rejected(token):
+    assert ID_IN_BRACKETS in check_report(GOOD.replace("[1]", f"[{token}]"), FACTS, {"1"})
