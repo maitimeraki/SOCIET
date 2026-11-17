@@ -348,6 +348,9 @@ class TestStageConfigWiring:
 
     def test_nim_credentials_come_from_config(self, monkeypatch):
         """OpenAILike receives the NIM key/base from LLMConfig (env-backed)."""
+        for name in ("EXTRACTION_PROVIDER", "EXTRACTION_BASE_URL", "EXTRACTION_API_KEY"):
+            monkeypatch.delenv(name, raising=False)
+        monkeypatch.setattr(LLMConfig, "extraction_provider", "nvidia_nim")
         monkeypatch.setattr(LLMConfig, "nvidia_nim_api_key", "sentinel-key")
         monkeypatch.setattr(LLMConfig, "nvidia_nim_base_url", "http://sentinel-base/v1")
 

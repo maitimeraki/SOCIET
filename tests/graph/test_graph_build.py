@@ -246,6 +246,9 @@ class TestStageConfigWiring:
         from src.graph.graph_build import GraphExtractionStage
         from src.llm.config_llm import LLMConfig
 
+        for name in ("EXTRACTION_PROVIDER", "EXTRACTION_BASE_URL", "EXTRACTION_API_KEY"):
+            monkeypatch.delenv(name, raising=False)
+        monkeypatch.setattr(LLMConfig, "extraction_provider", "nvidia_nim")
         monkeypatch.setattr(LLMConfig, "nvidia_nim_api_key", "sentinel-key")
         monkeypatch.setattr(LLMConfig, "nvidia_nim_base_url", "http://sentinel-base/v1")
 
