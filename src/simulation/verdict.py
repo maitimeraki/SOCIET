@@ -151,8 +151,8 @@ class VerdictSynthesizer:
         return DebateVerdict(
             overall_stance=overall_stance,
             confidence_score=confidence_score,
-            supporting_entities=list(set(supporting))[:10],
-            opposing_entities=list(set(opposing))[:10],
+            supporting_entities=list(dict.fromkeys(supporting))[:10],
+            opposing_entities=list(dict.fromkeys(opposing))[:10],
             cluster_details=cluster_details,
             provenance_by_claim=provenance_by_claim,
             rounds_executed=len(rounds),
