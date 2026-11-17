@@ -166,6 +166,8 @@ class LLMClient:
                             fallback_model=self._model_str(p, leg_model),
                         )
                     return response.choices[0].message.content or ""
+                except metering.MeteringError:
+                    raise
                 except Exception as exc:
                     errors.append(f"{p}: {exc}")
                     logger.warning("LLM provider %s failed: %s", p, exc)

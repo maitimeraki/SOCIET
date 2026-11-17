@@ -297,6 +297,26 @@ async def test_generate_raises_when_metering_already_failed():
 
 
 @pytest.mark.asyncio
+async def test_metering_error_never_falls_through_to_another_provider():
+    with metering.metering_scope(
+        user_id=uuid.uuid4(),
+        period_start=datetime.datetime.now(datetime.UTC),
+        source="debate",
+    ):
+        with patch(
+            "src.llm.client.litellm.acompletion", new_callable=AsyncMock
+        ) as ac, patch(
+            "src.billing.metering.record_response",
+            new_callable=AsyncMock,
+            side_effect=MeteringError("ledger down"),
+        ):
+            ac.return_value = _resp("paid once")
+            with pytest.raises(MeteringError):
+                await LLMClient().generate("sys", "usr", provider="openai")
+            assert ac.await_count == 1
+
+
+@pytest.mark.asyncio
 async def test_billing_enabled_without_chain_never_falls_back(monkeypatch):
     """No named chain under billing: never switch the privacy-policy subprocessor."""
     monkeypatch.setattr(
