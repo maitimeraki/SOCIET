@@ -52,7 +52,7 @@ def test_prompt_truncates_long_statement_at_word_boundary():
         _agent("Alice"), _agent("Bob"), "q", [_turn("Bob", "word " * 500)]
     )
 
-    block = prompt.split("WHAT Bob JUST ARGUED:\n", 1)[1]
-    said = block.split("\n", 1)[0]
+    block = prompt.split("<opponent_statement>", 1)[1]
+    said = block.split("</opponent_statement>", 1)[0]
     assert len(said) <= OPPONENT_STATEMENT_CHARS
     assert not said.endswith(" ")  # cut on a boundary, not mid-space
