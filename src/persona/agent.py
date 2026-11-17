@@ -85,7 +85,7 @@ class Agent(BaseModel):
             role=self.role,
             stance=self.stance,
             strength=self.strength,
-            bio=self.bio,
+            bio=strip_markers(self.bio),
             details=self.details,
             confidence=self.confidence,
         )

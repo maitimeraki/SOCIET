@@ -154,6 +154,13 @@ def test_view_strips_cite_markers_and_says_type_unknown_without_a_label():
     assert view.type == "type unknown"
 
 
+def test_view_strips_cite_markers_from_the_bio():
+    agent = _slim(bio="The filing shows the claim [e3] clearly.")
+    view = agent.view()
+    assert "[e3]" not in view.bio
+    assert "[e" not in view.bio
+
+
 def test_view_json_never_carries_evidence_cites_or_ids():
     import json
 
