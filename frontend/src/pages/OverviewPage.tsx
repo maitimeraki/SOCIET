@@ -145,7 +145,6 @@ export function OverviewPageView({
               unitsTotal={stats.units_total}
               unitsRemaining={stats.units_remaining}
               periodEnd={stats.period_end}
-              billingEnabled={stats.billing_enabled}
             />
             <WorkingNow run={working} />
           </aside>

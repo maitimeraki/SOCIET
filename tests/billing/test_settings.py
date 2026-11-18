@@ -34,29 +34,39 @@ def test_defaults_carry_the_plan_numbers():
     assert settings.billing_reservation_lease_seconds == 3_600
 
 
-def test_billing_enabled_requires_stripe_values():
-    with pytest.raises(ValueError, match="stripe_secret_key"):
+RAZORPAY_VALUES = {
+    "razorpay_key_id": "rzp_test_key",
+    "razorpay_key_secret": "secret",
+    "razorpay_webhook_secret": "whsec_test",
+    "razorpay_plan_starter_inr": "plan_starter_inr",
+    "razorpay_plan_starter_usd": "plan_starter_usd",
+    "razorpay_plan_studio_inr": "plan_studio_inr",
+    "razorpay_plan_studio_usd": "plan_studio_usd",
+}
+
+
+def test_billing_enabled_requires_razorpay_values():
+    with pytest.raises(ValueError, match="razorpay_key_id"):
         Settings(billing_enabled=True)
 
-    with pytest.raises(ValueError, match="stripe_price_studio"):
-        Settings(
-            billing_enabled=True,
-            stripe_secret_key="sk_test",
-            stripe_webhook_secret="whsec_test",
-            stripe_price_starter="price_starter",
-        )
+    values = dict(RAZORPAY_VALUES, razorpay_plan_studio_usd=None)
+    with pytest.raises(ValueError, match="razorpay_plan_studio_usd"):
+        Settings(billing_enabled=True, **values)
 
 
-def test_billing_enabled_with_all_stripe_values_is_valid():
-    settings = Settings(
-        billing_enabled=True,
-        stripe_secret_key="sk_test",
-        stripe_webhook_secret="whsec_test",
-        stripe_price_starter="price_starter",
-        stripe_price_studio="price_studio",
-    )
+def test_billing_enabled_with_all_razorpay_values_is_valid():
+    settings = Settings(billing_enabled=True, **RAZORPAY_VALUES)
 
     assert settings.billing_enabled is True
+
+
+def test_razorpay_key_mode_follows_the_environment():
+    prod = {"env": "prod", "email_api_key": "email_key"}
+    with pytest.raises(ValueError, match="rzp_live_"):
+        Settings(**prod, razorpay_key_id="rzp_test_key")
+    with pytest.raises(ValueError, match="rzp_test_"):
+        Settings(env="dev", razorpay_key_id="rzp_live_key")
+    assert Settings(**prod, razorpay_key_id="rzp_live_key").env == "prod"
 
 
 def test_zero_units_raise():

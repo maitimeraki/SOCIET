@@ -7,7 +7,8 @@ from src.billing.plans import (
     clear_plan_cache,
     get_plan,
     get_plans,
-    plan_for_price,
+    plan_for_razorpay_plan,
+    plan_price_minor,
 )
 from src.config.settings import get_settings
 
@@ -32,8 +33,9 @@ def test_default_plan_values():
     assert plans["studio"].max_rounds == 4
     assert (plans["enterprise"].units, plans["enterprise"].max_agents) == (80_000, 12)
     assert plans["enterprise"].max_rounds == 4
-    assert plans["free"].stripe_price_id is None
-    assert plans["enterprise"].stripe_price_id is None
+    assert plans["free"].razorpay_plan_ids == {}
+    assert plans["enterprise"].razorpay_plan_ids == {}
+    assert plans["enterprise"].prices == {"INR": None, "USD": None}
 
 
 def test_unknown_key_falls_back_to_free():
@@ -41,16 +43,24 @@ def test_unknown_key_falls_back_to_free():
     assert get_plan("nonsense") == get_plan(FREE_PLAN_KEY)
 
 
-def test_plan_for_price(monkeypatch):
-    monkeypatch.setenv("STRIPE_PRICE_STARTER", "price_starter_test")
-    monkeypatch.setenv("STRIPE_PRICE_STUDIO", "price_studio_test")
+def test_plan_for_razorpay_plan(monkeypatch):
+    monkeypatch.setenv("RAZORPAY_PLAN_STARTER_INR", "plan_starter_inr_test")
+    monkeypatch.setenv("RAZORPAY_PLAN_STUDIO_USD", "plan_studio_usd_test")
     get_settings.cache_clear()
     clear_plan_cache()
 
-    assert plan_for_price("price_starter_test").key == "starter"
-    assert plan_for_price("price_studio_test").key == "studio"
-    assert plan_for_price("price_unknown") is None
-    assert plan_for_price(None) is None
+    assert plan_for_razorpay_plan("plan_starter_inr_test").key == "starter"
+    assert plan_for_razorpay_plan("plan_studio_usd_test").key == "studio"
+    assert plan_for_razorpay_plan("plan_unknown") is None
+    assert plan_for_razorpay_plan(None) is None
+
+
+def test_plan_price_minor_is_in_minor_units():
+    plan = get_plan("starter")
+
+    assert plan_price_minor(plan, "INR") == 999 * 100
+    assert plan_price_minor(plan, "USD") == 10 * 100
+    assert plan_price_minor(get_plan("enterprise"), "INR") == 0
 
 
 def test_registry_is_read_only():

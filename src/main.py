@@ -15,7 +15,7 @@ async def main():
         The authentication service (AuthService v2.1) depends on the User Database (PostgreSQL 14) for credential validation. 
         This service also communicates with the Session Manager (Redis cluster) to maintain user state across multiple requests.
 
-        The Payment Processing System consists of three core components: the Payment Gateway (Stripe integration), 
+        The Payment Processing System consists of three core components: the Payment Gateway (Razorpay integration),
         the Transaction Validator (internal rule engine), and the Ledger Service (blockchain-based for audit trails). 
         The Payment Gateway depends on the Fraud Detection Service (ML model v4.0) for transaction screening before approval.
 

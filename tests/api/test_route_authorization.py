@@ -44,7 +44,7 @@ PUBLIC_PATHS = {
     # Terms/privacy must be readable before an account exists.
     "/api/v1/legal/documents",
     "/api/v1/legal/documents/{slug}",
-    # Signature-authenticated by Stripe; no session, no CSRF, no degraded gate.
+    # Signature-authenticated by Razorpay; no session, no CSRF, no degraded gate.
     "/api/v1/billing/webhook",
     # The public rate card; it reveals only published plan metadata.
     "/api/v1/billing/plans",

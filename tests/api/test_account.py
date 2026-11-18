@@ -22,7 +22,7 @@ from src.api.errors import install_error_handlers
 from src.api.jobs_api import router as jobs_router
 from src.auth.deps import current_user
 from src.db.engine import get_db, get_session_factory
-from src.billing import stripe_client
+from src.billing import razorpay_client
 from src.db.models import AgentRecordRow, Job, Run, Subscription, Upload, User, UserSession
 from src.ingest import repository, storage
 from src.jobs import queue as jobs_queue
@@ -216,8 +216,8 @@ async def _add_subscription(owner_id: str, status: str = "active") -> None:
         session.add(
             Subscription(
                 user_id=uuid.UUID(owner_id),
-                stripe_customer_id="cus_test",
-                stripe_subscription_id="sub_test",
+                razorpay_subscription_id="sub_test",
+                razorpay_plan_id="plan_starter_inr",
                 status=status,
             )
         )
@@ -236,12 +236,13 @@ async def _drop_subscriptions(owner_id: str) -> None:
 async def test_an_active_subscription_is_cancelled_before_delete(
     owner, s3, inline_queue, monkeypatch
 ):
-    cancelled: list[str] = []
-    monkeypatch.setattr(
-        stripe_client,
-        "cancel_subscription",
-        lambda subscription_id: cancelled.append(subscription_id) or {},
-    )
+    cancelled: list[tuple[str, bool]] = []
+
+    def cancel_subscription(subscription_id, *, at_cycle_end):
+        cancelled.append((subscription_id, at_cycle_end))
+        return {}
+
+    monkeypatch.setattr(razorpay_client, "cancel_subscription", cancel_subscription)
     await _add_subscription(owner)
     client, session, user = await _authed_client(owner)
     try:
@@ -255,16 +256,16 @@ async def test_an_active_subscription_is_cancelled_before_delete(
         await session.close()
         await _drop_subscriptions(owner)
 
-    assert cancelled == ["sub_test"]
+    assert cancelled == [("sub_test", False)]
 
 
 async def test_a_failed_cancellation_keeps_the_account_enabled(
     owner, s3, inline_queue, monkeypatch
 ):
-    def fail(_subscription_id):
-        raise RuntimeError("stripe is down")
+    def fail(_subscription_id, *, at_cycle_end):
+        raise RuntimeError("razorpay is down")
 
-    monkeypatch.setattr(stripe_client, "cancel_subscription", fail)
+    monkeypatch.setattr(razorpay_client, "cancel_subscription", fail)
     await _add_subscription(owner)
     client, session, user = await _authed_client(owner)
     try:

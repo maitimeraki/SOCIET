@@ -22,7 +22,8 @@ from src.audit import client_ip, record
 from src.auth.cookies import verify_csrf
 from src.auth.deps import current_user
 from src.auth.service import normalize_email
-from src.billing import stripe_client
+from src.billing import razorpay_client
+from src.billing.webhook import OPEN_SUBSCRIPTION_STATUSES
 from src.db.engine import get_db
 from src.db.models import Subscription, User, UserSession
 
@@ -84,15 +85,16 @@ async def delete_account(
         )
 
     # A live subscription must be cancelled first: deleting the account does
-    # not stop Stripe billing it. A failed cancellation leaves the account
-    # enabled so the owner can retry (or use the Customer Portal).
+    # not stop Razorpay billing it. Cancellation is immediate because the account
+    # is going away. A failed cancellation leaves the account enabled so the
+    # owner can retry.
     subscription = (
         await db.execute(
             select(Subscription)
             .where(
                 Subscription.user_id == user.id,
-                Subscription.status.in_(("active", "trialing", "past_due")),
-                Subscription.stripe_subscription_id.is_not(None),
+                Subscription.status.in_(OPEN_SUBSCRIPTION_STATUSES),
+                Subscription.razorpay_subscription_id.is_not(None),
             )
             .order_by(Subscription.created_at.desc())
             .limit(1)
@@ -101,8 +103,9 @@ async def delete_account(
     if subscription is not None:
         try:
             await asyncio.to_thread(
-                stripe_client.cancel_subscription,
-                subscription.stripe_subscription_id,
+                razorpay_client.cancel_subscription,
+                subscription.razorpay_subscription_id,
+                at_cycle_end=False,
             )
         except Exception as exc:
             raise HTTPException(

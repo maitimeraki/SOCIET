@@ -695,8 +695,8 @@ def purge_retention(dry_run: bool = False) -> dict[str, int]:
     return asyncio.run(purge_retention_core(dry_run=dry_run))
 
 
-async def process_stripe_event_core(event_row_id: str) -> None:
-    """Apply one recorded Stripe event and leave its row processed or failed."""
+async def process_razorpay_event_core(event_row_id: str) -> None:
+    """Apply one recorded Razorpay event and leave its row processed or failed."""
     from src.billing import webhook
     from src.db.engine import get_session_factory
     from src.db.models import WebhookEvent
@@ -707,7 +707,9 @@ async def process_stripe_event_core(event_row_id: str) -> None:
         if row is None or row.status == "processed":
             return
         try:
-            await webhook.handle_event(db, row.payload)
+            await webhook.handle_event(
+                db, row.payload, provider_event_id=row.provider_event_id
+            )
         except Exception as exc:
             # The handler may have committed before raising; clear any broken
             # transaction, then record the failure for the retry path.
@@ -725,21 +727,21 @@ async def process_stripe_event_core(event_row_id: str) -> None:
         await db.commit()
 
 
-def process_stripe_event(event_row_id: str) -> None:
-    asyncio.run(process_stripe_event_core(event_row_id))
+def process_razorpay_event(event_row_id: str) -> None:
+    asyncio.run(process_razorpay_event_core(event_row_id))
 
 
 async def reconcile_subscriptions_core() -> dict[str, int]:
     """Re-sync every mirrored subscription and replay stranded webhook events.
 
     Webhook events are acked before processing, so a failed enqueue or a
-    transient Stripe/DB error leaves a row no one re-visits: `pending` rows
+    transient Razorpay/DB error leaves a row no one re-visits: `pending` rows
     older than 60s and `failed` rows older than an hour are re-processed here,
     bounded per run. One bad row never aborts the sweep.
     """
     from sqlalchemy import and_, or_, select
 
-    from src.billing import stripe_client, webhook
+    from src.billing import razorpay_client, webhook
     from src.db.engine import get_session_factory
     from src.db.models import Subscription, WebhookEvent
 
@@ -771,7 +773,7 @@ async def reconcile_subscriptions_core() -> dict[str, int]:
         )
         for event_row_id in stranded:
             try:
-                await process_stripe_event_core(str(event_row_id))
+                await process_razorpay_event_core(str(event_row_id))
                 counts["webhook_retried"] += 1
             except Exception as exc:
                 logger.warning(
@@ -784,8 +786,8 @@ async def reconcile_subscriptions_core() -> dict[str, int]:
         subscription_ids = list(
             (
                 await db.execute(
-                    select(Subscription.stripe_subscription_id).where(
-                        Subscription.stripe_subscription_id.is_not(None)
+                    select(Subscription.razorpay_subscription_id).where(
+                        Subscription.razorpay_subscription_id.is_not(None)
                     )
                 )
             ).scalars()
@@ -793,7 +795,7 @@ async def reconcile_subscriptions_core() -> dict[str, int]:
         for subscription_id in subscription_ids:
             counts["checked"] += 1
             try:
-                remote = stripe_client.retrieve_subscription(subscription_id)
+                remote = razorpay_client.retrieve_subscription(subscription_id)
                 await webhook._sync_subscription(
                     db, remote, triggering_event_id="reconcile"
                 )

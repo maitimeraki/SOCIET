@@ -393,14 +393,17 @@ REDIS_URL=redis://localhost:6379
 # =============================================================================
 # BILLING AND COMPLIANCE (docs/TECHNOLOGY_STACK.md §11)
 # =============================================================================
-# Billing stays off until the legal surface + Stripe are live; the free plan is
-# the complete entitlement while off. With BILLING_ENABLED=true the four Stripe
+# Billing stays off until the legal surface + Razorpay are live; the free plan is
+# the complete entitlement while off. With BILLING_ENABLED=true the seven Razorpay
 # names below are required at boot.
 BILLING_ENABLED=false
-STRIPE_SECRET_KEY=sk-...
-STRIPE_WEBHOOK_SECRET=whsec-...
-STRIPE_PRICE_STARTER=price_...
-STRIPE_PRICE_STUDIO=price_...
+RAZORPAY_KEY_ID=rzp_test_...
+RAZORPAY_KEY_SECRET=
+RAZORPAY_WEBHOOK_SECRET=
+RAZORPAY_PLAN_STARTER_INR=plan_...
+RAZORPAY_PLAN_STARTER_USD=plan_...
+RAZORPAY_PLAN_STUDIO_INR=plan_...
+RAZORPAY_PLAN_STUDIO_USD=plan_...
 APP_BASE_URL=http://localhost:5173
 EMAIL_API_KEY=
 EMAIL_FROM=no-reply@societas.app
@@ -411,6 +414,8 @@ PLAN_FREE_UNITS=1000
 PLAN_STARTER_UNITS=8000
 PLAN_STUDIO_UNITS=16000
 PLAN_ENTERPRISE_UNITS=80000
+PLAN_STARTER_PRICE_INR=999
+PLAN_STUDIO_PRICE_INR=1999
 PLAN_STARTER_PRICE_USD=10
 PLAN_STUDIO_PRICE_USD=20
 PLAN_ENTERPRISE_PRICE_LABEL=Custom

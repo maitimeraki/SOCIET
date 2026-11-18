@@ -416,9 +416,11 @@ async def test_resolve_period_prefers_active_subscription(session_factory):
             db.add(
                 Subscription(
                     user_id=user_id,
-                    stripe_customer_id=f"cus_{uuid.uuid4()}",
-                    price_id="price_test",
-                    status="trialing",
+                    razorpay_subscription_id=f"sub_{uuid.uuid4().hex}",
+                    razorpay_plan_id="plan_test",
+                    currency="INR",
+                    billing_country="IN",
+                    status="active",
                     current_period_start=sub_start,
                     current_period_end=sub_end,
                 )

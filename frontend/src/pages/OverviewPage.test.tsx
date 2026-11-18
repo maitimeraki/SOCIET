@@ -60,7 +60,9 @@ describe('the Overview', () => {
     const standalone = [...html.matchAll(/<a\b[^>]*>/g)]
       .map((match) => match[0])
       .filter((tag) => /href="\/(?:runs|documents|pricing)"/.test(tag))
-    expect(standalone.length).toBeGreaterThanOrEqual(4)
+    // The plan row's "Choose a plan" link is not in the static markup: it appears only after the
+    // subscription read resolves on the client.
+    expect(standalone.length).toBeGreaterThanOrEqual(3)
     for (const tag of standalone) expect(tag).toContain('min-h-11')
   })
 
@@ -97,7 +99,8 @@ describe('the Overview', () => {
     expect(html).toContain('1,800')
     expect(html).toContain('Starter')
     expect(html).toContain('Resets 1 Nov 2026')
-    expect(html).toContain('Manage plan')
+    // The billing portal link is gone; the plan row's action stays empty until the subscription loads.
+    expect(html).not.toContain('Manage plan')
   })
 
   it('renders no invented meter, example label or literal plan name', () => {

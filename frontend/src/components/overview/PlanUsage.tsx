@@ -1,6 +1,8 @@
-import { useState } from 'react'
+/* eslint-disable react-refresh/only-export-components -- the pure plan-action mapping is exported so the no-DOM suite can assert it without a renderer. */
+import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { ApiError, billingPortal } from '../../api/rest'
+import { ApiError, billingCancelSubscription, billingSubscription } from '../../api/rest'
+import type { BillingSubscription } from '../../api/types'
 import { inlineLinkClasses } from '../ui/Button'
 import { fmtDay, fmtInt } from '../../utils/format'
 
@@ -10,33 +12,59 @@ export interface PlanUsageProps {
   unitsTotal: number
   unitsRemaining: number
   periodEnd: string
-  billingEnabled: boolean
 }
+
+/** The statuses that still bill. Halted, cancelled and completed subscriptions do not. */
+const LIVE_STATUSES = new Set(['active', 'pending', 'authenticated'])
+
+export type PlanAction = 'cancel' | 'scheduled' | 'choose'
+
+/** What the plan row offers: cancel a live plan, say that a cancelled one is still running, or choose a plan. */
+export function planAction(subscription: BillingSubscription | null): PlanAction {
+  if (subscription === null || !LIVE_STATUSES.has(subscription.status)) return 'choose'
+  return subscription.cancel_at_period_end ? 'scheduled' : 'cancel'
+}
+
+const LINK_CLASSES = `${inlineLinkClasses} font-ui text-body-sm text-accent underline underline-offset-4`
 
 /**
  * §7.8 — the only place a plan appears inside the app. Every figure is the server's
  * (`GET /api/v1/billing/usage`); the client never invents a limit. A meter over 90% turns
  * sienna, never red.
  */
-export default function PlanUsage({
-  plan,
-  unitsUsed,
-  unitsTotal,
-  unitsRemaining,
-  periodEnd,
-  billingEnabled,
-}: PlanUsageProps) {
-  const [portalError, setPortalError] = useState<string | null>(null)
+export default function PlanUsage({ plan, unitsUsed, unitsTotal, unitsRemaining, periodEnd }: PlanUsageProps) {
+  // `undefined` until the subscription read answers. Until then the action slot stays empty:
+  // neither a cancel nor a plan choice is right for every account.
+  const [subscription, setSubscription] = useState<BillingSubscription | null | undefined>(undefined)
+  const [cancelling, setCancelling] = useState(false)
+  const [planError, setPlanError] = useState<string | null>(null)
   const pct = unitsTotal > 0 ? Math.min(100, Math.round((unitsUsed / unitsTotal) * 100)) : 0
   const planLabel = plan.charAt(0).toUpperCase() + plan.slice(1)
+  const action = subscription === undefined ? null : planAction(subscription)
 
-  async function manage() {
-    setPortalError(null)
+  useEffect(() => {
+    let active = true
+    billingSubscription()
+      .then((next) => {
+        if (active) setSubscription(next)
+      })
+      .catch((error: unknown) => {
+        if (active) setPlanError(error instanceof ApiError ? error.detail : "Couldn't load your plan. Try again.")
+      })
+    return () => {
+      active = false
+    }
+  }, [])
+
+  async function cancel() {
+    setPlanError(null)
+    setCancelling(true)
     try {
-      const { url } = await billingPortal()
-      window.location.assign(url)
+      setSubscription(await billingCancelSubscription())
     } catch (error) {
-      setPortalError(error instanceof ApiError ? error.detail : "Couldn't open billing. Try again.")
+      setPlanError(error instanceof ApiError ? error.detail : "Couldn't cancel your plan. Try again.")
+    } finally {
+      setCancelling(false)
     }
   }
 
@@ -72,23 +100,26 @@ export default function PlanUsage({
       <p className="mt-3 font-mono text-micro text-ink-3">{fmtInt(unitsRemaining)} units remaining</p>
       <div className="mt-4 flex items-center justify-between gap-3 border-t border-hairline pt-3 font-mono text-micro text-ink-3">
         <span>Resets {fmtDay(periodEnd)}</span>
-        {billingEnabled ? (
-          <button
-            type="button"
-            onClick={() => void manage()}
-            className={`${inlineLinkClasses} font-ui text-body-sm text-accent underline underline-offset-4`}
-          >
-            Manage plan
+        {action === 'cancel' && (
+          <button type="button" onClick={() => void cancel()} disabled={cancelling} className={LINK_CLASSES}>
+            {cancelling ? 'Cancelling…' : 'Cancel plan'}
           </button>
-        ) : (
-          <Link to="/pricing" className={`${inlineLinkClasses} font-ui text-body-sm text-accent underline underline-offset-4`}>
-            Manage plan
+        )}
+        {action === 'choose' && (
+          <Link to="/pricing" className={LINK_CLASSES}>
+            Choose a plan
           </Link>
         )}
       </div>
-      {portalError && (
+      {action === 'scheduled' && (
+        <p className="mt-2 font-ui text-micro text-ink-2">
+          Your plan stays active until{' '}
+          {subscription?.current_period_end ? fmtDay(subscription.current_period_end) : 'the end of this period'}.
+        </p>
+      )}
+      {planError && (
         <p role="alert" className="mt-2 text-micro text-ink-2">
-          {portalError}
+          {planError}
         </p>
       )}
     </section>

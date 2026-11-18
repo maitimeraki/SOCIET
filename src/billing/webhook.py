@@ -1,13 +1,12 @@
-"""Stripe webhook verification, idempotent storage and the event state machine.
+"""Razorpay webhook: idempotent storage and the subscription state machine.
 
 The event payload is never the source of entitlement: every subscription event
-triggers a fresh retrieve from Stripe, and the plan is derived from that
-object. The local ``subscriptions`` row is the mirror; ``users.plan_key`` is
-written only here (and by admin actions), never from a request body.
+triggers a fresh fetch from Razorpay, and the plan is derived from that object.
+The local ``subscriptions`` row is the mirror; ``users.plan_key`` is written only
+here (and by admin actions), never from a request body.
 """
 
 import datetime
-import json
 import uuid
 
 from sqlalchemy import select
@@ -15,29 +14,46 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.audit import record as audit_record
-from src.billing import stripe_client
-from src.billing.plans import plan_for_price
+from src.billing import razorpay_client
+from src.billing.plans import plan_for_razorpay_plan, plan_price_minor
+from src.billing.tax import tax_amount_minor
 from src.db.models import Subscription, User, WebhookEvent
 
-_GRANTED_STATUSES = frozenset({"trialing", "active"})
-_REVOKED_STATUSES = frozenset({"canceled", "unpaid", "incomplete_expired"})
+#: The remote subscription still exists; cancel and account deletion act on it.
+OPEN_SUBSCRIPTION_STATUSES = frozenset(
+    {"created", "authenticated", "active", "pending", "paused", "halted"}
+)
+#: Checkout refuses a second subscription while one of these is live.
+BLOCKING_SUBSCRIPTION_STATUSES = frozenset(
+    {"created", "authenticated", "active", "pending", "paused"}
+)
+_GRANTED_STATUSES = frozenset({"active"})
+_REVOKED_STATUSES = frozenset({"cancelled", "completed", "expired", "halted"})
+
+_SUBSCRIPTION_EVENTS = frozenset(
+    {
+        "subscription.authenticated",
+        "subscription.activated",
+        "subscription.charged",
+        "subscription.completed",
+        "subscription.updated",
+        "subscription.pending",
+        "subscription.halted",
+        "subscription.cancelled",
+        "subscription.paused",
+        "subscription.resumed",
+    }
+)
 
 
-def verify_signature(
-    raw_body: bytes, header: str | None, *, secret: str, tolerance: int
-) -> None:
-    """Verify ``Stripe-Signature`` against the raw body (constant-time, the
-    Stripe library's own implementation). Raises on any mismatch."""
-    import stripe
-
-    stripe.WebhookSignature.verify_header(raw_body, header, secret, tolerance)
-
-
-def parse_event(raw_body: bytes) -> dict:
-    return json.loads(raw_body)
-
-
-async def store_event(db: AsyncSession, event: dict, payload_hash: str) -> bool:
+async def store_event(
+    db: AsyncSession,
+    *,
+    provider_event_id: str,
+    event_type: str,
+    payload_hash: str,
+    payload: dict,
+) -> bool:
     """Insert the event, or do nothing if the id was already recorded.
 
     Returns True iff this call inserted the row — the caller enqueues processing
@@ -47,10 +63,10 @@ async def store_event(db: AsyncSession, event: dict, payload_hash: str) -> bool:
         await db.execute(
             pg_insert(WebhookEvent)
             .values(
-                provider_event_id=event["id"],
-                event_type=event["type"],
+                provider_event_id=provider_event_id,
+                event_type=event_type,
                 payload_hash=payload_hash,
-                payload=event,
+                payload=payload,
             )
             .on_conflict_do_nothing(index_elements=["provider_event_id"])
             .returning(WebhookEvent.id)
@@ -60,123 +76,29 @@ async def store_event(db: AsyncSession, event: dict, payload_hash: str) -> bool:
     return inserted is not None
 
 
-async def handle_event(db: AsyncSession, event: dict) -> None:
+async def handle_event(db: AsyncSession, event: dict, *, provider_event_id: str) -> None:
     """Apply one verified event. Unknown and record-only types are a no-op."""
-    event_type = event.get("type")
-    obj = (event.get("data") or {}).get("object") or {}
-    event_id = event["id"]
-
-    if event_type == "checkout.session.completed":
-        await _handle_checkout_completed(db, obj, triggering_event_id=event_id)
-    elif event_type in (
-        "customer.subscription.created",
-        "customer.subscription.updated",
-        "customer.subscription.deleted",
-    ):
-        if obj.get("id"):
-            await _sync_subscription(
-                db,
-                stripe_client.retrieve_subscription(obj["id"]),
-                triggering_event_id=event_id,
-            )
-    elif event_type in (
-        "invoice.paid",
-        "invoice.payment_failed",
-        "invoice.finalization_failed",
-    ):
-        # API 2025-03-31 (Basil) moved this under parent.subscription_details.
-        subscription_id = obj.get("subscription") or (
-            (obj.get("parent") or {}).get("subscription_details") or {}
-        ).get("subscription")
-        if subscription_id:
-            await _sync_subscription(
-                db,
-                stripe_client.retrieve_subscription(subscription_id),
-                triggering_event_id=event_id,
-            )
-    # customer.updated, charge.refunded, charge.dispute.created,
-    # radar.early_fraud_warning.created and unknown types: recorded only.
-
-
-async def _find_mirror(
-    db: AsyncSession,
-    *,
-    subscription_id: str | None = None,
-    customer_id: str | None = None,
-    user_id: uuid.UUID | None = None,
-) -> Subscription | None:
-    if subscription_id:
-        row = (
-            await db.execute(
-                select(Subscription).where(
-                    Subscription.stripe_subscription_id == subscription_id
-                )
-            )
-        ).scalar_one_or_none()
-        if row is not None:
-            return row
-    if customer_id:
-        row = (
-            await db.execute(
-                select(Subscription)
-                .where(Subscription.stripe_customer_id == customer_id)
-                .order_by(Subscription.created_at.desc())
-                .limit(1)
-            )
-        ).scalar_one_or_none()
-        if row is not None:
-            return row
-    if user_id:
-        return (
-            await db.execute(
-                select(Subscription)
-                .where(Subscription.user_id == user_id)
-                .order_by(Subscription.created_at.desc())
-                .limit(1)
-            )
-        ).scalar_one_or_none()
-    return None
-
-
-def _as_uuid(value: object) -> uuid.UUID | None:
-    if value is None or isinstance(value, uuid.UUID):
-        return value
-    try:
-        return uuid.UUID(str(value))
-    except (TypeError, ValueError):
-        return None
-
-
-async def _handle_checkout_completed(
-    db: AsyncSession, session_obj: dict, *, triggering_event_id: str
-) -> None:
-    """Reuse (or create) the mirror for this customer, then sync the subscription."""
-    user_id = _as_uuid(
-        session_obj.get("client_reference_id")
-        or (session_obj.get("metadata") or {}).get("user_id")
+    if event.get("event") not in _SUBSCRIPTION_EVENTS:
+        return
+    entity = ((event.get("payload") or {}).get("subscription") or {}).get("entity") or {}
+    subscription_id = entity.get("id")
+    if not subscription_id:
+        return
+    await _sync_subscription(
+        db,
+        razorpay_client.retrieve_subscription(subscription_id),
+        triggering_event_id=provider_event_id,
     )
-    customer_id = session_obj.get("customer")
 
-    row = await _find_mirror(db, customer_id=customer_id, user_id=user_id)
-    if row is None:
-        if user_id is None or not customer_id:
-            raise ValueError("unmapped checkout session")
-        row = Subscription(
-            user_id=user_id, stripe_customer_id=customer_id, status="incomplete"
-        )
-        db.add(row)
-        await db.commit()
-    elif customer_id and row.stripe_customer_id != customer_id:
-        row.stripe_customer_id = customer_id
-        await db.commit()
 
-    subscription_id = session_obj.get("subscription")
-    if subscription_id:
-        await _sync_subscription(
-            db,
-            stripe_client.retrieve_subscription(subscription_id),
-            triggering_event_id=triggering_event_id,
+async def _find_mirror(db: AsyncSession, subscription_id: str) -> Subscription | None:
+    return (
+        await db.execute(
+            select(Subscription).where(
+                Subscription.razorpay_subscription_id == subscription_id
+            )
         )
+    ).scalar_one_or_none()
 
 
 def _unix(value: object) -> datetime.datetime | None:
@@ -188,34 +110,36 @@ def _unix(value: object) -> datetime.datetime | None:
 async def _sync_subscription(
     db: AsyncSession, sub: dict, *, triggering_event_id: str
 ) -> None:
-    """Mirror one retrieved Stripe subscription and apply its plan transition."""
+    """Mirror one fetched Razorpay subscription and apply its plan transition."""
     subscription_id = sub.get("id")
-    customer_id = sub.get("customer")
-    items = (sub.get("items") or {}).get("data") or []
-    first_item = items[0] if items else {}
-    price_id = (first_item.get("price") or {}).get("id")
-    # API 2025-03-31 (Basil) moved the period onto the subscription item.
-    period_start = sub.get("current_period_start") or first_item.get(
-        "current_period_start"
-    )
-    period_end = sub.get("current_period_end") or first_item.get(
-        "current_period_end"
-    )
+    plan_id = sub.get("plan_id")
+    status = sub.get("status")
+    # Razorpay returns [] rather than {} for empty notes.
+    notes = sub.get("notes") if isinstance(sub.get("notes"), dict) else {}
 
-    row = await _find_mirror(
-        db, subscription_id=subscription_id, customer_id=customer_id
-    )
+    row = await _find_mirror(db, subscription_id)
     if row is None:
-        raise ValueError("unmapped subscription")
+        user_id = notes.get("user_id")
+        if not user_id:
+            raise ValueError("unmapped subscription")
+        row = Subscription(
+            user_id=uuid.UUID(str(user_id)), razorpay_subscription_id=subscription_id
+        )
+        db.add(row)
 
-    row.stripe_subscription_id = subscription_id
-    row.stripe_customer_id = customer_id
-    row.status = sub.get("status")
-    row.price_id = price_id
-    row.current_period_start = _unix(period_start)
-    row.current_period_end = _unix(period_end)
-    row.cancel_at_period_end = bool(sub.get("cancel_at_period_end"))
+    row.razorpay_plan_id = plan_id
+    row.status = status
+    row.current_period_start = _unix(sub.get("current_start"))
+    row.current_period_end = _unix(sub.get("current_end"))
     row.updated_at = datetime.datetime.now(datetime.UTC)
+    row.billing_country = row.billing_country or notes.get("country")
+    row.currency = row.currency or notes.get("currency")
+
+    plan = plan_for_razorpay_plan(plan_id)
+    if plan is not None and row.currency:
+        row.tax_amount = tax_amount_minor(
+            plan_price_minor(plan, row.currency), row.billing_country
+        )
     await db.commit()
 
     if row.user_id is None:
@@ -224,14 +148,12 @@ async def _sync_subscription(
     if user is None:
         return
 
-    status = sub.get("status")
     if status in _GRANTED_STATUSES:
-        plan = plan_for_price(price_id)
         new_key = plan.key if plan is not None else "free"
     elif status in _REVOKED_STATUSES:
         new_key = "free"
     else:
-        # past_due / incomplete / paused: leave the plan exactly as it was.
+        # created / authenticated / pending / paused: leave the plan as it was.
         return
 
     if new_key != user.plan_key:
@@ -245,7 +167,7 @@ async def _sync_subscription(
             meta={
                 "from": previous,
                 "to": new_key,
-                "actor": "stripe",
-                "stripe_event_id": triggering_event_id,
+                "actor": "razorpay",
+                "provider_event_id": triggering_event_id,
             },
         )

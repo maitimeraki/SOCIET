@@ -30,14 +30,28 @@ export interface BillingUsage {
   billing_enabled: boolean
 }
 
+/** The currencies a plan is priced in. INR is first: it is the default for Indian billing countries. */
+export type BillingCurrency = 'INR' | 'USD'
+
 /** `GET /api/v1/billing/plans` — the public rate card (starter/studio/enterprise). */
 export interface BillingPlan {
-  key: string
-  price_usd: number | null
-  price_label: string
+  key: 'starter' | 'studio' | 'enterprise'
+  /** A currency with no configured price is null. */
+  prices: { INR: number | null; USD: number | null }
+  /** Enterprise only; the other plans are priced by `prices`. */
+  price_label: string | null
   units: number
   max_agents: number
   max_rounds: number
+}
+
+/** `GET /api/v1/billing/subscription` (and the cancel reply) — the account's subscription, or null. */
+export interface BillingSubscription {
+  status: string
+  plan: 'free' | 'starter' | 'studio' | 'enterprise'
+  currency: BillingCurrency | null
+  current_period_end: string | null
+  cancel_at_period_end: boolean
 }
 
 /** `GET /api/v1/legal/documents` — one current version per slug, no content. */

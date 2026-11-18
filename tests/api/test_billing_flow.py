@@ -321,6 +321,7 @@ async def test_the_billing_flow_shares_one_pool_and_keeps_internals_off_the_wire
             "unit_tokens",
             "chars_per_unit",
             "stripe",
+            "razorpay",
         )
         for body in bodies:
             lowered = body.lower()

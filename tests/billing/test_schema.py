@@ -164,7 +164,7 @@ async def test_webhook_event_idempotency(session_factory):
             db.add(
                 WebhookEvent(
                     provider_event_id=event_id,
-                    event_type="invoice.paid",
+                    event_type="subscription.charged",
                     payload_hash="a" * 64,
                 )
             )
@@ -174,7 +174,7 @@ async def test_webhook_event_idempotency(session_factory):
             db.add(
                 WebhookEvent(
                     provider_event_id=event_id,
-                    event_type="invoice.paid",
+                    event_type="subscription.charged",
                     payload_hash="b" * 64,
                 )
             )

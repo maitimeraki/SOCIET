@@ -111,13 +111,18 @@ class Settings(BaseSettings):
     shutdown_drain_seconds: int = 30
 
     # --- Billing and entitlements (plan §4, §6). billing_enabled stays False until
-    # legal + entity + Stripe are ready; the free plan is the entitlement while off.
+    # legal + entity + Razorpay are ready; the free plan is the entitlement while off.
     billing_enabled: bool = False
-    stripe_secret_key: str | None = None
-    stripe_webhook_secret: str | None = None
-    stripe_price_starter: str | None = None
-    stripe_price_studio: str | None = None
-    # Where Checkout/Portal send the browser back to (the SPA origin).
+    razorpay_key_id: str | None = None
+    razorpay_key_secret: str | None = None
+    razorpay_webhook_secret: str | None = None
+    razorpay_plan_starter_inr: str | None = None
+    razorpay_plan_starter_usd: str | None = None
+    razorpay_plan_studio_inr: str | None = None
+    razorpay_plan_studio_usd: str | None = None
+    # Monthly cycles before a subscription completes; the user then drops to free.
+    razorpay_subscription_total_count: int = 120
+    # Where the SPA sends the browser back to after checkout.
     app_base_url: str = "http://localhost:5173"
 
     # --- Transactional email (plan §7): a bare httpx POST, no framework. An
@@ -128,7 +133,6 @@ class Settings(BaseSettings):
     email_verification_ttl_seconds: int = 86_400  # 24 h
     password_reset_ttl_seconds: int = 3_600  # 1 h
     rate_limit_email: str = "3/hour"
-    stripe_webhook_tolerance_seconds: int = 300
     billing_reconcile_cron: str = "17 * * * *"  # hourly at :17
     billing_lease_sweep_cron: str = "*/10 * * * *"  # every 10 minutes
     legal_entity_name: str = ""
@@ -140,6 +144,9 @@ class Settings(BaseSettings):
     plan_enterprise_units: int = 80_000
 
     # Plan rate card — the public pricing surface and the server's one source.
+    # INR figures are PLACEHOLDERS until the rupee price is set.
+    plan_starter_price_inr: int = 999
+    plan_studio_price_inr: int = 1_999
     plan_starter_price_usd: int = 10
     plan_studio_price_usd: int = 20
     plan_enterprise_price_label: str = "Custom"
@@ -174,13 +181,21 @@ class Settings(BaseSettings):
 
         if self.billing_enabled:
             for name in (
-                "stripe_secret_key",
-                "stripe_webhook_secret",
-                "stripe_price_starter",
-                "stripe_price_studio",
+                "razorpay_key_id",
+                "razorpay_key_secret",
+                "razorpay_webhook_secret",
+                "razorpay_plan_starter_inr",
+                "razorpay_plan_starter_usd",
+                "razorpay_plan_studio_inr",
+                "razorpay_plan_studio_usd",
             ):
                 if not getattr(self, name):
                     raise ValueError(f"{name} is required when billing_enabled is true")
+
+        if self.razorpay_key_id:
+            prefix = "rzp_live_" if self.env == "prod" else "rzp_test_"
+            if not self.razorpay_key_id.startswith(prefix):
+                raise ValueError(f"razorpay_key_id must start with {prefix} in env {self.env}")
 
         for plan in ("free", "starter", "studio", "enterprise"):
             if getattr(self, f"plan_{plan}_units") <= 0:

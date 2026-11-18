@@ -268,9 +268,13 @@ class Subscription(Base):
     user_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), index=True
     )
-    stripe_customer_id: Mapped[str] = mapped_column(Text, nullable=False, index=True)
-    stripe_subscription_id: Mapped[str | None] = mapped_column(Text, unique=True)
-    price_id: Mapped[str | None] = mapped_column(Text)
+    razorpay_subscription_id: Mapped[str | None] = mapped_column(Text, unique=True)
+    razorpay_plan_id: Mapped[str | None] = mapped_column(Text)
+    currency: Mapped[str | None] = mapped_column(Text)
+    billing_country: Mapped[str | None] = mapped_column(Text)
+    tax_amount: Mapped[int] = mapped_column(
+        BigInteger, nullable=False, server_default=text("0")
+    )
     status: Mapped[str] = mapped_column(Text, nullable=False)
     current_period_start: Mapped[datetime.datetime | None] = mapped_column(
         DateTime(timezone=True)

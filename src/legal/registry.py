@@ -30,17 +30,16 @@ class LegalDocSeed:
 
 REQUIRED_CONSENT_SLUGS = ("terms", "privacy")
 
-_VERSION = "2026-11-03"
-_EFFECTIVE_AT = datetime.date(2026, 11, 3)
-# The deletion/anonymisation wording changed; only those two documents bump.
-_UPDATED_VERSION = "2026-11-04"
-_UPDATED_EFFECTIVE_AT = datetime.date(2026, 11, 4)
+_REVISED_VERSION = "2026-11-18"
+_REVISED_EFFECTIVE_AT = datetime.date(2026, 11, 18)
 
 SEEDS: tuple[LegalDocSeed, ...] = (
-    LegalDocSeed("terms", _UPDATED_VERSION, _UPDATED_EFFECTIVE_AT, "terms.md"),
-    LegalDocSeed("privacy", _UPDATED_VERSION, _UPDATED_EFFECTIVE_AT, "privacy.md"),
-    LegalDocSeed("refund", _VERSION, _EFFECTIVE_AT, "refund.md"),
-    LegalDocSeed("subprocessors", _VERSION, _EFFECTIVE_AT, "subprocessors.md"),
+    LegalDocSeed("terms", _REVISED_VERSION, _REVISED_EFFECTIVE_AT, "terms.md"),
+    LegalDocSeed("privacy", _REVISED_VERSION, _REVISED_EFFECTIVE_AT, "privacy.md"),
+    LegalDocSeed("refund", _REVISED_VERSION, _REVISED_EFFECTIVE_AT, "refund.md"),
+    LegalDocSeed(
+        "subprocessors", _REVISED_VERSION, _REVISED_EFFECTIVE_AT, "subprocessors.md"
+    ),
 )
 
 

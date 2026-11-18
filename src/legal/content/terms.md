@@ -58,31 +58,39 @@ process it through the service.
 ## 5. Plans, billing, and cancellation
 
 Some features require a paid subscription. Paid subscriptions are billed in
-advance through our payment processor, Stripe.
+advance through our payment processor, Razorpay.
 
 - **Renewal.** A paid subscription renews automatically at the end of each
   billing period unless you cancel it before renewal.
-- **Cancellation.** You may cancel at any time through the Stripe Customer
-  Portal linked from your account settings. Cancellation stops future renewals.
-  Your paid access continues until the end of the period you have already paid
-  for, and then your account returns to the free plan.
+- **Cancellation.** You may cancel at any time with the "Cancel plan" control in
+  your account. For an active plan, cancellation takes effect at the end of the
+  billing period and stops future renewals; your paid access continues until the
+  end of the period you have already paid for, and then your account returns to
+  the free plan. A plan that is not yet active or has been halted is cancelled
+  immediately.
 - **Refunds.** Refunds are governed by our Refund Policy. In short, we do not
   provide partial refunds for unused time except where required by law.
 - **Price changes.** We may change subscription prices. We will notify you
   before a price change applies to your subscription, and the new price applies
   from your next renewal. If you do not agree, you may cancel before that
   renewal.
-- **Proration.** If you change plans, Stripe calculates any proration for the
-  current billing period and shows the amount before you confirm the change.
-- **Card failure.** If a payment fails, Stripe retries the charge. While the
-  payment is being retried, your plan is normally left unchanged. If the
-  subscription is cancelled or remains unpaid, your account returns to the free
-  plan and paid features stop.
-- **Taxes.** Prices are exclusive of applicable taxes unless stated otherwise.
-  You are responsible for any taxes that apply to your purchase.
-- **Deleting your account.** Cancel an active subscription before deleting your
-  account. Deletion is refused while a subscription is live, so you are not
-  billed for an account you can no longer access.
+- **Changing plans.** To change plans, cancel your current plan first. A new plan
+  can be chosen once the current plan has ended: immediately if it is not yet
+  active or has been halted, or at the end of the billing period if it is active.
+  Plan changes are not prorated.
+- **Payment failure.** If a payment fails, Razorpay retries the payment. If the
+  retries are exhausted, your account returns to the free plan automatically and
+  paid features stop.
+- **Currency and taxes.** Prices are shown in Indian rupees (INR) or US dollars
+  (USD). No GST or other tax is currently charged. We may add tax in future and
+  will notify you before it applies. Prices are exclusive of applicable taxes
+  unless stated otherwise. You are responsible for any taxes that apply to your
+  purchase.
+- **Deleting your account.** Deleting your account cancels any live subscription
+  immediately, so paid access ends at once and no further renewals are charged.
+  The unused part of the current billing period is not refunded, as set out in
+  our Refund Policy. If we cannot cancel the subscription, the deletion does not
+  go ahead.
 
 ## 6. Quotas and metering
 

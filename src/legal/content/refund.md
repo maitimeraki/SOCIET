@@ -7,12 +7,14 @@ This Refund Policy applies to paid subscriptions to the service operated by
 
 ## Cancellation
 
-You may cancel your subscription at any time through the Stripe Customer Portal
-linked from your account settings. Cancellation stops future renewals.
+You may cancel your subscription at any time with the "Cancel plan" control in
+your account. For an active plan, cancellation takes effect at the end of the
+current billing period and stops future renewals. A plan that has not started or
+has been halted is cancelled immediately.
 
-When you cancel, your paid access continues until the end of the billing period
-you have already paid for. At the end of that period your account returns to
-the free plan. You are not charged again.
+When you cancel an active plan, your paid access continues until the end of the
+billing period you have already paid for. At the end of that period your account
+returns to the free plan. You are not charged again.
 
 ## Refunds
 
@@ -25,11 +27,9 @@ where the charge was made in error, refund it to the original payment method.
 
 ## Card failure and grace period
 
-If a renewal payment fails, Stripe retries the charge. While the payment is
-being retried, your plan is normally left unchanged. If the subscription is
-cancelled or remains unpaid, your account returns to the free plan and paid
-features stop. You can update your payment method in the Stripe Customer
-Portal.
+If a renewal payment fails, Razorpay retries the payment. If the retries are
+exhausted, your account returns to the free plan automatically and paid
+features stop.
 
 ## How to contact us
 

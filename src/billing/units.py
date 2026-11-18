@@ -81,7 +81,7 @@ async def resolve_period(
             select(Subscription)
             .where(
                 Subscription.user_id == user_id,
-                Subscription.status.in_(("trialing", "active")),
+                Subscription.status == "active",
                 Subscription.current_period_start.is_not(None),
                 Subscription.current_period_end.is_not(None),
             )

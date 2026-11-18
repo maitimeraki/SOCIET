@@ -22,7 +22,7 @@ questions and requests: {{legal_contact_email}}.
 | Extracted text | Text extracted from your uploads for processing | PostgreSQL |
 | Derived graph data | Entities, relationships, and other graph structures derived from your material | Neo4j |
 | Job and run records | Your queries, job status, debates, verdicts, confidence scores, run events, and model-usage telemetry (token counts and internal cost estimates) | PostgreSQL |
-| Billing data | Stripe customer and subscription identifiers, plan, subscription status, and billing-period dates. Card details are handled by Stripe, not stored by us | PostgreSQL and Stripe |
+| Billing data | Razorpay subscription identifiers, plan, subscription status, billing-period dates, currency, and billing country. Card details are handled by Razorpay, not stored by us | PostgreSQL and Razorpay |
 | Consent records | The legal document version and content hash you accepted, timestamp, IP address, and user agent | PostgreSQL |
 | Operational telemetry | Logs, metrics, traces, and error reports used to operate and secure the service | Our infrastructure and, where configured, Sentry and an OpenTelemetry collector |
 
@@ -58,7 +58,7 @@ processing addendum (DPA).
 | PostgreSQL | Primary application database | [DPA link pending counsel review] |
 | Redis | Job queue and caching | [DPA link pending counsel review] |
 | Neo4j | Knowledge graph storage | [DPA link pending counsel review] |
-| Stripe | Payments, subscriptions, and the billing portal | [DPA link pending counsel review] |
+| Razorpay | Payments and subscriptions | [DPA link pending counsel review] |
 | Transactional email provider (when configured) | Account notices and service messages | [DPA link pending counsel review] |
 | Sentry (when configured) | Error reporting | [DPA link pending counsel review] |
 | OpenTelemetry collector (when configured) | Distributed tracing | [DPA link pending counsel review] |
@@ -110,9 +110,9 @@ link.
 **Delete.** You can delete your account from the account settings. Deletion
 disables the account immediately, revokes active sessions, and queues a purge
 of the account's data. Some records may be retained where the law requires it.
-If you have an active paid subscription, cancel it first: deletion is refused
-while a subscription is live, so you are not billed for an account you can no
-longer access.
+If you have an active paid subscription, deletion cancels it immediately, so
+you are not billed for an account you can no longer access. If we cannot cancel
+the subscription, the deletion does not go through.
 
 **Other requests.** Email {{legal_contact_email}}. We may need to verify your
 identity before acting on a request.

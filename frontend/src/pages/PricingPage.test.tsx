@@ -1,9 +1,17 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 // No jsdom / no testing-library in this repo: render to static markup in Node. MemoryRouter is
 // required because the page's header and actions are `<Link>`s — React Router throws outside one.
 import { renderToStaticMarkup } from 'react-dom/server'
 import { MemoryRouter } from 'react-router-dom'
-import PricingPage, { ENTERPRISE_ROWS, PLANS, mergeServerPlans } from './PricingPage'
+import { billingCheckout } from '../api/rest'
+import PricingPage, {
+  ENTERPRISE_ROWS,
+  PLANS,
+  defaultCountry,
+  defaultCurrency,
+  formatPrice,
+  mergeServerPlans,
+} from './PricingPage'
 import { BANNED_TERMS, renderedText } from '../test/copyLaw'
 
 const render = () =>
@@ -54,20 +62,21 @@ describe('the plans', () => {
 
   it("renders the server's rate card when it loads", () => {
     const merged = mergeServerPlans([
-      { key: 'starter', price_usd: 12, price_label: '$12', units: 9000, max_agents: 12, max_rounds: 5 },
-      { key: 'studio', price_usd: 24, price_label: '$24', units: 18000, max_agents: 12, max_rounds: 6 },
-      { key: 'enterprise', price_usd: null, price_label: 'Custom', units: 90000, max_agents: 12, max_rounds: 8 },
+      { key: 'starter', prices: { INR: 900, USD: 12 }, price_label: null, units: 9000, max_agents: 12, max_rounds: 5 },
+      { key: 'studio', prices: { INR: 1800, USD: 24 }, price_label: null, units: 18000, max_agents: 12, max_rounds: 6 },
+      { key: 'enterprise', prices: { INR: null, USD: null }, price_label: 'Custom', units: 90000, max_agents: 12, max_rounds: 8 },
     ])
 
     expect(merged.plans[0]).toMatchObject({
-      amount: '$12',
+      prices: { INR: 900, USD: 12 },
       rows: [
         ['Units / month', '9,000'],
         ['Panel size', '12'],
         ['Passes per decision', '5'],
       ],
     })
-    expect(merged.plans[1].amount).toBe('$24')
+    expect(merged.plans[1].prices).toEqual({ INR: 1800, USD: 24 })
+    expect(merged.enterprisePriceLabel).toBe('Custom')
     expect(merged.enterpriseRows).toEqual([
       ['Units / month', '90,000'],
       ['Panel size', '12'],
@@ -90,5 +99,51 @@ describe('the plans', () => {
     expect(html).not.toContain('societas.example')
     // Anonymous visitors get the signup door, never a checkout control.
     expect(html).toContain('href="/auth/signup?next=/pricing"')
+  })
+})
+
+describe('the currency', () => {
+  it('keeps INR first in the fallback prices', () => {
+    expect(PLANS[0].prices).toEqual({ INR: 999, USD: 10 })
+    expect(PLANS[1].prices).toEqual({ INR: 1999, USD: 20 })
+  })
+
+  it('formats INR with ₹ and USD with $, and a missing price as a dash', () => {
+    expect(formatPrice(1999, 'INR')).toBe('₹1,999')
+    expect(formatPrice(10, 'USD')).toBe('$10')
+    expect(formatPrice(null, 'INR')).toBe('—')
+  })
+
+  it('takes the billing country from the locale, falling back to the US', () => {
+    expect(defaultCountry('en-IN')).toBe('IN')
+    expect(defaultCountry('en-US')).toBe('US')
+    expect(defaultCountry('en')).toBe('US')
+    expect(defaultCountry(undefined)).toBe('US')
+  })
+
+  it('defaults the currency to INR only for India', () => {
+    expect(defaultCurrency('IN')).toBe('INR')
+    expect(defaultCurrency('US')).toBe('USD')
+    expect(defaultCurrency('GB')).toBe('USD')
+  })
+
+  it('states the currencies in the enterprise footnote', () => {
+    expect(render()).toContain('prices in INR or USD')
+  })
+})
+
+describe('checkout', () => {
+  afterEach(() => vi.unstubAllGlobals())
+
+  it('posts the plan with the chosen currency and country', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ url: 'https://pay.example/checkout' })))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const { url } = await billingCheckout('studio', 'INR', 'IN')
+
+    const [path, init] = fetchMock.mock.calls[0] as [string, RequestInit]
+    expect(path).toContain('/api/v1/billing/checkout')
+    expect(JSON.parse(init.body as string)).toEqual({ plan: 'studio', currency: 'INR', country: 'IN' })
+    expect(url).toBe('https://pay.example/checkout')
   })
 })

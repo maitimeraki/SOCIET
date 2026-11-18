@@ -18,7 +18,7 @@ configures that provider.
 | PostgreSQL | Primary application database | No | [DPA link pending counsel review] |
 | Redis | Job queue and caching | No | [DPA link pending counsel review] |
 | Neo4j | Knowledge graph storage | No | [DPA link pending counsel review] |
-| Stripe | Payments, subscriptions, and the billing portal | No | [DPA link pending counsel review] |
+| Razorpay | Payments and subscriptions | No | [DPA link pending counsel review] |
 | Transactional email provider | Account notices and service messages | Yes | [DPA link pending counsel review] |
 | Sentry | Error reporting | Yes | [DPA link pending counsel review] |
 | OpenTelemetry collector | Distributed tracing | Yes | [DPA link pending counsel review] |

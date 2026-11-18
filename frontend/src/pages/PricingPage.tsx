@@ -2,9 +2,11 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { ApiError, billingCheckout, billingPlans } from '../api/rest'
-import type { BillingPlan } from '../api/types'
+import type { BillingCurrency, BillingPlan } from '../api/types'
 import { useAuthStore } from '../auth/authStore'
 import { buttonClasses, inlineLinkClasses } from '../components/ui/Button'
+import Input from '../components/ui/Input'
+import Select from '../components/ui/Select'
 import { LEGAL_LINKS } from '../config/legalLinks'
 
 /**
@@ -16,7 +18,8 @@ export interface PlanCard {
   key: 'starter' | 'studio'
   name: string
   for: string
-  amount: string
+  /** INR first. A currency the server has no price for is null and renders as a dash. */
+  prices: Record<BillingCurrency, number | null>
   per: string
   rows: [string, string][]
   action: string
@@ -28,7 +31,7 @@ export const PLANS: PlanCard[] = [
     key: 'starter',
     name: 'Starter',
     for: 'For the first questions.',
-    amount: '$10',
+    prices: { INR: 999, USD: 10 },
     per: '/ month',
     rows: [
       ['Units / month', '8,000'],
@@ -42,7 +45,7 @@ export const PLANS: PlanCard[] = [
     key: 'studio',
     name: 'Studio',
     for: 'For a standing practice.',
-    amount: '$20',
+    prices: { INR: 1999, USD: 20 },
     per: '/ month',
     rows: [
       ['Units / month', '16,000'],
@@ -60,6 +63,10 @@ export const ENTERPRISE_ROWS: [string, string][] = [
   ['Passes per decision', '4'],
 ]
 
+export const ENTERPRISE_PRICE_LABEL = 'Custom pricing'
+
+const COUNTRY_CODE = /^[A-Z]{2}$/
+
 export function planRows(plan: BillingPlan): [string, string][] {
   return [
     ['Units / month', plan.units.toLocaleString('en-US')],
@@ -68,21 +75,41 @@ export function planRows(plan: BillingPlan): [string, string][] {
   ]
 }
 
+/** `₹999`, `$10`. A price the server does not have is a dash. */
+export function formatPrice(amount: number | null, currency: BillingCurrency): string {
+  if (amount === null) return '—'
+  return `${currency === 'INR' ? '₹' : '$'}${amount.toLocaleString('en-US')}`
+}
+
+/** The browser's language tag; the static render has no navigator, so it reads as none. */
+function browserLanguage(): string | undefined {
+  return typeof navigator === 'undefined' ? undefined : navigator.language
+}
+
+/** The billing country from a locale tag, or the US when the tag carries no region. */
+export function defaultCountry(language?: string): string {
+  return (language ? new Intl.Locale(language).region : undefined) ?? 'US'
+}
+
+export function defaultCurrency(country: string): BillingCurrency {
+  return country === 'IN' ? 'INR' : 'USD'
+}
+
 /** Map the server's rate card onto the fallback card layout (pure, so it is testable). */
 export function mergeServerPlans(rows: BillingPlan[]): {
   plans: PlanCard[]
+  enterprisePriceLabel: string
   enterpriseRows: [string, string][]
 } {
   const byKey = new Map(rows.map((row) => [row.key, row]))
+  const enterprise = byKey.get('enterprise')
   return {
     plans: PLANS.map((plan) => {
       const server = byKey.get(plan.key)
-      return server ? { ...plan, amount: server.price_label, rows: planRows(server) } : plan
+      return server ? { ...plan, prices: server.prices, rows: planRows(server) } : plan
     }),
-    enterpriseRows: (() => {
-      const enterprise = byKey.get('enterprise')
-      return enterprise ? planRows(enterprise) : ENTERPRISE_ROWS
-    })(),
+    enterprisePriceLabel: enterprise?.price_label ?? ENTERPRISE_PRICE_LABEL,
+    enterpriseRows: enterprise ? planRows(enterprise) : ENTERPRISE_ROWS,
   }
 }
 
@@ -94,10 +121,14 @@ const RULES = [
 
 export default function PricingPage() {
   const user = useAuthStore((s) => s.user)
+  const [country, setCountry] = useState(() => defaultCountry(browserLanguage()))
+  const [currency, setCurrency] = useState<BillingCurrency>(() => defaultCurrency(country))
   const [buying, setBuying] = useState<'starter' | 'studio' | null>(null)
   const [checkoutError, setCheckoutError] = useState<string | null>(null)
   const [plans, setPlans] = useState<PlanCard[]>(PLANS)
+  const [enterprisePriceLabel, setEnterprisePriceLabel] = useState(ENTERPRISE_PRICE_LABEL)
   const [enterpriseRows, setEnterpriseRows] = useState<[string, string][]>(ENTERPRISE_ROWS)
+  const countryValid = COUNTRY_CODE.test(country)
 
   useEffect(() => {
     let active = true
@@ -106,6 +137,7 @@ export default function PricingPage() {
         if (!active) return
         const merged = mergeServerPlans(rows)
         setPlans(merged.plans)
+        setEnterprisePriceLabel(merged.enterprisePriceLabel)
         setEnterpriseRows(merged.enterpriseRows)
       })
       .catch(() => {
@@ -120,7 +152,7 @@ export default function PricingPage() {
     setCheckoutError(null)
     setBuying(plan)
     try {
-      const { url } = await billingCheckout(plan)
+      const { url } = await billingCheckout(plan, currency, country)
       window.location.assign(url)
     } catch (error) {
       setCheckoutError(error instanceof ApiError ? error.detail : "Checkout isn't available yet.")
@@ -170,7 +202,31 @@ export default function PricingPage() {
         </div>
       </div>
 
-      <div className="mx-auto grid w-[min(1100px,calc(100%-48px))] grid-cols-1 gap-5 sm:grid-cols-2">
+      <div className="mx-auto flex w-[min(1100px,calc(100%-48px))] flex-wrap items-end gap-4">
+        <label className="grid gap-1.5">
+          <span className="font-ui text-label uppercase tracking-[0.09em] text-ink-3">Currency</span>
+          <Select value={currency} onChange={(event) => setCurrency(event.target.value as BillingCurrency)}>
+            <option value="INR">INR (₹)</option>
+            <option value="USD">USD ($)</option>
+          </Select>
+        </label>
+        <label className="grid w-28 gap-1.5">
+          <span className="font-ui text-label uppercase tracking-[0.09em] text-ink-3">Billing country</span>
+          <Input
+            value={country}
+            onChange={(event) => setCountry(event.target.value.toUpperCase().replace(/[^A-Z]/g, '').slice(0, 2))}
+            maxLength={2}
+            autoComplete="country"
+            aria-invalid={!countryValid}
+            className="font-mono uppercase"
+          />
+        </label>
+        {!countryValid && (
+          <p className="pb-3 font-mono text-micro text-ink-3">Use a two-letter country code, such as IN or US.</p>
+        )}
+      </div>
+
+      <div className="mx-auto mt-6 grid w-[min(1100px,calc(100%-48px))] grid-cols-1 gap-5 sm:grid-cols-2">
         {plans.map((plan) => (
           <article
             key={plan.name}
@@ -179,7 +235,9 @@ export default function PricingPage() {
             <p className="font-ui text-label uppercase tracking-[0.1em] text-ink-3">{plan.name}</p>
             <p className="mt-1.5 font-ui text-body-sm text-ink-2">{plan.for}</p>
             <p className="my-6 flex items-baseline gap-2 border-b border-hairline pb-6">
-              <span className="tnum font-mono text-[56px] leading-none tracking-[-0.05em] text-ink">{plan.amount}</span>
+              <span className="tnum font-mono text-[56px] leading-none tracking-[-0.05em] text-ink">
+                {formatPrice(plan.prices[currency], currency)}
+              </span>
               <span className="font-mono text-micro uppercase tracking-[0.06em] text-ink-3">{plan.per}</span>
             </p>
             <ul className="mb-8">
@@ -194,7 +252,7 @@ export default function PricingPage() {
               <button
                 type="button"
                 onClick={() => void buy(plan.key)}
-                disabled={buying !== null}
+                disabled={buying !== null || !countryValid}
                 className={buttonClasses(plan.featured ? 'primary' : 'secondary', 48, 'mt-auto min-h-11 w-full')}
               >
                 {buying === plan.key ? 'Opening checkout…' : plan.action}
@@ -223,7 +281,7 @@ export default function PricingPage() {
           <h2 className="mt-2 max-w-[20ch] font-display text-heading font-medium tracking-[-0.025em] text-ink">
             Enterprise
           </h2>
-          <p className="mt-2 font-mono text-mono uppercase tracking-[0.06em] text-ink-3">Custom pricing</p>
+          <p className="mt-2 font-mono text-mono uppercase tracking-[0.06em] text-ink-3">{enterprisePriceLabel}</p>
           <p className="mt-3 max-w-[52ch] font-ui text-body-sm text-ink-2">
             More than 16,000 units a month, or the same panel against material that keeps growing. Tell
             us the material and the question; we will propose the plan and the monthly price.
@@ -241,7 +299,7 @@ export default function PricingPage() {
           <a href="mailto:hello@societas.app?subject=Enterprise%20plan" className={buttonClasses('primary', 48, 'min-h-11')}>
             Talk to the founder
           </a>
-          <p className="font-mono text-micro text-ink-3">Monthly billing &middot; cancel anytime &middot; prices in USD</p>
+          <p className="font-mono text-micro text-ink-3">Monthly billing &middot; cancel anytime &middot; prices in INR or USD</p>
         </div>
       </section>
 

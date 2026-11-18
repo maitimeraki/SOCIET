@@ -1,5 +1,7 @@
 import type {
+  BillingCurrency,
   BillingPlan,
+  BillingSubscription,
   BillingUsage,
   DebateConfig,
   DebateStartRequest,
@@ -293,10 +295,15 @@ export const billingUsage = () => request<BillingUsage>('/api/v1/billing/usage')
 /** The public rate card — the server's plan table, not client-invented figures. */
 export const billingPlans = () => request<BillingPlan[]>('/api/v1/billing/plans')
 
-export const billingCheckout = (plan: 'starter' | 'studio') =>
-  request<{ url: string }>('/api/v1/billing/checkout', jsonInit('POST', { plan }))
+export const billingCheckout = (plan: 'starter' | 'studio', currency: BillingCurrency, country: string) =>
+  request<{ url: string }>('/api/v1/billing/checkout', jsonInit('POST', { plan, currency, country }))
 
-export const billingPortal = () => request<{ url: string }>('/api/v1/billing/portal', { method: 'POST' })
+/** The account's live subscription, or null when there is none. */
+export const billingSubscription = () => request<BillingSubscription | null>('/api/v1/billing/subscription')
+
+/** Cancels at the end of the current cycle; the reply is the subscription as it now stands. */
+export const billingCancelSubscription = () =>
+  request<BillingSubscription>('/api/v1/billing/subscription/cancel', { method: 'POST' })
 
 /** Mint a one-time WebSocket ticket (R4) — never a long-lived token, never in a query string but here. */
 export const fetchWsTicket = () =>
