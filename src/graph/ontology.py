@@ -125,8 +125,10 @@ class OntologyDiscoveryStage:
             api_base=settings.base_url,
             api_key=settings.api_key,
             is_chat_model=True,
-            timeout=timeout,  # was 480 — must fit inside the caller's wait_for window
-            max_retries=1,  # was llama-index default 3 × SDK default 3 (stacked)
+            timeout=timeout,  # the caller's per-attempt budget (its wait_for window)
+            # The caller's retry loop owns retries; an SDK retry would double
+            # each attempt and blow past that window (2 × 480s > the job bound).
+            max_retries=0,
             strict=True,  # Reliable Structured Output
             temperature=temperature,  # Deterministic output for ontology discovery
             additional_kwargs={

@@ -130,10 +130,10 @@ def _document(
 
 
 def extract_pdf(filename: str, data: bytes) -> dict[str, Any]:
-    import fitz  # PyMuPDF
+    import pymupdf  # PyMuPDF; the legacy `fitz` alias prints to stdout on import
 
     try:
-        with fitz.open(stream=data, filetype="pdf") as pdf:
+        with pymupdf.open(stream=data, filetype="pdf") as pdf:
             text = "\n".join(page.get_text() for page in pdf)
             pages = pdf.page_count
     except Exception as exc:

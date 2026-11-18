@@ -92,7 +92,7 @@ class LLMConfig:
         or os.getenv("ANALYSIS_LLM_MODEL", "claude-sonnet-5")
     )
     verdict_max_tokens: int = field(
-        default_factory=lambda: int(os.getenv("VERDICT_MAX_TOKENS", "3000"))
+        default_factory=lambda: int(os.getenv("VERDICT_MAX_TOKENS", "8000"))
     )
 
     # Agent profile call (one per agent) and its support judge. Same tier pattern

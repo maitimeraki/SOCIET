@@ -1295,6 +1295,68 @@ async def get_debate_status(job_id: str, user: User = Depends(current_user)):
     )
 
 
+#: How often the stream re-reads the run's rows. The rows are the truth
+#: (``run_doc``) and the job may run in a separate RQ worker process, whose
+#: in-process buffer this one cannot see — so the stream tails the persisted
+#: event log instead of holding process-local state.
+_STREAM_POLL_INTERVAL_S = 0.5
+
+#: Keep-alive cadence once the run is terminal and there is nothing left to send.
+_STREAM_IDLE_PING_S = 60.0
+
+
+async def _relay_run(websocket: WebSocket, job_id: str) -> None:
+    """Relay a run's persisted event log, then stay attached until the client leaves.
+
+    ``run_events`` is append-only and ordered by ``seq``, so the count already
+    delivered is a safe cursor. ponytail: the whole log is re-read each poll —
+    fine for a run's few hundred events; add a seq-cursor query if a run ever
+    holds thousands.
+    """
+    sent = 0
+    while True:
+        doc = await run_doc.read_run_doc(job_id)
+        if doc is None:
+            return
+        events = doc.get("events") or []
+        for event in events[sent:]:
+            await websocket.send_json(event)
+        sent = len(events)
+        status = doc.get("status")
+        if status in run_doc.TERMINAL_STATUSES:
+            # A failure that happened outside the run body (a dead worker, a
+            # missing reservation) has no streamed event; say so on the wire.
+            if status == "failed" and (not events or events[-1].get("type") != "error"):
+                await websocket.send_json(
+                    {
+                        "type": "error",
+                        "error": doc.get("error") or "The run failed.",
+                        "warnings": [],
+                    }
+                )
+            break
+        try:
+            data = await asyncio.wait_for(
+                websocket.receive_text(), timeout=_STREAM_POLL_INTERVAL_S
+            )
+        except asyncio.TimeoutError:
+            pass
+        else:
+            await websocket.send_json({"type": "ack", "data": data})
+
+    # Terminal and fully delivered. Stay attached: closing here makes the
+    # client's reconnect loop replay the same finished run forever.
+    while True:
+        try:
+            data = await asyncio.wait_for(
+                websocket.receive_text(), timeout=_STREAM_IDLE_PING_S
+            )
+        except asyncio.TimeoutError:
+            await websocket.send_json({"type": "ping"})
+        else:
+            await websocket.send_json({"type": "ack", "data": data})
+
+
 @router.websocket("/{job_id}/stream")
 async def stream_debate(websocket: WebSocket, job_id: str):
     """
@@ -1303,6 +1365,9 @@ async def stream_debate(websocket: WebSocket, job_id: str):
     Authenticated before `accept()` (R4): a live sid cookie or a one-time
     ``?ticket=``; then the job must be the caller's. Failures close the
     handshake with a policy code and nothing is ever streamed.
+
+    The feed is the persisted run log (``run_doc``), not this process's memory:
+    the job runs in the worker container, so a live buffer here is always empty.
     """
     user = await websocket_user(websocket)
     if user is None:
@@ -1318,36 +1383,9 @@ async def stream_debate(websocket: WebSocket, job_id: str):
         await websocket.close(code=4404, reason="Job not found")
         return
 
-    async with _DEBATE_JOBS_LOCK:
-        job = _DEBATE_JOBS.get(job_id)
-        if job is None:
-            # A row without a live job in this process: nothing to stream.
-            await websocket.close(code=4404, reason="Job not found")
-            return
-        ws_manager = job.get("ws_manager")
-        if ws_manager is None:
-            # Job not started yet, create a new manager. The lock is already
-            # held here, so this write is atomic without re-taking it.
-            ws_manager = _DebateWSManager(job_id=job_id)
-            job["ws_manager"] = ws_manager
-
     await websocket.accept()
 
-    await ws_manager.attach(websocket)
-
     try:
-        # Keep connection alive and relay messages
-        while True:
-            try:
-                # Wait for messages (mainly to detect disconnection)
-                data = await asyncio.wait_for(websocket.receive_text(), timeout=60.0)
-                # Echo back as acknowledgment
-                await websocket.send_json({"type": "ack", "data": data})
-            except asyncio.TimeoutError:
-                # Send heartbeat
-                await websocket.send_json({"type": "ping"})
-
+        await _relay_run(websocket, job_id)
     except WebSocketDisconnect:
-        pass
-    finally:
-        await ws_manager.remove(websocket)
+        pass  # the client went away between two polls

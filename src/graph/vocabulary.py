@@ -56,7 +56,7 @@ async def discover_vocabulary(
         stage = OntologyDiscoveryStage(
             model=cfg.discovery_model,
             temperature=cfg.temperature,
-            timeout=min(60.0, cfg.discovery_timeout_seconds),
+            timeout=float(cfg.discovery_timeout_seconds),
         )
 
     sample = [documents[i] for i in spread_indexes(len(documents), sample_size)]

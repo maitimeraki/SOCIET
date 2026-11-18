@@ -105,6 +105,14 @@ async def _probe_llm(app: FastAPI) -> bool:
             logger.info(f"LLM connected: {config.default_llm_provider}")
         else:
             logger.warning("LLM probe returned an empty completion")
+    except asyncio.TimeoutError:
+        # str(TimeoutError) is empty: without this branch the log is a bare
+        # "failed:" with no reason, which makes a degraded latch unreadable.
+        logger.warning(
+            "LLM connectivity test timed out after %ss",
+            get_settings().llm_probe_timeout_seconds,
+        )
+        ok = False
     except Exception as exc:
         logger.warning("LLM connectivity test failed: %s", exc, exc_info=True)
         ok = False
@@ -131,6 +139,22 @@ async def _llm_healthy(app: FastAPI) -> bool:
         if _probe_is_fresh(app):
             return not getattr(app.state, "degraded", False)
         return await _probe_llm(app)
+
+
+async def _watch_degraded_llm(
+    app: FastAPI, interval: float = _PROBE_CACHE_SECONDS
+) -> None:
+    """Re-probe a degraded LLM until it answers.
+
+    ``degraded`` is a cached verdict, not a latch: a boot probe that timed out
+    must not refuse every enqueue for the life of the process. Only an
+    external /ready call cleared it before, and nothing calls /ready — the
+    frontend polls /health, which never probes.
+    """
+    while True:
+        await asyncio.sleep(interval)
+        if getattr(app.state, "degraded", False):
+            await _probe_llm(app)
 
 
 async def _postgres_ok() -> bool:
@@ -232,13 +256,20 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         # reports Postgres unavailability, and writes surface it per request.
         logger.exception("Interrupted-run sweep failed; continuing startup")
 
-    # 1c. LLM connectivity probe — degrades, never aborts.
+    # 1c. LLM connectivity probe — degrades, never aborts. The watcher then
+    # keeps re-probing while degraded, so recovery is not a latch.
     await _probe_llm(app)
+    llm_watcher = asyncio.create_task(_watch_degraded_llm(app))
 
     yield
     # 2. Shutdown: Everything after 'yield' runs on SHUTDOWN.
     # Uvicorn has already stopped accepting connections (no new work arrives);
     # bound how long in-flight jobs may run before this process exits (§9).
+    llm_watcher.cancel()
+    try:
+        await llm_watcher
+    except asyncio.CancelledError:
+        pass
     app.state.shutting_down = True
     from src.jobs import queue as jobs_queue
 
@@ -555,7 +586,10 @@ async def _execute_unified_job(
             OntologyDiscoveryStage(
                 model=cfg.discovery_model,
                 temperature=cfg.temperature,
-                timeout=min(60.0, cfg.discovery_timeout_seconds),
+                # The operator's per-attempt budget, not a hard 60s cap: an
+                # ontology reply from the analysis tier routinely exceeds a
+                # minute, so a capped client timed out before it could finish.
+                timeout=float(cfg.discovery_timeout_seconds),
             )
             if provided_ontology is None
             else None

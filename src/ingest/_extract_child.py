@@ -56,6 +56,8 @@ def _extract(request: dict) -> dict:
 
 
 def main() -> None:
+    frame = os.fdopen(os.dup(1), "wb")  # the protocol channel, kept aside…
+    os.dup2(2, 1)  # …while any stray stdout (imports, libraries) goes to stderr
     request = json.load(sys.stdin)
     _apply_rlimits(request["rlimit_memory_bytes"], request["rlimit_cpu_seconds"])
     response = _extract(request)
@@ -64,8 +66,9 @@ def main() -> None:
         out = json.dumps(
             {"ok": False, "detail": "extraction output exceeded the size limit"}
         ).encode("utf-8")
-    sys.stdout.buffer.write(out)
-    sys.stdout.buffer.flush()
+    frame.write(out)
+    frame.flush()
+    frame.close()
 
 
 if __name__ == "__main__":

@@ -70,7 +70,12 @@ def resolve_extraction_settings(model: str | None = None) -> ExtractionSettings:
     base_override = _env("EXTRACTION_BASE_URL")
     key_override = _env("EXTRACTION_API_KEY")
 
-    if provider == "nvidia_nim":
+    if provider == "nvidia_nim" or provider == "deepseek":
+        # `deepseek` is served through the same OpenAI-compatible gateway as the
+        # NIM catalog (see LLMClient._call_kwargs), so it resolves the same
+        # credentials. Without this branch it fell to the generic `else` and
+        # sent the literal placeholder key "not-needed" — a 401, not a config
+        # error, because EXTRACTION_API_KEY is optional there.
         base_url = (
             base_override
             or getattr(LLMConfig, "nvidia_nim_base_url", "")
