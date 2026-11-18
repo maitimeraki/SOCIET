@@ -63,6 +63,8 @@ export interface OverviewPageViewProps {
   working: WorkingRun | null
   loading: boolean
   failed: boolean
+  /** The usage read failed: the rest of the page still renders, without the plan bands. */
+  usageUnavailable?: boolean
   /** The signed-in account's display name; empty/absent renders the greeting without a name. */
   accountName?: string
   onRetry: () => void
@@ -76,6 +78,7 @@ export function OverviewPageView({
   working,
   loading,
   failed,
+  usageUnavailable = false,
   accountName = '',
   onRetry,
 }: OverviewPageViewProps) {
@@ -120,7 +123,7 @@ export function OverviewPageView({
             retryLabel="Try again"
           />
         </div>
-      ) : loading || stats === null ? (
+      ) : loading || (stats === null && !usageUnavailable) ? (
         <div className="mt-6 space-y-4">
           <Skeleton className="h-28 w-full" />
           <Skeleton className="h-56 w-full" />
@@ -128,24 +131,32 @@ export function OverviewPageView({
       ) : (
         <div className="mt-6 grid grid-cols-1 items-start gap-7 lg:grid-cols-[minmax(0,1.6fr)_minmax(300px,0.75fr)]">
           <div>
-            <StatsBand
-              plan={stats.plan}
-              unitsUsed={stats.units_used}
-              unitsTotal={stats.units_total}
-              unitsRemaining={stats.units_remaining}
-              periodEnd={stats.period_end}
-            />
+            {stats !== null ? (
+              <StatsBand
+                plan={stats.plan}
+                unitsUsed={stats.units_used}
+                unitsTotal={stats.units_total}
+                unitsRemaining={stats.units_remaining}
+                periodEnd={stats.period_end}
+              />
+            ) : (
+              <p className="rounded-lg bg-paper p-5 font-ui text-body-sm text-ink-2 shadow-card">
+                Usage is unavailable right now. Your plan and units appear when the server is back.
+              </p>
+            )}
             <RecentWork rows={recent} />
             <YourMaterial rows={corpora} />
           </div>
           <aside className="grid gap-5">
-            <PlanUsage
-              plan={stats.plan}
-              unitsUsed={stats.units_used}
-              unitsTotal={stats.units_total}
-              unitsRemaining={stats.units_remaining}
-              periodEnd={stats.period_end}
-            />
+            {stats !== null ? (
+              <PlanUsage
+                plan={stats.plan}
+                unitsUsed={stats.units_used}
+                unitsTotal={stats.units_total}
+                unitsRemaining={stats.units_remaining}
+                periodEnd={stats.period_end}
+              />
+            ) : null}
             <WorkingNow run={working} />
           </aside>
         </div>
@@ -169,11 +180,17 @@ export default function OverviewPage() {
   const [working, setWorking] = useState<WorkingRun | null>(null)
   const [loading, setLoading] = useState(true)
   const [failed, setFailed] = useState(false)
+  const [usageUnavailable, setUsageUnavailable] = useState(false)
   const [attempt, setAttempt] = useState(0)
 
   useEffect(() => {
     let cancelled = false
-    Promise.all([listUploads(), loadRecentRuns(), billingUsage()])
+    // §8.9 — the usage read costs the two plan bands, never the whole page.
+    const usage = billingUsage().catch((error: unknown) => {
+      console.error('OverviewPage: could not load the usage.', error)
+      return null
+    })
+    Promise.all([listUploads(), loadRecentRuns(), usage])
       .then(async ([uploads, runs, usage]) => {
         if (cancelled) return
         const items: UploadRow[] = uploads.items ?? []
@@ -198,6 +215,7 @@ export default function OverviewPage() {
           }
         }
         setStats(usage)
+        setUsageUnavailable(usage === null)
         setFiled(filedCount)
         setRecent(recentRows(runs))
         setCorpora(corpusRows(items, runs))
@@ -226,10 +244,12 @@ export default function OverviewPage() {
       working={working}
       loading={loading}
       failed={failed}
+      usageUnavailable={usageUnavailable}
       accountName={accountName}
       onRetry={() => {
         setLoading(true)
         setFailed(false)
+        setUsageUnavailable(false)
         setAttempt((value) => value + 1)
       }}
     />

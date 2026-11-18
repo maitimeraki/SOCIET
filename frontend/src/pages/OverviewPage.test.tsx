@@ -82,6 +82,15 @@ describe('the Overview', () => {
     expect(html).toContain('Working now')
   })
 
+  it('costs the plan bands, not the page, when the usage read fails', () => {
+    const html = view({ stats: null, usageUnavailable: true })
+    expect(html).toContain('Usage is unavailable')
+    expect(html).toContain('Recent work')
+    expect(html).toContain('Your material')
+    expect(html).toContain('Working now')
+    expect(html).not.toContain('Units used')
+  })
+
   it('lists the corpora as a ruled record, not a card grid', () => {
     const html = view()
     expect(html).toContain('Mill Street expansion')
