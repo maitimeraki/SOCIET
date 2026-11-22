@@ -20,10 +20,16 @@ graphify-out/
 agent_profiles.*md
 output*.md
 plan.*
-docs/
+docs/*
+!docs/DESIGN_AUTHORITY.md
+!docs/SIGNUP_TO_DASHBOARD_PLAN.md
+!docs/ARCHITECTURE.md
+!docs/TECHNOLOGY_STACK.md
 *.txt
 runtime/
 .serena/
 .superpowers/
 .gstack/
 .impeccable/
+video/
+tests/
