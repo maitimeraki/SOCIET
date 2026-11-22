@@ -2,7 +2,7 @@
 
 <!-- impeccable:product-schema 1 -->
 
-**Societas** — a panel of experts that argues a hard decision and files a verdict you can act on.
+**LarkVision** — a panel of experts that argues a hard decision and files a verdict you can act on.
 
 This is the confirmed product truth. Every line below was settled in the working session of 2026-10-17; the decisions behind it are recorded in the Decision Log of `docs/superpowers/plans/2026-10-17-societas-workspace-and-visual-world.md`. Nothing here is inferred, and nothing here is a draft.
 
@@ -34,7 +34,7 @@ web
 
 ## Product Purpose
 
-Societas convenes a panel of domain-specific experts — drawn from the customer's own documents — who argue the customer's question across computed passes and return a **weighted verdict with a confidence score, the case against, and the sources behind it**. It exists so a decision-maker hears the strongest argument on every side *before* committing, with all of the reasoning inspectable. Success is a verdict the owner trusts enough to act on, grounded in their own material, never a black box.
+LarkVision convenes a panel of domain-specific experts — drawn from the customer's own documents — who argue the customer's question across computed passes and return a **weighted verdict with a confidence score, the case against, and the sources behind it**. It exists so a decision-maker hears the strongest argument on every side *before* committing, with all of the reasoning inspectable. Success is a verdict the owner trusts enough to act on, grounded in their own material, never a black box.
 
 ## Positioning
 
@@ -111,7 +111,7 @@ The product is four moments, and the customer must be able to see the work at ev
 
 ## Brand Commitments
 
-- **Name:** *Societas* (rename of the internal "Simulation World"). The internal codename "The Chamber" is retired from customer surfaces.
+- **Name:** *LarkVision* — renamed from *Societas* on 2026-11-22 (itself a rename of the internal "Simulation World"). The internal codename "The Chamber" is retired from customer surfaces.
 - **No fabricated commercial claims.** No customer logos, testimonials, benchmarks, press, or capability the product does not have. Where a surface wants proof and none exists, it ships authored demonstrative material clearly labelled as an example — and that material goes on the replacement list handed to the owner at finish. **Prices and tiers are decided** (see the pricing record above): the product is free to start, with Starter and Studio paid tiers and an Enterprise plan. What is banned is any price, tier, benchmark or comparison the product has not been decided to have.
 - **The visual world.** The incumbent worlds — "The Chamber" and its successor "The Survey" — are retired; they are *evidence, not authority*. Kept from them: the three installed faces (Archivo, Spectral, JetBrains Mono) and the four-position system. The committed world is the **standard premium-SaaS system** in `docs/DESIGN_SPEC.md`: a neutral daylight ground, one considered accent, cards as the material, and the map as the single dark surface in the product. It is deliberately *not* the cream-and-serif editorial default, *not* near-black with a neon accent, and *not* a generic purple-gradient product page. Gradients are material with a job, never wallpaper. The `impeccable` direction roll in Phase 2 may confirm or replace the palette's roots — every token hangs off one accent and one ground, so the change is one variable wide.
 - **The target dashboard's surfaces.** The committed world stays. Gradients remain material with a job: the one primary action's ramp, the map's radial ramp, the answer band's tonal wash, and a 320px page-ground lift. Cards stay flat white; no gradient on a card, a record or a panel. The content grid is the standard 12-column grid, max 1280px, 24px gutters, on the 4px spacing scale.

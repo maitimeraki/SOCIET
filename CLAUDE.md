@@ -406,9 +406,9 @@ RAZORPAY_PLAN_STUDIO_INR=plan_...
 RAZORPAY_PLAN_STUDIO_USD=plan_...
 APP_BASE_URL=http://localhost:5173
 EMAIL_API_KEY=
-EMAIL_FROM=no-reply@societas.app
+EMAIL_FROM=no-reply@larkvision.app
 LEGAL_ENTITY_NAME=
-LEGAL_CONTACT_EMAIL=hello@societas.app
+LEGAL_CONTACT_EMAIL=hello@larkvision.app
 # Plan table overrides (units / caps / public price card).
 PLAN_FREE_UNITS=1000
 PLAN_STARTER_UNITS=8000
@@ -541,4 +541,11 @@ CRITICAL RULES:
 
 - `docs/TECHNOLOGY_STACK.md` - Production tech stack and architecture (source of truth)
 - `docs/ARCHITECTURE.md` - Detailed component documentation
-- `docs/DESIGN_SPEC.md` - Frontend design authority: the built world (tokens, type, wireframes, motion, component language, copy law), rewritten from the shipped frontend; the "Survey" draft and the retired "Neural Observatory" shell are both superseded by this file.
+- **Design, in this order — do not skip:**
+  1. `PRODUCT.md` — the product truth: users, the flow, the copy law, pricing, the accessibility floor. **Behaviour authority.**
+  2. `docs/DESIGN_AUTHORITY.md` — **the design record of record.** Which document answers which design question, the resolved tokens, and the open items (D15 accent, D16 onboarding, D17 V7 triage, D18 `docs/` tracking). **Read this before any visual work.**
+  3. `DESIGN_PROPOSAL.md` — the design authority: tokens, components, and every page. Supersedes `DESIGN.md` and `docs/DESIGN_SPEC.md`.
+  4. `DESIGN_PRODUCT_V7.html` — the named visual reference (colour, structure, layout, type). A **prototype**: appearance only, never behaviour, never a build target.
+- `docs/SIGNUP_TO_DASHBOARD_PLAN.md` — the journey plan and build order (signup → plan → dashboard). Inherits design from (2)/(3); owns no design decision.
+- ~~`docs/DESIGN_SPEC.md`~~ — **SUPERSEDED.** Its plum `#823A86` palette and Spectral type were never built. Do not cite it, do not build against it. Kept for history; see `docs/DESIGN_AUTHORITY.md` §3.1.
+- ~~`DESIGN.md`~~ — **RETIRED** (the "Quiet Room"). Evidence, not authority.
