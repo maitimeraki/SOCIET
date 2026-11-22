@@ -218,7 +218,7 @@ Revision 1 was written against the shipped code. The owner has since named `DESI
 | 21 | Runs | one record with a 12-column grid | **three** panels: plan usage, the filter, the decisions | §8.9. Plan usage is a billing surface inside the app and it was missing entirely. |
 | 22 | Billing, Account | not specified as pages | six billing panels and four account panels, with every kicker and every explanation | §8.10, §8.11. Both are new. Billing has no page in the shipped app at all. |
 | 23 | Dialogs | a drawer and a toast | **ten dialogs** and one command palette | §8.13. The modal surface is specified as a set, because V7 ships it as one. |
-| 24 | Scenarios | states were described per page, unevenly | a **scenario matrix**: 15 scenarios × 12 pages | §8.14, new. The owner asked for "each pages and scenario"; this is that table. |
+| 24 | Scenarios | states were described per page, unevenly | a **scenario matrix**: 15 scenarios × 18 rows (16 page surfaces, the provider-button group and the dialog set) | §8.14, new. The owner asked for "each pages and scenario"; this is that table. |
 
 **What did not change, because V7 agrees with revision 1:** the indigo accent; the refusal of the serif; the refusal of gradients on controls; the convergence rule as the signature; the four positions in frozen order with symbol, colour and word; the copy law; the map as the only dark instrument; the motion grammar of 120/180/240/560ms on one curve; WCAG 2.2 AA; "a sheet carries no shadow".
 
@@ -873,13 +873,14 @@ The verdict object. It is the same component on the homepage, on sign-up and on 
 
 Every page below is specified against `DESIGN_PRODUCT_V7.html`, section by section, in V7's own order. Where this file and V7 disagree, **V7 wins and this file is corrected** — that is the whole point of this revision. Wireframes are at 1280px. They show structure and proportion, not final pixels.
 
-Two shells carry the ten pages:
+Three shells and one bare surface carry every page. Eighteen routes, sixteen matrix rows (the legal pair and the recovery pair each share a row):
 
 | Shell | Pages | Its planes |
 |---|---|---|
-| **Site** (`#site`) | Landing, Pricing, Method, Sign up, Sign in | `--ground` page · `.site-head` sticky 68px bar · `.site-wrap` 1280px column · `.site-foot` |
+| **Site** (`#site`) | Landing, Pricing, Method, Example, Sign up, Sign in, Verify, Forgot, Reset, Legal index, Legal detail | `--ground` page · `.site-head` sticky 68px bar · `.site-wrap` 1280px column · `.site-foot` |
 | **App** (`.app`) | Verdict, Documents, Runs, Billing, Account | grid `280px \| 1fr` · plane 1 rail · plane 2 `--topbar-h` 60px bar · plane 3 `.content` at 1400px |
 | **Workspace** (`.app` with `body.v5`, no rail) | Decision (`/new`, `/runs/:id`) | `44% \| 8px divider \| 1fr`, `--night` map beside a `--sheet` flow |
+| **Bare** (no shell at all) | Plan choice (`/onboarding/plan`) | full-bleed `--ground`, one centred column at 720px, no rail, no top bar (§8.18) |
 
 The site pages and the app pages are switched by `[hidden]`, not by routing, and both shells share one token set. A visitor never crosses a seam, because the sign-up page and the Verdict page are the same paper, the same rules and the same type.
 
@@ -920,7 +921,7 @@ V7's two auth pages are the same component with different copy, and the aside is
 - **The aside's own footnote** is `fig` in `--ink-3`, at most 44ch, and it carries the honesty line: "AI-generated perspectives, not human advisers. Every verdict shows the case against and the passage each claim rests on." The sign-in variant carries "Worked example. Names and figures illustrative." This line is part of the page, not a disclaimer bolted on.
 - **Fields** use the ledger baseline (§7.2): no box, no fill, a 1.5px `--graphite` bottom rule, `--r-1` on nothing because a field is not a box. Focus turns the rule to 2px `--accent`. Height 44px on phone.
 - **Sign up's five parts**, in order: the margin label ("Create an account"), the `h1` ("Start your first decision."), the lead, the form, and the "Already have an account? Sign in" line. The form is name, email, password, an agreement checkbox, one primary action, and a `fig-sm` note.
-- **Sign in's four parts:** the margin label, the `h1` ("Your decisions, your material and your verdicts."), the lead ("Pick up where the panel left off. The record is where you filed it."), the form (email, password, primary, note), then "No account yet? Create one".
+- **Sign in's four parts:** the margin label, the `h1` ("Your decisions, your material and your verdicts."), the lead ("Pick up where the panel left off. The record is where you filed it."), the form (email, password, a **Forgot password?** link, primary, note), then "No account yet? Create one". The Forgot link is a real `<a href="/auth/forgot">` (§8.21) beside the primary action, not a disabled hint: it is the only route into recovery, so the built page must carry it.
 - **The password rule** is stated under the field in `hint` at most 40ch: "At least 8 characters." It is stated before the mistake, not after.
 - **States.** Focus: a 2px accent bottom rule. Invalid: a 2px `--neg` bottom rule, a `--neg` icon, the reason in `--ink-2` with `role="alert"`, and the mark recomputed from the current value so an autofill clears it. Submitting: fields disabled, the button reads "Creating your account…", the form is `aria-busy="true"`. Success moves to the landing rule (§8.12). Failure shows a sentence above the form and keeps every typed value.
 - **Keys and labels.** Every field has a real `<label for>`, and `autocomplete` is set: `name`, `email`, `new-password` on sign-up and `username`, `current-password` on sign-in.
@@ -995,6 +996,8 @@ The landing page's job is the feeling in one sentence: a panel argues the decisi
 3. **Bands are not alternated by colour.** The rhythm comes from the margin label and the change of object. The only colour break on the page is the closing night band.
 4. **One dark surface**, the close band. No other section is tinted.
 5. **The Method page is linked from the header and the footer**, because section 7's promises and section 4's steps both point at it.
+6. **The hero's secondary action ("See a filed decision") links to `/example`** (§8.19), and section 7's "check it" claim links there too. It is the page that turns the hero's promise into something a visitor can read without an account, so it must be reachable from both places that make the claim. The link navigates; it never opens a modal.
+7. **The footer carries the legal links, and they are a rule, not a suggestion.** `.site-foot` has two groups: the product links (*The product · The method · The plans · The example*) and the legal links (**Privacy · Terms · Refunds · Sub-processors**), each pointing at its `/legal/:slug` address (§8.20) and rendering only if `GET /legal/documents` returned that slug. The legal group is what makes §8.20 reachable at all — before this rule the footer wireframe showed *"The product · The record · Your account · Contact"* and nothing linked to a legal page. The `mailto:` contact sits beside them and renders only when `LEGAL_CONTACT_EMAIL` is configured (plan F14).
 
 ### 8.3 Pricing (`/pricing`)
 
@@ -1043,6 +1046,7 @@ V7's pricing page is four parts, ported from V3 and rebuilt on this file's token
 - **Enterprise is a ruled split**, `#enterprise-band`, not a fifth card.
 - **Recommended:** no plan is marked until D6 is answered.
 - **Every price is traceable** to `settings.plan_*_price_inr` / `_usd` (§11.1). A price that appears nowhere in configuration does not appear on the page.
+- **Under the cards, one link to `/example`** (§8.19): *"See one decision, filed"* — `.rule-note` with an inline accent link, placed after the four cards and before the comparison table. It is the second of `/example`'s three entry points, and it exists because the highest-friction ask in the funnel is "sign up to find out what you get".
 
 ### 8.4 Method (`/method`): the page for a product that checks itself
 
@@ -1313,11 +1317,23 @@ V7's billing page is six panels: what this period has spent, what the units boug
 - **The double rule is the point of panel 2.** Two 1px `--graphite` rules 3px apart, over the total, exactly as a ledger draws a total (§6.5). The rows above it are the entries. This is the signature object used where the product actually does arithmetic.
 - **The plans panel is three, not four.** The free tier is named on `/pricing` only; a paying account's billing page shows what it can move between.
 - **The current plan is marked three ways:** the chip "Your plan", the `--accent-soft` strip at the top of the card, and its action replaced by a state. Colour is never the only signal.
-- **`.period-grid` is four cells on desktop and two on phone**, with `--hairline` between cells, not `--panel-line`.
+- **`.period-grid` is four cells above 1160px, two from 768–1159px, and one below 768px**, with `--hairline` between cells, not `--panel-line`. This is V7's own ladder (`DESIGN_PRODUCT_V7.html:1203`, `:1287`, `:1419`, `:1452`); an earlier draft of this line said "two on phone", which V7 never did — below 768px it stacks to a single column.
+- **`.period-panel` is this design's name for a plain `.panel`** whose body is a `.period-grid` and nothing else. V7 has no `.period-panel` class: its billing view wraps every panel in the shared `.panel` (§8.6) inside a `.page-stack`, and the period panel is `section.panel > .panel-body > .period-grid`. Do not add a new component for it — compose the two named ones.
+- **The meter in cell 1 is V7's `.period-meter`, and its shape is part of the spec:** `display:grid`, `grid-template-columns:repeat(16, minmax(0,1fr))`, `gap:2px`, `height:6px`. Each `<i>` is `background:var(--hairline)`; `.on` is `var(--graphite)`; `.warn` is `var(--amb)` and is used once the pool is ≥ 80% spent. Sixteen segments, no rounding, no percentage-width bar.
 - **Invoices** are a record, flush, one row per invoice, each row a real download control ≥ 44px. An invoice row is the only place a browser download happens from a record.
 - **Every money figure is mono with tabular figures.** A currency symbol is never the only signal of a currency: the code says "₹1,999" or "$20", and the segmented control states which is in force.
 - **States.** No payment method: the card block is replaced by one sentence and one action ("Add a card"), and "Next charge" reads "Not yet" rather than `$0.00`. No invoices: "Your first invoice appears after the first charge." A failed charge is a `--neg` `quiet-block` at the top of the page, above the period panel, with one action — never a silent chip.
 - **The cancel flow** is a dialog: what stops, what stays, what is charged, then the confirm. It is not a one-click button, and the label names the object ("Cancel the Starter plan?").
+**Where panels 4 and 5 get their data — and the dependency this creates.** Both are specified from V7, and neither is a field `/billing/state` (B4) returns. They have their own contract, and the plan owns it:
+
+| Panel | Data | The endpoint the plan must add |
+|---|---|---|
+| 4 · Payment method | the card's brand, last four, expiry, and the billing country | `GET /api/v1/billing/payment-method` — a read of what the provider holds, never a write (the card is changed at the provider, so the `card` dialog is a deep link, not a form) |
+| 5 · Invoices | date, invoice number, period, amount, status, and a short-lived download URL | `GET /api/v1/billing/invoices` — `{items, next_cursor}`, same pagination as runs |
+
+**Neither may be faked on the client, and neither panel may render a placeholder.** A card block with invented digits, or an invoice list built from `usage_events`, is exactly the fabricated-claim defect `PRODUCT.md` bans. When an endpoint is absent the panel says so in one sentence (*"Payment method — not available yet."*) and no row is drawn. If these two endpoints are deferred, **panels 4 and 5 are deferred with them** — the design does not degrade into a mock.
+
+**The invoice rule that makes it real:** an invoice the customer cannot download is not an invoice (plan B18.4). So panel 5's row carries a real download control ≥ 44px, wired to a **short-lived signed URL minted at read time** — never a permanent public link, never a PDF the server generates twice.
 
 ### 8.11 Account (`/account`)
 
@@ -1405,6 +1421,17 @@ The workspace is the only surface where the map and the flow are both visible, a
 | The decision (`/runs/:id/<tab>`) | grows with experts and opinions | the five tabs; Debate holds the scrubber and the tape |
 | Complete | holds the final state | the Verdict tab opens once, automatically |
 
+**Two controls this section was missing, and both are required.** A workspace that can only start work and never stop it is a trap, and the backend supports both:
+
+| Control | Where | It does | Why the design owes it |
+|---|---|---|---|
+| **Stop this decision** | `.ws-flow` head, beside the stage rail — a `.btn-ghost` with a `stop` icon | `DELETE /api/v1/jobs/{id}`; the flow pane is replaced by §8.13's `stopped` dialog, which says what stopped and what was kept | a run costs units and can take minutes; without this the only exit is to wait |
+| **Remove** (per material row) | the material list in `?step=ingest`, one per row, revealed on hover/focus | `DELETE /api/v1/uploads/{id}`, then the row and its map entries leave; on failure the row is **restored** and the reason shown | a wrong file must be removable before it is read, not after it has polluted the material set |
+
+- **Stop is a dialog, not a one-click button.** It names the decision and says what is kept (the material, the map, the passes so far) and what stops (further passes, the verdict). The confirm is the danger tone. Escape cancels.
+- **Remove is one click, and reversible only by re-adding.** It confirms inline, not in a dialog — a dialog per row is too heavy — and the row leaves immediately with the removal already committed. There is **no undo**: a toast that said "Undone" would be a claim the backend does not honour.
+- **Neither control appears while the flow is read-only** — a finished decision has nothing to stop, and its material is baked into the map.
+
 ### 8.13 The dialogs, and the one search
 
 V7 ships ten dialogs and one palette. They are the whole modal surface of the product, and each one is named by its object.
@@ -1465,6 +1492,12 @@ A page spec is not finished until its states are named. This table is the checkl
 | **Billing** `/billing` (§8.10) | S6 · S7 · S8 · S9 · S10 · S11 · S12 · S13 · S15. S9 shows the free state with one action. S11 leads the page with the failed-charge block. S13 returns the page with a sentence, never a blank tab. |
 | **Account** `/account` (§8.11) | S6 · S7 · S8 · S13 · S15. Saving, saved, failed save, delete pending. |
 | **Decision workspace** `/new`, `/runs/:id` (§8.12) | S2 · S3 · S4 · S7 · S12 · S14 · S15. S12 stops before seating a panel and says why. S7 keeps the map and the record that already exists. |
+| **Verification** `/auth/verify` (§8.16) | S1 · S6 · S7 · S15. Six named states: idle, submitting, invalid code, throttled, attempts exhausted, expired link. A throttled resend shows the server's wait, never a client guess. |
+| **Provider buttons** (§8.17) | S1 · S6 · S7 · S15. Loading renders **nothing** (never a skeleton). Failed renders **nothing** and leaves the password form untouched. Only configured providers appear. |
+| **Plan choice** `/onboarding/plan` (§8.18) | S1 · S6 · S7 · S8 · S14 · S15. S7 keeps **Continue free** enabled — a billing outage must never trap a user behind a paywall. S8 shows the cards with the periods it has and says which figure is unavailable. No plan cards render a hardcoded price at any point. |
+| **Example** `/example` (§8.19) | S1 · S14 · S15 **only**. It is static: no fetch, no session, no loading state, no failed state, and that is deliberate — the page that proves the product must not depend on the product being up. S14 suppresses the tape's draw-rule; S15 folds the tape's value column under its row. |
+| **Legal** `/legal`, `/legal/:slug` (§8.20) | S1 · S6 · S7 · S15. Never a cached legal text: a failed fetch says so. No empty state — an index with no documents says "unavailable", not a blank list. The re-consent `.reader-banner` appears on every authed page until accepted, and never for an account already on the current versions. |
+| **Password recovery** `/auth/forgot`, `/auth/reset` (§8.21) | S1 · S6 · S7 · S15. Six states each: idle, submitting, invalid, expired token, and 5xx. Step 1's success message is identical whether or not the address exists — the page is not an account enumerator. |
 | **The dialogs** (§8.13) | S6 · S7 · S15 for every one. A dialog that fails stays open with the reason; it never closes silently on failure. |
 
 **Five scenarios that cross every page, and are easy to forget:**
@@ -1475,14 +1508,482 @@ A page spec is not finished until its states are named. This table is the checkl
 4. **A long value.** A decision question of 120 characters, a material set with a long name, an email of 64 characters. Each has a stated measure or a clamp, and none breaks its column.
 5. **The second visit.** The page is not newer than it was; if nothing changed, nothing animates and no toast appears for a condition the reader already saw.
 
-**What this matrix deliberately does not include.** There is no onboarding tour, no sample-data mode, no "demo account", no empty-state illustration, no progressive-disclosure wizard and no celebration animation. Each of those would be a feature the product does not have, and §9.2 forbids claiming one.
+**What this matrix deliberately does not include.** There is no sample-data mode, no "demo account", no empty-state illustration and no celebration animation. Each of those would be a feature the product does not have, and §9.2 forbids claiming one.
+
+**What changed here, and why the old sentence had to go.** This paragraph previously read *"There is no onboarding tour… no progressive-disclosure wizard"*. That was true of V7, which is a prototype, and it is **false of the product**: §8.18 is a first-run plan-choice screen, which is exactly what a reader would call an onboarding step. Left in place, the sentence forbade the very screen the journey requires — the contradiction recorded as R50 in `docs/SIGNUP_TO_DASHBOARD_PLAN.md` §14.5.7. What remains banned is the *deceptive* half: no fake tour, no seeded demo account, no invented sample data. A real first-run screen that does a real job is not in that category.
 
 ### 8.15 Overview (retired)
 
 The dashboard overview that the shipped app still serves at `/overview` — greeting, date eyebrow, the 1.6fr/0.75fr grid, KPI tiles — is not part of V7 and has no equivalent in it. V7 replaced it with the five app pages in §8.7 to §8.11 plus the three-plane shell in §8.5. The route stays until Documents, Runs, Verdict and Billing pass §10 in the browser, and it is removed after that. Nothing in this proposal rebuilds it.
 
+---
+
+### 8.16 Verification (`/auth/verify`) — NEW
+
+**Why this section exists.** V7 contains no verification view: its `data-site` set is `landing|pricing|method|signup|signin`, and its signup copy says *"this preview creates the account on this page; nothing leaves it."* The journey nonetheless needs this screen — it is the only place a user can clear the `403 email_unverified` gate that five spend routes already enforce. So this screen is **built in V7's language**, not traced from a V7 drawing. Every value below is read from V7's own stylesheet; none is invented.
+
+**It is the same surface as sign up, minus the aside.** Reuse `AuthLayout` and V7's `.auth-grid`; the verification column is the left column at the same width.
+
+| Element | V7 rule | Value |
+|---|---|---|
+| Grid | `.auth-grid` | `minmax(0,430px) minmax(0,1fr)`, `gap: 72px`, `padding: 64px 0 88px` |
+| Single column | `.auth-grid` at ≤1024px | one column, `gap: 44px`, `padding: 44px 0 64px` |
+| Heading | `.auth-col h1` | `clamp(30px,3.2vw,44px)/1.04`, `-0.03em`, `500`, `font-stretch:112%`, `max-width:18ch` |
+| Lead | `.auth-col .lead` | `margin-top:14px`, `max-width:40ch` |
+| Margin label | `.margin-label` | mono 11px uppercase, `letter-spacing:.09em`, `--ink-3` |
+| Form stack | `.auth-form` | `display:grid`, `gap:18px`, `margin-top:30px` |
+| Primary action | `.auth-form .btn` | `min-height:48px`, `margin-top:4px` |
+| Footnote | `.auth-alt` | `margin-top:18px`, `13px/20px`, `--ink-3` |
+
+**The code field is V7's `.field`, with one addition.** V7's field is a **ruled baseline, never a box**:
+
+```
+.field            display:grid; gap:6px
+.field label      600 13px/20px, --graphite
+.field input      width:100%; min-height:40px; padding:8px 0;
+                  border:0; border-bottom:1.5px solid --graphite;
+                  border-radius:0; background:transparent;
+                  400 15px/22px, --graphite
+.field input:focus  outline:none; border-bottom:2px solid --accent
+.field .hint      13px/20px, --ink-3, max-width:40ch
+```
+
+The one addition: the 6-digit input is `font-family:var(--mono)`, `letter-spacing:.28em`, `font-size:20px`, with the same 1.5px graphite baseline and the same 2px accent focus. Mono is the right face here because the string is a code, and V7 already uses `--mono` for every figure.
+
+**The layout, in V7's order:**
+
+```
+┌─ .auth-grid · minmax(0,430px) │ minmax(0,1fr) · gap 72px ────────────────────┐
+│                                                                              │
+│  CHECK YOUR MAIL                    ┌──────────────────────────────────────┐│
+│  (margin-label, mono 11 up)         │  WHAT YOU GET     Worked example     ││
+│                                     │  ──────────────────────────────────  ││
+│  One code, six digits.              │  ▼ NEGATIVE            0.82          ││
+│  (h1, clamp 30–44px)                │           share of weight            ││
+│                                     │  Should the Mill Street lease be     ││
+│  Sent to priya@company.com.         │  renewed?                            ││
+│  (lead, 40ch)                       │  ▮▮▮▮▮▮▮▮  the tape                  ││
+│                                     │  ──────────────────────────────────  ││
+│  Code          ← .field label       │  THE CASE AGAINST                    ││
+│  ┌─────────────────────────────┐    │  If the grease-trap works land on    ││
+│  │ 1 2 3 4 5 6                 │    │  time, the economics hold.           ││
+│  └─────────────────────────────┘    │                                      ││
+│   1.5px graphite baseline           └──────────────────────────────────────┘│
+│                                     .auth-aside · padding-top:36px          │
+│  [ Confirm and continue ]           .hero-sheet · max-width:460px           │
+│  (.btn-primary · min-h 48px)                                                 │
+│                                                                              │
+│  Send a new code · Use the link instead   ← .auth-alt                         │
+│  (legitimate mail can take a minute)                                         │
+└──────────────────────────────────────────────────────────────────────────────┘
+```
+
+**States.** Each is a sentence, never a colour alone:
+
+1. `idle` — the field and **Confirm and continue**.
+2. `submitting` — the button reads "Checking…", field disabled, never cleared (a typo must cost one edit, not a re-type).
+3. `invalid_code` — the field keeps V7's `.field-invalid` idiom: a 2px `--neg` baseline plus one sentence under it. The code is **kept**, so the user edits one digit.
+4. `code_throttled` — the server's `Retry-After` drives the countdown, never a client guess. Resend is disabled for exactly that long.
+5. `code_attempts_exhausted` — the code path closes; the copy offers the link and a fresh send, which is still the same account.
+6. `expired` — `?token=` that no longer resolves. One sentence, then the code form as the way forward.
+
+**Copy (voice §9.1, copy law §9.2).** *"Check your mail."* / *"One code, six digits."* / *"Sent to {email}."* / **Confirm and continue** / *"Send a new code"* / *"Use the link instead"*. Banned here: *token*, *verification flow*, *OTP*, *expire*, *invalid*. Say *"That code has expired. Send a new one."*
+
+**Accessibility.** The focus moves to the code field on mount. The field is `<input inputmode="numeric" autocomplete="one-time-code" maxlength="6" aria-describedby="code-hint code-error">`. The hint is `id="code-hint"` so the requirement is announced. The countdown is `aria-live="polite"` but must not announce every second — announce at start, then at zero.
+
+**What it must never be.** No modal. No overlay. It is a **page** at `/auth/verify`, so a mail client opening the link lands on a real address with its own title, and the back button behaves.
 
 ---
+
+### 8.17 Provider sign-in — the buttons on `/auth/signup` and `/auth/signin` — NEW
+
+**Why this section exists.** V7 has **no** provider markup: zero occurrences of `GitHub`, `Continue with`, `oauth` or `provider`; the two `Google` hits in the file are a verdict-export link. The three-way sign-in the journey requires is therefore **designed here, in V7's primitives**. It is not a V7 port and must never be described as one.
+
+**Shape: one block, above the form, separated by a rule.** It does not replace the password path — V7's sign-up copy is built on *"An email and a password. No more."*, so the provider block is an alternative offered first, and the password form stays fully visible beneath it. Nothing collapses, nothing is hidden behind a tab.
+
+```
+┌─ .auth-col ──────────────────────────────────┐
+│  CREATE AN ACCOUNT          (margin-label)   │
+│  Start your first decision. (h1)             │
+│  An email and a password.   (lead)           │
+│                                              │
+│  ┌────────────────────────────────────────┐  │
+│  │ [G]  Continue with GitHub       48px   │  │  .btn-secondary .btn-block
+│  └────────────────────────────────────────┘  │
+│  ┌────────────────────────────────────────┐  │
+│  │ [G]  Continue with Google       48px   │  │  .btn-secondary .btn-block
+│  └────────────────────────────────────────┘  │
+│                  gap 18px (.auth-form)       │
+│  ─────────────────────────────────────────── │  1px --hairline rule
+│                or with your email            │  .hint · 13px · --ink-3
+│                                              │
+│  Email      ← .field label                   │
+│  ┌─────────────────────────────────────┐     │
+│  │                                     │     │  ruled baseline, no box
+│  └─────────────────────────────────────┘     │
+│  Password                                    │
+│  ┌─────────────────────────────────────┐     │
+│  │                                     │     │
+│  └─────────────────────────────────────┘     │
+│    At least 8 characters.      (.hint)       │
+│                                              │
+│  [✓] I agree to the Terms…     (.check-row)  │
+│  ┌────────────────────────────────────────┐  │
+│  │          Create account                │  │  .btn-primary · min-h 48px
+│  └────────────────────────────────────────┘  │
+│  Already have an account? Sign in  (.auth-alt)│
+└──────────────────────────────────────────────┘
+```
+
+| Element | Specification |
+|---|---|
+| Button base | V7 `.btn` — `inline-flex`, `min-height:40px`, `padding:0 14px`, `border:1px solid transparent`, `border-radius:var(--r-1)` = **4px**, `600 14px/20px` |
+| Variant | `.btn-secondary` — `background:var(--sheet)`, `color:var(--graphite)`, `border-color:var(--record)`; hover `background:var(--accent-soft)`, `border-color:var(--graphite)` |
+| Size override | `.btn-block` (full width) plus **`min-height:48px`** to match `.auth-form .btn`, so the provider and primary buttons are the same height to the pixel |
+| Stack | `display:grid`, `gap:10px` — tighter than the 18px form gap, because they are one group |
+| Separator | `border-top:1px solid var(--hairline)`, `padding-top:18px`, centred `.hint` reading *"or with your email"* |
+| Icon | 16px, `gap:8px` (V7 `.btn .icon`), `flex:none`, currentColor |
+| Radius | **4px** (`--r-1`) — V7's control radius, used by every `.btn`. Never the sheet/panel radius: `.sheet` is `--r-2` = **8px**, while `.panel` and `.plan-card` carry a literal **10px**. A button takes none of these |
+
+**Conditional rendering is the contract.** The block reads `GET /api/v1/auth/oauth/providers` and renders **only** providers the server reports as configured (`{github: boolean, google: boolean}`). With none configured — the default, since `OAUTH_ENABLED` is false per plan D5 — the block, the rule and the "or with your email" line are **all absent**, and the form opens exactly as V7 draws it. This is what makes V7's two-field sign-up the zero-configuration appearance and the provider block a pure addition.
+
+**States:** `loading` → render nothing (never a skeleton: a flash of provider buttons on every page load is worse than their arriving a moment late); `error` → render nothing, and the password form is untouched, because a provider outage must never block the only guaranteed path; `ready` → configured buttons only.
+
+**Copy.** *"Continue with GitHub"*, *"Continue with Google"*, *"or with your email"*. Verb first, provider name second. Never *"Sign in with"* (the button is used on sign-up too, where nothing is being signed into), never *"social login"*, never *"OAuth"*.
+
+**Behaviour.** Each is an `<a href="/api/v1/auth/oauth/{provider}/start?next={safeNext}">` — a top-level navigation, not a fetch, because the `oauth_state` cookie must ride the request. `next` is validated client-side by `safeNext` and again server-side.
+
+**Accessibility.** Real links with an accessible name that includes the provider. The group is `<div role="group" aria-label="Or use a provider">`. Focus order: GitHub, Google, email, password, checkbox, submit — DOM order, no `tabindex`.
+
+---
+
+### 8.18 Choose a plan (`/onboarding/plan`) — NEW
+
+**Why this section exists.** V7's plan cards live in two places, and **neither is a first-run choice**: `.plans-grid` on the public `/pricing` page (readable by any visitor, and its buttons go to `#/signup`), and the signed-in `billing` view (an account that already has a plan). A first-run account has neither. So the choice screen is composed from V7's `.plan-card` — **the card is V7's, the page is new.**
+
+**Shell: none.** No rail, no top bar. It sits beside `/landing` as a sibling of `AppShell`, exactly as §8.5's three-plane shell is bypassed for `/auth/*`. Copying the auth pages' full-bleed `--ground` field is correct: this is still the front door, not the app.
+
+**Layout — one centred column, V7's `.page-stack` rhythm:**
+
+```
+┌────────────────────────────── 720px · centred ──────────────────────────────┐
+│                                                                             │
+│  YOUR PLAN                     (margin-label)                               │
+│  Choose how you start.         (h1 · .page-head h1 clamp 30–40px)           │
+│  {lead} — "Free for N units a month. Paid when the work grows."  (60ch)     │
+│  ────────────────────────────────────────────────────────────────────────   │
+│                          1px --record rule (.page-head border-bottom)       │
+│                                                                             │
+│  ┌──────────────┐ ┌──────────────┐        .plans-grid · 2 cols · gap 14px   │
+│  │ {plan-name}  │ │ {plan-name}  │        ← one card per paid plan           │
+│  │              │ │ ┌──────────┐ │  ← .plan-badge (only if D6 names one)    │
+│  │ {price}      │ │ │Recommended│ │    position:absolute; top:-11px; left:22px│
+│  │ {units} units│ │ └──────────┘ │    border-radius:999px; bg --graphite    │
+│  │              │ │ {price}      │    mono 10px, uppercase, .08em           │
+│  │ ✓ {agents}   │ │ {units} units│                                          │
+│  │   experts    │ │ ✓ {agents}   │  .plan-list · gap 10px · top border      │
+│  │ ✓ {passes}   │ │   experts    │                                          │
+│  │   passes     │ │ ✓ {passes}   │                                          │
+│  │              │ │   passes     │                                          │
+│  │ [ Choose ]   │ │ [ Choose ]   │  .btn-block · min-height:44px            │
+│  └──────────────┘ └──────────────┘                                          │
+│                                                                             │
+│  ────────────────────────────────────────────────────────────────────────   │
+│  Start free — {free-units} units, no card.   [ Continue free ]              │
+│  (.rule-note)                                (.btn-secondary)               │
+│                                                                             │
+│  Prices from the server. You can change plan at any time.  (.fig-sm)        │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+**Every `{token}` is a server value, never a literal.** `{price}` is `prices[currency]` from `/billing/state`; `{units}` is that plan's `units`; `{agents}` and `{passes}` are `limits.max_agents` / `limits.max_rounds`; `{free-units}` is `plan_free_units`. **No digit appears in this section's markup.** The braces are the spec, not a placeholder to be filled at build time with a constant — that is precisely the defect P10 describes and F5 removes, and a wireframe showing `8,000` / `12` / `4` is how a builder comes to type them.
+
+**The card is V7's, verbatim.** Every value below is read from `DESIGN_PRODUCT_V7.html:1773-1791`:
+
+```
+.plan-card        position:relative; display:flex; flex-direction:column;
+                  gap:16px; padding:26px 22px 22px;
+                  background:var(--sheet); border:1px solid var(--panel-line);
+                  border-radius:10px
+.plan-card.is-rec border-color:var(--graphite);
+                  box-shadow:inset 0 0 0 1px var(--graphite)
+.plan-badge       position:absolute; top:-11px; left:22px;
+                  min-height:22px; padding:0 9px; border-radius:999px;
+                  background:var(--graphite); color:#fff;
+                  font:500 10px/1 var(--mono); letter-spacing:.08em; uppercase
+.plan-label       font:500 11px/16px var(--mono); letter-spacing:.09em;
+                  uppercase; color:var(--ink-3)
+.plan-price       display:flex; align-items:baseline; gap:7px
+.price            font:500 clamp(34px,3vw,44px)/1 var(--sans);
+                  font-stretch:110%; letter-spacing:-.035em;
+                  font-variant-numeric:tabular-nums
+.plan-per         font:400 12px/18px var(--mono); color:var(--ink-3)
+.plan-units       font:500 13px/19px var(--mono)
+.plan-list        display:grid; gap:10px; margin-top:auto;
+                  padding-top:16px; border-top:1px solid var(--hairline);
+                  13px/20px; color:var(--ink-2)
+.plan-list li     grid-template-columns:16px minmax(0,1fr); gap:9px
+.plan-tick        14x14; margin-top:3px; color:var(--graphite)
+.plan-card .btn   width:100%; min-height:44px
+```
+
+Note the radii, and never mix them: **card 10px (literal), button 4px (`--r-1`), sheet 8px (`--r-2`).** A 4px card, an 8px card or a 10px button is off-spec.
+
+**Where it deliberately differs from `/pricing`.** The public page shows four cards (Free included) and its buttons *link to sign-up*. This screen shows the **paid** cards as choosable and the free path as **one ruled line with one button**, because free needs no card and no price comparison — it needs a single unambiguous way forward. Plan D2 governs whether a Free card is ever added here; until D2 is answered, the ruled line is the honest rendering, and it states `plan_free_units` from the server.
+
+**The free line, precisely:**
+
+```
+border-top:1px solid var(--hairline); margin-top:32px; padding-top:20px;
+display:flex; align-items:center; justify-content:space-between; gap:16px;
+```
+left: `.rule-note` — *"Start free — {free-units} units, no card."*; right: V7 `.btn-secondary`.
+
+**States:**
+
+1. `loading` — skeleton card outlines at the exact card height, never placeholder prices. A price that renders then changes is a lie for a moment.
+2. `error` — *"Couldn't load plans."* + retry, and **Continue free stays enabled**. A billing outage must never trap a user behind a paywall.
+3. `idle` — the cards and the free line.
+4. `busy` — the chosen card's button reads *"Opening checkout…"*, its siblings disabled, free still enabled.
+5. `return` — after Razorpay, `?checkout=return`. **Specified here, because it is a state of this screen and this file owns appearance.** The cards are replaced by a **ruled status ledger** — V7's `.ledger-row` / `.double-rule` / mono figures — never a spinner and never a modal:
+
+```
+┌────────────────────────────── 560px · centred ──────────────────────────────┐
+│                                                                             │
+│  CHECKING YOUR PAYMENT         (margin-label)                               │
+│  ────────────────────────────────────────────────────────────────────────   │
+│  Plan              {plan-name}                    ← .ledger-row, mono values │
+│  Status            {status-word}                  ← "Activating…" / "Active" │
+│  Next charge       {next-charge-date}                                       │
+│  ────────────────────────────────────────────────────────────────────────   │
+│  ══════════════════════════════════════════════════════════════════════════  │
+│                          ← .double-rule: the ledger's total rule             │
+│  We check again in 3s. It usually takes under a minute.  (.rule-note)        │
+│                                                                             │
+│  [ Check again ]  [ Open the dashboard ]      .btn-secondary · .btn-primary  │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+- **The ledger is V7's, not new.** `.ledger-row` is a two-column grid, the label is `margin-label` at `--ink-3`, the value is `font: 500 13px/19px var(--mono)` at `--graphite`, separated by `1px --hairline`. `.double-rule` is V7's two stacked `--graphite` rules — the ledger's total mark, which is exactly what a filed payment is.
+- **`{status-word}` is the server's state, never inferred.** `active` → *"Active"*; `pending` / `authenticated` → *"Activating…"*. There is **no error state and no failure copy**: a poll that times out keeps **Check again** and the support line, and still does not say "failed". A false "upgraded" is worse than an honest wait.
+- **The controls:** **Check again** is `.btn-secondary` (re-polls immediately); **Open the dashboard** is `.btn-primary` and appears **only** on `active`. Before that there is no primary action, because there is nowhere honest to go.
+- **All three figures come from `GET /billing/state`** — the same source as the cards, so the two cannot disagree.
+- **It is not a modal.** The route stays `/onboarding/plan?checkout=return`; the ledger replaces the cards in place, and `history.replaceState` strips the query so a refresh does not re-poll. The back button still works.
+
+**States:**
+
+**Copy.** *"Choose how you start."* / *"Free for {free-units} units a month. Paid when the work grows."* / **Choose Starter** / **Choose Studio** / **Continue free** / *"Prices from the server. You can change plan at any time."* Every figure in these strings is interpolated from `/billing/state` — the copy template contains no digit, and `plan_free_units` is never typed (F5, P10).
+
+**Consistency with §8.3, which the earlier draft of this section broke.** `/pricing` shows Free at **10 experts / 3 passes** and the paid plans at their configured limits, all from `settings.plan_*_max_agents` / `_max_rounds`. An earlier draft of this section's wireframe showed `12 experts / 4 passes` for the paid plans *and* `1,000` free units as literals — which both hardcoded the figures and contradicted §8.3's Free row. Both errors are corrected above. **The per-plan figures come from configuration in both pages, and the two pages read the same source**, so they cannot disagree.
+
+**Accessibility.** The two cards are a `<div role="list">` of `<article role="listitem">`; the badge is real text inside the card, not a `::before`. Each card's button names its plan (*"Choose Starter"*), so screen-reader users never hear two identical "Choose" buttons. The free line is a real button, reachable by tab after both cards. Target ≥44px on every control (V7's `.plan-card > .btn` is 44px).
+
+**Banned on this screen.** Any price or unit figure not sourced from `/billing/state`; a "Recommended" badge on more than one card; urgency copy (*"only 3 left"*); a countdown; and any modal. It is a page, and the back button must work.
+
+---
+
+### 8.19 Example (`/example`) — the public worked decision — NEW
+
+**Why this section exists.** The landing page and the Method page both carry a *"Worked example"* label on a filed sheet, but there is no page a visitor can visit to read one whole. The funnel's highest-friction ask is "sign up to find out what you get", and §9.2 forbids answering it with a fabricated customer. So `/example` publishes **one authored decision, labelled as an example**, in public, before any account exists. It is the honest version of a demo, and it is the page that makes the hero's `[See a filed decision]` link real.
+
+**It is not a marketing page and it is not a fixture viewer.** It renders the **real** verdict components — `.sheet`, the position mark, the tape, the dissent block, the sources — with authored content. One component set, one label, so what a visitor reads is literally the object they will get.
+
+**Shell: the site shell, not the app shell.** Same `.site-head` as the landing and pricing pages (68px, sticky). No rail, no account chrome, no top bar. A visitor is not signed in and nothing on this page needs a session.
+
+**Layout — V7's `.site-wrap` at 1120px, one column, content `.sheet` at 760px:**
+
+```
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ ◆ LarkVision          How it works   Pricing   Method      Sign in [Start free] │  .site-head
+├──────────────────────────────────────────────────────────────────────────────┤
+│                          EXAMPLE                                             │  .margin-label
+│                          One decision, filed.                               │  h1 30–40px
+│                          An illustrative example, written to show the shape   │  .lead, 60ch
+│                          of the object — not a customer's verdict.            │
+│                          ─────────────────────────────────────────────────   │  1px --record
+│                                                                              │
+│  ┌────────────────────────────────────────────────────────────────────────┐  │  .sheet · 760px
+│  │ THE DECISION                              FILED          Worked example │  │  .sheet-label
+│  │ ──────────────────────────────────────────────────────────────────────  │  │
+│  │ Should the Mill Street lease be renewed?                                │  │  .sheet-q
+│  │                                                                         │  │
+│  │ ▼ NEGATIVE                    0.82                                       │  │  .sheet-pos-row
+│  │                                share of weight                          │  │
+│  │ ┌────────────────────────────────────────────────────────────────────┐  │  │
+│  │ │ P1  ▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇        0.58                    │  │  │  .tape
+│  │ │ P2  ▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇      0.71                    │  │  │
+│  │ │ P3  ▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇    0.82  ┃ 0.80             │  │  │
+│  │ │            ══════════════════════════════════════ converges at 0.80    │  │  │  .tape-thr
+│  │ └────────────────────────────────────────────────────────────────────┘  │  │
+│  │ ──────────────────────────────────────────────────────────────────────  │  │
+│  │ THE CASE AGAINST                                                        │  │  .dissent
+│  │ The renewal only pays back if the grease-trap works land on the          │  │
+│  │ quarter's assumptions, and two of the three pass their own numbers.     │  │
+│  │ ──────────────────────────────────────────────────────────────────────  │  │
+│  │ WHO HELD WHAT                                                           │  │
+│  │ ◆ POSITIVE 2   ◆ NEUTRAL 1   ▼ NEGATIVE 4   ─ No view 0                 │  │  marks + words
+│  │ ──────────────────────────────────────────────────────────────────────  │  │
+│  │ SOURCES                                                                 │  │
+│  │ [1] Mill Street — lease terms, §4          [2] Works estimate, §2       │  │  .src links
+│  └────────────────────────────────────────────────────────────────────────┘  │
+│                                                                              │
+│  ─────────────────────────────────────────────────────────────────────────   │
+│  This is a worked example. The expert names, the figures and the sources     │  .rule-note
+│  are illustrative and belong to no customer; every decision you run uses     │
+│  your own material.                                                          │
+│                                                                              │
+│  [ Start your first decision ]  [ How a panel is checked ]                   │  .btn-primary
+│                                   .btn-secondary  → /method                  │
+└──────────────────────────────────────────────────────────────────────────────┘
+```
+
+**Element by element — all V7 values:**
+
+| Element | V7 rule | Value |
+|---|---|---|
+| Page column | `.site-wrap` | max-width 1120px, centred, `px` from the shell |
+| Sheet | `.sheet` | `--sheet`, `1px solid --hairline`, `border-radius:var(--r-2)` = **8px** |
+| Sheet head | `.sheet-label` | flex, space-between, margin-label left, `fig` right |
+| Question | `.sheet-q` | `clamp(22px,1.6vw+12px,28px)/1.16`, `-0.02em`, `600`, `font-stretch:106%`, `max-width:36ch`, `margin-top:18px` |
+| Position + share | `.sheet-pos-row` | flex, align-end, space-between, `gap:16px`, `margin-top:16px` |
+| The share figure | `.sheet-numeral` | `500 40px/1 var(--mono)`, tabular, `-0.03em` |
+| Share caption | `.sheet-numeral-label` | `400 10px/14px var(--mono)`, `.08em`, uppercase, `--ink-3` |
+| Tape | `.tape` | `.tape-row` grid `32px | 1fr | 56px`, `column-gap:12px`; `.tape-track` height **12px**; `.tape-thr` the 0.80 rule |
+| Dissent | `.dissent` | `margin-top:26px`, `border-top:1px solid --hairline`, `padding-top:14px`, body `15px/24px --ink-2` |
+| Footnote | `.rule-note` | `margin-top:24px`, `max-width:70ch`, `13px/21px`, `--ink-3` |
+| Primary action | `.btn-primary` | 4px radius, `--accent` fill, white label, `min-height:40px` |
+
+Note the sheet is **8px** (`.sheet` uses `--r-2`), not the 10px of `.panel`/`.plan-card`. This is the one page where the sheet radius is the right one.
+
+**The four rules that make it honest:**
+
+1. **The label is visible and adjacent** — *"Worked example"* appears in the sheet head, in the footnote, and in the page lead. Three times, because a screenshot of this page will travel without its context. `PRODUCT.md`'s copy law and its "no fabricated commercial claims" clause both require it.
+2. **No customer, no logo, no name.** The expert names are role labels (*"the lease analyst"*, *"the works estimator"*), never a person-shaped fabrication. The question is a plausible small-business decision, not a famous company's.
+3. **Figures are internally consistent.** The per-pass shares average to the filed 0.82 under the documented weighting; the position counts sum to the roster. A worked example whose arithmetic does not close teaches the wrong thing.
+4. **One authored file, versioned with the copy.** The content lives as a typed constant beside the route, so a copy edit is a code review, not a CMS change. It is not fetched, so the page has no loading or failed state.
+
+**States.** This page is **static**: no fetch, no session, no loading state, no failed state. That is deliberate and it is the reason the page can be the funnel's proof — a page that proves the product must not depend on the product being up. The only state is `S14 reduced motion` (the tape's draw-rule animation is suppressed) and `S15 phone`, where the tape's `56px` value column folds under its row and the position row wraps.
+
+**Copy.** *"One decision, filed."* / *"An illustrative example, written to show the shape of the object — not a customer's verdict."* / *"This is a worked example. The expert names, the figures and the sources are illustrative and belong to no customer; every decision you run uses your own material."* / **Start your first decision** / **How a panel is checked**.
+
+**Banned on this page.** Any real company, person, logo or quotation; the words *sample*, *demo*, *preview*, *mock*; a second example; a carousel; a sign-up wall over the content; and any figure presented without the "Worked example" label visible in the same viewport.
+
+**Where it is linked from:** the hero's secondary action on `/` (§8.2, "See a filed decision" — this page is that link's destination), the pricing page under the cards (§8.3), and the Method page's threshold row (§8.4). Three entry points, one page.
+
+---
+
+### 8.20 Legal (`/legal`, `/legal/:slug`, `/privacy`, `/terms`, `/refund`) — NEW
+
+**Why this section exists.** The backend publishes legal documents (`GET /api/v1/legal/documents` and `/{slug}`), the footer of every page links to them, and signup records consent against their `content_sha256`. The design had no section for the pages that serve them, so the one surface with a **legal** obligation was the only one left undesigned.
+
+**Two pages, one shape.** The index lists; the detail renders one document.
+
+**The index `/legal`** — a `.site-wrap` at 1120px, one column at `min(760px, 100%)`:
+
+```
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ ◆ LarkVision          How it works   Pricing   Method      Sign in [Start free] │
+├──────────────────────────────────────────────────────────────────────────────┤
+│                          LEGAL                                              │  .margin-label
+│                          The terms that apply.                              │  h1 30–40px
+│                          Every document below is the version in force, and    │  .lead, 60ch
+│                          the one consent is recorded against.                 │
+│                          ─────────────────────────────────────────────────   │  1px --record
+│                                                                              │
+│  PRIVACY                  Version 2026-11-03 · Effective 3 Nov 2026     →     │  .ledger-row
+│  TERMS OF SERVICE         Version 2026-11-03 · Effective 3 Nov 2026     →     │
+│  REFUNDS                  Version 2026-11-03 · Effective 3 Nov 2026     →     │
+│  SUBPROCESSORS            Version 2026-11-03 · Effective 3 Nov 2026     →     │
+└──────────────────────────────────────────────────────────────────────────────┘
+```
+
+**The detail `/legal/:slug`** — the same shell, one column at `min(72ch, 100%)`:
+
+```
+┌──────────────────────────────────────────────────────────────────────────────┐
+│                          PRIVACY                                            │  .margin-label
+│                          Privacy                                            │  h1
+│                          Version 2026-11-03 · Effective 3 Nov 2026           │  .fig
+│                          ─────────────────────────────────────────────────   │
+│                          {content}                                           │  rendered markdown
+│                          ─────────────────────────────────────────────────   │
+│                          ← Back to all documents                             │  .auth-alt
+└──────────────────────────────────────────────────────────────────────────────┘
+```
+
+**V7 has no legal view** (`data-site` is `landing|pricing|method|signup|signin`), so this is designed in V7's `.method` idiom — the trust-document form already established by §8.4: one column, `margin-label` head, `--ink-3` metadata, `--hairline` rules, no cards, no imagery. **The two pages are the same object**, so they share it.
+
+- **The version and the effective date are always shown.** §8.11's consent record points at `content_sha256`; a customer must be able to see *which* version they are reading.
+- **Content is served, never bundled.** A copy change is a server publish, not a deploy. The page renders what `GET /legal/documents/{slug}` returns and says so when it cannot fetch.
+- **`/privacy`, `/terms`, `/refund` are aliases** — permanent redirects to the matching `/legal/:slug`, kept because those addresses are in the footer, in mails and in old links.
+- **States:** S6 loading (a skeleton matching one text block), S7 failed (*"Couldn't load this document. Try again."* — never a cached copy of a legal text), S15 phone. **No empty state**: a legal index with no documents is a defect, and the page says *"This is unavailable right now."* rather than drawing a blank list.
+- **Print.** These pages print cleanly — a reader may need to keep a copy. No dark surfaces, no gradients, `@media print` hides the shell chrome.
+- **Copy.** The document's own title, its version, its effective date. Never paraphrased, never summarised, never given a marketing lead-in.
+
+**The re-consent prompt, which the design also owed.** When a published document's `content_sha256` no longer matches the version the account consented to, `POST /api/v1/legal/consent` records the new acceptance. The prompt is **not** a page and **not** a blocking modal:
+
+- A **`.reader-banner`** — V7's own full-width strip (`background:var(--accent-soft)`, `border-bottom:1px solid var(--hairline)`, `padding:9px 20px`, `12px/19px`, `--ink-2`, `display:flex` with `flex-wrap:wrap` and `gap:8px 12px`) — at the top of the app shell, above `.content`, on every authed page until accepted: one sentence naming what changed (*"Our Privacy Policy has been updated. Read it, then accept to continue."*), a link to the document, and **Accept**.
+- It is dismissible only by accepting; it does not cover the page and does not trap focus. A user can read and work while ignoring it — except on the routes that already require verification or a plan, where the gate runs first.
+- **It never appears for an account that has accepted the current versions**, so the steady state is no band at all.
+
+### 8.21 Password recovery (`/auth/forgot`, `/auth/reset`) — NEW
+
+**Why this section exists.** The backend has `POST /api/v1/auth/reset/request` (always 202, never reveals whether an address exists) and `POST /api/v1/auth/reset/confirm` (204). **Neither this file nor the plan had a section for them.** A customer who forgets a password had no designed way back in — the single largest hole this review found.
+
+**Both pages are `AuthLayout` with no aside.** Recovery is a two-step errand, not a sales moment, so the filed-sheet aside is absent and the column is centred at `min(430px, 100%)` — V7's `.auth-col` width, without its grid.
+
+**Step 1 — `/auth/forgot`:**
+
+```
+┌──────────────── 430px · centred · no aside ─────────────────┐
+│                                                              │
+│  RESET YOUR PASSWORD              (margin-label)             │
+│  Let's get you back in.           (h1 clamp 30–44px)          │
+│  Enter the address on your account. We'll mail a link that   │
+│  works once, for one hour.        (.lead, 40ch)              │
+│                                                              │
+│  Email                            ← .field label             │
+│  ┌────────────────────────────────────────────────────────┐  │
+│  │                                                        │  │  1.5px graphite baseline
+│  └────────────────────────────────────────────────────────┘  │
+│                                                              │
+│  [ Send the link ]                .btn-primary · min-h 48px  │
+│                                                              │
+│  Remembered it? Sign in           (.auth-alt)                │
+└──────────────────────────────────────────────────────────────┘
+```
+
+**Step 2 — `/auth/reset?token=…`:**
+
+```
+┌──────────────── 430px · centred · no aside ─────────────────┐
+│                                                              │
+│  NEW PASSWORD                     (margin-label)             │
+│  Choose a new password.           (h1)                       │
+│  This signs out every other device. (.lead)                  │
+│                                                              │
+│  New password                     ← .field label             │
+│  ┌────────────────────────────────────────────────────────┐  │
+│  │                                                        │  │
+│  └────────────────────────────────────────────────────────┘  │
+│    At least 8 characters.          (.hint, 40ch)             │
+│                                                              │
+│  Confirm it                                                  │
+│  ┌────────────────────────────────────────────────────────┐  │
+│  │                                                        │  │
+│  └────────────────────────────────────────────────────────┘  │
+│                                                              │
+│  [ Save and sign in ]             .btn-primary · min-h 48px  │
+└──────────────────────────────────────────────────────────────┘
+```
+
+- **The fields are V7's `.field`** — ruled baseline, `1.5px --graphite`, `2px --accent` on focus, `padding:8px 0`, no box, no fill, `border-radius:0`. The two fields are separated by `.auth-form`'s `18px` gap, inside a `gap:6px` label/input pair. **Exactly the two-field rhythm V7's signup uses**, which is the whole point: recovery must feel like the door it is next to.
+- **Step 1 always reports success** — *"If that address has an account, a link is on its way."* It never says "no account found", because that turns the page into an account enumerator.
+- **Step 2's success is a signed-in session.** `POST /reset/confirm` returns 204 and revokes other sessions; the page then calls `authMe()` and follows `safeNext`, so the user lands where they were going, already signed in.
+- **States, both pages:** `idle`; `submitting` (button reads *"Sending…"* / *"Saving…"*, fields disabled but **not cleared**); `invalid` on a bad address or a short password, marked in V7's field idiom with the sentence under it; `expired` on a spent token (*"That link has been used or has expired. Ask for a new one."* + a link back to step 1); `error` on a 5xx (*"Couldn't reach the server. Nothing changed."*). No success celebration on either page — the reward is the app, not a checkmark.
+- **The token is never put in a header or a log.** It rides the URL once, `POST`s once, and a refresh after success finds the session cookie and re-routes through the guard.
+- **Copy.** *"Reset your password."* / *"Let's get you back in."* / *"Send the link."* / *"Choose a new password."* / *"This signs out every other device."* / *"Save and sign in."* Banned: *forgot*, *recovery flow*, *credentials*, *invalid token*, *OTP*.
+- **Accessibility.** Both pages are one `<form>` with a real `<label for>` per field, `autocomplete="email"` / `"new-password"`, the hint wired by `aria-describedby`, and focus moved to the first field on mount. Enter submits.
 
 ## 9. Copy system
 
@@ -1611,7 +2112,7 @@ The markers follow `DESIGN_SPEC.md` §0.2: **E** keep as built, **C** change in 
 | `pages/NewRunWorkspace.tsx`, `pages/RunPage.tsx` | C | The shell changes (§8.9). The step addresses, the in-flow stage rail and the tab strip above the content stay as built. |
 | `marketing/Hero.tsx` | C | Recompose the ten sections of §8.2 — a hero, eight `.site-section`s each carrying a margin label, and the night close band. Copy and behaviour kept. The header and the footer gain a link to the Method page. |
 | `auth/AuthLayout.tsx`, `pages/SignInPage.tsx`, `pages/SignUpPage.tsx` | C | `.auth-grid` at `430px / 1fr`, the ledger fields, and the filed sheet in the aside (§8.1). |
-| `pages/PricingPage.tsx` | C | The plan ledger without a Free column, currency in the header, and the rows sourced from configuration (§8.3, D6). |
+| `pages/PricingPage.tsx` | C | The plan ledger **with** a Free column, currency in the header, and every row sourced from `/billing/plans` plus `plan_free_units` (§8.3, settled — the earlier "without a Free column" text is superseded on V7's evidence). |
 | `pages/ResultsPage.tsx` | C | `.verdict-layout` at `minmax(0,1fr) minmax(296px,336px)`, with the tape and overlay beneath the sheet (§8.7). |
 | `components/common/RunTable.tsx` | E | The field mapping is unchanged. The material column is the existing corpus column. |
 | `pages/RunsPage.tsx` | C | A `.page-stack` of three panels — plan usage, the filter, the decisions — with the material column and no trail (§8.9). |
@@ -1626,6 +2127,15 @@ The markers follow `DESIGN_SPEC.md` §0.2: **E** keep as built, **C** change in 
 | `components/ui/CommandPalette.tsx` | N | The one search (§8.13), on `<dialog>`, with a `listbox`, `↑ ↓` / `Enter` / `Esc`, and the results grouped by decisions, documents and invoices. |
 | `components/billing/PeriodPanel.tsx`, `LedgerPanel.tsx`, `PaymentPanel.tsx`, `InvoicesPanel.tsx`, `QuietPanel.tsx` | N | The six billing panels (§8.10). Billing has no page in the shipped app today, so this is the page's whole body. |
 | `pages/BillingPage.tsx`, `pages/AccountPage.tsx` | C/N | Billing is new (N). Account is changed in place (C) to the four `account-panel`s of §8.11, each with a kicker and a per-setting current value. |
+| `pages/VerifyEmailPage.tsx` | C | The code form beside the `?token=` link (§8.16). Route stays `/auth/verify`. |
+| `pages/OnboardingPlanPage.tsx` | N | The plan-choice screen (§8.18): `PlanCard` ×2, the free line, and the `?checkout=return` ledger as state 5. Route `/onboarding/plan`, a sibling of the shells (no rail). |
+| `pages/ForgotPasswordPage.tsx` | C | The email step (§8.21), at `.auth-col` width with no aside. Route `/auth/forgot`. |
+| `pages/ResetPasswordPage.tsx` | C | The new-password step (§8.21), reading `?token=`. Route `/auth/reset`. |
+| `pages/LegalIndexPage.tsx` | C | The document index (§8.20) in the `.method` idiom. Route `/legal`. |
+| `pages/LegalPage.tsx` | C | One served document (§8.20) with its version and effective date. Route `/legal/:slug`; `/privacy`, `/terms`, `/refund` redirect here. |
+| `pages/ExamplePage.tsx` | N | The public worked decision (§8.19): the real `.sheet` components with one authored constant. Route `/example`, site shell. |
+| `components/auth/OAuthButtons.tsx` | N | The provider block (§8.17) on both auth pages; renders only configured providers, reads `/auth/oauth/providers`. |
+| `components/legal/ReconsentBanner.tsx` | N | The `.reader-banner` strip (§8.20) above `.content` while a published `content_sha256` differs from the consented version; **Accept** posts `/legal/consent`. |
 | `pages/OverviewPage.tsx` | C | Route kept until Documents, Runs, Verdict and Billing pass §10, then removed (§8.15). |
 | Every rendered string containing "corpus" | C | "material" or "material set" (D7). |
 | `api/*`, `run/selectors.ts`, `graph/graphStore.ts`, `run/runStore.ts`, `auth/*`, `RequireAuth` | E | Not touched. The tape's series is already built on the client (`convergenceSeries`), so no backend change is needed. |
@@ -1671,13 +2181,15 @@ Each open decision lists a recommendation, and the recommendation is what this p
 - **The Free plan is a column on `/pricing`** (§8.3). This reverses the previous revision's decision, on V7's evidence. The signed-in Billing panel keeps three plans.
 - The Method page is linked from the header and the footer (§8.2, §8.4).
 - **The primary action is a flat accent fill, never a gradient** (§6.9). `DESIGN_SPEC.md` §3's plum action ramp is withdrawn.
+- **The Free plan is a column on `/pricing`** (§8.3). This reverses the previous revision's decision, on V7's evidence. The signed-in Billing panel keeps three plans. The earlier sentence in §11's file map saying "without a Free column" is **superseded and corrected** — one decision, one text.
+- **Six screens are specified here for the first time, and none of them is a V7 port.** §8.16 verification, §8.17 provider buttons, §8.18 plan choice, §8.19 example, §8.20 legal and §8.21 password recovery have **no V7 equivalent** — V7's `data-site` set has no verify and no onboarding view, and its file contains no provider markup. They are designed from V7's own tokens and primitives (`.field` ruled baseline, `.btn-secondary` at 48px, `.plan-card` at 10px with a 4px button, `.hero-sheet` aside), and V7 must never be cited as the source of their layout. This closes the gap recorded as R50 in `docs/SIGNUP_TO_DASHBOARD_PLAN.md` §14.5.7.
 
 **Still open.** D1 to D4 and D10 are answered by V7 and are not repeated here. What follows is what V7 cannot answer.
 
 | # | Decision | Recommendation | Alternative | Why it matters |
 |---|---|---|---|---|
 | **D5** | Document of record | Adopt this proposal as the successor to `DESIGN.md` and `docs/DESIGN_SPEC.md` once approved. Update the visual-world paragraph of `PRODUCT.md` to match. Until then, all three stay as they are. | Keep `DESIGN.md` as the record and treat this file as an option. | Three documents disagree, and the code follows one of them. Someone has to decide which one is true. |
-| **D6** | Pricing rows | Source "Panel size" and "Passes per decision" for each plan from plan configuration, and remove the hard-coded 12 and 4. Confirm the Free allowance before it appears. Decide whether any plan is marked "Recommended". | Keep the fallback values as they are. | The fallback rows show 12 and 4 for every plan. That is a claim, and `PRODUCT.md` bans unsupported claims. |
+| **D6** | Pricing rows | Source "Panel size" and "Passes per decision" for each plan from plan configuration, and remove the hard-coded 12 and 4. **The Free allowance must be confirmed before it appears on `/pricing` or `/onboarding/plan`** — §8.18 renders `plan_free_units` from the server, and until that value is confirmed the screen states the unit count it is given rather than a chosen one. Decide whether any plan is marked "Recommended". | Keep the fallback values as they are. | The fallback rows show 12 and 4 for every plan. That is a claim, and `PRODUCT.md` bans unsupported claims. |
 | **D7** | The word "corpus" | Replace it with "material" or "material set" in every rendered string. | Keep "corpus" as machinery vocabulary the customer already sees. | It is the kind of term the copy law exists to remove. |
 | **D8** | The threshold window | Keep the tape as built: each pass is compared with the threshold on its own. Its series is already built on the client, so no backend change is needed. | Compare the threshold with the last two passes, the window that decides the verdict (`CONSENSUS_ROUNDS = 2`). That changes what the tape shows. | A single pass can cross 0.80 while the verdict's window does not. The tape and the verdict can then disagree, which would mislead the customer. |
 | **D9** | Method page copy | The owner writes the plain-language weighting paragraph and the "not an adviser" line. A legal read is taken against the Legal pages. | Omit the Method page. | The page makes claims about how verdicts are made, so the wording has to be the owner's and checked. |

@@ -32,7 +32,7 @@ Verified by reading the tree, not assumed.
 | `UserOut.email_verified` | `src/api/auth_api.py:84`, `:94` | **Shipped.** Derived from `email_verified_at is not None`. |
 | `require_verified_email` | `src/auth/deps.py:137-152` | **Shipped.** Returns `403 {code: "email_unverified"}`. |
 | Code send / confirm | `src/api/auth_api.py:218`, `:263` | **Shipped.** `POST /auth/verify/code/send` (202), `/verify/code/confirm` (200 `MeOut`). |
-| OAuth providers / start / callback | `src/api/oauth_api.py:48`, `:54`, `:98` | **Written, untested, unmigrated.** |
+| OAuth providers / start / callback | `src/api/oauth_api.py:48`, `:54`, `:98` | **Written; migration `0010_oauth_accounts` now exists; untested; no client caller** (R41/R42). |
 | Plan catalogue with a free tier | `src/billing/plans.py:37` | **Shipped.** `free`, `starter`, `studio`, `enterprise`; free units from settings. |
 | Rate card | `src/api/billing_api.py:109-128` | **Shipped.** `/billing/plans` returns starter, studio, enterprise. **No free row.** |
 | Usage / entitlements | `src/api/billing_api.py:131-151` | **Shipped.** `/billing/usage`: plan, units, limits, `billing_enabled`. |
@@ -196,7 +196,7 @@ Three exist, and none is a shade of another.
 |---|---|---|
 | **Shipped** | `#1E4B38` evergreen | `frontend/src/index.css:23` — what the app renders today, with a passing contrast suite (`tokens.test.ts:75-79`) |
 | ~~`DESIGN_SPEC.md`~~ | `#823A86` plum | **Withdrawn** — superseded by `docs/DESIGN_AUTHORITY.md` §3.1. Listed for history only; do not build against it |
-| **V7 prototype** | `#2D3F9C` indigo | `DESIGN_PRODUCT_V7.html:42` — the file handed over as the design reference |
+| **V7 prototype** | `#2D3F9C` indigo | `DESIGN_PRODUCT_V7.html:51` and `:1051` (`--accent` in the two `:root` blocks) — the file handed over as the design reference |
 
 **Recommendation: keep the shipped evergreen.** It is the only one with measured contrast assertions already in CI. Changing it invalidates the entire §2.6 matrix and the token test. If the owner prefers V7's indigo, that is a deliberate re-theme (one variable, then re-measure), and it should be its own change before this journey work starts — not smuggled in with it.
 
@@ -205,6 +205,8 @@ Three exist, and none is a shade of another.
 `plans.py` defines `free`; `/billing/plans` does not return it; `DESIGN_PROPOSAL` D6 says the free allowance is unverified and is added to pricing only after D6 is answered. V7 shows **four** cards including Free.
 
 **Recommendation:** free is a **tier in the catalogue but not a card**. The onboarding screen says "Start free — 1,000 units" using the server's `plan_free_units`, and adds a card only once D6 is answered. This preserves V3/V7's honesty about the free path without publishing an allowance nobody has verified.
+
+> **⚠️ This recommendation now conflicts with the design authority, and D2 must be re-answered.** `DESIGN_PROPOSAL.md:1671` states *"The Free plan **is** a column on `/pricing`"*, calling it a reversal on V7's evidence — while `DESIGN_PROPOSAL.md:1614` still says the pricing page ships *"without a Free column"*. **The proposal contradicts itself on this row**, and this plan's recommendation sides with line 1614 against line 1671. V7 is unambiguous: four cards, Free first, `$0 / month`. Resolve in `DESIGN_AUTHORITY.md` §2.6 (*"Free tier presentation — one open item"*) before F5 or F8 is built, or the pricing page will be built one way and the onboarding screen the other.
 
 ### D3. Does onboarding block the dashboard, or nudge it?
 
@@ -265,6 +267,37 @@ The audit's report §11.5 argues for the block — one conversion number, one re
 ```
 
 **Why `/landing` and not `/overview` at the end:** `landingTarget` already decides between documents, runs and results from the account's real state (`LandingPage.tsx:15-19`). Hardcoding `/overview` would make a brand-new account land on an empty dashboard, which is the exact thing that function exists to prevent.
+
+### 3.1 The owner's requirement, stated in one place
+
+The journey above is not negotiable and every clause is now testable:
+
+1. **Password sign-up** → email + password → a **verification window** where the user enters a 6-digit code mailed to them, **or** opens the link in the same mail.
+2. **GitHub / Google sign-in** → an alternative to the password path, available on both `/auth/signup` and `/auth/signin`. A provider-proved address is **already verified**, so this path skips the verification window.
+3. **Either path, once verified** → an **onboarding plan page**, on its own address with no rail, where the user chooses free or paid.
+4. **Only then** → the dashboard.
+
+**The gate rule that makes 3 meaningful:** `RequireAuth` refuses every app route while an account is un-onboarded, so the plan page is a step, not a suggestion. That is D3's hard block, and it is the recommendation.
+
+**What "verified" gates, precisely.** It is **not** a gate on reaching the dashboard — a user who has verified but not chosen a plan still cannot pass. The verify gate blocks only the spend routes (`ingest_files`, `ingest_url`, `ontology`, `build_graph`, `debate`), returning `403 email_unverified` from `deps.py:150`. The onboarding gate blocks the shell. Two gates, two failure modes, two screens — do not collapse them into one.
+
+### 3.2 The three screens, and how each one is specified
+
+| Screen | Route | V7 equivalent | Source of truth for its look |
+|---|---|---|---|
+| Verification | `/auth/verify` | **none** | **F7** → `DESIGN_PROPOSAL.md` **§8.16** (ruled `.field` baseline, mono code field, `.auth-grid` at 430px + 72px gap) |
+| Provider buttons | on `/auth/signup` and `/auth/signin` | **none** | **F17** → `DESIGN_PROPOSAL.md` **§8.17** (`.btn-secondary` at 48px, 4px radius, above the form) |
+| Plan choice | `/onboarding/plan` | **none** | **F8** → `DESIGN_PROPOSAL.md` **§8.18** (V7's `.plan-card` at 10px, `.plan-badge`, free as one ruled line) |
+
+**This is the single most important V7 finding in the plan.** V7 answers **none** of the three screens the owner requires. Its `signup` is a single static form whose own copy says *"this preview creates the account on this page; nothing leaves it"* — it has no verification step, no provider buttons and no post-signup redirect. Its plan cards live at `/pricing` (a marketing page any visitor can read) and its Billing view (a signed-in page for an account that already has a plan).
+
+**Now closed on the design side.** `DESIGN_PROPOSAL.md` **§8.16, §8.17 and §8.18** specify all three, built from V7's own stylesheet values rather than from a V7 drawing — V7 has no drawing to trace. The exact CSS in those sections is quoted from `DESIGN_PRODUCT_V7.html`, so the screens match V7's language even though V7 never contained them. **F7/F8/F17 must be built to those sections, not invented at implementation time.**
+
+**The three rules that keep them V7-faithful:**
+
+1. **Fields are ruled baselines, never boxes.** `.field input` is `border:0; border-bottom:1.5px solid var(--graphite); border-radius:0; padding:8px 0`, with a 2px `--accent` bottom rule on focus. A boxed input anywhere on these three screens is off-spec.
+2. **Two radii, never mixed.** Controls are **4px** (`--r-1`). Cards and panels are **10px** (`.panel`, `.plan-card` — a literal, not `--r-2`). Sheets are **8px** (`--r-2`). A control never takes a card radius, and a card never takes a control radius.
+3. **Auth buttons are 48px.** `.auth-form .btn` is `min-height:48px`; provider buttons must match it exactly, or the stack reads as two different sizes of the same thing.
 
 ---
 
@@ -717,6 +750,70 @@ Backend code is written, untested and unmigrated. This section is the gate that 
 5. **`ruff check src/auth/oauth.py src/api/oauth_api.py`** — they were never linted.
 
 ## 5. Frontend plan
+### B39. Payment method, read-only — `src/api/billing_api.py` — `DESIGN_PROPOSAL.md` §8.10 panel 4
+
+```
+GET /api/v1/billing/payment-method     (auth, Cache-Control: private, no-store)
+{ "card": { "brand": "visa", "last4": "4242", "expiry": "12/2027" } | null,
+  "country": "IN" | null }
+```
+
+- **A read of what the provider holds, never a write.** The card is changed at Razorpay; the `card` dialog (design §8.13) is a **deep link to the provider's own page**, not a form. Never accept a PAN, a CVV or a raw card object anywhere in this API.
+- **`card: null` is a first-class answer** — the design renders *"Add a card"* for it (§8.10 states). An account on the free plan has no card and must not see an empty box.
+- **Absent when the provider is unconfigured.** With `billing_enabled=false` the route 404s with `{code: "not_found"}`, and F19 omits the panel with one sentence.
+- **No stored card data in Postgres, ever.** `last4`/`brand`/`expiry` are cached display values refreshed from the provider on read; nothing is trusted from the client.
+
+### B40. Invoices — `src/api/billing_api.py` + the `invoices` table — `DESIGN_PROPOSAL.md` §8.10 panel 5
+
+**B18.4 already says the row shape; this item makes it readable.** An invoice the customer cannot retrieve is not an invoice.
+
+```
+GET /api/v1/billing/invoices?limit=&cursor=    (auth, private, no-store)
+{ "items": [ { "number": "INV-2026-0031", "issued_at": "...",
+               "period_start": "...", "period_end": "...",
+               "amount": 1000, "currency": "INR", "tax_amount": 180,
+               "status": "paid" | "open" | "refunded",
+               "download_url": "https://..." | null } ],
+  "next_cursor": null }
+```
+
+- **`download_url` is minted at read time, short-lived** — the same pattern the export uses (`jobs_api.get_job` presigns on read). Never a permanent public link, never a URL stored in the row.
+- **Same pagination as runs** — `{items, next_cursor}`, keyset on `(issued_at, id)` DESC. That is R21's rule applied to the second list surface, so the API does not grow a third pagination style.
+- **Rows come from B18.4's write path**; the webhook is the only writer. A refunded charge stays in the list with `status: "refunded"` — the record is not deleted.
+- **Owner-scoped, like every other read.** A foreign invoice id is absent, never 403.
+
+---
+
+
+**The design-plan rule, stated once.** `DESIGN_PROPOSAL.md` owns appearance; this file owns order and behaviour. Every `F` item below is one of two kinds, and it says which:
+
+| Kind | What it does | Where its look comes from |
+|---|---|---|
+| **Design-bearing** — F4, F5, F7, F8, F9, F11, F12, F14, F15, F17, F18, F19, F20, F21, F22, F23 | adds or changes a visible surface | **cites a DESIGN_PROPOSAL.md section**, and that section is the spec. Do not invent layout at build time |
+| **Logic-only** — F1, F2, F3, F6, F10, F13, F16 | (unchanged) changes a type, a guard, a route, a store, an error path | **inherits** the surrounding design; adds no new surface |
+
+The seven logic-only items touch no new pixels: F1 widens a TS interface, F2 adds guard branches, F3 places a route the design already draws, F6 redirects after submit, F10 clears a draft store, F13 stops three states lying, F16 carries `next`. **If an implementer finds themselves styling anything while doing one of those seven, something has gone wrong** — the design for that surface already exists in §8.
+
+**Where the twelve design-bearing items point:**
+
+| Item | Surface | Design section |
+|---|---|---|
+| F4 | the shared plan card | §8.3 (content anatomy) + §8.18 (outer frame) |
+| F5 | `/pricing` honest figures | §8.3 |
+| F7 | `/auth/verify` | §8.16 |
+| F8 | `/onboarding/plan` | §8.18 |
+| F9 | `/onboarding/plan?checkout=return` | §8.18 state 5 |
+| F11 | the plan card's four actions | §8.10 |
+| F12 | `/overview` truthfulness only | §8.15 (retired — no new design) |
+| F14 | enterprise block, legal links | §8.3, §8.4, §8.19 |
+| F15 | `/example` | §8.19 |
+| F17 | provider buttons | §8.17 |
+| F18 | `/method` | §8.4 |
+| F19 | `/billing` | §8.10 (+ §8.10 panels 4–5 contracts) |
+| F20 | `/auth/forgot`, `/auth/reset` | §8.21 |
+| F21 | `/legal`, `/legal/:slug` | §8.20 |
+| F22 | account panel 2, password dialog | §8.11 panel 2, §8.13 |
+| F23 | stop + remove controls | §8.12 |
 
 ### F1. The `User` type finally reads what the server sends — `frontend/src/api/types.ts`
 
@@ -792,6 +889,8 @@ components/billing/PlanCard.tsx
 
 `PricingPage` passes `link → /auth/signup` for anonymous visitors and `button → buy()` for signed-in ones. `OnboardingPlanPage` passes `button → buy()` always. One card, one set of styles, no drift.
 
+**One card, two design sources, and they must not diverge.** `DESIGN_PROPOSAL.md` **§8.3** draws the pricing card as `.plan-option` — *"name, price (`numeral-sm`), a units line, three `plan-facts` rows, and the action"*, action at `margin-top:auto` so all four buttons land on one line. **§8.18** draws the onboarding card as V7's `.plan-card` — `26px 22px 22px`, 10px radius, `.plan-badge` at `top:-11px`. **They are the same component with different shells around it**: the card's *content* anatomy comes from §8.3, its *outer frame* (badge, radius, padding) from §8.18. `PlanCard` takes both, and neither page re-draws the other's part.
+
 ### F5. Kill the transacting fallback — `PricingPage.tsx:29-58` (P10)
 
 `PLANS` currently carries `{ INR: 999, USD: 10 }`, `'8,000'`, `'12'`, `'4'` as a render-time fallback **with live buy buttons**. A user can be shown one number and charged another.
@@ -804,6 +903,8 @@ Replace with:
 - The `RULES` copy block (`:116-120`) is static prose and may stay; prices and limits never are.
 
 The same rule applies to the enterprise block's `ENTERPRISE_ROWS`.
+
+**Design source: `DESIGN_PROPOSAL.md` §8.3**, which already specifies the honest-pricing rules this item enforces — *"`[config]` cells come from plan configuration, never from constants"* and *"a price that appears nowhere in configuration does not appear on the page"*. F5 is the implementation of §8.3's two rules, not a separate policy. The three states F5 names (skeleton, unavailable panel, loaded) map to §8.14's S6 / S7 / S4 for the pricing page.
 
 ### F6. Sign-up routes to verification — `SignUpPage.tsx:70-72`
 
@@ -826,19 +927,26 @@ Keep the `?token=` link handling exactly as it is (`:103-133`); add alongside it
 - **"Use the link instead"**, which is what already exists.
 - Error copy for `invalid_code`, `code_throttled`, `code_attempts_exhausted` — each its own sentence, not one generic "wrong code".
 
-This is the one screen where the prototype has nothing to offer: V7's signup is a two-field mock. Design it in the existing `AuthLayout` idiom — `font-display` heading, one column, `min-h-11` controls.
+This is the one screen where the prototype has nothing to offer: **V7 contains no verification view at all** (`data-site` is one of `landing|pricing|method|signup|signin`; no verify page, and V7's signup copy says *"this preview creates the account on this page; nothing leaves it"*).
+
+**The design is now written: `DESIGN_PROPOSAL.md` §8.16.** Build to it exactly — the `.auth-grid` split, V7's `.field` ruled baseline (1.5px graphite, no box, 2px accent on focus), the mono code field, the 48px primary action, and the six named states. Those values are quoted from `DESIGN_PRODUCT_V7.html:161-167` and `:1657-1670`, so this screen matches V7's language even though V7 never contained it. Do not invent a layout at implementation time.
+
+**Why this screen is not optional (the verification window the owner asked for).** It is the *only* place a user can satisfy the gate that `deps.py:150` already enforces on five spend routes. Ship F7 no later than B11 or every new account is locked out of ingest and debate with no way forward. See §3.1 and §14.5.6.3.
 
 ### F8. Wallet: the onboarding screen — `pages/OnboardingPlanPage.tsx` (new)
 
 **Reads:** `GET /billing/state` only. No `PLANS` constants on this screen, ever.
 
-**Layout** — one column, max ~560px, centred, no rail:
+**The design is written: `DESIGN_PROPOSAL.md` §8.18.** Build to it. The card is V7's `.plan-card` **verbatim** — 10px radius, `1px solid --panel-line`, `26px 22px 22px` padding, `16px` internal gap — with the badge absolute at `top:-11px; left:22px`, and the card's button at **44px** with **4px** radius. The r-2 card radius and the r-1 button radius never cross.
+
+**Layout** — one column, max ~720px, centred, no rail (wider than 560px because two cards must sit side by side at `.plans-grid`'s 14px gap):
 
 | Band | Content | Design source |
 |---|---|---|
-| Head | "Choose how you start." + one lead line | V7 `pricing-h1` + `.lead`, re-expressed |
-| Cards | Starter, Studio — `PlanCard` from F4 | V7 `.plan-card`, shipped pricing card |
-| Free | One ruled line: "Start free — 1,000 units, no card." + **Continue free** | V7's honesty about the free path, without a fourth card (D2) |
+| Head | "Choose how you start." + one lead line | V7 `.page-head` — `border-bottom:1px solid --record`, `padding-bottom:22px`, h1 `clamp(30px,2.4vw+10px,40px)` |
+| Cards | Starter, Studio — `PlanCard` from F4 | V7 `.plan-card` (`:1773-1791`), quoted in §8.18 |
+| Badge | "Recommended" on Studio only | V7 `.plan-badge` — mono 10px uppercase, `--graphite` pill, `top:-11px` |
+| Free | One ruled line: "Start free — {plan_free_units} units, no card." + **Continue free** | `border-top:1px solid --hairline`, `.rule-note` + `.btn-secondary`. No fourth card unless D2 says so |
 | Rules | The three existing `RULES` lines from `PricingPage` | reused verbatim, so the two pages cannot disagree |
 
 **States:**
@@ -849,27 +957,17 @@ This is the one screen where the prototype has nothing to offer: V7's signup is 
 4. `busy` — the chosen card's button reads "Opening checkout…", siblings disabled.
 5. `return` (see F9).
 
-### F9. The return state — the part V7 has no equivalent for
+### F9. The return state — `DESIGN_PROPOSAL.md` §8.18 state 5
 
-On `?checkout=return`, replace the cards with a **ruled status ledger** in V7's own language (its `.ledger-row` / `.double-rule` / mono figures), not a spinner:
+On `?checkout=return`, the cards are replaced by a **ruled status ledger** — V7's `.ledger-row` / `.double-rule` / mono figures, never a spinner. **The design is written in `DESIGN_PROPOSAL.md` §8.18, state 5**; build to it rather than to this paragraph.
 
-```
-CHECKING YOUR PAYMENT
-─────────────────────────────
-Plan            Studio
-Status          Activating…            ← or "Active"
-Next charge     30 Dec 2026
-─────────────────────────────
-We check again in 3s. It usually takes under a minute.
-                      [ Check again ]  [ Open the dashboard ]
-```
+**The behaviour this item owns — the part the design cannot specify:**
 
 - Poll `GET /billing/state` every 3 s for ≤ 90 s.
-- `status === "active"` → success: "Studio is active", the reset date, and **Open the dashboard**.
-- `pending`/`authenticated` → "Payment received. Your plan activates shortly." — never an error, never "failed".
-- Timeout → stop polling, keep **Check again**, keep the support mailto. Still not an error.
-- On success: `POST /billing/onboarding/complete {choice:"paid"}`, then `authMe()` to refresh the store, then `/landing`.
-- Strip the query with `history.replaceState` so a refresh does not re-poll.
+- `status === "active"` → reveal **Open the dashboard**, then `POST /billing/onboarding/complete {choice:"paid"}`, `authMe()` to refresh the store, then `/landing`.
+- `pending` / `authenticated` → *"Payment received. Your plan activates shortly."* — never an error, never "failed".
+- Timeout → stop polling, keep **Check again** and the support mailto. Still not an error.
+- `history.replaceState` strips `?checkout=return` so a refresh does not re-poll.
 
 **The rule this screen must obey:** it reports the server's state and never infers one. A false "upgraded" is worse than an honest wait.
 
@@ -890,6 +988,8 @@ After checkout, cancel, or onboarding completion, call `authMe()` and adopt the 
 
 `created` and `paused` now say something true instead of routing the user into a 409.
 
+**Design source: `DESIGN_PROPOSAL.md` §8.10**, which owns the four actions and their words. §8.10 specifies the plan ledger's action states — *"the current plan is marked three ways: the chip 'Your plan', the `--accent-soft` strip at the top of the card, and its action replaced by a state"* — and names the cancel flow as a dialog that says what stops, what stays and what is charged. **F11 must use §8.10's words, not the table above**: the table is the mapping from `subscription.action` to behaviour, §8.10 is the copy and layout. Where `PlanUsage` (the Overview card) and `/billing` (the ledger) both show a plan, they show the same four actions from the same server field.
+
 ---
 
 ### F12. The Overview stops inventing numbers — P30
@@ -900,6 +1000,11 @@ After checkout, cancel, or onboarding completion, call `authMe()` and adopt the 
 - **Join corpora by `dataset_id`**, never by name. A name match is a guess and it will match the wrong dataset the first time two are called "Q3".
 - **Read convergence from run events**, not from a client placeholder.
 - If a number is not available, the page says "Not yet" — never `0`, and never a leftover from the last render.
+
+**This is a truthfulness fix on a page that is being retired — and both documents must say so.** `DESIGN_PROPOSAL.md` §8.15 retires Overview: *"not part of V7 and has no equivalent in it… the route stays until Documents, Runs, Verdict and Billing pass §10 in the browser, and it is removed after that. Nothing in this proposal rebuilds it."* So F12 is **not** a rebuild and must not become one: it stops the page **lying** while it still exists. Two consequences the design and this plan agree on:
+
+- `GET /api/v1/overview` is a **temporary endpoint with the same lifetime as the route.** It is added to the route contract under a **removal condition**: it is deleted in the same change that deletes `OverviewPage.tsx`. It carries no design and gets no design section — the design never specifies its panels, only that the numbers must be true.
+- **No new visual work lands on Overview.** F12 changes what a number *is*, never how a panel looks. Anything that would restyle it is out of scope; the page is on its way out.
 
 ### F13. The wizard tells the truth about its own state — P31, P9
 
@@ -917,15 +1022,26 @@ Three defects, one component.
 - **Legal links come from the legal registry** (`/api/v1/legal/documents` already exists, §`legal_api.py`), so a renamed or added document does not need a deploy.
 - A `mailto:` is only rendered when the address is configured; otherwise the contact line is omitted rather than showing a dead link.
 
+**Design sources:** `DESIGN_PROPOSAL.md` **§8.3** (the pricing page's `[config]` rule and the traceability rule), **§8.4** (the Method page's legal read, D9), and **§8.19** (the worked example's "no fabricated claim" rule). F14 is the same principle applied to three more surfaces, so it cites the sections rather than inventing a fourth wording.
+
 ### F15. A public worked example — report §11.1
 
 A visitor has no public sample of what an account unlocks, and asking them to sign up to find out is the highest-friction ask in the funnel.
 
 Add a public route `/example` that renders **one authored filed decision** through the existing `VerdictSheet`, labelled "Worked example" exactly as the marketing page labels its examples.
 
-- **Copy, not machinery.** The sheet component, the position marks and the tape already exist; the page is a route and a data fixture.
+**The design is written: `DESIGN_PROPOSAL.md` §8.19.** Build to it exactly — the `.site-wrap` column, the `.sheet` at 760px with its **8px** radius (`.sheet` uses `--r-2`; this is the one page where the sheet radius is the right one), `.sheet-q`/`.sheet-pos-row`/`.sheet-numeral`, the `.tape` with its 0.80 threshold rule, `.dissent`, and the `.rule-note` footnote. Those values are quoted from `DESIGN_PRODUCT_V7.html:331-351` and `:1496-1503`.
+
+**Three rules the design makes binding, and each is testable:**
+
+1. **The "Worked example" label appears three times** — sheet head, page lead, footnote — because a screenshot of this page travels without its context.
+2. **The page is static**: no fetch, no session, no loading state, no failed state. The page that proves the product must not depend on the product being up.
+3. **Its figures must be internally consistent** with the documented weighting: the per-pass shares average to the filed figure, and the position counts sum to the roster. A worked example whose arithmetic does not close teaches the wrong thing.
+
+- **Copy, not machinery.** The sheet component, the position marks and the tape already exist; the page is a route plus one authored typed constant.
 - **It carries the same label as every other example** (`PRODUCT.md:130`, the copy law — the only surviving authority on copy) and no "real customer" claim.
-- Linked from the landing hero and the pricing page, so the visitor can inspect the output before creating anything.
+- **Linked from three places**: the landing hero's secondary action and section 7, the pricing page under the cards (§8.3), and the Method page's threshold row (§8.4). Those links are specified in the design sections, so F15 also touches `marketing/Hero.tsx`, `PricingPage.tsx` and the new `MethodPage.tsx`.
+- **Banned on the page:** any real company, person, logo or quotation; the words *sample*, *demo*, *preview*, *mock*; a second example; a sign-up wall over the content.
 
 ### F16. `next` survives both login paths — report §11.2
 
@@ -934,9 +1050,109 @@ Add a public route `/example` that renders **one authored filed decision** throu
 - **Pass `next` explicitly on every OAuth button**, so a deep link (`/runs/<id>/verdict`) round-trips identically through password and provider login.
 - **Test both paths to the same destination:** one password login and one OAuth login, both landing on the deep link they started from.
 
+### F17. `OAuthButtons` — the component the plan assumed — `components/auth/OAuthButtons.tsx` (new)
+
+**Why this item exists.** §C2 reason 4 says *"the frontend cannot … start OAuth"* and closes it with §F7 + §F6. Neither builds a provider button, and `OAuthButtons` appears in this plan only once — as a checklist noun in §C2.2 step 5, as though it were already shipped. It is not: `grep OAuthButtons frontend/src` is **0 hits**. Without this item, `GET /auth/oauth/providers` and `/oauth/{provider}/start` stay unreachable, migration `0010` buys nothing, and a configured provider still never appears. That is R41/R42 in §14.5.6.1.
+
+**Reads:** `GET /api/v1/auth/oauth/providers` → `{github: boolean, google: boolean}`. Render **only** the configured ones, so a deployment with no credentials shows nothing rather than a dead button. This is a request, not a build-time constant: the answer changes per deployment, never per release.
+
+**Behaviour:**
+
+- Each button is an `<a>` to `/api/v1/auth/oauth/{provider}/start?next=<safeNext>`, **not** a fetch — the server answers with a redirect to the provider, and a full navigation is the point (the `oauth_state` cookie must ride the top-level request). Do not open it in a new tab.
+- `next` is `safeNext`ed on the client before it enters the URL, and re-validated on the server (F16). One validator, both ends.
+- Label each with the provider name (`Continue with GitHub`), verb-first, matching the copy law.
+- Hidden entirely when the fetch fails: a provider list that will not load must not block the password form beside it.
+
+**The test that stops the old behaviour recurring:** `SignUpPage.test.tsx:23` currently asserts *"offers no social sign-in until a provider is configured"* and passes **vacuously** — no component reads `/providers`, so the buttons can never appear *even after* an operator configures one. Rewrite it to mock `/providers` twice: empty → assert no buttons; `{github: true}` → assert the GitHub button and its `?next=` round-trip. The gate must be data-driven, not hardcoded.
+
+**Placement:** inside `AuthLayout`, above the email field, separated by a rule, on both `SignInPage` and `SignUpPage`. Not on `VerifyEmailPage`.
+
+**The design is written: `DESIGN_PROPOSAL.md` §8.17.** Build to it exactly. The button is V7's `.btn-secondary` at `min-height:48px` (matching `.auth-form .btn`), `border-radius:4px`, `border:1px solid --record`, full width, 16px icon with an 8px gap; the group is a `grid` with `gap:10px`; the separator is a `1px --hairline` rule with a centred `.hint`. Those values are quoted from `DESIGN_PRODUCT_V7.html:131-142` and `:1657-1670`.
+
+**V7 has no equivalent — and that is a warning, not a blank cheque.** `DESIGN_PRODUCT_V7.html` contains no OAuth markup: zero occurrences of `GitHub`, `Continue with`, `oauth` or `provider`; the two `Google` hits are a verdict-export link, not a sign-in button. So V7 cannot say what these buttons look like. Do **not** invent a new visual idiom for them, and do **not** let them dominate the password form (which remains the primary path per V7's *"An email and a password. No more."*).
+
+**The conditional-render rule that keeps V7's zero-config appearance exact.** With no provider configured — the default, since `OAUTH_ENABLED` is false (plan D5) — the block, the rule **and** the "or with your email" line are all absent, so sign-up looks exactly as V7 draws it. A skeleton is never shown while `/providers` loads.
+
+### F18. The Method page — `pages/MethodPage.tsx` (new) — `DESIGN_PROPOSAL.md` §8.4
+
+**Why it is in this plan at all.** The design specifies `/method` in full (§8.4) and the landing and pricing pages link to it, but **no plan item builds it** and `frontend/src/pages/` has no `MethodPage.tsx`. It is a route the design and the copy both reference and the code cannot serve — a dead link the day F15's "How a panel is checked" button ships.
+
+**It is nearly static.** No fetch, no session, no account data: six definitions and one inline tape. That is the design's whole point (§8.4: *"a page about the mechanism must not depend on the account"*), and it is why the page can be built without any backend work.
+
+- **Form:** one column of `min(704px, 100%)`, six `.method-row`s on a `140px | 1fr` grid, `--hairline` separators, a `--graphite` rule above the first. No imagery, no tabs, no cards.
+- **The threshold row carries the worked example** — the tape with its 0.80 double rule, inline. `ConvergenceTape` exists; reuse it, do not re-create it.
+- **Copy is owner-blocked on two paragraphs** — the plain-language weighting paragraph and the "not an adviser" line need the owner's wording and a legal read against the Legal pages (**D9**). **Build the page with the four mechanism rows and the tape; hold the two blocked paragraphs behind D9** rather than inventing copy, which §9.2 forbids.
+- **Route:** `/method` in `App.tsx`, inside `MarketingLayout` beside `/` and `/pricing`.
+- **Linked from:** the site header and footer (§8.2 rule 5) and `/example`'s secondary action (§8.19).
+
+### F19. The Billing page — `pages/BillingPage.tsx` (new) — `DESIGN_PROPOSAL.md` §8.10
+
+**Why it is in this plan at all.** The design specifies `/billing` in full (§8.10) and the account popover links to it (§8.5 gives the rail three items, not four), but `frontend/src/pages/` has no `BillingPage.tsx`. Today `PlanUsage` is a **component inside `OverviewPage`** — the plan's own §1.3 records this. So the plan's B4 (`GET /billing/state`) has no consumer until this page exists, and F11 ("`PlanUsage` stops guessing") has no home.
+
+**It consumes TWO contracts, not one — and the earlier draft of this paragraph was wrong about that.** §8.10 has six panels. **Four** of them (this period, what the units bought, the plans, the cancel/change action) come from `GET /billing/state` (B4). The other **two** — payment method and invoices — are *not* B4 fields, and pretending otherwise is what hid the gap below:
+
+- **Panel 4, Payment method** needs `GET /api/v1/billing/payment-method` (**B39**).
+- **Panel 5, Invoices** needs `GET /api/v1/billing/invoices` (**B40**), whose rows **B18.4** already persists.
+
+Neither endpoint is in B4 and neither existed in this plan before this correction. **If B39/B40 are deferred, F19 ships four panels and the other two are omitted with a sentence** — never mocked (`DESIGN_PROPOSAL.md` §8.10).
+
+- **Reads `GET /billing/state` for panels 1–3 and 6, plus `GET /billing/payment-method` (B39) for panel 4 and `GET /billing/invoices` (B40) for panel 5.** No `PLANS` constant, no hardcoded unit count, and **no invented card digits or invoice rows** — a panel whose endpoint is absent is omitted with one sentence.
+- **The invoice download is a short-lived signed URL minted at read time** (B40), opened directly; never a permanent link, never a PDF regenerated per click.
+- **`subscription.action` drives the controls** — `cancel`, `scheduled`, `choose`, `resume` — and the client never switches on a status string. That is B4's whole purpose and P14's fix.
+- **Reuse the plan card from F4** for the plans panel, so `/pricing`, `/onboarding/plan` and `/billing` cannot drift.
+- **States:** S6 loading, S7 failed (a billing outage shows the last known figures with a stale marker, never zeros), S8 partial, S9 free, S10 paid, S11 payment problem, S12 at the limit, S13 restricted.
+- **Route:** `/billing` in `App.tsx` inside `AppShell`. **It is NOT a rail item** — `DESIGN_PROPOSAL.md` §8.5 gives the rail exactly three: Documents, Runs, Verdict. Billing is reached from the **account popover**, which §8.5 specifies as *"name, email, plan and price, a units meter, payment method, next charge, then links to Billing, Account settings and Sign out"*. Put the link there. A fourth rail item would be a design change and is not in this plan.
+- **Sequencing:** F19 depends on **B4** (the contract) and **F4** (the shared card). It does not depend on B5/B7 (the payment loop), so it can ship showing correct read-only state before checkout returns work.
+
 ---
 
+### F20. Password recovery — `pages/ForgotPasswordPage.tsx` + `pages/ResetPasswordPage.tsx` — `DESIGN_PROPOSAL.md` §8.21
+
+**Why it is in this plan at all.** The backend has had `POST /auth/reset/request` and `/reset/confirm` all along, and both pages exist in `frontend/src/pages/` — but **neither design file nor this plan ever specified them** until §8.21 was written. A customer who forgot a password had a route, a page and no spec, which is how a page drifts into whatever the last person typed.
+
+**Both pages are `AuthLayout` with no aside**, at V7's `.auth-col` width (`min(430px,100%)`) — recovery is a two-step errand, not a sales moment.
+
+- **`/auth/forgot`** — one email field on V7's ruled baseline, **Send the link** at 48px. On submit, **always** the same sentence: *"If that address has an account, a link is on its way."* The page must never reveal whether an address exists; the server already answers 202 for both cases and the copy has to match it.
+- **`/auth/reset?token=…`** — new password + confirm, both on the ruled baseline, separated by `.auth-form`'s 18px gap. `POST /reset/confirm` returns 204 and revokes the other sessions; then `authMe()` and `safeNext`, so the user lands where they were going, already signed in.
+- **Six states each** (idle, submitting, invalid, expired, 5xx, and the token-less landing): never clear a typed password on failure; an expired token routes back to `/auth/forgot` rather than dead-ending.
+- **The token never reaches a header or a log.** It rides the URL once and posts once.
+- **Banned copy:** *forgot*, *invalid token*, *credentials*, *OTP*. The design's words are in §8.21.
+
+**This unblocks a real dead end**, so it is not deferrable behind the journey work: any account that forgets its password today has no designed way back in.
+
+### F21. Legal pages — `pages/LegalIndexPage.tsx` + `pages/LegalPage.tsx` — `DESIGN_PROPOSAL.md` §8.20
+
+**Why it is in this plan at all.** `GET /legal/documents` and `/{slug}` exist, the footer links to them from every page, and signup records consent against their `content_sha256` — but the design had no section for the pages that serve them. The one surface with a **legal** obligation was the one left unspecified.
+
+- **Both pages are V7's `.method` idiom** (§8.4): one column, `margin-label` head, `--ink-3` metadata, `--hairline` rules, no cards, no imagery. They are the same object, so they share it.
+- **The version and effective date are always shown.** A customer must be able to see *which* version they are reading, because that is the version their consent points at.
+- **Content is served, never bundled** — a copy change is a server publish, not a deploy. A failed fetch says so; **never render a cached legal text**.
+- **`/privacy`, `/terms`, `/refund` are permanent redirects** to `/legal/:slug`, kept because those addresses are in the footer, in mails and in old links.
+- **The re-consent band (§8.20)** belongs to this item: when a published `content_sha256` differs from the version the account accepted, a **`.reader-banner`** strip above `.content` on every authed page says what changed, links to the document, and offers **Accept** → `POST /api/v1/legal/consent`. That closes **R43**, which recorded the endpoint as orphaned.
+- **Print cleanly.** `@media print` hides the shell chrome; no dark surfaces, no gradients.
+### F22. Account panel 2 — password and sessions — `pages/AccountPage.tsx` — `DESIGN_PROPOSAL.md` §8.11 panel 2, §8.13 `password` dialog
+
+**Why it is in this plan at all.** §8.11 panel 2 specifies the whole surface — *"the password line and its action, then `.session-row`s: device, browser, when, and a Sign out per session"* — and §8.13 specifies the `password` dialog. **No plan item delivered either.** The backend has `POST /auth/password`, `GET /auth/sessions` and `DELETE /auth/sessions/{id}`; the design has the panels; the join is this item.
+
+- **The password row states its current value in text** — *"Password · Last changed 12 Sep 2026"* + **Change password** (§8.11's rule: a settings row states its value in text, not in a control's position). The dialog is §8.13's: current password, then the new one twice.
+- **`POST /auth/password` returns 204 and revokes every other session** (B15). The copy says so before the action, not after.
+- **The session rows** are `.session-row`s: device, browser, when, and **Sign out** per row. `DELETE /auth/sessions/{id}` revokes one. A revoked row leaves immediately; the current session's row says *"This device"* and carries no Sign out.
+- **B15 lands in the same phase**, so the UI is never built against the old `SessionOut` shape — it is built once, against `public_id`.
+- **States:** S6 loading, S7 failed per row (a failed revoke restores the row and says why), S8 partial. Never show a session list built from guesswork: if the read fails, the panel says so.
+- **Closes R38 (change-password) and R39 (session list/revoke).**
+
+### F23. Stop a decision, and remove material — `components/workspace/*`, `pages/IngestPage.tsx` — `DESIGN_PROPOSAL.md` §8.12
+
+**Why it is in this plan at all.** §8.12 now specifies both controls, and both have backend routes nothing calls: `DELETE /api/v1/jobs/{id}` (**R44**) and `DELETE /api/v1/uploads/{id}` (**R37**, partly covered by F13.2).
+
+- **Stop this decision** — a `.btn-ghost` in the `.ws-flow` head, opening §8.13's `stopped` dialog: what stops, what is kept, danger-tone confirm. Then `DELETE /api/v1/jobs/{id}` and the flow pane reflects the stopped state. **It is a dialog, not a one-click button**, because a run costs units.
+- **Remove** — one control per material row in `?step=ingest`, revealed on hover/focus, confirming inline (not a dialog per row). Then `DELETE /api/v1/uploads/{id}`; on failure the row is **restored** and the reason shown. **No undo toast** — a toast that said "Undone" would claim something the backend does not honour.
+- **Neither control appears while the flow is read-only** — a finished decision has nothing to stop, and its material is baked into the map.
+- **F13.2 and F23 overlap deliberately on the remove path.** F13.2 is the state-truthfulness fix (the draft store must not claim a removal it did not make); F23 is the control itself. Ship them together or the row will lie for one phase.
+- **Closes R44**; completes **R37**.
+
 ## 6. Route and URL structure — the production-grade contract
+
 
 **This section is an addition, not an audit finding.** `REPORT.md` is a backend audit and contains no finding on API or frontend route shape. The owner asked for it directly, and the code has real defects here that nothing else on record describes.
 
@@ -984,9 +1200,11 @@ Three addressing schemes currently coexist for the same concept — "which part 
 
 ```
 /api/v1/auth/*        accounts, sessions, verification, oauth
-/api/v1/billing/*     plans, usage, state, checkout, subscription, webhook
+/api/v1/billing/*     plans, usage, state, checkout, subscription, webhook, onboarding,
+                      payment-method (B39), invoices (B40)
 /api/v1/legal/*       documents, consent
 /api/v1/account/*     deletion, export
+/api/v1/overview      TEMPORARY — F12's aggregate; deleted with OverviewPage.tsx (§8.15)
 /api/v1/ingest/*      files, url, documents
 /api/v1/uploads/*     list, delete, preview
 /api/v1/simulate/*    debate, debates, graph, stream (WS)
@@ -995,7 +1213,7 @@ Three addressing schemes currently coexist for the same concept — "which part 
 /health, /ready       unversioned infrastructure endpoints
 ```
 
-**The rules that make it enforceable:**
+**The three rules that make it enforceable:**
 
 1. **One mount per router.** A router appears in `api_server.py` exactly once.
 2. **A router owns its full path.** `include_router` is called with no `prefix`.
@@ -1101,11 +1319,15 @@ A plan claiming "every flaw is covered" must be checkable rather than asserted. 
 
 **T2. The section test.** Every section reference in §1.5.1 resolves. A reference to a section that does not exist is a broken promise, and this is the failure mode of a coverage table.
 
-**T3. The route-contract test** (§6.2.4). The exact sorted set of registered paths is asserted, so the surface cannot drift from this document.
+**T3. The route-contract test** (§6.2, rule 4). The exact sorted set of registered paths is asserted, so the surface cannot drift from this document.
 
 **T4. The gate test** (§B11). Every state-changing router is enumerated and each spend/enqueue route is asserted to depend on `require_verified_email`, and each read route to not. This is the test that keeps §B11 true in six months, when someone adds a route.
 
-**What T1–T4 cannot prove.** They cannot prove the fixes *work* — that is what §8 and report §11.5's matrices are for. They prove only that nothing on record has been silently dropped, which is the specific thing the owner asked about.
+**T5. The reachability test** (§14.5.6.4). Every registered path is either called by `frontend/src`, or listed in §14.5.6.1 as intentionally backend-only with a reason. Enumerate both sides mechanically: the same route inventory the §6.2 test builds, cross-referenced against every fetch/WebSocket call site. A route with no caller and no reason is a capability the customer paid for and cannot use — the failure mode that produced the whole of §14.5.6.
+
+**T6. The shape test** (§14.5.6.4). For every outbound model, the serialised backend key set equals the TS union's keys. `_PROFILE_KEYS` and `_VERDICT_KEYS` in `public_events.py` already give the pattern; `R45` is the first case to close.
+
+**What T1–T6 cannot prove.** They cannot prove the fixes *work* — that is what §8 and report §11.5's matrices are for. They prove only that nothing on record has been silently dropped, which is the specific thing the owner asked about. T5 and T6 extend that from "no flaw dropped" to "no surface unreachable and no shape disagreeing" — the two things a backend-only audit structurally could not see.
 
 ---
 
@@ -1170,7 +1392,7 @@ The 409 gains `status` and `expires_at` so the screen can say "you already have 
 21. A refund and a `payment.failed` each move the mirror row and write an audit row (§B18).
 22. Delete an account with two open subscriptions: both are cancelled, and the graph is gone (§B10, §B13).
 23. Read `/api/v1/auth/sessions` while holding a cookie: no returned value is the cookie (§B15).
-24. The route-path set equals the contract in §6.2 (§6.2.4).
+24. The route-path set equals the contract in §6.2 (rule 4).
 
 ### 11.4 Security invariants — all 15 from `REPORT.md` §10.3 F
 
@@ -1229,7 +1451,7 @@ For the sections that had no test at all. Each is one assertion per logical chec
 | Snapshot (§B28) | An unknown property does not appear in the projection; a 5 KB property is capped |
 | Contract (§B33) | The exact key sets of a run document and a WS event |
 | Entitlements (§B34) | `grep` finds no read of `user.plan_key` outside the resolver |
-| Route contract (§6.2.4) | The exact sorted set of registered paths |
+| Route contract (§6.2 rule 4) | The exact sorted set of registered paths |
 | Erasure order (C2) | Deletion that cannot erase the graph does not report the account deleted |
 
 ---
@@ -1243,13 +1465,13 @@ The order is the audit's own priority (report §11.11 P0 → P1 → P2), with th
 | **C2** | The deployment gate: migration `0010`, `ingest_url` gated, `MeOut` test updated, conftest flag, `.env` OAuth vars, lint and boot | `REPORT.md` §10.4's nine reasons are all closed; `ruff check` clean |
 | **0** | D1–D8 answered; the accent frozen | No open design fork |
 | **1** | B1, B2, F1, F2, F3 — the gate and the flag | A new account is sent to `/onboarding/plan` and cannot skip it |
-| **2** | B4, B6, F4, F5, F8, F14 — server plan state, shared card, honest pricing | The screen renders server prices only |
+| **2** | B4, B6, F4, F5, F8, F14, **R46, R47** — server plan state, shared card, honest pricing, and the two dead request fields | The screen renders server prices only; `context` and `selected_domains` are either sent or removed from the contract |
 | **3** | B3, B5, B7, B16, F9, F10 — the payment loop, its return, and the outbox | A test-mode payment flips the dashboard within 90 s |
 | **4** | B8, B9, B10, B17, B18, B19 — idempotency, period gate, deletion, quota, refunds, PII | The double-charge window is closed |
-| **5** | F6, F7, F15, F16 — signup → verify → onboarding wiring, the public example | No unverified user reaches the dashboard; `next` survives both paths |
-| **6** | B11, B20, B21, B22, B23, B30, B31, B32, B33, F11, F12, F13 — the auth and contract hardening | The gate test, the enumeration test, the contract test all pass |
-| **7** | B12, B13, B14, B25, B26, B27, B28, B29 — MinIO, graph erasure, corpus, RLS, Redis, snapshot, Neo4j | Every data finding P7, P8, P9, P24–P29 is closed with a test |
-| **8** | B15, B36, B37, B38, C1 — sessions, email outbox, metrics, OAuth, the operator view | One GitHub and one Google login end to end; the funnel panel shows a real signup |
+| **5** | F6, F7, F15, F16, **F18, F20, F21** — signup → verify → onboarding wiring, the public example, the Method page, password recovery, legal pages | No unverified user reaches the dashboard; `next` survives both paths; `/example` and `/method` are reachable pages, not dead links |
+| **6** | B11, B20, B21, B22, B23, B30, B31, B32, B33, F11, F12, F13, **F23, R37, R45, R48** — the auth and contract hardening | The gate test, the enumeration test, the contract test all pass; **F7 has already shipped, so B11's gate cannot lock anyone out** |
+| **7** | B12, B13, B14, B25, B26, B27, B28, B29, **B39, B40, F19** — MinIO, graph erasure, corpus, RLS, Redis, snapshot, Neo4j, the Billing page | Every data finding P7, P8, P9, P24–P29 is closed with a test; `/billing` renders `/billing/state` with no hardcoded figure |
+| **8** | B15, B36, B37, B38, C1, **F22** — sessions, email outbox, metrics, OAuth, the operator view, account panel 2 | One GitHub and one Google login end to end; the funnel panel shows a real signup |
 | **9** | §6 — the route contract: one mount per router, full prefixes, stable pagination, idempotency keys, `/docs` off, the path test | The path-set test passes; `/api/v1` is the only surface |
 | **10** | B34, F14, the copy sweep, the §9 tests | No client status set remains; §9's four tests pass |
 
@@ -1274,6 +1496,8 @@ A visitor can, with no support contact:
 9. delete the account and know Postgres, S3 **and** Neo4j no longer hold the material.
 
 Items 1–6 are this plan. 7 exists. 8–9 depend on B9/B10 and the audit's P7/P8.
+
+**The synchronization condition, stated as a done-criterion:** no item here is "done" while its route has no caller and no reason, or while its two sides declare different shapes. §14.5.6's rows are the current detritus of exactly that; T5 and T6 are how it stops recurring.
 
 ---
 
@@ -1307,11 +1531,11 @@ The brand was renamed across the design corpus on 2026-11-22. The design documen
 
 | # | Defect | Effect | Fix | Phase |
 |---|---|---|---|---|
-| R12 | `docs/DESIGN_AUTHORITY.md` and `docs/SIGNUP_TO_DASHBOARD_PLAN.md` are whitelisted in `.gitignore` but **not committed** | a clone has no design authority and no plan | `git add` both, commit | **now** |
+| R12 | `docs/DESIGN_AUTHORITY.md` and `docs/SIGNUP_TO_DASHBOARD_PLAN.md` were whitelisted in `.gitignore` but **not committed** | a clone had no design authority and no plan | **fixed** — both are tracked (`git ls-files docs` returns them); the rest of `docs/` stays intentionally untracked | done |
 | R13 | `DESIGN.md` is untracked; `docs/DESIGN_SPEC.md` is gitignored | two dead design worlds sit where an agent will read them | both now carry a **⚠️ SUPERSEDED / RETIRED** banner at the top; delete them once §11 passes | 10 |
 | R14 | `.gitignore:28` `*.txt` and `:35` `tests/` | `requirements.txt` is tracked (predates the rule) but **the whole test tree is ignored** — a clone has no tests | narrow `tests/` to `tests/**/__pycache__/`, or remove the rule; `*.txt` must not swallow future requirement files | **now** |
 | R15 | `CLAUDE.md` named `docs/DESIGN_SPEC.md` as "Frontend design authority" | **every coding agent read the plum world that was never built** | **fixed** — read order is `PRODUCT.md` → `DESIGN_AUTHORITY.md` → `DESIGN_PROPOSAL.md` → `DESIGN_PRODUCT_V7.html`; both dead files struck through | done |
-| R16 | `docs/` was ignored as a directory | `DESIGN_SPEC.md`'s successor could not be committed | **fixed** — `docs/*` + four negations | done |
+| R16 | `docs/` was ignored as a directory | `DESIGN_SPEC.md`'s successor could not be committed | **fixed** — `docs/*` + the two negations that track the authority file and this plan | done |
 | R17 | Decision numbers collide: `D5`–`D8` mean different things in the proposal and the plan | "answer D7" is ambiguous and will be answered wrongly | the authority file allocates new numbers at **D15+**; the two files' `D1`–`D8` are disambiguated by filename in any citation | 0 |
 | R18 | The plan cited neither `PRODUCT.md` (0×) nor `DESIGN_PROPOSAL.md` (0×) | it was written in isolation, so it contradicted both | **fixed** — it now cites the authority file and inherits its design | done |
 
@@ -1351,6 +1575,95 @@ The brand was renamed across the design corpus on 2026-11-22. The design documen
 | R34 | `index.html:41` seed key and the `.impeccable/` state are development-only; neither is rendered, but both ship in the repo | `frontend/index.html:41` | 10 |
 | R35 | `tests/` being gitignored means CI on a clean clone has **no tests to run** — the suite passes only on a machine that already has the files | `.gitignore:35` | **now** |
 | R36 | `api_server.py` mounts `simulate_router` and `jobs_router` at the bottom of the module, after ~700 lines of endpoint definitions | `api_server.py:1044-1050` | 9 |
+
+### 14.5.6 Frontend/backend synchronization — what the client cannot reach, and what it mis-declares
+
+This sub-section exists because the audit was a **backend** audit and the rename sweep was a **document** sweep. Neither could see the seam. Every row below was found by enumerating the backend's registered routes and comparing them against every fetch/WebSocket call site in `frontend/src`; a row is closed only when its test passes.
+
+Read the **Kind** column first: `ORPHAN` is a capability no screen can use; `MISMATCH` is a shape two sides declare differently; `GAP` is a screen the plan already assigns but must not lose; `OK` is recorded so it is not "fixed" away.
+
+#### 14.5.6.1 Orphaned backend capability — no frontend caller
+
+Verified: zero non-test references in `frontend/src`.
+
+| # | Endpoint | Consequence | Fix | Phase |
+|---|---|---|---|---|
+| **R37** | `DELETE /api/v1/uploads/{upload_id}` | **ORPHAN.** A card can be removed locally while the row and the stored object survive. Already caught at F13.2 — recorded here so the route inventory is complete | call it from `removeDoc`; restore the card on failure | 6 |
+| **R38** | `POST /api/v1/auth/password` | **ORPHAN.** A user cannot change their password. B15 rotates sessions on a password change, so the rotation is unreachable | a change-password form in `/account`, calling it, then treating the 204 as "all other sessions revoked" | 8 |
+| **R39** | `GET /api/v1/auth/sessions` + `DELETE /api/v1/auth/sessions/{id}` | **ORPHAN in the plan, NOT a design gap.** `DESIGN_PROPOSAL.md` §8.11 panel 2 already specifies `.session-row`s — *"device, browser, when, and a Sign out per session"* — and the `password` dialog is specified in §8.13. So the design is done and **no plan item delivers it**. An earlier draft of this row wrongly claimed the design had no device list | a session list in `/account` panel 2 with one Sign out per row, plus the change-password dialog; the B15 `public_id` change lands in the same phase so the UI is never built against the old shape. Owned by **F22** | 8 |
+| **R40** | `POST /api/v1/auth/verify/code/send` + `/verify/code/confirm` | **ORPHAN today; GAP in plan.** The server can issue and redeem a 6-digit code; the client cannot enter one. F7 owns the screen | build F7 **before** B11 closes the gate (see §14.5.6.4) | 5 |
+| **R41** | `GET /api/v1/auth/oauth/providers` + `/oauth/{provider}/start` | **ORPHAN.** 545 backend lines and migration `0010` are unreachable. `RequireAuth` has no provider branch; no `OAuthButtons` component exists | see R42 — the component is the fix | 8 |
+| **R42** | — (**missing client piece**) | **GAP.** `OAuthButtons` is named only in §C2 step 5 as though it already exists. No `F` item creates it, so §C2 reason 4 is "closed" by F6+F7, which do not close it | add **F17**, below | 8 |
+| **R43** | `POST /api/v1/legal/consent` | **ORPHAN, low severity.** First consent **is** recorded — `auth/service.py:153` writes it inside the signup transaction and rolls back if it fails; `oauth.py:342` does the same. This route is **re-consent** for a new legal version, and nothing re-prompts on version change | a version-aware re-consent banner on next authed load when `content_sha256` differs from the recorded version | 10 |
+| **R44** | `DELETE /api/v1/jobs/{id}` | **ORPHAN.** No cancel action on a queued or running job, so a mistaken upload or graph build can only be waited out to its terminal state | a cancel action on the in-flight job surfaces (`IngestPage`, `GraphPage`) | 9 |
+
+**Correctly not a client surface, and must stay off it:** `POST /api/v1/simulate/normalize_graph` (a pipeline stage the graph job calls internally), `GET /ready` (infrastructure probe; `/health` is the client's read), and `GET /operator/runs/{run_id}/agents/{node_id}` (role-guarded, audited, `include_in_schema=False` per R23). An agent must **not** add UI for these three.
+
+#### 14.5.6.2 Contract mismatches — both sides exist and disagree
+
+| # | Contract | Backend | Frontend | Consequence | Fix | Phase |
+|---|---|---|---|---|---|---|
+| **R45** | `pair_turn` event | `public_events.py:50` allows only `{type, pair_id}`; `round_runner.py:320` sends exactly that | `run/events.ts:155` declares `response` and `error`; `reducer.ts:169` reads neither | a per-pair success/failure signal is advertised and can never arrive. A failed turn is invisible until the round event | drop the two fields from the TS union **and** add a type-level test that every key in `_EVENT_KEYS` matches the TS union | 6 |
+| **R46** | `DebateRequest.context` | accepted, capped at `CONTEXT_MAX_BYTES = 4096` (`debate_api.py:101`), serialised into the prompt as `scenario` (`orchestrator.py:529`) | nothing ever sets it — `grep 'context:'` in `frontend/src` is 0 hits | the strongest prompt input the API supports is permanently empty: verdicts are weaker than the product promises | capture the scenario in the wizard's question step (a bounded textarea, live byte counter) and send it | 2 |
+| **R47** | `selected_domains` | used for domain filtering and the intent fallback (`utils/queryIntend.py:131,140`) | hardcoded `[]` at `SocietyPage.tsx:52` | a live filter is silently disabled | let the question step pick from the map's domains, or **remove the parameter** so the contract stops implying a capability no screen offers | 2 |
+| **R48** | Error `code` vocabulary | 20 codes emitted (`email_unverified`, `plan_limit_exceeded`, `code_throttled`, `code_attempts_exhausted`, `already_subscribed`, `rate_limited`, `payment_required`, `job_limit_exceeded`, `no_corpus`, `corpus_gone`, …) | 4 handled. `rest.ts:41` documents "branch on `code`, never on `detail`" and then almost nothing branches | `plan_limit_exceeded` reaches the user as a raw server sentence with no upgrade path | a `copies/errorCode.ts` map: every code → one sentence, defaulted by status. One table, one test asserting every backend code has an entry | 6 |
+
+#### 14.5.6.3 The sign-up → verify → plan → dashboard chain, end to end
+
+The owner's requirement, stated once: **a new user enters email and password, sees a verification step, then chooses a plan on its own page, and only then reaches the dashboard.**
+
+Today that chain does not exist at any layer. Recorded as the reference for the phases that build it:
+
+| Leg | Backend | Frontend | State | Owning item |
+|---|---|---|---|---|
+| email + password → account | `POST /auth/signup` (201, sets `sid` + `csrf`) | `SignUpPage` → `safeNext(...)` → `/landing` | **built** | — |
+| …but the user is signed in **before** verifying | consent written inline (`service.py:153`); `email_verified` returned on `MeOut` | `User` type omits `email_verified`; `resolveGuard` has no verify branch | **broken** | B11 + F1 + F2 + F6 |
+| verification screen | `/verify/send` (204), `/verify/code/send` (202), `/verify/code/confirm` (200), both gated routes return `403 email_unverified` (`deps.py:150`) | `VerifyEmailPage` reads `?token=` **only**; no code form; `RequireAuth` never routes here | **missing** | F7 (+ F2) |
+| plan page | **absent**: no `onboarding_completed_at` column, no `onboarding_required` flag, no `POST /billing/onboarding/complete`, no `GET /billing/state` — `grep -i onboarding` over `src/` is **0 hits** | **absent**: no `OnboardingPlanPage`, no `/onboarding/plan` route, `grep onboarding` is **0 hits** | **missing at both layers** | B1 + B2 + B3 + B4 + F8 |
+| → dashboard | `GET /billing/usage` reports the entitlement | `LandingPage.landingTarget(uploads, runs)` → documents \| runs \| results | built, but **unreached**: `/landing` is only the `safeNext` default | F2, F8 |
+
+**Order is not negotiable.** The gate must open **after** the screen that satisfies it exists, or every new account is locked out of ingest and debate with no way forward. The sequence already honours this — **F7 is phase 5, B11 is phase 6** — and that ordering is now a **hard constraint, not a preference**: any re-plan that moves B11 earlier must move F7 with it, or demote B11 to "gated on F7 shipped".
+
+#### 14.5.6.4 The four drift classes, and the test that stops each recurring
+
+A synchronization section that is not enforced is a snapshot. Each class below gets a test, and the test is the deliverable:
+
+| Class | How it drifts | The test that stops it | Phase |
+|---|---|---|---|
+| **Route drift** | a route is added, renamed or mounted twice; no client ever learns | the §6.2 path-set test — assert the exact sorted set of registered paths | 9 |
+| **Shape drift** | a pydantic model gains a field, or the TS interface invents one | a **contract test** per outbound model: serialise the backend response and assert its key set equals the TS union's keys. `R45` is the first case; `_PROFILE_KEYS`/`_VERDICT_KEYS` already give the pattern | 6 |
+| **Reachability drift** | a route exists with no caller (this whole of §14.5.6.1) | an **inventory test**: assert every registered path is either called by `frontend/src`, or listed in this file as intentionally backend-only (`normalize_graph`, `/ready`, `/operator`) | 9 |
+| **Code drift** | the server adds an error code the client renders as a raw string | `R48`'s test — every backend `code` has an entry in the copy map | 6 |
+
+**The rule.** A new route or a new outbound key is not done when the server returns it. It is done when the inventory test passes with the caller registered, or when this section records the route as intentionally unreachable with a reason.
+
+#### 14.5.7 Document-level breaks found while writing §3.1 and F17
+
+Not frontend/backend seams — these are defects in the design and plan corpus itself. Recorded because each one causes a build decision to be made against wrong information.
+
+| # | Defect | Evidence | Fix | Phase |
+|---|---|---|---|---|
+| **R49** | **`DESIGN_PROPOSAL.md` contradicted itself on the Free pricing column.** §11's file map said `/pricing` ships "without a Free column"; §12 said "The Free plan **is** a column". Both were live text in the same committed file | `DESIGN_PROPOSAL.md:1614` vs `:1671` | **FIXED 2026-11-22** — the file map now reads "with a Free column", the losing sentence is deleted, and §12 records the reversal once. D2 in this plan no longer conflicts | done |
+| **R50** | **V7 could not be the appearance reference for three required screens.** Its `data-site` set is `landing, pricing, method, signup, signin` — no verify view, no onboarding view, no OAuth buttons | `DESIGN_PRODUCT_V7.html`: 5 site views; signup copy says "nothing leaves this page" | **FIXED 2026-11-22** — `DESIGN_PROPOSAL.md` now specifies all three: **§8.16** verify, **§8.17** provider buttons, **§8.18** plan choice. Every value is quoted from V7's own stylesheet, so they match its language without pretending V7 contained them | done |
+| **R51** | **`R67` is a dangling reference.** `SignUpPage.tsx:26` and `SignUpPage.test.tsx` cite `R67` as the reason the sign-up form has no name field. No `R67` exists in any document, and this register stops at R66 | `grep '\bR67\b'` over all docs → 0 hits outside the citing files | write the finding into this register, or renumber the citation to whichever row actually records it. An agent following `R67` finds nothing | 2 |
+| **R52** | **Design decisions D1–D8 are re-used across two files for different questions.** `SIGNUP_TO_DASHBOARD_PLAN.md` §2's D1–D8 and `DESIGN_PROPOSAL.md` §12's D1–D11 collide; "answer D5" is ambiguous | authority file already fixes forward numbering at D15+ | **cite by filename** (`plan D2`, `proposal D6`) until one list is retired. `DESIGN_AUTHORITY.md` §6 records the hazard; this row records the residue | 0 |
+| **R53** | **`docs/DESIGN_SPEC.md` is the only *un*tracked design document** and still carries live-looking content under a supersession banner. `git ls-files docs` returns two files; this is not one of them | `.gitignore:23` + two negations | delete it once §11 passes, as R13 already says. Until then it is an untracked file an agent can read and mistake for current | 10 |
+| **R54** | **`/method` was designed and linked but no plan item built it.** `DESIGN_PROPOSAL.md` §8.4 specifies the page in full; the landing and pricing pages link to it; `frontend/src/pages/` has no `MethodPage.tsx`. A dead link the day F15 ships | design §8.4 vs no page file | **FIXED 2026-11-22** — **F18** added, phase 5, with the D9 copy block held behind the owner's wording | done |
+| **R55** | **`/billing` was designed but no plan item built it.** `DESIGN_PROPOSAL.md` §8.10 specifies six panels; §8.5 reaches the page from the **account popover**; B4's `GET /billing/state` had **no consumer**. `PlanUsage` is a component inside `OverviewPage` | design §8.10 vs no page file | **FIXED 2026-11-22** — **F19** added, phase 7, reading `/billing/state` only and reusing F4's card | done |
+| **R56** | **`/example` was a plan item (F15) the design never specified** — the inverse of R54/R55. It was also absent from the landing and pricing specs that were supposed to link to it | plan F15 vs 0 design mentions | **FIXED 2026-11-22** — **`DESIGN_PROPOSAL.md` §8.19** added, plus the link rules in §8.2 rule 6 and §8.3 | done |
+| **R57** | **§8.18's wireframe hardcoded the figures its own text bans** (`$10`, `8,000`, `12 experts`, `4 passes`) — the exact defect P10/F5 exists to remove — **and contradicted §8.3's Free row** (10 experts / 3 passes) | design §8.18 wireframe vs §8.3 table vs `settings.plan_*_max_agents` | **FIXED 2026-11-22** — every digit replaced by a `{token}` placeholder naming its `/billing/state` field, and a consistency rule tying both pages to the same source | done |
+| **R58** | **Design drew a Payment-method panel and a `card` dialog; the plan had no endpoint.** §8.10 panel 4 and §8.13's `card` dialog need the card's brand/last4/expiry; B4's `/billing/state` has no such field and no `B` item supplied one | design §8.10 panel 4 vs B1–B38 | **FIXED 2026-11-22** — **B39** added (read-only `GET /billing/payment-method`, card data never stored, `card:null` first-class), route added to §6.2, and **F19** consumes it | done |
+| **R59** | **Design drew an Invoices panel; B18.4 persisted the rows but nothing could read them.** No `GET /invoices` route existed in §6.2, and no `F` item rendered the panel — invoices were written to a table with no read path | design §8.10 panel 5 vs B18.4 | **FIXED 2026-11-22** — **B40** added (`GET /billing/invoices`, keyset paging, signed download URL minted at read), route added to §6.2, **F19** renders it | done |
+| **R60** | **`F19` falsely claimed B4 supplied all six billing panels.** It listed "payment method, invoices" among *"exactly the fields B4 already returns"* — B4 returns neither, which hid R58 and R59 | plan F19 vs B4's payload | **FIXED 2026-11-22** — F19 now says it consumes **three** contracts (B4 + B39 + B40), and names which panels come from which | done |
+| **R61** | **Legal pages had no design section.** The backend publishes legal documents, the footer links to them from every page, and signup records consent against their `content_sha256` — but §8 had no section for `/legal`, `/legal/:slug`, `/privacy`, `/terms`, `/refund`, and no `F` item built them | design §8 had 0 legal sections | **FIXED 2026-11-22** — **`DESIGN_PROPOSAL.md` §8.20** added (index + detail in §8.4's `.method` idiom, version/date always shown, served never bundled, aliases as redirects, re-consent band), and **F21** builds it | done |
+| **R62** | **Password recovery had no design section and no plan item — in either document.** `POST /auth/reset/request` and `/reset/confirm` existed, `ForgotPasswordPage.tsx` and `ResetPasswordPage.tsx` existed, and **neither this plan nor the design ever specified them**: `forgot`/`reset` appeared 0 times in both | 0 hits in both docs | **FIXED 2026-11-22** — **`DESIGN_PROPOSAL.md` §8.21** added (two pages, V7's ruled field, six states each, no account enumeration), and **F20** builds them | done |
+| **R63** | **Sessions and change-password were designed but no plan item delivered them — and `R39` wrongly called it a design gap.** §8.11 panel 2 already specifies `.session-row`s with a Sign out per row, and §8.13 the `password` dialog | design §8.11 vs no `F` item | **FIXED 2026-11-22** — **F22** added (account panel 2: password row + session rows, built against B15's `public_id` in the same phase); **R39** corrected to *"ORPHAN in the plan, NOT a design gap"* | done |
+| **R64** | **Stop-a-decision and remove-material had backend routes nothing called, and §8.12 drew neither control.** `DELETE /jobs/{id}` (R44) and `DELETE /uploads/{id}` (R37) were reachable by no screen, and the workspace spec had no stop affordance | design §8.12 vs R37/R44 | **FIXED 2026-11-22** — §8.12 now specifies both controls (stop as a dialog, remove as an inline confirm with **no undo toast**), and **F23** builds them | done |
+
+
+**What R49–R64 have in common:** each one makes an implementing agent act on a document that is wrong about its own subject, or build a screen the other document never drew. They are cheap to fix and expensive to leave, because a design corpus is only as useful as its worst-contradicting file.
+
+**The pattern R54–R56 describes** is worth naming, because it is how the six-way split happened: a page can be **designed without being planned** (R54, R55) or **planned without being designed** (R56). Both produce the same outcome — a route in no build order, or a build with no spec. **The rule that prevents it:** a page is only real when `DESIGN_PROPOSAL.md` §8 has a section for it **and** this plan has an `F` item that builds it **and** the two cite each other. Every entry in §8's page list and every `F` item that adds a route should satisfy all three.
 
 ---
 
@@ -1402,6 +1715,17 @@ src/pages/PricingPage.tsx                    no transacting fallback; shared car
 src/pages/SignUpPage.tsx                     → /auth/verify
 src/pages/VerifyEmailPage.tsx                code form, resend, link fallback
 src/pages/AccountPage.tsx                    plan block from /billing/state
+src/pages/MethodPage.tsx                    NEW — §8.4, D9 copy held
+src/pages/BillingPage.tsx                   NEW — §8.10, reads B4 + B39 + B40
+src/pages/ForgotPasswordPage.tsx            §8.21 — email step
+src/pages/ResetPasswordPage.tsx             §8.21 — new password + token
+src/pages/LegalIndexPage.tsx                §8.20 — document index
+src/pages/LegalPage.tsx                     §8.20 — one served document
+src/pages/ExamplePage.tsx                   NEW — §8.19, one authored constant
+src/pages/OverviewPage.tsx                  F12 truthfulness only; retired with the route
+src/components/auth/OAuthButtons.tsx        NEW — §8.17, reads /auth/oauth/providers
+src/components/legal/ReconsentBanner.tsx    NEW — §8.20, posts /legal/consent
+
 src/components/overview/PlanUsage.tsx        server-driven action
 ```
 

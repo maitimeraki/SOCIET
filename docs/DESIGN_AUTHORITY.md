@@ -248,8 +248,12 @@ The brand was renamed across the whole design corpus. Recorded here because a re
 | `PRODUCT.md` | who the user is, what they do, what they get, what is banned | a hex, a typeface, a pixel, a gradient |
 | `DESIGN_PROPOSAL.md` | every token, component, page and state | a product capability that `PRODUCT.md` has not settled |
 | `DESIGN_PRODUCT_V7.html` | the design | anything binding — it is a prototype (§5) |
-| `SIGNUP_TO_DASHBOARD_PLAN.md` | order, phases, exit criteria, backend contracts | a design decision (it inherits them) |
+| `SIGNUP_TO_DASHBOARD_PLAN.md` | order, phases, exit criteria, backend contracts, and **the frontend/backend synchronization register (§14.5.6)** | a design decision (it inherits them) |
 | `DESIGN_AUTHORITY.md` | **which file answers what, and the resolved value** | a new design (it records; it does not invent) |
+
+**Where "the backend has it but no screen can reach it" is recorded.** `docs/SIGNUP_TO_DASHBOARD_PLAN.md` **§14.5.6** is the register of orphaned routes, mismatched wire shapes, and the drift tests that stop them recurring (T5 reachability, T6 shape). Neither a backend audit nor a design document can see this seam, which is why it lives in the plan — the only file that owns the order in which both sides are built.
+
+**Where V7 does not reach — and what now answers the gap.** V7 contains **no verification view, no onboarding view and no OAuth buttons**; its `data-site` set is `landing, pricing, method, signup, signin` and its file has zero provider markup. `DESIGN_PROPOSAL.md` therefore specifies the three screens itself: **§8.16** verification, **§8.17** provider buttons, **§8.18** plan choice. Every value in those sections is quoted from V7's own stylesheet (`DESIGN_PRODUCT_V7.html:131-142`, `:161-167`, `:1657-1670`, `:1773-1791`), so they match V7's language without pretending V7 contained them. **V7 must never be cited as the source of their layout** — there is none — and **no one may invent a new visual idiom** for them either, because V7's primitives fully cover the need: `.field` ruled baseline, `.btn-secondary` at 48px, `.plan-card` at 10px, `.hero-sheet` aside.
 
 **The one rule that prevents a seventh document:** a new question is added to §1 with an owner. A new value is added to §2. If a fact needs no owner, it is not a design decision.
 
@@ -274,10 +278,22 @@ The brand was renamed across the whole design corpus. Recorded here because a re
 | **D15** | **The accent: evergreen `#1E4B38` (ships, pinned in CI) or indigo `#2D3F9C` (the named reference)?** | owner | every visual change; `tokens.test.ts` |
 | **D16** | **Is `/onboarding/plan` a product change?** `PRODUCT.md` mandates Documents as the first landing; the plan inserts a plan-choice step. | owner | the plan's phase 1 |
 | **D17** | **The V7 behaviour triage** — `KEEP 1:1` / `KEEP BUT WIRE` / `DROP`, per interaction | design + eng | any page port |
-| **D18** | **`docs/` is gitignored** (`.gitignore:23`), so this file — like `DESIGN_SPEC.md` and the plan before it — is **not committed**. A design record that does not survive a clone is not a record. Either move it beside `PRODUCT.md` at the repo root, or un-ignore `docs/`. | owner | nothing in `docs/` survives a clone |
+| **D18** | **RESOLVED 2026-11-22.** `docs/` was gitignored, so this record and the plan did not survive a clone. `.gitignore` now carries `docs/*` plus negations for this file and `docs/SIGNUP_TO_DASHBOARD_PLAN.md`; both are tracked. The rest of `docs/` stays untracked by design. | owner | nothing — resolved |
 | **D19** | **`larkvision.com` is not registered.** The rename reached the email domain, but DNS + SPF/DKIM + the Resend domain are outside the repo. Until they exist, every verification and welcome mail fails silently. | owner + ops | all email; signup verification |
 
 **Numbering.** `DESIGN_PROPOSAL.md` already uses **D1–D11** and `docs/SIGNUP_TO_DASHBOARD_PLAN.md` reuses **D1–D8** for entirely different questions — that collision is a live hazard and is fixed here by continuing at **D15**, leaving D12–D14 unused rather than re-numbering either file. From now on, a new decision number is allocated **here first**, in this table, and nowhere else.
+
+**The cross-map, so a bare "D5" is never ambiguous.** Four questions are numbered in more than one file. Resolve them by this table, or cite with the filename (`plan D1`, `proposal D11`):
+
+| The question | In the plan | In the proposal | Here |
+|---|---|---|---|
+| **The accent** — evergreen `#1E4B38` (ships) or indigo `#2D3F9C` (V7) | **D1** | D2 (historical) | **D15** |
+| **Is the app migrated to V7 at all?** | — | **D11** | not allocated — the proposal's own |
+| **Free tier as a card on `/pricing`?** | **D2** | D6 | **§2.6** |
+| **Does onboarding block the dashboard?** | **D3** | — | **D16** |
+| **Document of record** | — | **D5** | answered by this file's existence |
+
+The accent appearing as `D1`, `D2` **and** `D15` is the single worst instance. **Until it is answered, cite it as `D15`** — this file allocates numbers first, so its ID is the one a future document will use.
 
 D5 (document of record) in `DESIGN_PROPOSAL.md` §12 is **answered by this file's existence** — this *is* the document of record's index. The proposal's own D1–D4 and D10 are marked settled there; D6–D9 remain open and unaffected. **D11** in the proposal ("is the app migrated to V7 at all?") is distinct from **D15** here ("which accent") and both are live.
 
@@ -291,7 +307,7 @@ D5 (document of record) in `DESIGN_PROPOSAL.md` §12 is **answered by this file'
 4. **Propagate in this order:** this file → `DESIGN_PROPOSAL.md` → `SIGNUP_TO_DASHBOARD_PLAN.md` → the code. Never the reverse; a document that chases the code is already stale.
 5. **Record the supersession** in §3, saying what changed and why. A silent change is how the six-way split happened.
 
-**Note on version control.** See **D18** in §6: `docs/` is gitignored, so this file will not survive a clone until it moves or `docs/` is un-ignored.
+**Note on version control.** D18 is **resolved**: `.gitignore` negates `docs/DESIGN_AUTHORITY.md` and `docs/SIGNUP_TO_DASHBOARD_PLAN.md`, so both survive a clone. A new document that must be citable needs its own negation — which is why §1's "one place per question" rule matters: every added file is another line in `.gitignore`.
 
 ---
 
