@@ -1277,11 +1277,89 @@ Items 1–6 are this plan. 7 exists. 8–9 depend on B9/B10 and the audit's P7/P
 
 ---
 
+## 14.5 The remediation register — every known-broken thing, and the phase that fixes it
+
+This plan closes the audit's 38 findings (§1.5). It must also close **the defects the rename and the document consolidation exposed**, which no audit found. Each row is verified, located, and assigned to a phase in §12. Nothing here is "clean up later" — a row is closed when its test passes.
+
+Read the table by the **Fix** column: that is what an implementing agent does.
+
+### 14.5.1 The name — `Societas` → `LarkVision` (**domain `larkvision.com`**)
+
+The brand was renamed across the design corpus on 2026-11-22. The design documents say *LarkVision*; the application does not.
+
+| # | Location | Still says | Fix | Phase |
+|---|---|---|---|---|
+| R1 | `frontend/index.html:7` | `<title>Societas</title>` | `<title>LarkVision</title>` | 2 |
+| R2 | `frontend/index.html:10` | meta description "*Societas* convenes your panel…" | "*LarkVision* convenes…" | 2 |
+| R3 | `frontend/index.html:13` | `og:title content="Societas"` | `LarkVision` | 2 |
+| R4 | `frontend/index.html:41` | seed key `societas-world-v1` | **keep** — an internal design-tool seed, not rendered | — |
+| R5 | `.env.sample:45` | `EMAIL_FROM=no-reply@societas.app` | `no-reply@larkvision.com` | 3 |
+| R6 | `.env.sample:47` | `LEGAL_CONTACT_EMAIL=hello@societas.app` | `hello@larkvision.com` | 3 |
+| R7 | `src/config/settings.py:132` | `email_from: "no-reply@societas.app"` | `"no-reply@larkvision.com"` | 3 |
+| R8 | `src/config/settings.py:159` | `legal_contact_email: "hello@societas.app"` | `"hello@larkvision.com"` | 3 |
+| R9 | `src/api/api_server.py:281` | `title="Socirty Simulator API"` — **a typo for Societas** | `title="LarkVision API"` | 9 |
+| R10 | `src/config/settings.py:84` | `s3_bucket: "societas-uploads"` | **keep** — a live object-storage namespace; renaming needs a bucket migration, not a find/replace | — |
+| R11 | DB roles `societas_app`, `societas_retention` | live Postgres roles | **keep** — renaming needs a grant rewrite; no customer sees them | — |
+
+**R5–R8 are gated on a fact outside this repo:** `larkvision.com` must be registered, with SPF/DKIM configured and the sending domain verified in Resend. `settings.py` refuses to boot in prod without `EMAIL_API_KEY`, but it cannot know the domain is unowned — so a wrong domain fails **silently**. **D19.**
+
+### 14.5.2 The documents — what is tracked, visible and citable
+
+| # | Defect | Effect | Fix | Phase |
+|---|---|---|---|---|
+| R12 | `docs/DESIGN_AUTHORITY.md` and `docs/SIGNUP_TO_DASHBOARD_PLAN.md` are whitelisted in `.gitignore` but **not committed** | a clone has no design authority and no plan | `git add` both, commit | **now** |
+| R13 | `DESIGN.md` is untracked; `docs/DESIGN_SPEC.md` is gitignored | two dead design worlds sit where an agent will read them | both now carry a **⚠️ SUPERSEDED / RETIRED** banner at the top; delete them once §11 passes | 10 |
+| R14 | `.gitignore:28` `*.txt` and `:35` `tests/` | `requirements.txt` is tracked (predates the rule) but **the whole test tree is ignored** — a clone has no tests | narrow `tests/` to `tests/**/__pycache__/`, or remove the rule; `*.txt` must not swallow future requirement files | **now** |
+| R15 | `CLAUDE.md` named `docs/DESIGN_SPEC.md` as "Frontend design authority" | **every coding agent read the plum world that was never built** | **fixed** — read order is `PRODUCT.md` → `DESIGN_AUTHORITY.md` → `DESIGN_PROPOSAL.md` → `DESIGN_PRODUCT_V7.html`; both dead files struck through | done |
+| R16 | `docs/` was ignored as a directory | `DESIGN_SPEC.md`'s successor could not be committed | **fixed** — `docs/*` + four negations | done |
+| R17 | Decision numbers collide: `D5`–`D8` mean different things in the proposal and the plan | "answer D7" is ambiguous and will be answered wrongly | the authority file allocates new numbers at **D15+**; the two files' `D1`–`D8` are disambiguated by filename in any citation | 0 |
+| R18 | The plan cited neither `PRODUCT.md` (0×) nor `DESIGN_PROPOSAL.md` (0×) | it was written in isolation, so it contradicted both | **fixed** — it now cites the authority file and inherits its design | done |
+
+### 14.5.3 The route surface (§6) — structural, not cosmetic
+
+| # | Defect | Fix | Phase |
+|---|---|---|---|
+| R19 | Every main router is mounted **twice** (bare legacy + `/api/v1`), so versioning is decorative | one mount per router; legacy paths become logged redirects with a removal date | 9 |
+| R20 | Version location is inconsistent — some routers carry `/api/v1` in their prefix, others get it from `include_router`, `/operator` and `/jobs` carry none | every router declares its full prefix; `include_router(..., prefix=)` is never used | 9 |
+| R21 | Two pagination contracts — Runs is cursor-based, `/ingest/documents` is `limit`-only | `/ingest/documents` gains `cursor` and returns `{items, next_cursor}` | 9 |
+| R22 | No idempotency key on public write routes | `Idempotency-Key` on `checkout` and `onboarding/complete` | 9 |
+| R23 | `/docs`, `/openapi.json` public in every environment; `/operator` in the public schema | `docs_url=None` in prod; `/operator` `include_in_schema=False` | 9 |
+| R24 | `/new?step=ingest` uses a query param where every other surface uses a path segment | promote to `/new/ingest`; the alias routes at `App.tsx:84-86` already exist | 9 |
+| R25 | The route set has no contract test | assert the exact sorted path set, so the surface cannot drift | 9 |
+
+### 14.5.4 What V7 gets wrong about being a product (**D17**)
+
+`DESIGN_PRODUCT_V7.html` is the appearance reference. These are its prototype-only behaviours, verified in the file — an implementing agent must **not** copy them, and the design side must decide each one's production form.
+
+| # | In V7 | Why it cannot ship | Required production behaviour |
+|---|---|---|---|
+| R26 | `STATE.signedOut` flag; sign-in password preseeded `"design-preview"`; *"nothing leaves this page"* | there is no auth — it is an honour system | the real guard (`RequireAuth` + `resolveGate`); the demo flag is `?demo=1`, **dev builds only** |
+| R27 | Three marketing sections link to app routes (`#/verdict`, `#/runs`, `#/account`); the footer links five | clicking as a visitor bounces to sign-in and **drops the destination** | every app link carries `next`; the guard preserves it through sign-in **and** sign-up |
+| R28 | No session-expiry state | a stale tab looks live and every action 401s | a "signed out — sign in again" state that keeps the typed work |
+| R29 | No offline state; no permission-denied state; no validation state | the only failures modelled are none | the four states from §11's matrix: S7 failed, S13 restricted, plus offline and field-invalid |
+| R30 | Hardcoded `PLANS`, `RUNS`, `DOCS`, `INVOICES`, `VERDICTS`, `STATE` (≈1.6 KB of fixtures) | the price on screen can differ from the amount charged (audit **P10**) | render server values only; no transacting fallback (**F5**) |
+| R31 | Hash routing (`#/signup`) | cannot be server-routed, cannot be deep-linked cold, collides with `#section` anchors | `BrowserRouter` + real paths (**§6**) |
+| R32 | One 328 KB file: four `<style>` blocks, one `<script>`, 240 element ids | unmaintainable; no tree-shaking; no per-page code split | the component inventory in §5 and the file map in the Appendix |
+| R33 | Section anchors and route hashes share `#`; `href="#how"` parses as the route `how` | a "scroll to section" link breaks the router | fragments for scroll, paths for destinations — **never both on one scheme** |
+
+**The rule this table encodes:** V7 is a reference for **appearance**. Its structure and copy are copied deliberately (41/50 headings, 33/38 margin labels, 18/19 tokens). Its **behaviour is not** — every row above is a decision that must be made on purpose, not inherited by accident.
+
+### 14.5.5 Known bugs with no assigned owner yet
+
+| # | Defect | Evidence | Suggested phase |
+|---|---|---|---|
+| R34 | `index.html:41` seed key and the `.impeccable/` state are development-only; neither is rendered, but both ship in the repo | `frontend/index.html:41` | 10 |
+| R35 | `tests/` being gitignored means CI on a clean clone has **no tests to run** — the suite passes only on a machine that already has the files | `.gitignore:35` | **now** |
+| R36 | `api_server.py` mounts `simulate_router` and `jobs_router` at the bottom of the module, after ~700 lines of endpoint definitions | `api_server.py:1044-1050` | 9 |
+
+---
+
 ## 14. Assumptions and risks
 
 - **The accent decision is real and blocks visual work.** D1 must be answered before F4/F8 are styled, or the work is thrown away.
 - **`billing_enabled=false` must still render the free path.** The gate is skipped entirely when billing is off, so a deployment without Razorpay is usable, not a wall.
 - **`onboarding_required` on `MeOut` couples auth to billing.** It is a boolean behind a settings check; the alternative — a second request per page load — is worse. If it becomes contentious, move it to `/billing/state` and accept one extra round-trip in the guard.
+- **The public domain is `larkvision.com`**, and it is not yet registered. Every email address in the repo must use it (register R5–R8), and SPF/DKIM plus the Resend domain must be verified before any transactional mail works. **D19.**
 - **`callback_url` depends on `APP_BASE_URL` being correct in each environment.** Settings already refuse a localhost origin in prod (`settings.py:202-205`), which is the guard that makes this safe.
 - **Migration 0010 (OAuth) has never run.** Phase 7 cannot start until it is reviewed and applied on a scratch database.
 - **The V7 prototype is not a source of truth for copy.** Its marketing strings are drafts; **`PRODUCT.md:130`'s copy law** governs what ships. Where V7 and the copy law disagree, the law wins and V7 is corrected.

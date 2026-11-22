@@ -227,7 +227,7 @@ The brand was renamed across the whole design corpus. Recorded here because a re
 | `.../2026-10-17-societas-*.md` | historical plan filenames **that exist on disk** | editing the string would create a dead link |
 | `SIMULATION-WORLD` | the checkout directory | the owner's path, outside the product |
 
-**Renamed but needing an action outside the repo — the email domain.** `societas.app` → `larkvision.app` in V7's footer and `mailto:` links, `CLAUDE.md`, `.env.sample` and `src/config/settings.py`. **`larkvision.app` is not registered.** Until DNS, SPF/DKIM and the Resend domain exist, every transactional mail fails silently in prod — `settings.py` refuses to boot without `EMAIL_API_KEY`, but it cannot know the domain is unowned. **Tracked as D19.**
+**Renamed but needing an action outside the repo — the email domain.** `societas.app` → `larkvision.com` in V7's footer and `mailto:` links, `CLAUDE.md`, `.env.sample` and `src/config/settings.py`. **`larkvision.com` is not registered.** Until DNS, SPF/DKIM and the Resend domain exist, every transactional mail fails silently in prod — `settings.py` refuses to boot without `EMAIL_API_KEY`, but it cannot know the domain is unowned. **Tracked as D19.**
 
 **The half-rename still in the tree.** The design corpus says *LarkVision*; the code and its shell still default to the old strings. None of these is a design decision, so they are logged, not silently fixed:
 
@@ -275,7 +275,7 @@ The brand was renamed across the whole design corpus. Recorded here because a re
 | **D16** | **Is `/onboarding/plan` a product change?** `PRODUCT.md` mandates Documents as the first landing; the plan inserts a plan-choice step. | owner | the plan's phase 1 |
 | **D17** | **The V7 behaviour triage** — `KEEP 1:1` / `KEEP BUT WIRE` / `DROP`, per interaction | design + eng | any page port |
 | **D18** | **`docs/` is gitignored** (`.gitignore:23`), so this file — like `DESIGN_SPEC.md` and the plan before it — is **not committed**. A design record that does not survive a clone is not a record. Either move it beside `PRODUCT.md` at the repo root, or un-ignore `docs/`. | owner | nothing in `docs/` survives a clone |
-| **D19** | **`larkvision.app` is not registered.** The rename reached the email domain, but DNS + SPF/DKIM + the Resend domain are outside the repo. Until they exist, every verification and welcome mail fails silently. | owner + ops | all email; signup verification |
+| **D19** | **`larkvision.com` is not registered.** The rename reached the email domain, but DNS + SPF/DKIM + the Resend domain are outside the repo. Until they exist, every verification and welcome mail fails silently. | owner + ops | all email; signup verification |
 
 **Numbering.** `DESIGN_PROPOSAL.md` already uses **D1–D11** and `docs/SIGNUP_TO_DASHBOARD_PLAN.md` reuses **D1–D8** for entirely different questions — that collision is a live hazard and is fixed here by continuing at **D15**, leaving D12–D14 unused rather than re-numbering either file. From now on, a new decision number is allocated **here first**, in this table, and nowhere else.
 

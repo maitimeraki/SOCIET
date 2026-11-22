@@ -406,9 +406,9 @@ RAZORPAY_PLAN_STUDIO_INR=plan_...
 RAZORPAY_PLAN_STUDIO_USD=plan_...
 APP_BASE_URL=http://localhost:5173
 EMAIL_API_KEY=
-EMAIL_FROM=no-reply@larkvision.app
+EMAIL_FROM=no-reply@larkvision.com
 LEGAL_ENTITY_NAME=
-LEGAL_CONTACT_EMAIL=hello@larkvision.app
+LEGAL_CONTACT_EMAIL=hello@larkvision.com
 # Plan table overrides (units / caps / public price card).
 PLAN_FREE_UNITS=1000
 PLAN_STARTER_UNITS=8000
