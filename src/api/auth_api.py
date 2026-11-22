@@ -1,5 +1,6 @@
 """Auth endpoints under /api/v1/auth (R3: these are the canonical paths)."""
 
+import asyncio
 import datetime
 import logging
 import uuid
@@ -24,6 +25,8 @@ from src.billing.entitlements import resolve_entitlements
 from src.config.settings import get_settings
 from src.db.engine import get_db
 from src.db.models import User, UserSession
+from src.email.service import EmailNotConfigured
+from src.email.welcome import send_welcome_email
 
 logger = logging.getLogger(__name__)
 
@@ -47,6 +50,10 @@ class SignupRequest(BaseModel):
 
 class VerifyRequest(BaseModel):
     token: str
+
+
+class VerifyCodeRequest(BaseModel):
+    code: str = Field(min_length=6, max_length=6, pattern=r"^\d{6}$")
 
 
 class ResetRequest(BaseModel):
@@ -74,6 +81,7 @@ class UserOut(BaseModel):
     role: str
     plan: str
     created_at: datetime.datetime
+    email_verified: bool
 
     @classmethod
     def from_user(cls, user: User, **extra) -> "UserOut":
@@ -83,6 +91,7 @@ class UserOut(BaseModel):
             role=user.role,
             plan=user.plan_key,
             created_at=user.created_at,
+            email_verified=user.email_verified_at is not None,
             **extra,
         )
 
@@ -140,6 +149,28 @@ def _session_out(row: UserSession) -> SessionOut:
     )
 
 
+async def _send_signup_emails(user: User) -> None:
+    """Send verification and welcome together, each failure recorded on its own.
+
+    The account exists before either mail is attempted: a provider outage must
+    not turn a successful signup into a 500, and one failed mail must not stop
+    the other one from going out.
+    """
+    results = await asyncio.gather(
+        verify.send_verification_email(user),
+        send_welcome_email(user),
+        return_exceptions=True,
+    )
+    for label, result in zip(("verification", "welcome"), results):
+        if isinstance(result, Exception):
+            logger.warning(
+                "Signup %s email failed for user %s",
+                label,
+                user.id,
+                exc_info=result,
+            )
+
+
 @router.post("/signup", response_model=MeOut, status_code=201)
 @limiter.limit(lambda: get_settings().rate_limit_signup)
 async def signup(
@@ -159,11 +190,7 @@ async def signup(
     )
     set_session_cookie(response, session.id)
     set_csrf_cookie(response)
-    try:
-        await verify.send_verification_email(user)
-    except Exception:
-        # The account is real; a mail outage must not turn signup into a 500.
-        logger.warning("Verification email failed for user %s", user.id, exc_info=True)
+    await _send_signup_emails(user)
     return await _me_out(db, user)
 
 
@@ -175,7 +202,100 @@ async def send_verification(
 ) -> None:
     if user.email_verified_at is not None:
         return
-    await verify.send_verification_email(user)
+    try:
+        await verify.send_verification_email(user)
+    except verify.CodeThrottled as exc:
+        raise HTTPException(
+            status_code=429,
+            detail={
+                "code": "code_throttled",
+                "message": "A code was sent recently. Wait before requesting another.",
+            },
+            headers={"Retry-After": str(exc.retry_after)},
+        ) from exc
+
+
+@router.post("/verify/code/send", status_code=202)
+@limiter.limit(lambda: get_settings().rate_limit_verify_code)
+async def send_verification_code(
+    request: Request,
+    response: Response,
+    user: User = Depends(current_user),
+) -> dict:
+    """Issue a fresh six-digit code (plus the fallback link) for this account."""
+    if user.email_verified_at is not None:
+        return {"status": "already_verified"}
+    try:
+        await verify.send_verification_email(user)
+    except verify.CodeThrottled as exc:
+        raise HTTPException(
+            status_code=429,
+            detail={
+                "code": "code_throttled",
+                "message": "A code was sent recently. Wait before requesting another.",
+            },
+            headers={"Retry-After": str(exc.retry_after)},
+        ) from exc
+    except EmailNotConfigured as exc:
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "code": "email_unavailable",
+                "message": "Email is not configured. Contact support.",
+            },
+        ) from exc
+    except Exception as exc:
+        logger.warning("Verification code send failed for user %s", user.id, exc_info=exc)
+        raise HTTPException(
+            status_code=502,
+            detail={
+                "code": "email_failed",
+                "message": "The code could not be sent. Try again.",
+            },
+        ) from exc
+    response.headers["Cache-Control"] = "private, no-store"
+    return {
+        "status": "sent",
+        "expires_in": get_settings().email_code_ttl_seconds,
+    }
+
+
+@router.post("/verify/code/confirm", response_model=MeOut)
+@limiter.limit(lambda: get_settings().rate_limit_verify_code)
+async def confirm_verification_code(
+    body: VerifyCodeRequest,
+    request: Request,
+    user: User = Depends(current_user),
+    db: AsyncSession = Depends(get_db),
+) -> MeOut:
+    """Consume the code and mark this account's address verified."""
+    if user.email_verified_at is not None:
+        return await _me_out(db, user)
+
+    result = await verify.redeem_verification_code(user.id, body.code)
+    if result == "too_many":
+        raise HTTPException(
+            status_code=429,
+            detail={
+                "code": "code_attempts_exhausted",
+                "message": "Too many attempts. Request a new code.",
+            },
+        )
+    if result != "ok":
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "code": "invalid_code",
+                "message": "That code is wrong or has expired.",
+            },
+        )
+
+    user.email_verified_at = datetime.datetime.now(datetime.UTC)
+    await db.commit()
+    await audit_record(
+        db, "email_verified", user_id=user.id, ip=_client_ip(request)
+    )
+    return await _me_out(db, user)
 
 
 @router.post("/verify", status_code=204)

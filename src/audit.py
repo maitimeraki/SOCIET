@@ -22,6 +22,9 @@ ACTIONS = frozenset(
     {
         "login",
         "logout",
+        "email_verified",
+        "oauth_login",
+        "oauth_signup",
         "password_change",
         "session_revoke",
         "run_create",

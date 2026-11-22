@@ -100,6 +100,11 @@
   --text-display--letter-spacing: -0.03em;
   --text-display--font-weight: 500;
 
+  --text-section: clamp(32px, 2.2vw + 14px, 48px); /* the marketing section h2: the hero leads, sections follow */
+  --text-section--line-height: 1.08;
+  --text-section--letter-spacing: -0.028em;
+  --text-section--font-weight: 500;
+
   --text-title: 32px; /* the verdict's question, card titles */
   --text-title--line-height: 38px;
   --text-title--letter-spacing: -0.02em;

@@ -130,9 +130,29 @@ class Settings(BaseSettings):
     email_api_url: str = "https://api.resend.com/emails"
     email_api_key: str | None = None
     email_from: str = "no-reply@societas.app"
-    email_verification_ttl_seconds: int = 86_400  # 24 h
+    email_verification_ttl_seconds: int = 86_400  # 24 h (link)
     password_reset_ttl_seconds: int = 3_600  # 1 h
     rate_limit_email: str = "3/hour"
+
+    # --- Email verification codes. The short code is the primary gate; the
+    # link stays as a one-click fallback inside the same mail.
+    require_email_verification: bool = True
+    email_code_ttl_seconds: int = 600  # 10 min
+    email_code_resend_seconds: int = 60
+    email_code_max_attempts: int = 5
+    email_code_hourly_limit: int = 5
+    rate_limit_verify_code: str = "10/minute"
+
+    # --- OAuth sign-in (GitHub and Google). Empty credentials disable a
+    # provider; the redirect URI must be registered at the provider as
+    # {oauth_redirect_base or app_base_url}/api/v1/auth/oauth/{provider}/callback.
+    github_client_id: str | None = None
+    github_client_secret: str | None = None
+    google_client_id: str | None = None
+    google_client_secret: str | None = None
+    oauth_redirect_base: str | None = None
+    oauth_state_ttl_seconds: int = 600
+    rate_limit_oauth: str = "20/minute"
     billing_reconcile_cron: str = "17 * * * *"  # hourly at :17
     billing_lease_sweep_cron: str = "*/10 * * * *"  # every 10 minutes
     legal_entity_name: str = ""
@@ -178,6 +198,29 @@ class Settings(BaseSettings):
     def _validate_billing(self) -> "Settings":
         if self.env == "prod" and not self.email_api_key:
             raise ValueError("EMAIL_API_KEY is required in production")
+
+        if self.env == "prod" and self.app_base_url.rstrip("/").startswith(
+            ("http://localhost", "http://127.0.0.1")
+        ):
+            raise ValueError("APP_BASE_URL must be the public origin in production")
+
+        for provider in ("github", "google"):
+            client_id = getattr(self, f"{provider}_client_id")
+            client_secret = getattr(self, f"{provider}_client_secret")
+            if bool(client_id) != bool(client_secret):
+                raise ValueError(
+                    f"{provider.upper()}_CLIENT_ID and "
+                    f"{provider.upper()}_CLIENT_SECRET must be set together"
+                )
+
+        if self.email_code_ttl_seconds < 60:
+            raise ValueError("email_code_ttl_seconds must be at least 60")
+        if not 1 <= self.email_code_max_attempts <= 20:
+            raise ValueError("email_code_max_attempts must be in [1, 20]")
+        if self.email_code_resend_seconds < 10:
+            raise ValueError("email_code_resend_seconds must be at least 10")
+        if self.oauth_state_ttl_seconds < 60:
+            raise ValueError("oauth_state_ttl_seconds must be at least 60")
 
         if self.billing_enabled:
             for name in (

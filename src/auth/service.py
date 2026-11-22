@@ -85,6 +85,25 @@ def _new_session(
     )
 
 
+async def open_session(
+    db: AsyncSession,
+    user_id: uuid.UUID,
+    *,
+    user_agent: str | None = None,
+    ip: str | None = None,
+) -> UserSession:
+    """Mint and persist a session for an already-authenticated identity.
+
+    The OAuth callback uses this after it has proved the external identity;
+    password login keeps its own in-transaction path so a failed credential
+    check never leaves a session row.
+    """
+    session = _new_session(user_id, user_agent, ip)
+    db.add(session)
+    await db.commit()
+    return session
+
+
 async def signup(
     db: AsyncSession,
     email: str,
@@ -169,6 +188,12 @@ async def login(
         await asyncio.to_thread(verify_password, password, _dummy_hash())
         raise HTTPException(status_code=401, detail=INVALID_CREDENTIALS)
 
+    if user.password_hash is None:
+        # OAuth-only account: a password attempt is the same failed login, at
+        # the same cost, never a crash or a different shape.
+        await asyncio.to_thread(verify_password, password, _dummy_hash())
+        raise HTTPException(status_code=401, detail=INVALID_CREDENTIALS)
+
     if not await asyncio.to_thread(verify_password, password, user.password_hash):
         raise HTTPException(status_code=401, detail=INVALID_CREDENTIALS)
     if user.disabled_at is not None:
@@ -206,6 +231,11 @@ async def change_password(
     user = await db.get(User, user_id)
     if user is None:
         raise HTTPException(status_code=401, detail="Not authenticated.")
+    if user.password_hash is None:
+        raise HTTPException(
+            status_code=400,
+            detail="This account signs in with a provider; set a password from the reset flow.",
+        )
     if not await asyncio.to_thread(
         verify_password, current_password, user.password_hash
     ):

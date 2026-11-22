@@ -2310,7 +2310,7 @@ body.v5 .site .section-note{font-size:12px;line-height:19px;margin-top:16px;max-
               <li>Monthly billing in INR or USD.</li>
               <li>No per-question invoice. One unit pool per month.</li>
             </ul>
-            <a class="btn btn-primary" href="mailto:hello@larkvision.app?subject=Enterprise%20plan">Talk to the founder</a>
+            <a class="btn btn-primary" href="mailto:hello@larkvision.com?subject=Enterprise%20plan">Talk to the founder</a>
           </div>
         </div>
       </section>
@@ -2489,9 +2489,9 @@ body.v5 .site .section-note{font-size:12px;line-height:19px;margin-top:16px;max-
           <li><a href="#/account">Export or delete your material</a></li>
         </ul></div>
         <div class="foot-col"><h4>Contact</h4><ul>
-          <li><a href="mailto:hello@larkvision.app">hello@larkvision.app</a></li>
-          <li><a href="mailto:hello@larkvision.app?subject=Enterprise%20plan">Enterprise</a></li>
-          <li><a href="mailto:hello@larkvision.app?subject=A%20bug">Report a problem</a></li>
+          <li><a href="mailto:hello@larkvision.com">hello@larkvision.com</a></li>
+          <li><a href="mailto:hello@larkvision.com?subject=Enterprise%20plan">Enterprise</a></li>
+          <li><a href="mailto:hello@larkvision.com?subject=A%20bug">Report a problem</a></li>
         </ul></div>
       </div>
       <div class="foot-legal">
@@ -3979,7 +3979,7 @@ body.v5 .site .section-note{font-size:12px;line-height:19px;margin-top:16px;max-
 
   function planCta(plan) {
     if (plan === STATE.plan) return `<span class="plan-current"><span class="dot" aria-hidden="true"></span>Your plan</span>`;
-    if (plan === 'enterprise') return `<a class="btn btn-secondary" href="mailto:hello@larkvision.app?subject=Enterprise%20plan">Talk to the founder</a>`;
+    if (plan === 'enterprise') return `<a class="btn btn-secondary" href="mailto:hello@larkvision.com?subject=Enterprise%20plan">Talk to the founder</a>`;
     const target = PLANS[plan];
     const label = STATE.plan === 'starter' && plan === 'studio' ? 'Upgrade to Studio' : 'Switch to ' + target.name;
     return `<button class="btn ${plan === 'studio' ? 'btn-primary' : 'btn-secondary'}" type="button" data-plan-switch="${plan}">${label}</button>`;
@@ -4298,7 +4298,7 @@ body.v5 .site .section-note{font-size:12px;line-height:19px;margin-top:16px;max-
   }
 
   function invoiceText(inv, plan, card) {
-    return `LARKVISION\nInvoice ${inv.id}\n\nDate: ${inv.date}\nPeriod: ${inv.period}\nBilled to: ${STATE.account.name} · ${STATE.account.company} · ${STATE.account.email}\n\n${plan.name} plan, ${inv.period}: ${money(inv.usd, inv.usd === 10 ? 999 : 1999)}\nPaid with ${card.brand} ending ${card.last4}\n\nTotal paid: ${money(inv.usd, inv.usd === 10 ? 999 : 1999)}\n\nQuestions: hello@larkvision.app`;
+    return `LARKVISION\nInvoice ${inv.id}\n\nDate: ${inv.date}\nPeriod: ${inv.period}\nBilled to: ${STATE.account.name} · ${STATE.account.company} · ${STATE.account.email}\n\n${plan.name} plan, ${inv.period}: ${money(inv.usd, inv.usd === 10 ? 999 : 1999)}\nPaid with ${card.brand} ending ${card.last4}\n\nTotal paid: ${money(inv.usd, inv.usd === 10 ? 999 : 1999)}\n\nQuestions: hello@larkvision.com`;
   }
 
   function openInvoice(id) {
@@ -4306,7 +4306,7 @@ body.v5 .site .section-note{font-size:12px;line-height:19px;margin-top:16px;max-
     if (!inv) return;
     $('#invoice-lead').textContent = `${inv.id} · ${inv.date}`;
     $('#invoice-body').innerHTML = `<div class="invoice-doc">
-      <div class="invoice-doc-head"><div><h3>LarkVision</h3><p>hello@larkvision.app</p></div><div style="text-align:right"><h3>${money(inv.usd, inv.usd === 10 ? 999 : 1999)}</h3><p>${esc(inv.status)}</p></div></div>
+      <div class="invoice-doc-head"><div><h3>LarkVision</h3><p>hello@larkvision.com</p></div><div style="text-align:right"><h3>${money(inv.usd, inv.usd === 10 ? 999 : 1999)}</h3><p>${esc(inv.status)}</p></div></div>
       <div class="invoice-billed"><b>Billed to</b><span>${esc(STATE.account.name)} · ${esc(STATE.account.company)}<br>${esc(STATE.account.email)}</span><b style="margin-top:8px">Period</b><span>${esc(inv.period)}</span></div>
       <div class="ledger">
         <div class="ledger-row"><span class="lbl"><b>Starter plan</b><span>One unit pool · no seats</span></span><span class="fig">1</span><span class="fig">${money(inv.usd, inv.usd === 10 ? 999 : 1999)}</span></div>

@@ -27,7 +27,7 @@ from src.api.jobs_api import enqueue_or_http
 from src.audit import client_ip
 from src.audit import record as audit_record
 from src.auth.cookies import verify_csrf
-from src.auth.deps import current_user, require_owner
+from src.auth.deps import current_user, require_owner, require_verified_email
 from src.billing import units
 from src.billing.plans import get_plan
 from src.billing.units import Reservation
@@ -118,7 +118,7 @@ async def _discard_staged(db: AsyncSession, object_keys: list[str]) -> None:
 async def ingest_files(
     request: Request,
     files: list[UploadFile] = File(...),
-    user: User = Depends(current_user),
+    user: User = Depends(require_verified_email),
     db: AsyncSession = Depends(get_db),
 ):
     """Validate a batch, store it, and queue one extraction job for the lot."""

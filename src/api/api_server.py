@@ -39,6 +39,7 @@ from src.auth.cookies import verify_csrf
 from src.billing import units as billing_units
 from src.billing.entitlements import resolve_entitlements
 from src.auth.deps import current_user, require_owned_dataset, require_owner
+from src.auth.deps import require_verified_email
 from src.config.settings import get_settings
 from src.db.engine import get_db, get_engine
 from src.db.models import Dataset, User
@@ -319,6 +320,7 @@ from src.api.ingest_api import router as ingest_router
 from src.api.jobs_api import enqueue_or_http, get_job as get_jobs_job
 from src.api.jobs_api import router as jobs_router
 from src.api.legal_api import router as legal_router
+from src.api.oauth_api import router as oauth_router
 
 app.include_router(debate_router)  # /simulate/*
 app.include_router(ingest_router, prefix="/api")  # /api/ingest/*, /api/uploads
@@ -333,6 +335,7 @@ app.include_router(
 # Auth API (accounts, sessions, CSRF) under /api/v1/auth
 app.include_router(auth_router)
 app.include_router(ws_ticket_router)
+app.include_router(oauth_router)
 
 # Billing (read-only usage) under /api/v1/billing — no legacy /api alias.
 app.include_router(billing_router)
@@ -929,7 +932,7 @@ async def discover_ontology_async(
     dataset_id: uuid.UUID,
     documents: List[GlobalInputDocument],
     request: Request,
-    user: User = Depends(current_user),
+    user: User = Depends(require_verified_email),
     db: AsyncSession = Depends(get_db),
 ):
     # Ontology can be the first call for a new corpus: it claims the row for the
@@ -958,7 +961,7 @@ async def build_graph_async(
     request: Request,
     ontology_job_id: Optional[str] = None,
     corpus_name: str = "",
-    user: User = Depends(current_user),
+    user: User = Depends(require_verified_email),
     db: AsyncSession = Depends(get_db),
 ):
     # Ownership guard: a caller-supplied ontology job feeds its schema into this
@@ -1013,7 +1016,7 @@ async def create_simulation(query: UserQuery, background_tasks: BackgroundTasks)
 async def normalize_graph(
     dataset_id: uuid.UUID,
     request: Request,
-    user: User = Depends(current_user),
+    user: User = Depends(require_verified_email),
     db: AsyncSession = Depends(get_db),
 ):
     await require_owned_dataset(db, user, dataset_id)

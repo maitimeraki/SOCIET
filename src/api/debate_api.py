@@ -44,6 +44,7 @@ from src.auth.deps import (
     current_user,
     require_owned_dataset,
     require_owner,
+    require_verified_email,
     websocket_user,
 )
 from src.billing import units as billing_units
@@ -608,7 +609,7 @@ async def _persist_debate_run(job_id: str) -> None:
 async def create_debate(
     body: DebateRequest,
     request: Request,
-    user: User = Depends(current_user),
+    user: User = Depends(require_verified_email),
     db: AsyncSession = Depends(get_db),
     _available: None = Depends(service_available),
 ):
@@ -996,7 +997,7 @@ async def retry_verdict_report(run_id: str, owner_id: str) -> bool:
 async def retry_verdict(
     run_id: str,
     request: Request,
-    user: User = Depends(current_user),
+    user: User = Depends(require_verified_email),
     db: AsyncSession = Depends(get_db),
     _available: None = Depends(service_available),
 ):

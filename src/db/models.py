@@ -43,7 +43,8 @@ class User(Base):
         UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()")
     )
     email: Mapped[str] = mapped_column(CITEXT, nullable=False, unique=True)
-    password_hash: Mapped[str] = mapped_column(Text, nullable=False)
+    #: NULL for an OAuth-only account; a password can be added later by reset.
+    password_hash: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime.datetime] = _timestamptz_default()
     updated_at: Mapped[datetime.datetime] = _timestamptz_default()
     disabled_at: Mapped[datetime.datetime | None] = mapped_column(
@@ -92,6 +93,42 @@ class UserSession(Base):
             "sessions_user_id_idx",
             "user_id",
             postgresql_where=text("revoked_at IS NULL"),
+        ),
+    )
+
+
+class OAuthAccount(Base):
+    """One external identity linked to a local account.
+
+    The provider's stable subject id — never the email — is the key, so a
+    provider-side email change cannot re-point the login. ``(user_id, provider)``
+    is unique: one GitHub and one Google identity per account.
+    """
+
+    __tablename__ = "oauth_accounts"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()")
+    )
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    provider: Mapped[str] = mapped_column(Text, nullable=False)
+    provider_user_id: Mapped[str] = mapped_column(Text, nullable=False)
+    email: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime.datetime] = _timestamptz_default()
+    updated_at: Mapped[datetime.datetime] = _timestamptz_default()
+
+    __table_args__ = (
+        UniqueConstraint(
+            "provider", "provider_user_id", name="uq_oauth_accounts_provider_subject"
+        ),
+        UniqueConstraint("user_id", "provider", name="uq_oauth_accounts_user_provider"),
+        CheckConstraint(
+            "provider IN ('github','google')", name="ck_oauth_accounts_provider"
         ),
     )
 

@@ -134,6 +134,26 @@ async def require_owner(resource_user_id: uuid.UUID | str | None, user: User) ->
         raise HTTPException(status_code=404, detail="Not found.")
 
 
+def require_verified_email(user: User = Depends(current_user)) -> User:
+    """Refuse spend/enqueue work until the address is confirmed.
+
+    Reads stay open (a user can inspect their account), and the verify routes
+    themselves never depend on this. ``REQUIRE_EMAIL_VERIFICATION=false`` is the
+    explicit test/dev escape hatch; production leaves it on.
+    """
+    from src.config.settings import get_settings
+
+    if get_settings().require_email_verification and user.email_verified_at is None:
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "code": "email_unverified",
+                "message": "Confirm your email address to continue.",
+            },
+        )
+    return user
+
+
 async def require_owned_dataset(
     db: AsyncSession, user: User, dataset_id: uuid.UUID
 ) -> Dataset:

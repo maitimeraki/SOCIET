@@ -23,8 +23,6 @@ plan.*
 docs/*
 !docs/DESIGN_AUTHORITY.md
 !docs/SIGNUP_TO_DASHBOARD_PLAN.md
-!docs/ARCHITECTURE.md
-!docs/TECHNOLOGY_STACK.md
 *.txt
 runtime/
 .serena/
